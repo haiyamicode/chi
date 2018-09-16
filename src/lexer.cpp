@@ -1,0 +1,818 @@
+/*
+ * Copyright (c) 2018 Hai Thanh Nguyen
+ *
+ * This file is part of chi, which is MIT licensed.
+ * See http://opensource.org/licenses/MIT
+ */
+
+#include "lexer.h"
+
+using namespace cx;
+
+KeywordMap Lexer::s_keywords;
+
+static bool is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+static bool is_letter(char c) {
+    return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
+}
+
+static bool is_digit(char c) { return '0' <= c && c <= '9'; }
+
+Lexer::Lexer(std::istream& file, int file_id, ErrorFunc on_err) : m_file(file) {
+
+    m_file_id = file_id;
+    m_on_err = on_err;
+    reset();
+    setup_keywords();
+}
+
+void Lexer::setup_keywords() {
+    if (!s_keywords.empty()) {
+        return;
+    }
+
+    s_keywords["let"] = Keyword::LET;
+    s_keywords["break"] = Keyword::BREAK;
+    s_keywords["case"] = Keyword::CASE;
+    s_keywords["const"] = Keyword::CONST;
+    s_keywords["continue"] = Keyword::CONTINUE;
+    s_keywords["default"] = Keyword::DEFAULT;
+    s_keywords["else"] = Keyword::ELSE;
+    s_keywords["enum"] = Keyword::ENUM;
+    s_keywords["for"] = Keyword::FOR;
+    s_keywords["func"] = Keyword::FUNC;
+    s_keywords["goto"] = Keyword::GOTO;
+    s_keywords["while"] = Keyword::WHILE;
+    s_keywords["if"] = Keyword::IF;
+    s_keywords["interface"] = Keyword::INTERFACE;
+    s_keywords["impl"] = Keyword::IMPL;
+    s_keywords["public"] = Keyword::PUBLIC;
+    s_keywords["private"] = Keyword::PRIVATE;
+    s_keywords["foreach"] = Keyword::FOREACH;
+    s_keywords["return"] = Keyword::RETURN;
+    s_keywords["static"] = Keyword::STATIC;
+    s_keywords["select"] = Keyword::SELECT;
+    s_keywords["struct"] = Keyword::STRUCT;
+    s_keywords["switch"] = Keyword::SWITCH;
+    s_keywords["typedef"] = Keyword::TYPEDEF;
+    s_keywords["typeof"] = Keyword::TYPEOF;
+    s_keywords["new"] = Keyword::NEW;
+}
+
+std::string& Lexer::new_buf(size_t reserve) {
+    m_cbuf.clear();
+    m_cbuf.reserve(reserve);
+    return m_cbuf;
+}
+
+void Lexer::next(Token* tok) {
+    m_tok.type = TokenType::END;
+    m_tok.val.d = 0.;
+    m_tok.str.clear();
+
+    next();
+
+    *tok = m_tok;
+}
+
+void Lexer::next() {
+    l0:
+    // skip white space
+    char c;
+    do {
+        c = read();
+    } while (is_space(c));
+
+    m_tok.pos = pos();
+
+    // identifiers and keywords
+    if (is_letter(c)) {
+        read_iden(c);
+        return;
+    }
+
+    char c1 = 0;
+
+    if (m_eof) {
+        return;
+
+    } else if (is_digit(c)) {
+        read_number(c);
+
+    } else if (c == '.') {
+        c1 = read();
+        if (is_digit(c1)) {
+            unread();
+            read_number('.');
+            return;
+        }
+
+        if (c1 == '.') {
+            auto p = peek();
+            if (p == '.') {
+                read();
+                m_tok.type = TokenType::ELLIPSIS;
+                return;
+            }
+
+            unread();
+        }
+
+        unread();
+        m_tok.type = TokenType::DOT;
+
+    } else if (c == '"') {
+        read_string();
+
+    } else if (c == '`') {
+        read_raw_string();
+
+    } else if (c == '\'') {
+        read_rune();
+
+    } else if (c == '#') {
+        c = read();
+        while (c != '\n') {
+            c = read(); // ignore
+        }
+        goto l0;
+
+    } else if (c == '/') {
+        if (read_expect('/')) {
+            c = read();
+            while (c != '\n') {
+                c = read(); // ignore
+            }
+            goto l0;
+
+        } else if (read_expect('*')) {
+            c = read();
+            while (1) {
+                if (c == '*') {
+                    c = read();
+                    if (c == '/') {
+                        break;
+                    }
+                    continue;
+                }
+                if (m_eof) {
+                    error("eof in comment", pos());
+                    return;
+                }
+
+                c = read(); // ignore
+            }
+            goto l0;
+        }
+
+        m_tok.type = read_rep('=', TokenType::DIV_ASS, TokenType::DIV);
+
+    } else if (c == ':') {
+        m_tok.type = TokenType::COLON;
+
+    } else if (c == '*') {
+        m_tok.type = read_rep('=', TokenType::MUL_ASS, TokenType::MUL);
+
+    } else if (c == '%') {
+        m_tok.type = read_rep('=', TokenType::MOD_ASS, TokenType::MOD);
+
+    } else if (c == '+') {
+        if (read_expect('+')) {
+            m_tok.type = TokenType::INC;
+        } else {
+            m_tok.type = read_rep('=', TokenType::ADD_ASS, TokenType::ADD);
+        }
+
+    } else if (c == '-') {
+        if (read_expect('-')) {
+            m_tok.type = TokenType::DEC;
+        } else {
+            m_tok.type = read_rep('=', TokenType::SUB_ASS, TokenType::SUB);
+        }
+
+    } else if (c == '>') {
+        if (read_expect('>')) {
+            m_tok.type = TokenType::RSHIFT;
+        } else {
+            m_tok.type = read_rep('=', TokenType::GE, TokenType::GT);
+        }
+
+    } else if (c == '<') {
+        if (read_expect('<')) {
+            m_tok.type = TokenType::LSHIFT;
+        } else {
+            m_tok.type = read_rep('=', TokenType::LE, TokenType::LT);
+        }
+
+    } else if (c == '=') {
+        m_tok.type = read_rep('=', TokenType::EQ, TokenType::ASS);
+
+    } else if (c == '!') {
+        m_tok.type = read_rep('=', TokenType::NE, TokenType::LNOT);
+
+    } else if (c == '&') {
+        m_tok.type = read_rep('&', TokenType::LAND, TokenType::AND);
+        m_tok.type = read_rep('=', TokenType::AND_ASS, m_tok.type);
+
+    } else if (c == '|') {
+        m_tok.type = read_rep('|', TokenType::LOR, TokenType::OR);
+        m_tok.type = read_rep('=', TokenType::OR_ASS, m_tok.type);
+
+    } else if (c == '^') {
+        m_tok.type = read_rep('=', TokenType::XOR_ASS, TokenType::XOR);
+
+    } else if (c == '~') {
+        m_tok.type = TokenType::NOT;
+
+    } else {
+        auto& t = m_tok.type;
+        switch (c) {
+            case '(':
+                t = TokenType::LPAREN;
+                break;
+            case ')':
+                t = TokenType::RPAREN;
+                break;
+            case '[':
+                t = TokenType::LBRACK;
+                break;
+            case ']':
+                t = TokenType::RBRACK;
+                break;
+            case '{':
+                t = TokenType::LBRACE;
+                break;
+            case '}':
+                t = TokenType::RBRACE;
+                break;
+            case ',':
+                t = TokenType::COMMA;
+                break;
+            case ';':
+                t = TokenType::SEMICOLON;
+                break;
+            case '?':
+                t = TokenType::QUES;
+                break;
+            default:
+                error(fmt::format("unexpected character '{}'", c), pos());
+        }
+    }
+}
+
+bool Lexer::read_expect(char expect) {
+    auto c = read();
+    if (c == expect) {
+        return true;
+    }
+    unread();
+    return false;
+}
+
+TokenType Lexer::read_rep(char expect, TokenType t_if, TokenType t_else) {
+    auto c = read();
+    if (c == expect) {
+        return t_if;
+    }
+    unread();
+    return t_else;
+}
+
+void Lexer::read_rune() {
+    char c;
+    bool ok = read_char('\'', &c);
+    if (!ok) {
+        error("empty character literal or unescaped ' in character literal",
+              pos());
+        c = '\'';
+    }
+
+    auto c1 = read();
+    if (c1 != '\'') {
+        error("missing '", pos());
+        unread();
+    }
+
+    m_tok.type = TokenType::CHAR;
+    m_tok.val.i = c;
+}
+
+void Lexer::read_raw_string() {
+    auto buf = new_buf();
+    while (1) {
+        auto c = read();
+        if (c == '\r') {
+            continue;
+        }
+        if (m_eof) {
+            error("eof in string", pos());
+            break;
+        }
+        if (c == '`') {
+            break;
+        }
+        buf.push_back(c);
+    }
+
+    m_tok.str = buf;
+    m_tok.type = TokenType::STRING;
+}
+
+void Lexer::read_string() {
+    auto buf = new_buf();
+    while (1) {
+        char c;
+        bool ok = read_char('"', &c);
+        if (!ok) {
+            break;
+        }
+
+        buf.push_back(c);
+    }
+
+    m_tok.str = buf;
+    m_tok.type = TokenType::STRING;
+}
+
+bool Lexer::read_char(char quote, char* out) {
+    auto c = read();
+    bool ok = true;
+
+    if (m_eof) {
+        error("eof in string", pos());
+        unread();
+        return false;
+    }
+
+    switch (c) {
+        case '\n':
+            error("newline in string", pos());
+            unread();
+            return false;
+
+        case '\\':
+            break;
+
+        default:
+            if (c == quote) {
+                return false;
+            }
+
+            *out = c;
+            return true;
+    }
+
+    c = read();
+    switch (c) {
+        case 'x':
+            *out = read_hex_char(2);
+            return true;
+
+        case 'u':
+            *out = read_unicode_char(4);
+            return true;
+
+        case 'U':
+            *out = read_unicode_char(8);
+            return true;
+
+        case 'a':
+            c = '\a';
+            break;
+        case 'b':
+            c = '\b';
+            break;
+        case 'f':
+            c = '\f';
+            break;
+        case 'n':
+            c = '\n';
+            break;
+        case 'r':
+            c = '\r';
+            break;
+        case 't':
+            c = '\t';
+            break;
+        case 'v':
+            c = '\v';
+            break;
+        case '\\':
+            c = '\\';
+            break;
+
+        default:
+            if (c >= '0' && c <= '7') {
+                auto x = c - '0';
+                auto p = pos();
+                for (int i = 2; i > 0; i--) {
+                    c = read();
+                    if (c >= '0' && c <= '7') {
+                        x = x * 8 + c - '0';
+                        continue;
+                    }
+
+                    error(fmt::format(
+                            "non-octal character in escape sequence: '{}'", c),
+                          pos());
+                    unread();
+                    ok = false;
+                }
+
+                if (x > 255) {
+                    error(fmt::format("octal escape value > 255: {}", x), p);
+                    ok = false;
+                }
+
+                *out = x;
+                return ok;
+            }
+
+            if (c != quote) {
+                error(fmt::format("unknown escape sequence: {}", c), pos());
+                ok = false;
+            }
+    }
+
+    *out = c;
+    return ok;
+}
+
+uint32_t Lexer::read_unicode_char(int n) {
+    auto p = pos();
+    auto x = read_hex_char(n);
+    if (x > UTF8_MAX || (0xd800 <= x && x < 0xe000)) {
+        error(fmt::format(
+                "invalid Unicode code point in escape sequence: {:#x}", x),
+              p);
+        return 0;
+    }
+    return x;
+}
+
+uint32_t Lexer::read_hex_char(int n) {
+    uint32_t x = 0;
+
+    for (; n > 0; n--) {
+        uint32_t d;
+        auto c = read();
+        if (is_digit(c)) {
+            d = c - '0';
+        } else if ('a' <= c && c <= 'f') {
+            d = c - 'a' + 10;
+        } else if ('A' <= c && c <= 'F') {
+            d = c - 'A' + 10;
+        } else {
+            error(fmt::format("non-hex character in escape sequence: '{}'", c),
+                  pos());
+            unread();
+            return x;
+        }
+        x = x * 16 + d;
+    }
+
+    return x;
+}
+
+void Lexer::read_number(char c) {
+    auto buf = new_buf();
+    // parse mantissa before decimal point or exponent
+    bool is_int = false;
+    char malformed_octal = 0;
+    int b = 10;
+    auto p = pos();
+
+    if (c != '.') {
+        if (c != '0') {
+            // decimal or float
+            while (is_digit(c)) {
+                buf.push_back(c);
+                c = read();
+            };
+        } else {
+            // c == 0
+            auto p = pos();
+            buf.push_back(c);
+            c = read();
+            if (c == 'b' || c == 'B') {
+                is_int = true;
+                b = 2;
+                while (is_digit(c)) {
+                    if (c > '1') {
+                        error(fmt::format(
+                                "invalid digit '{}' in binary constant", c),
+                              pos());
+                        return;
+                    }
+                    buf.push_back(c);
+                    c = read();
+                }
+            } else if (c == 'x' || c == 'X') {
+                b = 16;
+                is_int = true; // must be int
+                c = read();
+                while (is_digit(c) || ('a' <= c && c <= 'f') ||
+                       ('A' <= c && c <= 'F')) {
+                    buf.push_back(c);
+                    c = read();
+                };
+                if (buf.size() == 2) {
+                    error("malformed hex constant", p);
+                    return;
+                }
+            } else {
+                // octal
+                b = 8;
+                while (is_digit(c)) {
+                    if (c > '7') {
+                        if (!malformed_octal) {
+                            malformed_octal = c;
+                        }
+                    }
+                    buf.push_back(c);
+                    c = read();
+                }
+            }
+        }
+    }
+
+    // unless we have a hex or binary number, parse fractional part or exponent,
+    // if any
+    if (!is_int) {
+        is_int = true; // assume int unless proven otherwise
+
+        // fraction
+        if (c == '.') {
+            is_int = false;
+            buf.push_back(c);
+            c = read();
+            while (is_digit(c)) {
+                buf.push_back(c);
+                c = read();
+            }
+        }
+
+        // exponent
+        if (c == 'e' || c == 'E') {
+            buf.push_back(c);
+            is_int = false;
+            c = read();
+            if (c == '+' || c == '-') {
+                buf.push_back(c);
+                c = read();
+            }
+            if (!is_digit(c)) {
+                error("malformed floating point constant exponent", pos());
+                return;
+            }
+            while (is_digit(c)) {
+                buf.push_back(c);
+                c = read();
+            }
+        }
+
+        if (is_letter(c)) {
+            error(fmt::format("invalid numeric literal operator '{}'", c),
+                  pos());
+            return;
+        }
+    }
+
+    unread();
+
+    if (is_int) {
+        if (malformed_octal) {
+            error(fmt::format("invalid digit '{}' in octal constant",
+                              malformed_octal),
+                  pos());
+            return;
+        }
+
+        auto i = std::strtoull(buf.c_str(), NULL, b);
+        if (i == ULLONG_MAX) {
+            error(fmt::format("integer constant {} is too large", buf), p);
+        }
+        m_tok.val.i = i;
+        m_tok.type = TokenType::INT;
+        return;
+    } else { // float
+        double d = std::strtod(buf.c_str(), NULL);
+        if (d == HUGE_VAL) {
+            error(fmt::format("floating point constant {} is too large", buf),
+                  p);
+        }
+
+        m_tok.val.d = d;
+        m_tok.type = TokenType::FLOAT;
+        return;
+    }
+
+    return;
+}
+
+void Lexer::read_iden(char c) {
+    auto buf = new_buf();
+
+    while (is_letter(c) || is_digit(c)) {
+        buf.push_back(c);
+        c = read();
+    }
+
+    unread();
+    if (buf.length() >= 2) {
+        auto it = s_keywords.find(buf);
+        if (it != s_keywords.end()) {
+            m_tok.val.kw = s_keywords.at(buf);
+            m_tok.type = TokenType::KEYWORD;
+            m_tok.str = buf;
+            return;
+        }
+    }
+
+    m_tok.str = buf;
+    m_tok.type = TokenType::IDEN;
+}
+
+void Lexer::reset(long offset) {
+    m_file.clear();
+    m_eof = false;
+    m_bufn = m_bufi = 0;
+    for (int i = 0; i < BUF_LEN; i++) {
+        m_pbuf[i].line = 0;
+        m_pbuf[i].col = 0;
+        m_pbuf[i].offset = offset - 1;
+        m_pbuf[i].file = m_file_id;
+    }
+    seek(offset);
+}
+
+void Lexer::seek(long offset) {
+    m_bufn = 0;
+    m_file.seekg(offset, std::ios::beg);
+}
+
+char Lexer::read() {
+    // if there are characters put back
+    if (m_bufn > 0) {
+        m_bufi = (m_bufi + 1) % BUF_LEN;
+        m_bufn--;
+        return m_buf[m_bufi];
+    }
+
+    char ch = 0;
+    // otherwise read from input
+    m_file.get(ch);
+    if (m_file.fail()) {
+        if (m_file.eof()) {
+            m_eof = true;
+        } else {
+            error("Unknown I/O error", pos());
+        }
+        return 0;
+    }
+
+    auto p = m_pbuf[m_bufi];
+    if (ch == '\n') {
+        p.line++;
+        p.col = 0;
+    } else {
+        p.col++;
+    }
+    p.offset++;
+
+    m_bufi = (m_bufi + 1) % BUF_LEN;
+    m_buf[m_bufi] = ch;
+    m_pbuf[m_bufi] = p;
+
+    return ch;
+}
+
+void Lexer::unread() {
+    m_bufi = (m_bufi + BUF_LEN - 1) % BUF_LEN; // circularly decreases the index
+    m_bufn++;
+}
+
+char Lexer::peek() {
+    auto c = read();
+    unread();
+    return c;
+}
+
+Token Lexer::get() { return m_tok; }
+
+std::string Token::repr() const {
+    switch (type) {
+        case TokenType::END:
+            return "EOF";
+        case TokenType::KEYWORD:
+        case TokenType::IDEN:
+        case TokenType::CHAR:
+        case TokenType::STRING:
+            if (str.empty()) {
+                goto print_enum;
+            }
+            return fmt::format("\"{}\"", str);
+        case TokenType::INT:
+            return fmt::format("{}", val.i);
+        case TokenType::FLOAT:
+            return fmt::format("{}", val.d);
+        case TokenType::ADD:
+            return "+";
+        case TokenType::SUB:
+            return "-";
+        case TokenType::MUL:
+            return "*";
+        case TokenType::DIV:
+            return "/";
+        case TokenType::MOD:
+            return "%";
+        case TokenType::OR:
+            return "|";
+        case TokenType::AND:
+            return "&";
+        case TokenType::NOT:
+            return "~";
+        case TokenType::XOR:
+            return "^";
+        case TokenType::LSHIFT:
+            return "<<";
+        case TokenType::RSHIFT:
+            return ">>";
+        case TokenType::LOR:
+            return "||";
+        case TokenType::LAND:
+            return "&&";
+        case TokenType::LNOT:
+            return "!";
+        case TokenType::LT:
+            return "<";
+        case TokenType::LE:
+            return "<=";
+        case TokenType::GT:
+            return ">";
+        case TokenType::GE:
+            return ">=";
+        case TokenType::EQ:
+            return "==";
+        case TokenType::NE:
+            return "!=";
+        case TokenType::ASS:
+            return "=";
+        case TokenType::MUL_ASS:
+            return "*=";
+        case TokenType::DIV_ASS:
+            return "/=";
+        case TokenType::MOD_ASS:
+            return "%=";
+        case TokenType::ADD_ASS:
+            return "+=";
+        case TokenType::SUB_ASS:
+            return "-=";
+        case TokenType::LSHIFT_ASS:
+            return "<<=";
+        case TokenType::RSHIFT_ASS:
+            return ">>=";
+        case TokenType::AND_ASS:
+            return "&=";
+        case TokenType::XOR_ASS:
+            return "^=";
+        case TokenType::OR_ASS:
+            return "|=";
+        case TokenType::INC:
+            return "++";
+        case TokenType::DEC:
+            return "--";
+        case TokenType::LPAREN:
+            return "(";
+        case TokenType::RPAREN:
+            return ")";
+        case TokenType::LBRACK:
+            return "[";
+        case TokenType::RBRACK:
+            return "]";
+        case TokenType::LBRACE:
+            return "{";
+        case TokenType::RBRACE:
+            return "}";
+        case TokenType::COMMA:
+            return ",";
+        case TokenType::DOT:
+            return ".";
+        case TokenType::COLON:
+            return ":";
+        case TokenType::SEMICOLON:
+            return ";";
+        case TokenType::ELLIPSIS:
+            return "...";
+        case TokenType::TILDE:
+            return "~";
+        case TokenType::QUES:
+            return "?";
+        default:
+        print_enum:
+            return PRINT_ENUM<TokenType>(type);
+    }
+}

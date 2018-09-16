@@ -1,0 +1,2 @@
+add_executable(cx cli.cpp builder.h compat.h types.h builder.cpp include/sso23.h include/optional.h package.cpp package.h interpreter.h interpreter.cpp lexer.h lexer.cpp parser.cpp parser.h include/enum.h)
+target_link_libraries(cx fmt)

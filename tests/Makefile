@@ -1,0 +1,24 @@
+TESTS = 00_fib.test
+
+CX = ../cmake-build-debug/src/cx
+
+%.test: %.expect %.cx
+	@echo Test: $*...
+	@if [ "x`echo $* | grep args`" != "x" ]; \
+	then \
+		$(CX) $*.cx - arg1 arg2 arg3 arg4 2>&1 >$*.output; \
+	else \
+		$(CX) $*.cx 2>&1 >$*.output; \
+	fi
+	@if [ "x`diff -qbu $*.expect $*.output`" != "x" ]; \
+	then \
+        	echo "error in test $*"; \
+        	diff -u $*.expect $*.output; \
+		exit 1; \
+	fi; \
+       	rm -f $*.output
+
+all: test
+
+test: $(TESTS)
+	@echo "tests passed"
