@@ -8,6 +8,6 @@ int fib(int n) {
 int main() {
     int N;
     N = 10; // Should return 433494437
-    print("fib: {}\n", fib(N));
+    printf("fib: {}\n", fib(N));
     return 0;
 }

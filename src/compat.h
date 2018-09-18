@@ -7,48 +7,186 @@
 
 #pragma once
 
-#include <vector>
-#include <fmt/format.h>
+#include <unordered_map>
+#include <functional>
+#include <fstream>
+#include <sstream>
 
 #include "include/optional.h"
-#include "include/sso23.h"
 #include "include/enum.h"
+#include "include/tsl/hopscotch_map.h"
+
+#include "util.h"
 
 namespace cx {
-
     typedef int64_t int64;
-
-    template<typename T>
-    class array {
-        std::vector<T> vec;
-    public:
-        T* push(T&& value) {
-            vec.push_back(value);
-            return &vec.back();
-        }
-
-        T& operator[](long i) {
-            return vec.operator[](i);
-        }
-    };
-
-    typedef sso23::basic_string<char> basic_string;
-
-    class string : public basic_string {
-    public:
-        using basic_string::basic_string;
-
-        bool is_empty() {
-            return size() == 0;
-        }
-
-        char operator[](long i) {
-            return data()[0];
-        }
-    };
-
     using nonstd::optional;
     using fmt::print;
-    using fmt::format;
+    template<typename T> using func = std::function<T>;
+    template<typename T> using box = std::unique_ptr<T>;
+    using std::string;
 
+    // part of this is from zig by Andrew Kelley
+    // http://opensource.org/licenses/MIT
+    template<typename T>
+    struct array {
+        size_t size = 0;
+        size_t capacity = 0;
+
+        ~array() {
+            free(items);
+        }
+
+        array() {}
+
+        array(std::initializer_list<T> values) {
+            reserve(values.size());
+            for (auto& value: values) {
+                add(value);
+            }
+        }
+
+        template<typename... Args>
+        T* emplace(Args&& ... args) {
+            resize(size + 1);
+            return new(&items[size]) T(std::forward<Args>(args)...);
+        }
+
+        T* add(T&& item) {
+            resize(size + 1);
+            last() = item;
+            return &last();
+        }
+
+        T* add(const T& item) {
+            return add(item);
+        }
+
+        T& operator[](size_t index) {
+            return at(index);
+        }
+
+        T* begin() { return items; }
+
+        T* end() { return items + size; }
+
+        const T& at(size_t index) const {
+            assert(index != SIZE_MAX);
+            assert(index < size);
+            return items[index];
+        }
+
+        T& at(size_t index) {
+            assert(index != SIZE_MAX);
+            assert(index < size);
+            return items[index];
+        }
+
+        T pop() {
+            assert(size >= 1);
+            return items[--size];
+        }
+
+        const T& last() const {
+            assert(size >= 1);
+            return items[size - 1];
+        }
+
+        T& last() {
+            assert(size >= 1);
+            return items[size - 1];
+        }
+
+        void resize(size_t new_length) {
+            assert(new_length != SIZE_MAX);
+            reserve(new_length);
+            size = new_length;
+        }
+
+        void clear() {
+            size = 0;
+        }
+
+        void reserve(size_t new_capacity) {
+            if (capacity >= new_capacity)
+                return;
+
+            size_t better_capacity = capacity;
+            do {
+                better_capacity = better_capacity * 5 / 2 + 8;
+            } while (better_capacity < new_capacity);
+
+            items = reallocate_nonzero(items, capacity, better_capacity);
+            capacity = better_capacity;
+        }
+
+    private:
+        T* items = nullptr;
+    };
+
+    template<typename K, typename V>
+    struct map {
+        typedef tsl::hopscotch_map<K, V> Map;
+
+        V& operator[](const K& key) {
+            return data.operator[](key);
+        }
+
+        bool is_empty() {
+            return data.empty();
+        }
+
+        optional<V> get(const K& key) {
+            auto iter = data.find(key);
+            if (iter != data.end()) {
+                return iter->second;
+            } else {
+                return {};
+            }
+        }
+
+    private:
+        Map data;
+    };
+
+    namespace io {
+        enum class Error : int {
+            unknown,
+            eof
+        };
+
+        static constexpr Error eof = Error::eof;
+
+        class Buffer {
+            box<std::istream> m_stream;
+
+            Buffer(std::istream* stream) {
+                m_stream.reset(stream);
+            }
+
+        public:
+            static Buffer from_file(string file_name) {
+                return {new std::fstream(file_name)};
+            }
+
+            static Buffer from_string(string str) {
+                return {new std::stringstream(str)};
+            }
+
+            void reset() {
+                m_stream->clear();
+            }
+
+            optional<Error> read(char* ch) {
+                m_stream->get(*ch);
+                if (m_stream->fail()) {
+                    if (m_stream->eof()) {
+                        return eof;
+                    }
+                    return Error::unknown;
+                }
+                return {};
+            };
+        };
+    }
 }

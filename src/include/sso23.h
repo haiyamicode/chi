@@ -6,7 +6,7 @@
   //
   // Permission is hereby granted, free of charge, to any person or organization
   // obtaining a copy of the software and accompanying documentation covered by
-  // this license (the "Software") to use, reproduce, display, distribute,
+  // this license (the "Software") to use, to_stringoduce, display, distribute,
   // execute, and transmit the Software, and to prepare derivative works of the
   // Software, and to permit third-parties to whom the Software is furnished to
   // do so, all subject to the following:
@@ -57,7 +57,7 @@ namespace sso23 {
         }
 
         template<typename T>
-        unsigned char &most_sig_byte(T &obj) {
+        unsigned char& most_sig_byte(T& obj) {
             return *(reinterpret_cast<unsigned char*>(&obj) + sizeof(obj) - 1);
         }
 
@@ -70,7 +70,7 @@ namespace sso23 {
         }
 
         template<int N>
-        void set_lsb(unsigned char &byte, bool bit) {
+        void set_lsb(unsigned char& byte, bool bit) {
             if (bit) {
                 byte |= 1u << N;
             } else {
@@ -79,7 +79,7 @@ namespace sso23 {
         }
 
         template<int N>
-        void set_msb(unsigned char &byte, bool bit) {
+        void set_msb(unsigned char& byte, bool bit) {
             if (bit) {
                 byte |= 1u << (CHAR_BIT - N - 1);
             } else {
@@ -112,7 +112,7 @@ namespace sso23 {
         basic_string(CharT const* string)
                 : basic_string{string, std::strlen(string)} {}
 
-        basic_string(const basic_string &string) {
+        basic_string(const basic_string& string) {
             if (string.sso()) {
                 m_data.sso = string.m_data.sso;
             } else {
@@ -120,20 +120,20 @@ namespace sso23 {
             }
         }
 
-        basic_string(basic_string &&string) noexcept {
+        basic_string(basic_string&& string) noexcept {
             m_data = string.m_data;
             string.set_moved_from();
         }
 
         const CharT* c_str() const { return data(); }
 
-        basic_string &operator=(basic_string const &other) {
+        basic_string& operator=(basic_string const& other) {
             auto copy = other;
             swap(copy, *this);
             return *this;
         }
 
-        basic_string &operator=(basic_string &&other) {
+        basic_string& operator=(basic_string&& other) {
             this->~basic_string();
             m_data = other.m_data;
             other.set_moved_from();
@@ -166,7 +166,7 @@ namespace sso23 {
             }
         }
 
-        friend void swap(basic_string &lhs, basic_string &rhs) {
+        friend void swap(basic_string& lhs, basic_string& rhs) {
             std::swap(lhs.m_data, rhs.m_data);
         }
 
@@ -190,10 +190,10 @@ namespace sso23 {
         }
 
         void set_non_sso_data(std::size_t size, std::size_t capacity) {
-            auto &size_hsb = detail::most_sig_byte(size);
+            auto& size_hsb = detail::most_sig_byte(size);
             auto const size_high_bit = detail::msb<0>(size_hsb);
 
-            auto &cap_hsb = detail::most_sig_byte(capacity);
+            auto& cap_hsb = detail::most_sig_byte(capacity);
             auto const cap_high_bit = detail::msb<0>(cap_hsb);
             auto const cap_sec_high_bit = detail::msb<1>(cap_hsb);
 
@@ -211,8 +211,8 @@ namespace sso23 {
             auto size = m_data.non_sso.size;
             auto capacity = m_data.non_sso.capacity;
 
-            auto &size_hsb = detail::most_sig_byte(size);
-            auto &cap_hsb = detail::most_sig_byte(capacity);
+            auto& size_hsb = detail::most_sig_byte(size);
+            auto& cap_hsb = detail::most_sig_byte(capacity);
 
             // Remember to negate the high bits
             auto const cap_high_bit = detail::lsb<0>(cap_hsb);
@@ -247,28 +247,28 @@ namespace sso23 {
     };
 
     template<typename CharT, typename Traits>
-    bool operator==(const basic_string<CharT, Traits> &lhs,
+    bool operator==(const basic_string<CharT, Traits>& lhs,
                     const CharT* rhs) noexcept {
         return !std::strcmp(lhs.data(), rhs);
     }
 
     template<typename CharT, typename Traits>
     bool operator==(const CharT* lhs,
-                    const basic_string<CharT, Traits> &rhs) noexcept {
+                    const basic_string<CharT, Traits>& rhs) noexcept {
         return rhs == lhs;
     }
 
     template<typename CharT, typename Traits>
-    bool operator==(const basic_string<CharT, Traits> &lhs,
-                    const basic_string<CharT, Traits> &rhs) noexcept {
+    bool operator==(const basic_string<CharT, Traits>& lhs,
+                    const basic_string<CharT, Traits>& rhs) noexcept {
         if (lhs.size() != rhs.size())
             return false;
         return !std::strcmp(lhs.data(), rhs.data());
     }
 
     template<typename CharT, typename Traits>
-    std::ostream &operator<<(std::ostream &stream,
-                             const basic_string<CharT, Traits> &string) {
+    std::ostream& operator<<(std::ostream& stream,
+                             const basic_string<CharT, Traits>& string) {
         return stream << string.data();
     }
 

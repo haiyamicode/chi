@@ -17,16 +17,16 @@ int main(int argc, char* argv[]) {
         if (arg[0] == '-') {
             auto flag = arg[1];
             if (flag == 'd') {
-                bld.m_debug_mode = true;
+                bld.set_debug_mode(true);
             } else if (flag == 's') {
-                bld.m_assembly_mode = true;
+                bld.set_assembly_mode(true);
             }
         } else {
             file_name = arg;
         }
     }
-    if (file_name.is_empty()) {
-        print("usage: cx [-d | -s] source_file");
+    if (file_name.empty()) {
+        print("usage: cx [-d | -s] source_file\n");
         return 0;
     }
     bld.build_program(file_name);

@@ -7,26 +7,33 @@
 
 #pragma once
 
-#include "types.h"
-#include "package.h"
+#include "sema.h"
+#include "resolver.h"
 
 namespace cx {
-    struct Builder {
+    class Builder {
         bool m_debug_mode = false;
         bool m_assembly_mode = false;
+        Resolver m_resolver;
+        array<ast::Package> m_packages;
+        array<void*> m_allocated;
 
-        Package* add_package();
-
-
-        array<Package> m_packages;
-
+    public:
         Builder();
 
-        void compile(Module* file);
+        ast::Package* add_package() { return m_packages.emplace(); }
 
-        void process_file(Package* pkg, string file_name);
+        void set_debug_mode(bool value) { m_debug_mode = value; }
+
+        void set_assembly_mode(bool value) { m_assembly_mode = value; }
+
+        void compile(ast::Module* file);
+
+        void process_file(ast::Package* package, string file_name);
 
         void build_program(string entry_file_name);
+
+        void* alloc_mem(size_t size);
     };
 
 }

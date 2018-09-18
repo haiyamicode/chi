@@ -5,17 +5,7 @@
  * See http://opensource.org/licenses/MIT
  */
 
-#pragma once
+#include "compiler.h"
 
-#include "types.h"
+using namespace cx;
 
-namespace cx {
-    struct Package {
-        
-    };
-
-    struct Module {
-
-    };
-
-}

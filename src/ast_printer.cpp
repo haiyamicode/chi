@@ -5,10 +5,10 @@
  * See http://opensource.org/licenses/MIT
  */
 
-#pragma once
+#include "ast_printer.h"
 
-namespace cx {
-    struct Interpreter {
-        void run();
-    };
+using namespace cx;
+
+void cx::print_ast(ast::Node* ast) {
+    print("AST");
 }

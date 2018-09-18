@@ -7,4 +7,8 @@
 
 #pragma once
 
-#include "compat.h"
+namespace cx {
+    struct Compiler {
+
+    };
+}

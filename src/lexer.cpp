@@ -21,48 +21,45 @@ static bool is_letter(char c) {
 
 static bool is_digit(char c) { return '0' <= c && c <= '9'; }
 
-Lexer::Lexer(std::istream& file, int file_id, ErrorFunc on_err) : m_file(file) {
-
-    m_file_id = file_id;
-    m_on_err = on_err;
+Lexer::Lexer(io::Buffer* src, Tokenization* result) {
+    m_src = src;
+    m_result = result;
     reset();
     setup_keywords();
 }
 
 void Lexer::setup_keywords() {
-    if (!s_keywords.empty()) {
+    if (!s_keywords.is_empty()) {
         return;
     }
 
-    s_keywords["let"] = Keyword::LET;
-    s_keywords["break"] = Keyword::BREAK;
-    s_keywords["case"] = Keyword::CASE;
-    s_keywords["const"] = Keyword::CONST;
-    s_keywords["continue"] = Keyword::CONTINUE;
-    s_keywords["default"] = Keyword::DEFAULT;
-    s_keywords["else"] = Keyword::ELSE;
-    s_keywords["enum"] = Keyword::ENUM;
-    s_keywords["for"] = Keyword::FOR;
-    s_keywords["func"] = Keyword::FUNC;
-    s_keywords["goto"] = Keyword::GOTO;
-    s_keywords["while"] = Keyword::WHILE;
-    s_keywords["if"] = Keyword::IF;
-    s_keywords["interface"] = Keyword::INTERFACE;
-    s_keywords["impl"] = Keyword::IMPL;
-    s_keywords["public"] = Keyword::PUBLIC;
-    s_keywords["private"] = Keyword::PRIVATE;
-    s_keywords["foreach"] = Keyword::FOREACH;
-    s_keywords["return"] = Keyword::RETURN;
-    s_keywords["static"] = Keyword::STATIC;
-    s_keywords["select"] = Keyword::SELECT;
-    s_keywords["struct"] = Keyword::STRUCT;
-    s_keywords["switch"] = Keyword::SWITCH;
-    s_keywords["typedef"] = Keyword::TYPEDEF;
-    s_keywords["typeof"] = Keyword::TYPEOF;
-    s_keywords["new"] = Keyword::NEW;
+    s_keywords["let"] = TokenType::KW_LET;
+    s_keywords["break"] = TokenType::KW_BREAK;
+    s_keywords["case"] = TokenType::KW_CASE;
+    s_keywords["const"] = TokenType::KW_CONST;
+    s_keywords["continue"] = TokenType::KW_CONTINUE;
+    s_keywords["default"] = TokenType::KW_DEFAULT;
+    s_keywords["else"] = TokenType::KW_ELSE;
+    s_keywords["enum"] = TokenType::KW_ENUM;
+    s_keywords["for"] = TokenType::KW_FOR;
+    s_keywords["func"] = TokenType::KW_FUNC;
+    s_keywords["goto"] = TokenType::KW_GOTO;
+    s_keywords["while"] = TokenType::KW_WHILE;
+    s_keywords["if"] = TokenType::KW_IF;
+    s_keywords["interface"] = TokenType::KW_INTERFACE;
+    s_keywords["public"] = TokenType::KW_PUBLIC;
+    s_keywords["private"] = TokenType::KW_PRIVATE;
+    s_keywords["return"] = TokenType::KW_RETURN;
+    s_keywords["static"] = TokenType::KW_STATIC;
+    s_keywords["select"] = TokenType::KW_SELECT;
+    s_keywords["struct"] = TokenType::KW_STRUCT;
+    s_keywords["switch"] = TokenType::KW_SWITCH;
+    s_keywords["typedef"] = TokenType::KW_TYPEDEF;
+    s_keywords["typeof"] = TokenType::KW_TYPEOF;
+    s_keywords["new"] = TokenType::KW_NEW;
 }
 
-std::string& Lexer::new_buf(size_t reserve) {
+string& Lexer::new_buf(size_t reserve) {
     m_cbuf.clear();
     m_cbuf.reserve(reserve);
     return m_cbuf;
@@ -408,7 +405,7 @@ bool Lexer::read_char(char quote, char* out) {
             if (c >= '0' && c <= '7') {
                 auto x = c - '0';
                 auto p = pos();
-                for (int i = 2; i > 0; i--) {
+                for (long i = 2; i > 0; i--) {
                     c = read();
                     if (c >= '0' && c <= '7') {
                         x = x * 8 + c - '0';
@@ -441,7 +438,7 @@ bool Lexer::read_char(char quote, char* out) {
     return ok;
 }
 
-uint32_t Lexer::read_unicode_char(int n) {
+uint32_t Lexer::read_unicode_char(long n) {
     auto p = pos();
     auto x = read_hex_char(n);
     if (x > UTF8_MAX || (0xd800 <= x && x < 0xe000)) {
@@ -453,7 +450,7 @@ uint32_t Lexer::read_unicode_char(int n) {
     return x;
 }
 
-uint32_t Lexer::read_hex_char(int n) {
+uint32_t Lexer::read_hex_char(long n) {
     uint32_t x = 0;
 
     for (; n > 0; n--) {
@@ -482,7 +479,7 @@ void Lexer::read_number(char c) {
     // parse mantissa before decimal point or exponent
     bool is_int = false;
     char malformed_octal = 0;
-    int b = 10;
+    long b = 10;
     auto p = pos();
 
     if (c != '.') {
@@ -512,7 +509,7 @@ void Lexer::read_number(char c) {
                 }
             } else if (c == 'x' || c == 'X') {
                 b = 16;
-                is_int = true; // must be int
+                is_int = true; // must be long
                 c = read();
                 while (is_digit(c) || ('a' <= c && c <= 'f') ||
                        ('A' <= c && c <= 'F')) {
@@ -542,7 +539,7 @@ void Lexer::read_number(char c) {
     // unless we have a hex or binary number, parse fractional part or exponent,
     // if any
     if (!is_int) {
-        is_int = true; // assume int unless proven otherwise
+        is_int = true; // assume long unless proven otherwise
 
         // fraction
         if (c == '.') {
@@ -623,10 +620,9 @@ void Lexer::read_iden(char c) {
 
     unread();
     if (buf.length() >= 2) {
-        auto it = s_keywords.find(buf);
-        if (it != s_keywords.end()) {
-            m_tok.val.kw = s_keywords.at(buf);
-            m_tok.type = TokenType::KEYWORD;
+        auto kw = s_keywords.get(buf);
+        if (kw) {
+            m_tok.type = *kw;
             m_tok.str = buf;
             return;
         }
@@ -636,22 +632,15 @@ void Lexer::read_iden(char c) {
     m_tok.type = TokenType::IDEN;
 }
 
-void Lexer::reset(long offset) {
-    m_file.clear();
+void Lexer::reset() {
+    m_src->reset();
     m_eof = false;
     m_bufn = m_bufi = 0;
-    for (int i = 0; i < BUF_LEN; i++) {
+    for (long i = 0; i < BUF_LEN; i++) {
         m_pbuf[i].line = 0;
         m_pbuf[i].col = 0;
-        m_pbuf[i].offset = offset - 1;
-        m_pbuf[i].file = m_file_id;
+        m_pbuf[i].offset = -1;
     }
-    seek(offset);
-}
-
-void Lexer::seek(long offset) {
-    m_bufn = 0;
-    m_file.seekg(offset, std::ios::beg);
 }
 
 char Lexer::read() {
@@ -664,12 +653,10 @@ char Lexer::read() {
 
     char ch = 0;
     // otherwise read from input
-    m_file.get(ch);
-    if (m_file.fail()) {
-        if (m_file.eof()) {
+    auto err = m_src->read(&ch);
+    if (err) {
+        if (err == io::eof) {
             m_eof = true;
-        } else {
-            error("Unknown I/O error", pos());
         }
         return 0;
     }
@@ -703,11 +690,26 @@ char Lexer::peek() {
 
 Token Lexer::get() { return m_tok; }
 
-std::string Token::repr() const {
+void Lexer::tokenize() {
+    long i = 0;
+    for (;;) {
+        next(&m_tok);
+        if (m_eof) {
+            break;
+        }
+        m_result->tokens.add(m_tok);
+    }
+}
+
+void Lexer::error(string error, Pos pos) {
+    m_result->error = error;
+    m_result->error_pos = pos;
+}
+
+string Token::to_string() const {
     switch (type) {
         case TokenType::END:
             return "EOF";
-        case TokenType::KEYWORD:
         case TokenType::IDEN:
         case TokenType::CHAR:
         case TokenType::STRING:

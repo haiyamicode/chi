@@ -7,17 +7,40 @@
 
 #pragma once
 
-#include <functional>
-#include <istream>
-#include <string>
-#include <unordered_map>
-
 #include "compat.h"
 
 namespace cx {
 
-    MAKE_ENUM(TokenType, END, IDEN, KEYWORD,
+    MAKE_ENUM(TokenType,
+              END,
+              IDEN,
 
+    // keywords
+              KW_BREAK,
+              KW_CASE,
+              KW_LET,
+              KW_CONST,
+              KW_CONTINUE,
+              KW_DEFAULT,
+              KW_ELSE,
+              KW_ENUM,
+              KW_FOR,
+              KW_FUNC,
+              KW_GOTO,
+              KW_WHILE,
+              KW_IF,
+              KW_INTERFACE,
+              KW_PUBLIC,
+              KW_PRIVATE,
+              KW_RETURN,
+              KW_SELECT,
+              KW_STATIC,
+              KW_STRUCT,
+              KW_SWITCH,
+              KW_TYPEDEF,
+              KW_TYPEOF,
+              KW_NEW,
+ 
     // literals
               INT,    // 322, 0322, 0xBadFace
               FLOAT,  // 322.0
@@ -79,19 +102,13 @@ namespace cx {
               TILDE      // ~
     )
 
-    MAKE_ENUM(Keyword, LET, BREAK, CASE, CONST, CONTINUE, DEFAULT, ELSE, ENUM, FOR,
-              FUNC, GOTO, WHILE, IF, INTERFACE, IMPL, PUBLIC, PRIVATE, FOREACH,
-              RETURN, SELECT, STATIC, STRUCT, SWITCH, TYPEDEF, TYPEOF, NEW
-    )
-
     struct Pos {
-        int line, col, offset, file;
+        long line, col, offset;
 
         Pos() {
             line = -1;
             col = -1;
             offset = -1;
-            file = -1;
         }
 
         bool is_valid() { return offset >= 0; }
@@ -101,41 +118,43 @@ namespace cx {
         union Value {
             double d;   // floating point value
             int64_t i;  // integer value
-            Keyword kw; // keyword type
         } val;
-        std::string str;
+        string str;
         TokenType type;
         Pos pos;
 
-        std::string repr() const;
+        string to_string() const;
 
         Token(TokenType type = TokenType::END) { this->type = type; }
     };
 
-    typedef std::function<void(std::string, Pos)> ErrorFunc;
-    typedef std::unordered_map<std::string, Keyword> KeywordMap;
-// typedef std::function<bool(std::string)> LookupFunc;
+    typedef func<void(string, Pos)> ErrorFunc;
+    typedef map<string, TokenType> KeywordMap;
 
-    const int BUF_LEN = 4;
+    const long BUF_LEN = 4;
     const uint32_t UTF8_MAX = U'\U0010FFFF';
+
+    struct Tokenization {
+        array<Token> tokens;
+        optional<string> error;
+        Pos error_pos;
+    };
 
     class Lexer {
         static KeywordMap s_keywords;
-
-        ErrorFunc m_on_err;
-        std::istream& m_file;
-        int m_file_id;
+        io::Buffer* m_src;
+        Tokenization* m_result;
 
         char m_buf[BUF_LEN];
         Pos m_pbuf[BUF_LEN];
-        int m_bufn, m_bufi;
+        long m_bufn, m_bufi;
 
-        std::string m_cbuf;
+        string m_cbuf;
         bool m_eof;
 
         Token m_tok;
 
-        std::string& new_buf(size_t reserve = 5);
+        string& new_buf(size_t reserve = 5);
 
         char read();
 
@@ -144,8 +163,6 @@ namespace cx {
         char peek();
 
         void next();
-
-        void seek(long offset);
 
         void read_iden(char c);
 
@@ -164,20 +181,22 @@ namespace cx {
 
         bool read_char(char quote, char* c);
 
-        uint32_t read_unicode_char(int n);
+        uint32_t read_unicode_char(long n);
 
-        uint32_t read_hex_char(int n);
+        uint32_t read_hex_char(long n);
 
         void setup_keywords();
 
         Pos pos() { return m_pbuf[m_bufi]; }
 
     public:
-        Lexer(std::istream& file, int file_id, ErrorFunc on_err);
+        Lexer(io::Buffer* src, Tokenization* result);
 
-        void reset(long offset = 0);
+        void tokenize();
 
-        void error(std::string error, Pos pos) { m_on_err(error, pos); }
+        void reset();
+
+        void error(string error, Pos pos);
 
         void next(Token* tok);
 

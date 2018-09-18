@@ -5,10 +5,10 @@
  * See http://opensource.org/licenses/MIT
  */
 
-#include "interpreter.h"
+#pragma once
 
-using namespace cx;
+#include "ast.h"
 
-void cx::Interpreter::run() {
-
+namespace cx {
+    void print_ast(ast::Node* ast);
 }
