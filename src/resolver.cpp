@@ -14,8 +14,9 @@ Resolver::Resolver() {
     init_primitives();
 }
 
-void Resolver::add_primitive(string name) {
+void Resolver::add_primitive(const string& name) {
     auto node = m_primitives.emplace(ast::NodeType::Identifier);
+    node->token = nullptr;
     node->name = name;
     node->data.identifier.kind = ast::IdentifierKind::TypeName;
     node->data.identifier.is_builtin = true;
@@ -26,15 +27,16 @@ void Resolver::init_primitives() {
     add_primitive("void");
 }
 
-void ModuleResolver::push_scope() {
+Scope* ModuleResolver::push_scope() {
     m_current_scope = m_scopes.emplace(m_current_scope);
+    return m_current_scope;
 }
 
 void ModuleResolver::pop_scope() {
     m_current_scope = m_current_scope->parent;
 }
 
-bool ModuleResolver::declare_symbol(string name, ast::Node* node) {
+bool ModuleResolver::declare_symbol(const string& name, ast::Node* node) {
     if (m_resolver->get_primitive(name) || m_current_scope->find_one(name)) {
         return false;
     }
@@ -42,7 +44,7 @@ bool ModuleResolver::declare_symbol(string name, ast::Node* node) {
     return true;
 }
 
-ast::Node* ModuleResolver::find_symbol(string name) {
+ast::Node* ModuleResolver::find_symbol(const string& name) {
     if (auto prim = m_resolver->get_primitive(name)) {
         return prim;
     }
@@ -62,7 +64,7 @@ ModuleResolver::ModuleResolver(Resolver* resolver) {
 }
 
 
-ast::Node* Resolver::get_primitive(string name) {
+ast::Node* Resolver::get_primitive(const string& name) {
     for (auto& node: m_primitives) {
         if (node.name == name) {
             return &node;

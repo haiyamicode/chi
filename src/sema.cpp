@@ -9,16 +9,22 @@
 
 using namespace cx;
 
-ast::Node* Scope::find_one(string symbol) {
+ast::Node* Scope::find_one(const string& symbol) {
     if (auto val = symbols.get(symbol)) {
+        auto list = val;
         return val->at(0);
     }
-    return {};
+    return 0;
 }
 
-NodeList* Scope::find_all(string symbol) {
+NodeList* Scope::find_all(const string& symbol) {
     if (auto list = symbols.get(symbol)) {
-        return &list.value();
+        return list;
     }
-    return {};
+    return nullptr;
+}
+
+void Scope::put(const string& name, ast::Node* node) {
+    symbols[name];
+    symbols[name].add(node);
 }

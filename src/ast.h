@@ -25,8 +25,8 @@ namespace cx {
                   VarDecl,
                   BinOpExpr,
                   LiteralExpr,
+                  IfStmt,
                   FnCallExpr,
-                  IfBoolExpr,
                   Identifier,
                   EmptyStmt,
                   ParenExpr
@@ -89,7 +89,7 @@ namespace cx {
             bool is_builtin;
         };
 
-        struct IfBoolExpr {
+        struct IfStmt {
             Node* condition;
             Node* then_block;
             Node* else_node; // can be null, block node, or another if node
@@ -123,13 +123,14 @@ namespace cx {
                 BinOpExpr bin_op_expr;
                 Node* child_expr;
                 Identifier identifier;
+                IfStmt if_stmt;
 
                 NodeData() {}
 
                 ~NodeData() {}
             } data;
 
-            Node(NodeType type) {
+            explicit Node(NodeType type) {
                 this->type = type;
                 memset(&data, 0, sizeof(data));
             }

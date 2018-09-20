@@ -11,15 +11,13 @@
 
 using namespace cx;
 
-Builder::Builder() {
-    m_allocated.reserve(1024);
-}
+Builder::Builder() {}
 
 void Builder::compile(ast::Module* file) {
 
 }
 
-void Builder::process_file(ast::Package* package, string file_name) {
+void Builder::process_file(ast::Package* package, const string& file_name) {
     auto src = io::Buffer::from_file(file_name);
 
     auto module = package->modules.emplace();
@@ -35,17 +33,17 @@ void Builder::process_file(ast::Package* package, string file_name) {
     pc.resolver = &mr;
     pc.module = module;
     pc.tokens = &tokenization.tokens;
-    pc.alloc = std::bind(&Builder::alloc_mem, this, std::placeholders::_1);
+    pc.allocator = this;
 
     Parser parser(&pc);
     parser.parse();
     print_ast(pc.module->root);
 }
 
-void Builder::build_program(string entry_file_name) {
+void Builder::build_program(const string& entry_file_name) {
     process_file(add_package(), entry_file_name);
 }
 
-void* Builder::alloc_mem(size_t size) {
-    return m_allocated.add(malloc(size));
+Node* Builder::allocate_node(NodeType type) {
+    return m_ast_nodes.emplace(new Node(type))->get();
 }

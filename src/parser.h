@@ -16,13 +16,14 @@
 using namespace cx::ast;
 
 namespace cx {
-    typedef func<void*(int size)> AllocFunc;
-    typedef array<Node*> NodeList;
+    struct NodeAllocator {
+        virtual Node* allocate_node(NodeType type) = 0;
+    };
 
     struct ParseContext {
         Module* module;
         array<Token>* tokens;
-        AllocFunc alloc;
+        NodeAllocator* allocator;
         ModuleResolver* resolver;
     };
 
@@ -30,19 +31,14 @@ namespace cx {
         ParseContext* m_ctx;
         size_t m_token_i = 0;
         Token m_eof_token;
-        Token* m_buf[BUF_LEN];
-        long m_bufi = 0;
-        std::deque<Token*> m_lookahead;
 
         Token* next();
 
         Token* read();
 
-        Token* peek();
+        Token* get();
 
         Token* lookahead(int n);
-
-        void reset_buffers();
 
         void skip_to(long offset);
 
@@ -56,6 +52,7 @@ namespace cx {
         void error(Token* token, const char* format, const Args& ...args) {
             print("{}:{}:{}: error: {}\n", m_ctx->module->path, token->pos.line + 1,
                   token->pos.col + 1, fmt::format(format, args...));
+            exit(0);
         }
 
     public:
@@ -73,9 +70,11 @@ namespace cx {
 
         bool next_is_type_expr();
 
+        void add_to_scope(Node* node);
+
         void parse();
 
-        void parse_root(Node* root);
+        Node* parse_root();
 
         void parse_top_level_decls(NodeList* decls);
 
@@ -116,5 +115,7 @@ namespace cx {
         Node* parse_simple_stmt();
 
         Node* parse_return_stmt();
+
+        Node* parse_if_stmt();
     };
 }

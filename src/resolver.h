@@ -16,11 +16,11 @@ namespace cx {
     public:
         Resolver();
 
-        void add_primitive(string name);
+        void add_primitive(const string& name);
 
         void init_primitives();
 
-        ast::Node* get_primitive(string name);
+        ast::Node* get_primitive(const string& name);
     };
 
     class ModuleResolver {
@@ -31,13 +31,13 @@ namespace cx {
     public:
         ModuleResolver(Resolver* resolver);
 
-        Scope* current_scope() { return m_current_scope; }
+        Scope* get_scope() { return m_current_scope; }
 
-        bool declare_symbol(string name, ast::Node* node);
+        bool declare_symbol(const string& name, ast::Node* node);
 
-        ast::Node* find_symbol(string name);
+        ast::Node* find_symbol(const string& name);
 
-        void push_scope();
+        Scope* push_scope();
 
         void pop_scope();
     };

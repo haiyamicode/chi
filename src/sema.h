@@ -21,14 +21,15 @@ namespace cx {
 
     struct Scope {
         Scope* parent;
+        ast::Node* owner = nullptr;
 
         Scope(Scope* parent) { this->parent = parent; }
 
-        ast::Node* find_one(string symbol);
+        ast::Node* find_one(const string& symbol);
 
-        NodeList* find_all(string symbol);
+        NodeList* find_all(const string& symbol);
 
-        void put(string name, ast::Node* node) { symbols[name] = {node}; }
+        void put(const string& name, ast::Node* node);
 
     private:
         map<string, NodeList> symbols;

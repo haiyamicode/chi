@@ -39,6 +39,13 @@ namespace cx {
 
         array() {}
 
+        array(const array& other) {
+            if (other.size) {
+                resize(other.size);
+                memcpy(items, other.items, other.size);
+            }
+        }
+
         array(std::initializer_list<T> values) {
             reserve(values.size());
             for (auto& value: values) {
@@ -49,7 +56,7 @@ namespace cx {
         template<typename... Args>
         T* emplace(Args&& ... args) {
             resize(size + 1);
-            return new(&items[size]) T(std::forward<Args>(args)...);
+            return new(&last()) T(std::forward<Args>(args)...);
         }
 
         T* add(T&& item) {
@@ -59,10 +66,16 @@ namespace cx {
         }
 
         T* add(const T& item) {
-            return add(item);
+            resize(size + 1);
+            last() = item;
+            return &last();
         }
 
         T& operator[](size_t index) {
+            return at(index);
+        }
+
+        const T& operator[](size_t index) const {
             return at(index);
         }
 
@@ -126,7 +139,7 @@ namespace cx {
 
     template<typename K, typename V>
     struct map {
-        typedef tsl::hopscotch_map<K, V> Map;
+        typedef std::unordered_map<K, V> Map;
 
         V& operator[](const K& key) {
             return data.operator[](key);
@@ -136,12 +149,12 @@ namespace cx {
             return data.empty();
         }
 
-        optional<V> get(const K& key) {
+        V* get(const K& key) {
             auto iter = data.find(key);
             if (iter != data.end()) {
-                return iter->second;
+                return &iter->second;
             } else {
-                return {};
+                return nullptr;
             }
         }
 
@@ -166,7 +179,11 @@ namespace cx {
 
         public:
             static Buffer from_file(string file_name) {
-                return {new std::fstream(file_name)};
+                auto stream = new std::fstream(file_name);
+                if (stream->fail()) {
+                    print("unable to open file {}", file_name);
+                }
+                return {stream};
             }
 
             static Buffer from_string(string str) {

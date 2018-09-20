@@ -9,6 +9,24 @@
 
 #include "ast.h"
 
+using namespace cx::ast;
+
 namespace cx {
-    void print_ast(ast::Node* ast);
+    class AstPrinter {
+        Node* m_root = nullptr;
+        int m_indent = 0;
+
+    public:
+        AstPrinter(Node* root) { m_root = root; }
+
+        void print_ast();
+
+        void print_node(Node* root);
+
+        void print_indent(int level);
+
+        void print_node_list(array<Node*>* list);
+    };
+
+    void print_ast(Node* root);
 }

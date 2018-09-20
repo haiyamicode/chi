@@ -140,7 +140,7 @@ void Lexer::next() {
     } else if (c == '/') {
         if (read_expect('/')) {
             c = read();
-            while (c != '\n') {
+            while (c && c != '\n') {
                 c = read(); // ignore
             }
             goto l0;
@@ -706,21 +706,20 @@ void Lexer::error(string error, Pos pos) {
     m_result->error_pos = pos;
 }
 
-string Token::to_string() const {
-    switch (type) {
+string cx::token_type_to_string(TokenType token_type) {
+    switch (token_type) {
         case TokenType::END:
             return "EOF";
         case TokenType::IDEN:
+            return "identifier";
         case TokenType::CHAR:
+            return "character";
         case TokenType::STRING:
-            if (str.empty()) {
-                goto print_enum;
-            }
-            return fmt::format("\"{}\"", str);
+            return "string literal";
         case TokenType::INT:
-            return fmt::format("{}", val.i);
+            return "int literal";
         case TokenType::FLOAT:
-            return fmt::format("{}", val.d);
+            return "float literal";
         case TokenType::ADD:
             return "+";
         case TokenType::SUB:
@@ -814,7 +813,21 @@ string Token::to_string() const {
         case TokenType::QUES:
             return "?";
         default:
-        print_enum:
-            return PRINT_ENUM<TokenType>(type);
+            return PRINT_ENUM<TokenType>(token_type);
+    }
+}
+
+string Token::to_string() const {
+    switch (type) {
+        case TokenType::IDEN:
+        case TokenType::CHAR:
+        case TokenType::STRING:
+            return fmt::format("\"{}\"", str);
+        case TokenType::INT:
+            return fmt::format("{}", val.i);
+        case TokenType::FLOAT:
+            return fmt::format("{}", val.d);
+        default:
+            return token_type_to_string(type);
     }
 }

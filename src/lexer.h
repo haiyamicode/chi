@@ -40,7 +40,7 @@ namespace cx {
               KW_TYPEDEF,
               KW_TYPEOF,
               KW_NEW,
- 
+
     // literals
               INT,    // 322, 0322, 0xBadFace
               FLOAT,  // 322.0
@@ -205,4 +205,5 @@ namespace cx {
         bool is_eof() const { return m_eof; }
     };
 
+    string token_type_to_string(TokenType token_type);
 }

@@ -9,19 +9,22 @@
 
 #include "sema.h"
 #include "resolver.h"
+#include "parser.h"
 
 namespace cx {
-    class Builder {
+    class Builder : NodeAllocator {
         bool m_debug_mode = false;
         bool m_assembly_mode = false;
         Resolver m_resolver;
         array<ast::Package> m_packages;
-        array<void*> m_allocated;
+        array<box<ast::Node>> m_ast_nodes;
 
     public:
         Builder();
 
         ast::Package* add_package() { return m_packages.emplace(); }
+
+        Node* allocate_node(NodeType type);
 
         void set_debug_mode(bool value) { m_debug_mode = value; }
 
@@ -29,11 +32,9 @@ namespace cx {
 
         void compile(ast::Module* file);
 
-        void process_file(ast::Package* package, string file_name);
+        void process_file(ast::Package* package, const string& file_name);
 
-        void build_program(string entry_file_name);
-
-        void* alloc_mem(size_t size);
+        void build_program(const string& entry_file_name);
     };
 
 }
