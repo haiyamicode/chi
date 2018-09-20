@@ -77,6 +77,7 @@ void AstPrinter::print_node(Node* node) {
             print_node(data.type);
             print(" {}", node->name);
             if (data.expr) {
+                print(" = ");
                 print_node(data.expr);
             }
             break;

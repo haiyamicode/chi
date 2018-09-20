@@ -10,11 +10,45 @@
 #include "ast.h"
 
 namespace cx {
-    MAKE_ENUM(TypeId, Int)
+    struct ChiType;
+
+    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String)
+
+    struct ChiTypeTypeName {
+        ChiType* giving_type;
+        string* name;
+    };
+
+    struct ChiTypeFn {
+        ChiType* return_type;
+        array<ChiType*> params;
+    };
 
     struct ChiType {
         TypeId id;
-        string name;
+
+        union Data {
+            ChiTypeFn fn;
+            ChiTypeTypeName type_name;
+
+            Data() {}
+
+            ~Data() {}
+        } data;
+
+        ChiType(TypeId id) {
+            this->id = id;
+            memset(&data, 0, sizeof(data));
+        }
+
+        ~ChiType() {
+#define CHITYPE_CASE_DESTROY_FIELD(field, type, type_struct) case TypeId::type: data.field.~type_struct(); break;
+            switch (id) {
+                CHITYPE_CASE_DESTROY_FIELD(fn, Fn, ChiTypeFn)
+                default:
+                    break;
+            }
+        }
     };
 
     typedef array<ast::Node*> NodeList;

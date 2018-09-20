@@ -11,7 +11,7 @@
 
 using namespace cx;
 
-Builder::Builder() {}
+Builder::Builder() : m_resolver(this) {}
 
 void Builder::compile(ast::Module* file) {
 
@@ -38,12 +38,18 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
     Parser parser(&pc);
     parser.parse();
     print_ast(pc.module->root);
+
+    m_resolver.resolve(package);
 }
 
 void Builder::build_program(const string& entry_file_name) {
     process_file(add_package(), entry_file_name);
 }
 
-Node* Builder::allocate_node(NodeType type) {
+Node* Builder::create_node(NodeType type) {
     return m_ast_nodes.emplace(new Node(type))->get();
+}
+
+ChiType* Builder::create_type(TypeId type) {
+    return m_types.emplace(new ChiType(type))->get();
 }

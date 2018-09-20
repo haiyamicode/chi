@@ -27,6 +27,7 @@ namespace cx {
                   LiteralExpr,
                   IfStmt,
                   FnCallExpr,
+                  Primitive,
                   Identifier,
                   EmptyStmt,
                   ParenExpr
@@ -58,6 +59,7 @@ namespace cx {
         struct FnDef {
             Node* fn_proto;
             Node* body;
+            bool is_builtin;
         };
 
         struct ParamDecl {
@@ -102,7 +104,7 @@ namespace cx {
 
         struct Identifier {
             IdentifierKind kind;
-            bool is_builtin;
+            Node* decl;
         };
 
         struct Node {

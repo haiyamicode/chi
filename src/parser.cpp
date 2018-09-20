@@ -123,7 +123,7 @@ bool Parser::at_comma(TokenType end_token) {
 }
 
 Node* Parser::create_node(NodeType type, Token* token) {
-    auto node = m_ctx->allocator->allocate_node(type);
+    auto node = m_ctx->allocator->create_node(type);
     node->token = token;
     node->module = m_ctx->module;
     return node;
@@ -150,36 +150,62 @@ void Parser::parse_top_level_decls(NodeList* decls) {
 }
 
 Node* Parser::parse_top_level_decl() {
-    return parse_var_or_func_decl();
+    return parse_var_or_fn_decl();
 }
 
-Node* Parser::parse_var_or_func_decl() {
+Node* Parser::parse_var_or_fn_decl() {
     auto type_expr = parse_type_expr();
     auto iden = expect(TokenType::IDEN);
     auto token = get();
     if (token->type == TokenType::LPAREN) {
         consume();
-        return parse_func_decl(type_expr, iden);
+        return parse_fn_decl(type_expr, iden);
     } else {
         return parse_var_decl(type_expr, iden);
     }
 }
 
-Node* Parser::parse_type_expr() {
+IdentifierKind Parser::get_identifier_kind(Node* node) {
+    if (node->type == NodeType::Primitive) {
+        return IdentifierKind::TypeName;
+    } else {
+        return IdentifierKind::Value;
+    }
+}
+
+Node* Parser::parse_identifier() {
     auto token = expect(TokenType::IDEN);
     auto node = create_node(NodeType::Identifier, token);
     node->name = token->str;
+    auto& data = node->data.identifier;
+    data.decl = m_ctx->resolver->find_symbol(node->name);
+    if (!data.decl) {
+        error(token, errors::UNDECLARED, node->name);
+    } else {
+        data.kind = get_identifier_kind(data.decl);
+    }
     return node;
 }
 
-Node* Parser::parse_func_decl(Node* return_type, Token* iden) {
+Node* Parser::parse_type_expr() {
+    return parse_identifier();
+}
+
+Node* Parser::parse_fn_decl(Node* return_type, Token* iden) {
     auto fn = create_node(NodeType::FnDef, iden);
     fn->name = iden->str;
-    auto proto = parse_func_proto(return_type, iden);
+    auto proto = parse_fn_proto(return_type, iden);
     fn->data.fn_def.fn_proto = proto;
-    fn->data.fn_def.body = parse_block();
     proto->data.fn_proto.fn_def_node = fn;
+
     add_to_scope(fn);
+    auto scope = m_ctx->resolver->push_scope();
+    scope->owner = fn;
+    for (auto param: proto->data.fn_proto.params) {
+        add_to_scope(param);
+    }
+    fn->data.fn_def.body = parse_block();
+    m_ctx->resolver->pop_scope();
     return fn;
 }
 
@@ -197,22 +223,22 @@ Node* Parser::parse_var_decl(Node* type_expr, Token* iden) {
     return node;
 }
 
-Node* Parser::parse_func_proto(Node* return_type, Token* iden) {
+Node* Parser::parse_fn_proto(Node* return_type, Token* iden) {
     auto proto = create_node(NodeType::FnProto, iden);
     proto->name = iden->str;
     proto->data.fn_proto.return_type = return_type;
-    parse_func_params(&proto->data.fn_proto.params);
+    parse_fn_params(&proto->data.fn_proto.params);
     return proto;
 }
 
-void Parser::parse_func_params(NodeList* params) {
+void Parser::parse_fn_params(NodeList* params) {
     Token* token;
     for (;;) {
         token = get();
         if (token->type == TokenType::RPAREN) {
             break;
         }
-        auto param = parse_func_param();
+        auto param = parse_fn_param();
         params->add(param);
         if (!at_comma(TokenType::RPAREN)) {
             break;
@@ -222,7 +248,7 @@ void Parser::parse_func_params(NodeList* params) {
     expect(TokenType::RPAREN);
 }
 
-Node* Parser::parse_func_param() {
+Node* Parser::parse_fn_param() {
     auto type = parse_type_expr();
     auto iden = expect(TokenType::IDEN);
     auto param = create_node(NodeType::ParamDecl, iden);
@@ -296,7 +322,7 @@ Node* Parser::parse_simple_stmt() {
 bool Parser::next_is_type_expr() {
     auto token = get();
     if (auto node = m_ctx->resolver->find_symbol(token->str)) {
-        if (node->type == NodeType::Identifier && node->data.identifier.kind == IdentifierKind::TypeName) {
+        if (get_identifier_kind(node) == IdentifierKind::TypeName) {
             return true;
         }
     }
@@ -338,8 +364,8 @@ Node* Parser::parse_expr_clause(bool lhs) {
 Node* Parser::parse_binary_expr(bool lhs, Node* parent, int prec) {
     auto op1 = parse_unary_expr(lhs, parent);
     for (;;) {
-        auto op = get();
-        auto op_prec = get_op_precedence(op->type);
+        auto op_token = get();
+        auto op_prec = get_op_precedence(op_token->type);
         if (op_prec < prec) {
             return op1;
         }
@@ -348,13 +374,14 @@ Node* Parser::parse_binary_expr(bool lhs, Node* parent, int prec) {
 //        } else {
         consume();
         auto op2 = parse_binary_expr(lhs, parent, op_prec + 1);
-        auto node = create_node(NodeType::BinOpExpr, op1->token);
+        auto node = create_node(NodeType::BinOpExpr, op_token);
         node->data.bin_op_expr.op1 = op1;
-        node->data.bin_op_expr.op_type = op->type;
+        node->data.bin_op_expr.op_type = op_token->type;
         node->data.bin_op_expr.op2 = op2;
-        return node;
+        op1 = node;
 //        }
     }
+    return op1;
 }
 
 Node* Parser::parse_unary_expr(bool lhs, Node* parent) {
@@ -372,7 +399,7 @@ Node* Parser::parse_primary_expr(bool lhs, Node* parent) {
 //                break;
 
             case TokenType::LPAREN:
-                node = parse_func_call_expr(node, lhs, parent);
+                node = parse_fn_call_expr(node, lhs, parent);
 
             default:
                 return node;
@@ -382,13 +409,11 @@ Node* Parser::parse_primary_expr(bool lhs, Node* parent) {
 
 Node* Parser::parse_operand(bool lhs, Node* parent) {
     auto token = get();
-    Node* node = create_node(NodeType::LiteralExpr, token);
+    if (token->type == TokenType::IDEN) {
+        return parse_identifier();
+    }
+    Node* node = create_node(NodeType::Error, token);
     switch (token->type) {
-        case TokenType::IDEN:
-            consume();
-            node->type = NodeType::Identifier;
-            node->name = token->str;
-            break;
         case TokenType::INT:
         case TokenType::FLOAT:
         case TokenType::CHAR:
@@ -410,7 +435,7 @@ Node* Parser::parse_operand(bool lhs, Node* parent) {
     return node ? node : create_error_node();
 }
 
-Node* Parser::parse_func_call_expr(Node* fn_expr, bool lhs, Node* parent) {
+Node* Parser::parse_fn_call_expr(Node* fn_expr, bool lhs, Node* parent) {
     auto node = create_node(NodeType::FnCallExpr, fn_expr->token);
     node->data.fn_call_expr.fn_ref_expr = fn_expr;
     expect(TokenType::LPAREN);

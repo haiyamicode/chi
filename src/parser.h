@@ -16,14 +16,10 @@
 using namespace cx::ast;
 
 namespace cx {
-    struct NodeAllocator {
-        virtual Node* allocate_node(NodeType type) = 0;
-    };
-
     struct ParseContext {
         Module* module;
         array<Token>* tokens;
-        NodeAllocator* allocator;
+        Allocator* allocator;
         ModuleResolver* resolver;
     };
 
@@ -80,19 +76,23 @@ namespace cx {
 
         Node* parse_top_level_decl();
 
-        Node* parse_var_or_func_decl();
+        Node* parse_var_or_fn_decl();
+
+        Node* parse_identifier();
+
+        IdentifierKind get_identifier_kind(Node* node);
 
         Node* parse_type_expr();
 
-        Node* parse_func_decl(Node* return_type, Token* iden);
+        Node* parse_fn_decl(Node* return_type, Token* iden);
 
         Node* parse_var_decl(Node* type_expr, Token* iden);
 
-        Node* parse_func_proto(Node* return_type, Token* iden);
+        Node* parse_fn_proto(Node* return_type, Token* iden);
 
-        void parse_func_params(NodeList* params);
+        void parse_fn_params(NodeList* params);
 
-        Node* parse_func_param();
+        Node* parse_fn_param();
 
         Node* parse_block();
 
@@ -110,7 +110,7 @@ namespace cx {
 
         Node* parse_operand(bool lhs, Node* parent);
 
-        Node* parse_func_call_expr(Node* fn_expr, bool lhs, Node* parent);
+        Node* parse_fn_call_expr(Node* fn_expr, bool lhs, Node* parent);
 
         Node* parse_simple_stmt();
 

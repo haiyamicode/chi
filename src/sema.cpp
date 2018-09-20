@@ -11,7 +11,6 @@ using namespace cx;
 
 ast::Node* Scope::find_one(const string& symbol) {
     if (auto val = symbols.get(symbol)) {
-        auto list = val;
         return val->at(0);
     }
     return 0;

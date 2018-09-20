@@ -11,16 +11,60 @@
 #include "sema.h"
 
 namespace cx {
-    class Resolver {
-        array<ast::Node> m_primitives;
-    public:
-        Resolver();
+    struct Allocator {
+        virtual ast::Node* create_node(ast::NodeType type) = 0;
 
-        void add_primitive(const string& name);
+        virtual ChiType* create_type(TypeId type_id) = 0;
+    };
+
+    class Resolver {
+        Allocator* m_allocator;
+        map<ast::Node*, ChiType*> m_types;
+        ast::Module* m_module = nullptr;
+        ChiTypeFn* m_current_fn = nullptr;
+
+        array<ast::Node*> m_builtins;
+
+        ChiType* create_type(TypeId type_id);
+
+        ast::Node* create_node(ast::NodeType type);
+
+        void add_primitive(const string& name, ChiType* type);
+
+        void add_builtin(const string& name, ChiType* type);
 
         void init_primitives();
 
-        ast::Node* get_primitive(const string& name);
+        void init_builtins();
+
+        bool can_assign(ChiType* from_type, ChiType* to_type);
+
+        void check_assignment(ast::Node* node, ChiType* from_type, ChiType* to_type);
+
+        void resolve(ast::Module* module);
+
+        ChiType* resolve(ast::Node* node);
+
+        ChiType* _resolve(ast::Node* node);
+
+        string to_string(ChiType* type);
+
+        template<typename... Args>
+        void error(ast::Node* node, const char* format, const Args& ...args) {
+            auto pos = node->token->pos;
+            print("{}:{}:{}: error: {}\n", m_module->path, pos.line + 1,
+                  pos.col + 1, fmt::format(format, args...));
+            exit(0);
+        }
+
+    public:
+        Resolver(Allocator* ctx);
+
+        ast::Node* get_builtin(const string& name);
+
+        ChiType* get_node_type(ast::Node* node);
+
+        void resolve(ast::Package* package);
     };
 
     class ModuleResolver {
