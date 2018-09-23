@@ -2,12 +2,12 @@ int fib(int n) {
     if (n < 2) {
         return n;
     }
-    return (fib(n - 2) + fib(n - 1) + n);
+    return (fib(n - 2) + fib(n - 1));
 }
 
 int main() {
     int N;
-    N = 10; // Should return 364
+    N = 10; // Should return 55
     printf("fib: {}\n", fib(N));
     return 0;
 }
