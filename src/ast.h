@@ -42,6 +42,7 @@ namespace cx {
 
         struct Package {
             array<Module> modules;
+            Node* entry_fn = NULL;
             string root_src_dir;
             string root_src_path;
         };
@@ -131,6 +132,8 @@ namespace cx {
 
                 ~NodeData() {}
             } data;
+
+            Node(const Node&) = delete;
 
             explicit Node(NodeType type) {
                 this->type = type;

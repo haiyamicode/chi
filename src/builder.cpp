@@ -5,16 +5,33 @@
  * See http://opensource.org/licenses/MIT
  */
 
+#include <jit/jit-dump.h>
+
 #include "builder.h"
 #include "parser.h"
 #include "ast_printer.h"
+#include "jit.h"
 
 using namespace cx;
 
-Builder::Builder() : m_resolver(this) {}
+BuildContext::BuildContext(cx::Allocator* allocator) :
+        resolve_ctx(new ResolveContext(allocator)),
+        jit_ctx(new jit::CompileContext()) {
+}
 
-void Builder::compile(ast::Module* file) {
+jit::Compiler BuildContext::create_compiler() {
+    return {jit_ctx.get(), resolve_ctx.get()};
+}
 
+Builder::Builder() : m_ctx(this) {
+    auto resolver = m_ctx.create_resolver();
+    resolver.context_init_builtins();
+    auto jitc = m_ctx.create_compiler();
+    for (auto node: resolver.get_context()->builtins) {
+        if (node->type == NodeType::FnDef) {
+            jitc.compile_fn(node);
+        }
+    }
 }
 
 void Builder::process_file(ast::Package* package, const string& file_name) {
@@ -28,18 +45,24 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
     Lexer lexer(&src, &tokenization);
     lexer.tokenize();
 
-    ModuleResolver mr(&m_resolver);
+    auto resolver = m_ctx.create_resolver();
+    ScopeResolver scope_resolver(&resolver);
     ParseContext pc;
-    pc.resolver = &mr;
+    pc.resolver = &scope_resolver;
     pc.module = module;
     pc.tokens = &tokenization.tokens;
     pc.allocator = this;
 
     Parser parser(&pc);
     parser.parse();
-    print_ast(pc.module->root);
+//    print_ast(pc.module->root);
 
-    m_resolver.resolve(package);
+    resolver.resolve(package);
+
+    auto jitc = m_ctx.create_compiler();
+    jitc.compile(module);
+    auto& main_fn = jitc.get_context()->functions[package->entry_fn];
+    main_fn->apply(NULL, NULL);
 }
 
 void Builder::build_program(const string& entry_file_name) {

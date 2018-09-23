@@ -10,15 +10,27 @@
 #include "sema.h"
 #include "resolver.h"
 #include "parser.h"
+#include "jit.h"
 
 namespace cx {
+    struct BuildContext {
+        box<ResolveContext> resolve_ctx;
+        box<jit::CompileContext> jit_ctx;
+
+        BuildContext(Allocator* allocator);
+
+        Resolver create_resolver() { return {resolve_ctx.get()}; }
+
+        jit::Compiler create_compiler();
+    };
+
     class Builder : Allocator {
         bool m_debug_mode = false;
         bool m_assembly_mode = false;
-        Resolver m_resolver;
         array<ast::Package> m_packages;
         array<box<ast::Node>> m_ast_nodes;
         array<box<ChiType>> m_types;
+        BuildContext m_ctx;
 
     public:
         Builder();
@@ -32,8 +44,6 @@ namespace cx {
         void set_debug_mode(bool value) { m_debug_mode = value; }
 
         void set_assembly_mode(bool value) { m_assembly_mode = value; }
-
-        void compile(ast::Module* file);
 
         void process_file(ast::Package* package, const string& file_name);
 

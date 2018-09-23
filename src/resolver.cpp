@@ -12,25 +12,23 @@ using namespace cx;
 
 using ast::NodeType;
 
-Resolver::Resolver(Allocator* allocator) {
-    m_allocator = allocator;
-    init_primitives();
-    init_builtins();
+Resolver::Resolver(ResolveContext* ctx) {
+    m_ctx = ctx;
 }
 
 void Resolver::add_primitive(const string& name, ChiType* type) {
     auto node = create_node(ast::NodeType::Primitive);
     node->token = nullptr;
     node->name = name;
-    m_builtins.add(node);
+    m_ctx->builtins.add(node);
 
     auto type_name = create_type(TypeId::TypeName);
     type_name->data.type_name.name = &node->name;
     type_name->data.type_name.giving_type = type;
-    m_types[node] = type_name;
+    m_ctx->types[node] = type_name;
 }
 
-void Resolver::init_primitives() {
+void Resolver::create_primitives() {
     add_primitive("bool", create_type(TypeId::Bool));
     add_primitive("int", create_type(TypeId::Int));
     add_primitive("void", create_type(TypeId::Void));
@@ -40,11 +38,11 @@ void Resolver::add_builtin(const std::string& name, ChiType* type) {
     auto fn = create_node(ast::NodeType::FnDef);
     fn->name = name;
     fn->data.fn_def.is_builtin = true;
-    m_builtins.add(fn);
-    m_types[fn] = type;
+    m_ctx->builtins.add(fn);
+    m_ctx->types[fn] = type;
 }
 
-void Resolver::init_builtins() {
+void Resolver::create_builtins() {
     auto printf_type = create_type(TypeId::Fn);
     printf_type->data.fn.return_type = create_type(TypeId::Void);
     auto& params = printf_type->data.fn.params;
@@ -54,57 +52,15 @@ void Resolver::init_builtins() {
 }
 
 ChiType* Resolver::create_type(TypeId type_id) {
-    return m_allocator->create_type(type_id);
+    return m_ctx->allocator->create_type(type_id);
 }
 
 ast::Node* Resolver::create_node(ast::NodeType type) {
-    return m_allocator->create_node(type);
+    return m_ctx->allocator->create_node(type);
 }
-
-Scope* ModuleResolver::push_scope() {
-    m_current_scope = m_scopes.emplace(m_current_scope);
-    return m_current_scope;
-}
-
-void ModuleResolver::pop_scope() {
-    m_current_scope = m_current_scope->parent;
-}
-
-bool ModuleResolver::declare_symbol(const string& name, ast::Node* node) {
-    if (m_current_scope->find_one(name)) {
-        return false;
-    }
-    if (auto builtin = m_resolver->get_builtin(name)) {
-        if (builtin->type == NodeType::Primitive) {
-            return false;
-        }
-    }
-    m_current_scope->put(name, node);
-    return true;
-}
-
-ast::Node* ModuleResolver::find_symbol(const string& name) {
-    if (auto builtin = m_resolver->get_builtin(name)) {
-        return builtin;
-    }
-    auto scope = m_current_scope;
-    while (scope) {
-        if (auto node = scope->find_one(name)) {
-            return node;
-        }
-        scope = scope->parent;
-    }
-    return nullptr;
-}
-
-ModuleResolver::ModuleResolver(Resolver* resolver) {
-    m_resolver = resolver;
-    push_scope();
-}
-
 
 ast::Node* Resolver::get_builtin(const string& name) {
-    for (auto& node: m_builtins) {
+    for (auto& node: m_ctx->builtins) {
         if (node->name == name) {
             return node;
         }
@@ -113,7 +69,7 @@ ast::Node* Resolver::get_builtin(const string& name) {
 }
 
 ChiType* Resolver::get_node_type(ast::Node* node) {
-    auto result = m_types.get(node);
+    auto result = m_ctx->types.get(node);
     return result ? *result : nullptr;
 }
 
@@ -132,6 +88,13 @@ bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
     return from_type->id == to_type->id;
 }
 
+ChiType* Resolver::to_value_type(ChiType* type) {
+    if (type->id == TypeId::TypeName) {
+        return type->data.type_name.giving_type;
+    }
+    return type;
+}
+
 ChiType* Resolver::_resolve(ast::Node* node) {
     static auto bool_type = create_type(TypeId::Bool);
     static auto void_type = create_type(TypeId::Void);
@@ -140,12 +103,15 @@ ChiType* Resolver::_resolve(ast::Node* node) {
         case NodeType::Root:
             for (auto decl: node->data.root.top_level_decls) {
                 resolve(decl);
+                if (decl->type == NodeType::FnDef && decl->name == "main") {
+                    node->module->package->entry_fn = decl;
+                }
             }
             return nullptr;
         case NodeType::FnDef: {
             auto& data = node->data.fn_def;
             auto proto = resolve(data.fn_proto);
-            m_types[node] = proto;
+            m_ctx->types[node] = proto;
             m_current_fn = &proto->data.fn;
             resolve(data.body);
             return proto;
@@ -153,27 +119,24 @@ ChiType* Resolver::_resolve(ast::Node* node) {
         case NodeType::FnProto: {
             auto& data = node->data.fn_proto;
             auto type = create_type(TypeId::Fn);
-            type->data.fn.return_type = resolve(data.return_type);
+            type->data.fn.return_type = to_value_type(resolve(data.return_type));
             for (auto param: data.params) {
-                type->data.fn.params.add(resolve(param));
+                type->data.fn.params.add(to_value_type(resolve(param)));
             }
             return type;
         }
         case NodeType::Identifier: {
             auto& data = node->data.identifier;
             auto type = resolve(data.decl);
-            if (type->id == TypeId::TypeName) {
-                return type->data.type_name.giving_type;
-            }
             return type;
         }
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
-            return resolve(data.type);
+            return to_value_type(resolve(data.type));
         }
         case NodeType::VarDecl: {
             auto& data = node->data.var_decl;
-            auto var_type = resolve(data.type);
+            auto var_type = to_value_type(resolve(data.type));
             if (data.expr) {
                 auto expr_type = resolve(data.expr);
                 check_assignment(node, expr_type, var_type);
@@ -267,7 +230,7 @@ ChiType* Resolver::resolve(ast::Node* node) {
         return cached;
     }
     auto result = _resolve(node);
-    m_types[node] = result;
+    m_ctx->types[node] = result;
     return result;
 }
 
@@ -279,4 +242,50 @@ void Resolver::check_assignment(ast::Node* node, ChiType* from_type, ChiType* to
     if (!can_assign(from_type, to_type)) {
         error(node, errors::CANNOT_CONVERT, to_string(from_type), to_string(to_type));
     }
+}
+
+void Resolver::context_init_builtins() {
+    create_primitives();
+    create_builtins();
+}
+
+Scope* ScopeResolver::push_scope() {
+    m_current_scope = m_scopes.emplace(m_current_scope);
+    return m_current_scope;
+}
+
+void ScopeResolver::pop_scope() {
+    m_current_scope = m_current_scope->parent;
+}
+
+bool ScopeResolver::declare_symbol(const string& name, ast::Node* node) {
+    if (m_current_scope->find_one(name)) {
+        return false;
+    }
+    if (auto builtin = m_resolver->get_builtin(name)) {
+        if (builtin->type == NodeType::Primitive) {
+            return false;
+        }
+    }
+    m_current_scope->put(name, node);
+    return true;
+}
+
+ast::Node* ScopeResolver::find_symbol(const string& name) {
+    if (auto builtin = m_resolver->get_builtin(name)) {
+        return builtin;
+    }
+    auto scope = m_current_scope;
+    while (scope) {
+        if (auto node = scope->find_one(name)) {
+            return node;
+        }
+        scope = scope->parent;
+    }
+    return nullptr;
+}
+
+ScopeResolver::ScopeResolver(cx::Resolver* resolver) {
+    m_resolver = resolver;
+    push_scope();
 }

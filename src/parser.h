@@ -20,7 +20,7 @@ namespace cx {
         Module* module;
         array<Token>* tokens;
         Allocator* allocator;
-        ModuleResolver* resolver;
+        ScopeResolver* resolver;
     };
 
     class Parser {

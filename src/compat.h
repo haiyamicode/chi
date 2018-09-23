@@ -19,7 +19,6 @@
 #include "util.h"
 
 namespace cx {
-    typedef int64_t int64;
     using nonstd::optional;
     using fmt::print;
     template<typename T> using func = std::function<T>;
@@ -32,6 +31,7 @@ namespace cx {
     struct array {
         size_t size = 0;
         size_t capacity = 0;
+        T* items = nullptr;
 
         ~array() {
             free(items);
@@ -41,8 +41,8 @@ namespace cx {
 
         array(const array& other) {
             if (other.size) {
-                resize(other.size);
-                memcpy(items, other.items, other.size);
+                items = (T*) malloc(other.size * sizeof(T));
+                memcpy(items, other.items, other.size * sizeof(T));
             }
         }
 
@@ -132,14 +132,18 @@ namespace cx {
             items = reallocate_nonzero(items, capacity, better_capacity);
             capacity = better_capacity;
         }
-
-    private:
-        T* items = nullptr;
     };
 
     template<typename K, typename V>
     struct map {
         typedef std::unordered_map<K, V> Map;
+
+        template<typename... Args>
+        void emplace(const K& key, Args&& ... args) {
+            data.emplace(std::piecewise_construct,
+                         std::forward_as_tuple(key),
+                         std::forward_as_tuple(std::forward<Args>(args)...));
+        }
 
         V& operator[](const K& key) {
             return data.operator[](key);

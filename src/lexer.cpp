@@ -32,7 +32,6 @@ void Lexer::setup_keywords() {
     if (!s_keywords.is_empty()) {
         return;
     }
-
     s_keywords["let"] = TokenType::KW_LET;
     s_keywords["break"] = TokenType::KW_BREAK;
     s_keywords["case"] = TokenType::KW_CASE;

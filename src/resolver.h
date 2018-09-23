@@ -17,13 +17,19 @@ namespace cx {
         virtual ChiType* create_type(TypeId type_id) = 0;
     };
 
+    struct ResolveContext {
+        Allocator* allocator;
+        array<ast::Node*> builtins;
+        map<ast::Node*, ChiType*> types;
+
+        ResolveContext(Allocator* allocator) { this->allocator = allocator; }
+    };
+
     class Resolver {
-        Allocator* m_allocator;
-        map<ast::Node*, ChiType*> m_types;
+        ResolveContext* m_ctx;
+
         ast::Module* m_module = nullptr;
         ChiTypeFn* m_current_fn = nullptr;
-
-        array<ast::Node*> m_builtins;
 
         ChiType* create_type(TypeId type_id);
 
@@ -33,13 +39,15 @@ namespace cx {
 
         void add_builtin(const string& name, ChiType* type);
 
-        void init_primitives();
+        void create_primitives();
 
-        void init_builtins();
+        void create_builtins();
 
         bool can_assign(ChiType* from_type, ChiType* to_type);
 
         void check_assignment(ast::Node* node, ChiType* from_type, ChiType* to_type);
+
+        ChiType* to_value_type(ChiType* type);
 
         void resolve(ast::Module* module);
 
@@ -58,7 +66,11 @@ namespace cx {
         }
 
     public:
-        Resolver(Allocator* ctx);
+        Resolver(ResolveContext* ctx);
+
+        ResolveContext* get_context() { return m_ctx; }
+
+        void context_init_builtins();
 
         ast::Node* get_builtin(const string& name);
 
@@ -67,13 +79,13 @@ namespace cx {
         void resolve(ast::Package* package);
     };
 
-    class ModuleResolver {
+    class ScopeResolver {
         Resolver* m_resolver;
         array<Scope> m_scopes;
         Scope* m_current_scope = nullptr;
 
     public:
-        ModuleResolver(Resolver* resolver);
+        ScopeResolver(Resolver* resolver);
 
         Scope* get_scope() { return m_current_scope; }
 
