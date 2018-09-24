@@ -13,6 +13,7 @@ namespace cx {
     namespace errors {
         constexpr auto TOKEN_UNEXPECTED_GOT = "expected '{}', got '{}'";
         constexpr auto TOKEN_UNEXPECTED = "unexpected '{}'";
+        constexpr auto UNEXPECTED_EOF = "unexpected end-of-file";
         constexpr auto REDECLARED = "'{}' redeclared";
         constexpr auto UNDECLARED = "undeclared identifier '{}'";
         constexpr auto CANNOT_CONVERT = "cannot convert from {} to {}";

@@ -90,12 +90,8 @@ Token* Parser::read() {
     return next();
 }
 
-void Parser::skip_to(long offset) {
-    Token* token;
-    do {
-        token = read();
-    } while (token->type != TokenType::END && token->pos.offset < offset);
-    unread();
+void Parser::jump_to(long pos) {
+    m_token_i = pos;
 }
 
 void Parser::unread() {
@@ -141,11 +137,18 @@ Node* Parser::parse_root() {
 }
 
 void Parser::parse_top_level_decls(NodeList* decls) {
+    // first pass, skip all function bodies
     for (;;) {
         if (get()->type == TokenType::END) {
             break;
         }
         decls->add(parse_top_level_decl());
+    }
+    // second pass, parse function bodies
+    for (auto decl: *decls) {
+        if (decl->type == NodeType::FnDef) {
+            parse_fn_body(decl);
+        }
     }
 }
 
@@ -197,16 +200,24 @@ Node* Parser::parse_fn_decl(Node* return_type, Token* iden) {
     auto proto = parse_fn_proto(return_type, iden);
     fn->data.fn_def.fn_proto = proto;
     proto->data.fn_proto.fn_def_node = fn;
-
+    save_block_pos(fn);
+    parse_block_skip();
     add_to_scope(fn);
+    return fn;
+}
+
+void Parser::parse_fn_body(Node* fn) {
+    auto pos = m_block_pos[fn];
+    jump_to(pos);
     auto scope = m_ctx->resolver->push_scope();
     scope->owner = fn;
-    for (auto param: proto->data.fn_proto.params) {
+    auto& fn_def = fn->data.fn_def;
+    auto& fn_proto = fn_def.fn_proto->data.fn_proto;
+    for (auto param: fn_proto.params) {
         add_to_scope(param);
     }
-    fn->data.fn_def.body = parse_block();
+    fn_def.body = parse_block();
     m_ctx->resolver->pop_scope();
-    return fn;
 }
 
 Node* Parser::parse_var_decl(Node* type_expr, Token* iden) {
@@ -494,4 +505,21 @@ Node* Parser::parse_if_stmt() {
     }
     m_ctx->resolver->pop_scope();
     return node;
+}
+
+void Parser::parse_block_skip() {
+    expect(TokenType::LBRACE);
+    long block_level = 1;
+    while (block_level > 0) {
+        auto tok = read();
+        if (tok->type == TokenType::END) {
+            error(tok, errors::UNEXPECTED_EOF);
+            return;
+        }
+        if (tok->type == TokenType::LBRACE) {
+            block_level++;
+        } else if (tok->type == TokenType::RBRACE) {
+            block_level--;
+        }
+    }
 }

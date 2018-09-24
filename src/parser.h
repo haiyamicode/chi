@@ -27,6 +27,7 @@ namespace cx {
         ParseContext* m_ctx;
         size_t m_token_i = 0;
         Token m_eof_token;
+        map<Node*, long> m_block_pos;
 
         Token* next();
 
@@ -36,11 +37,13 @@ namespace cx {
 
         Token* lookahead(int n);
 
-        void skip_to(long offset);
+        void jump_to(long pos);
 
         void unread();
 
         Token* expect(TokenType expected);
+
+        void save_block_pos(Node* node) { m_block_pos[node] = m_token_i; }
 
         void consume() { read(); }
 
@@ -86,6 +89,8 @@ namespace cx {
 
         Node* parse_fn_decl(Node* return_type, Token* iden);
 
+        void parse_fn_body(Node* fn);
+
         Node* parse_var_decl(Node* type_expr, Token* iden);
 
         Node* parse_fn_proto(Node* return_type, Token* iden);
@@ -117,5 +122,7 @@ namespace cx {
         Node* parse_return_stmt();
 
         Node* parse_if_stmt();
+
+        void parse_block_skip();
     };
 }
