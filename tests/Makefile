@@ -1,4 +1,5 @@
-TESTS = 00_fib.test
+TESTS = 00_fib.test \
+    01_fib_struct.test
 
 CX = ../cmake-build-debug/src/cx
 

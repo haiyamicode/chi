@@ -30,7 +30,10 @@ namespace cx {
                   Primitive,
                   Identifier,
                   EmptyStmt,
-                  ParenExpr
+                  ParenExpr,
+                  StructDecl,
+                  ComplitExpr,
+                  DotExpr
         );
 
         struct Module {
@@ -57,10 +60,12 @@ namespace cx {
             Node* fn_def_node;
         };
 
+        MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
         struct FnDef {
             Node* fn_proto;
             Node* body;
             bool is_builtin;
+            FnKind fn_kind;
         };
 
         struct ParamDecl {
@@ -98,6 +103,20 @@ namespace cx {
             Node* else_node; // can be null, block node, or another if node
         };
 
+        struct StructDecl {
+            array<Node*> members;
+        };
+
+        // composite literal
+        struct ComplitExpr {
+            array<Node*> items;
+        };
+
+        struct DotExpr {
+            Node* expr;
+            Token* field;
+        };
+
         MAKE_ENUM(IdentifierKind,
                   Value,
                   TypeName
@@ -127,6 +146,9 @@ namespace cx {
                 Node* child_expr;
                 Identifier identifier;
                 IfStmt if_stmt;
+                StructDecl struct_decl;
+                ComplitExpr complit_expr;
+                DotExpr dot_expr;
 
                 NodeData() {}
 
@@ -148,6 +170,7 @@ namespace cx {
                     AST_CASE_DESTROY_FIELD(fn_proto, FnProto)
                     AST_CASE_DESTROY_FIELD(block, Block)
                     AST_CASE_DESTROY_FIELD(fn_call_expr, FnCallExpr)
+                    AST_CASE_DESTROY_FIELD(struct_decl, StructDecl)
                     default:
                         break;
                 }

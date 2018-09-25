@@ -249,8 +249,9 @@ void Resolver::context_init_builtins() {
     create_builtins();
 }
 
-Scope* ScopeResolver::push_scope() {
+Scope* ScopeResolver::push_scope(ast::Node* owner) {
     m_current_scope = m_scopes.emplace(m_current_scope);
+    m_current_scope->owner = owner;
     return m_current_scope;
 }
 
@@ -287,5 +288,5 @@ ast::Node* ScopeResolver::find_symbol(const string& name) {
 
 ScopeResolver::ScopeResolver(cx::Resolver* resolver) {
     m_resolver = resolver;
-    push_scope();
+    push_scope(nullptr);
 }

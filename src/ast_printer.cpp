@@ -82,10 +82,43 @@ void AstPrinter::print_node(Node* node) {
             }
             break;
         }
+        case NodeType::StructDecl: {
+            auto& data = node->data.struct_decl;
+            print("struct {} ", node->name);
+            print("{{\n");
+            m_indent++;
+            for (auto member: data.members) {
+                print_indent(m_indent);
+                if (member->type == NodeType::FnDef) {
+                    auto kind = member->data.fn_def.fn_kind;
+                    print("[@{}] ", PRINT_ENUM(kind));
+                }
+                print_node(member);
+                if (member->type == NodeType::VarDecl) {
+                    print(";\n");
+                }
+            }
+            m_indent--;
+            print("}}\n");
+            break;
+        }
+        case NodeType::DotExpr: {
+            auto& data = node->data.dot_expr;
+            print_node(data.expr);
+            print(".{}", data.field->str);
+            break;
+        }
+        case NodeType::ComplitExpr: {
+            auto& data = node->data.complit_expr;
+            print("{{");
+            print_node_list(&data.items);
+            print("}}");
+            break;
+        }
         case NodeType::BinOpExpr: {
             auto& data = node->data.bin_op_expr;
             print_node(data.op1);
-            print(" {} ", token_type_to_string(data.op_type));
+            print(" {} ", get_token_symbol(data.op_type));
             print_node(data.op2);
             break;
         }
@@ -136,7 +169,6 @@ void AstPrinter::print_indent(int level) {
 
 void AstPrinter::print_node_list(array<Node*>* list) {
     for (int i = 0; i < list->size; i++) {
-        auto params = list;
         print_node(list->at(i));
         if (i < list->size - 1) {
             print(", ");

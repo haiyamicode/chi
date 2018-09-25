@@ -56,6 +56,7 @@ void Lexer::setup_keywords() {
     s_keywords["typedef"] = TokenType::KW_TYPEDEF;
     s_keywords["typeof"] = TokenType::KW_TYPEOF;
     s_keywords["new"] = TokenType::KW_NEW;
+    s_keywords["this"] = TokenType::KW_THIS;
 }
 
 string& Lexer::new_buf(size_t reserve) {
@@ -705,20 +706,8 @@ void Lexer::error(string error, Pos pos) {
     m_result->error_pos = pos;
 }
 
-string cx::token_type_to_string(TokenType token_type) {
+string cx::get_token_symbol(TokenType token_type) {
     switch (token_type) {
-        case TokenType::END:
-            return "EOF";
-        case TokenType::IDEN:
-            return "identifier";
-        case TokenType::CHAR:
-            return "character";
-        case TokenType::STRING:
-            return "string literal";
-        case TokenType::INT:
-            return "int literal";
-        case TokenType::FLOAT:
-            return "float literal";
         case TokenType::ADD:
             return "+";
         case TokenType::SUB:
@@ -812,14 +801,16 @@ string cx::token_type_to_string(TokenType token_type) {
         case TokenType::QUES:
             return "?";
         default:
-            return PRINT_ENUM<TokenType>(token_type);
+            return PRINT_ENUM(token_type);
     }
 }
 
 string Token::to_string() const {
     switch (type) {
         case TokenType::IDEN:
+            return str;
         case TokenType::CHAR:
+            return fmt::format("'{}'", (char) val.i);
         case TokenType::STRING:
             return fmt::format("\"{}\"", str);
         case TokenType::INT:
@@ -827,6 +818,6 @@ string Token::to_string() const {
         case TokenType::FLOAT:
             return fmt::format("{}", val.d);
         default:
-            return token_type_to_string(type);
+            return get_token_symbol(type);
     }
 }

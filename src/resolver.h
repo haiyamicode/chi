@@ -93,7 +93,7 @@ namespace cx {
 
         ast::Node* find_symbol(const string& name);
 
-        Scope* push_scope();
+        Scope* push_scope(ast::Node* owner);
 
         void pop_scope();
     };

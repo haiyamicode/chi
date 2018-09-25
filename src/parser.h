@@ -27,7 +27,7 @@ namespace cx {
         ParseContext* m_ctx;
         size_t m_token_i = 0;
         Token m_eof_token;
-        map<Node*, long> m_block_pos;
+        map<Node*, size_t> m_block_pos;
 
         Token* next();
 
@@ -37,7 +37,7 @@ namespace cx {
 
         Token* lookahead(int n);
 
-        void jump_to(long pos);
+        void jump_to(size_t pos);
 
         void unread();
 
@@ -57,7 +57,7 @@ namespace cx {
     public:
         Parser(ParseContext* ctx) { m_ctx = ctx; }
 
-        Node* create_node(NodeType type, Token*);
+        Node* create_node(NodeType type, Token* token);
 
         Node* create_error_node();
 
@@ -71,6 +71,8 @@ namespace cx {
 
         void add_to_scope(Node* node);
 
+        Scope* get_scope() { return m_ctx->resolver->get_scope(); }
+
         void parse();
 
         Node* parse_root();
@@ -78,6 +80,8 @@ namespace cx {
         void parse_top_level_decls(NodeList* decls);
 
         Node* parse_top_level_decl();
+
+        optional<FnKind> parse_decl_identifier(Token** iden);
 
         Node* parse_var_or_fn_decl();
 
@@ -87,9 +91,9 @@ namespace cx {
 
         Node* parse_type_expr();
 
-        Node* parse_fn_decl(Node* return_type, Token* iden);
+        Node* parse_fn_decl(Node* return_type, Token* iden, FnKind kind);
 
-        void parse_fn_body(Node* fn);
+        void parse_fn_block(Node* fn);
 
         Node* parse_var_decl(Node* type_expr, Token* iden);
 
@@ -123,6 +127,14 @@ namespace cx {
 
         Node* parse_if_stmt();
 
-        void parse_block_skip();
+        void skip_block();
+
+        void parse_struct_block(Node* node);
+
+        Node* parse_struct_decl();
+
+        Node* parse_complit_expr();
+
+        Node* parse_dot_expr(Node* expr);
     };
 }
