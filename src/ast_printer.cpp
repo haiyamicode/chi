@@ -128,8 +128,11 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::ReturnStmt: {
             auto& data = node->data.return_stmt;
-            print("return ");
-            print_node(data.expr);
+            print("return");
+            if (data.expr) {
+                print(" ");
+                print_node(data.expr);
+            }
             break;
         }
         case NodeType::ParenExpr: {

@@ -12,7 +12,7 @@
 namespace cx {
     struct ChiType;
 
-    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String)
+    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String, Struct)
 
     struct ChiTypeTypeName {
         ChiType* giving_type;
@@ -24,12 +24,27 @@ namespace cx {
         array<ChiType*> params;
     };
 
+    struct ChiStructMember {
+        ChiType* type;
+        ChiType* struct_;
+        ast::Node* node;
+    };
+
+    MAKE_ENUM(ResolveStatus, None, MemberTypesKnown);
+    struct ChiTypeStruct {
+        ast::Node* node;
+        array<ChiStructMember> members;
+        map<string, ChiStructMember*> members_table;
+        ResolveStatus resolve_status;
+    };
+
     struct ChiType {
         TypeId id;
 
         union Data {
             ChiTypeFn fn;
             ChiTypeTypeName type_name;
+            ChiTypeStruct struct_;
 
             Data() {}
 
@@ -38,13 +53,18 @@ namespace cx {
 
         ChiType(TypeId id) {
             this->id = id;
-            memset(&data, 0, sizeof(data));
+            if (id == TypeId::Struct) {
+                new(&data.struct_) ChiTypeStruct();
+            } else {
+                memset(&data, 0, sizeof(data));
+            }
         }
 
         ~ChiType() {
 #define CHITYPE_CASE_DESTROY_FIELD(field, type, type_struct) case TypeId::type: data.field.~type_struct(); break;
             switch (id) {
                 CHITYPE_CASE_DESTROY_FIELD(fn, Fn, ChiTypeFn)
+                CHITYPE_CASE_DESTROY_FIELD(struct_, Struct, ChiTypeStruct)
                 default:
                     break;
             }

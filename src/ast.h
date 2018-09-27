@@ -119,7 +119,8 @@ namespace cx {
 
         MAKE_ENUM(IdentifierKind,
                   Value,
-                  TypeName
+                  TypeName,
+                  This
         )
 
         struct Identifier {

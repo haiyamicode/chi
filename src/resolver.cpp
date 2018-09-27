@@ -81,7 +81,7 @@ void Resolver::resolve(ast::Package* package) {
 
 void Resolver::resolve(ast::Module* module) {
     m_module = module;
-    resolve(module->root);
+    resolve(module->root, ResolveScope());
 }
 
 bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
@@ -95,14 +95,14 @@ ChiType* Resolver::to_value_type(ChiType* type) {
     return type;
 }
 
-ChiType* Resolver::_resolve(ast::Node* node) {
+ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
     static auto bool_type = create_type(TypeId::Bool);
     static auto void_type = create_type(TypeId::Void);
 
     switch (node->type) {
         case NodeType::Root:
             for (auto decl: node->data.root.top_level_decls) {
-                resolve(decl);
+                resolve(decl, scope);
                 if (decl->type == NodeType::FnDef && decl->name == "main") {
                     node->module->package->entry_fn = decl;
                 }
@@ -110,43 +110,46 @@ ChiType* Resolver::_resolve(ast::Node* node) {
             return nullptr;
         case NodeType::FnDef: {
             auto& data = node->data.fn_def;
-            auto proto = resolve(data.fn_proto);
-            m_ctx->types[node] = proto;
-            m_current_fn = &proto->data.fn;
-            resolve(data.body);
+            auto proto = resolve(data.fn_proto, scope);
+            if (should_resolve_fn_body(scope)) {
+                resolve(data.body, scope.set_parent_fn(proto));
+            }
             return proto;
         }
         case NodeType::FnProto: {
             auto& data = node->data.fn_proto;
             auto type = create_type(TypeId::Fn);
-            type->data.fn.return_type = to_value_type(resolve(data.return_type));
+            type->data.fn.return_type = to_value_type(resolve(data.return_type, scope));
             for (auto param: data.params) {
-                type->data.fn.params.add(to_value_type(resolve(param)));
+                type->data.fn.params.add(to_value_type(resolve(param, scope)));
             }
             return type;
         }
         case NodeType::Identifier: {
             auto& data = node->data.identifier;
-            auto type = resolve(data.decl);
+            if (data.kind == ast::IdentifierKind::This) {
+                return scope.parent_struct;
+            }
+            auto type = resolve(data.decl, scope);
             return type;
         }
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
-            return to_value_type(resolve(data.type));
+            return to_value_type(resolve(data.type, scope));
         }
         case NodeType::VarDecl: {
             auto& data = node->data.var_decl;
-            auto var_type = to_value_type(resolve(data.type));
+            auto var_type = to_value_type(resolve(data.type, scope));
             if (data.expr) {
-                auto expr_type = resolve(data.expr);
+                auto expr_type = resolve(data.expr, scope.set_value_type(var_type));
                 check_assignment(node, expr_type, var_type);
             }
             return var_type;
         }
         case NodeType::BinOpExpr: {
             auto& data = node->data.bin_op_expr;
-            auto t1 = resolve(data.op1);
-            auto t2 = resolve(data.op2);
+            auto t1 = resolve(data.op1, scope);
+            auto t2 = resolve(data.op2, scope);
             check_assignment(node, t2, t1);
             switch (data.op_type) {
                 case TokenType::EQ:
@@ -172,50 +175,91 @@ ChiType* Resolver::_resolve(ast::Node* node) {
         }
         case NodeType::ReturnStmt: {
             auto& data = node->data.return_stmt;
-            auto type = data.expr ? resolve(data.expr) : void_type;
-            check_assignment(data.expr, type, m_current_fn->return_type);
+            auto type = data.expr ? resolve(data.expr, scope) : void_type;
+            assert(scope.parent_fn);
+            check_assignment(node, type, scope.parent_fn->data.fn.return_type);
             return nullptr;
         }
         case NodeType::ParenExpr: {
             auto& child = node->data.child_expr;
-            return resolve(child);
+            return resolve(child, scope);
+        }
+        case NodeType::DotExpr: {
+            auto& data = node->data.dot_expr;
+            auto field_name = data.field->str;
+            auto expr_type = resolve(data.expr, scope);
+            auto member = get_struct_member(expr_type, field_name);
+            if (!member) {
+                error(node, errors::FIELD_NOT_FOUND, field_name, to_string(expr_type));
+                return nullptr;
+            }
+            return member->type;
+        }
+        case NodeType::ComplitExpr: {
+            auto& data = node->data.complit_expr;
+            if (!scope.value_type) {
+                error(node, errors::COMPLIT_CANNOT_INFER_TYPE);
+                return nullptr;
+            }
+            auto value_type = scope.value_type;
+            auto constructor = get_struct_member(value_type, "new");
+            if (!constructor) {
+                error(node, errors::FIELD_NOT_FOUND, "new", to_string(value_type));
+                return nullptr;
+            }
+            resolve_fn_call(node, scope, &constructor->type->data.fn, &data.items);
+            return value_type;
         }
         case NodeType::FnCallExpr: {
             auto& data = node->data.fn_call_expr;
-            auto fn_type = resolve(data.fn_ref_expr);
+            auto fn_type = resolve(data.fn_ref_expr, scope);
             if (fn_type->id != TypeId::Fn) {
                 error(data.fn_ref_expr, errors::CANNOT_CALL_NON_FUNCTION);
                 return nullptr;
             }
             auto& fn = fn_type->data.fn;
-            auto n_args = data.args.size;
-            auto n_params = fn.params.size;
-            if (n_args != n_params) {
-                error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, n_params, n_args);
-            }
-            for (int i = 0; i < n_args; i++) {
-                auto arg = data.args[i];
-                auto arg_type = resolve(arg);
-                check_assignment(arg, arg_type, fn.params[i]);
-            }
+            resolve_fn_call(node, scope, &fn, &data.args);
             return fn.return_type;
         }
         case NodeType::IfStmt: {
             auto& data = node->data.if_stmt;
-            auto cond_type = resolve(data.condition);
+            auto cond_type = resolve(data.condition, scope);
             check_assignment(data.condition, cond_type, bool_type);
-            resolve(data.then_block);
+            resolve(data.then_block, scope);
             if (data.else_node) {
-                resolve(data.else_node);
+                resolve(data.else_node, scope);
             }
             return nullptr;
         }
         case NodeType::Block: {
             auto& data = node->data.block;
             for (auto stmt: data.statements) {
-                resolve(stmt);
+                resolve(stmt, scope);
             }
             return nullptr;
+        }
+        case NodeType::StructDecl: {
+            auto& data = node->data.struct_decl;
+            auto struct_type = create_type(TypeId::Struct);
+            auto struct_ = &struct_type->data.struct_;
+            auto struct_scope = scope.set_parent_struct(struct_type);
+            // first pass, method bodies are skipped
+            struct_->resolve_status = ResolveStatus::None;
+            for (auto member: data.members) {
+                resolve_struct_member(struct_type, member, struct_scope);
+            }
+            struct_->resolve_status = ResolveStatus::MemberTypesKnown;
+            // second pass, resolve method bodies
+            for (auto member: data.members) {
+                if (member->type == NodeType::FnDef) {
+                    auto fn_type = get_node_type(member);
+                    resolve(member->data.fn_def.body, struct_scope.set_parent_fn(fn_type));
+                }
+            }
+            auto struct_typename = create_type(TypeId::TypeName);
+            struct_typename->data.type_name.name = &node->name;
+            struct_typename->data.type_name.giving_type = struct_type;
+            return struct_typename;
         }
         default:
             print("\n");
@@ -224,12 +268,12 @@ ChiType* Resolver::_resolve(ast::Node* node) {
     return nullptr;
 }
 
-ChiType* Resolver::resolve(ast::Node* node) {
+ChiType* Resolver::resolve(ast::Node* node, const ResolveScope& scope) {
     auto cached = get_node_type(node);
     if (cached) {
         return cached;
     }
-    auto result = _resolve(node);
+    auto result = _resolve(node, scope);
     m_ctx->types[node] = result;
     return result;
 }
@@ -247,6 +291,43 @@ void Resolver::check_assignment(ast::Node* node, ChiType* from_type, ChiType* to
 void Resolver::context_init_builtins() {
     create_primitives();
     create_builtins();
+}
+
+ChiStructMember* Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope) {
+    auto& struct_ = struct_type->data.struct_;
+    auto member = struct_.members.emplace();
+    member->struct_ = struct_type;
+    member->node = node;
+    member->type = resolve(node, scope);
+    struct_.members_table[node->name] = member;
+    return member;
+}
+
+bool Resolver::should_resolve_fn_body(const ResolveScope& scope) {
+    auto parent_struct = scope.parent_struct;
+    return !parent_struct || parent_struct->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown;
+}
+
+ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string& field_name) {
+    if (struct_type->id != TypeId::Struct) {
+        return nullptr;
+    }
+    auto& data = struct_type->data.struct_;
+    auto member = data.members_table.get(field_name);
+    return member ? *member : nullptr;
+}
+
+void Resolver::resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTypeFn* fn, NodeList* args) {
+    auto n_args = args->size;
+    auto n_params = fn->params.size;
+    if (n_args != n_params) {
+        error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, n_params, n_args);
+    }
+    for (int i = 0; i < n_args; i++) {
+        auto arg = args->at(i);
+        auto arg_type = resolve(arg, scope);
+        check_assignment(arg, arg_type, fn->params[i]);
+    }
 }
 
 Scope* ScopeResolver::push_scope(ast::Node* owner) {
@@ -289,4 +370,18 @@ ast::Node* ScopeResolver::find_symbol(const string& name) {
 ScopeResolver::ScopeResolver(cx::Resolver* resolver) {
     m_resolver = resolver;
     push_scope(nullptr);
+}
+
+#define RS_SET_PROP_COPY(prop, value) auto cpy = *this; cpy.prop = value; return cpy;
+
+ResolveScope ResolveScope::set_parent_fn(ChiType* fn) const {
+    RS_SET_PROP_COPY(parent_fn, fn);
+}
+
+ResolveScope ResolveScope::set_parent_struct(ChiType* struct_) const {
+    RS_SET_PROP_COPY(parent_struct, struct_);
+}
+
+ResolveScope ResolveScope::set_value_type(ChiType* value_type) const {
+    RS_SET_PROP_COPY(value_type, value_type);
 }

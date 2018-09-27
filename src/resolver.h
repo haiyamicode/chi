@@ -25,11 +25,22 @@ namespace cx {
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
 
+    struct ResolveScope {
+        ChiType* parent_fn = nullptr;
+        ChiType* parent_struct = nullptr;
+        ChiType* value_type = nullptr;
+
+        ResolveScope set_parent_fn(ChiType* fn) const;
+
+        ResolveScope set_parent_struct(ChiType* struct_) const;
+
+        ResolveScope set_value_type(ChiType* value_type) const;
+    };
+
     class Resolver {
         ResolveContext* m_ctx;
 
         ast::Module* m_module = nullptr;
-        ChiTypeFn* m_current_fn = nullptr;
 
         ChiType* create_type(TypeId type_id);
 
@@ -38,6 +49,8 @@ namespace cx {
         void add_primitive(const string& name, ChiType* type);
 
         void add_builtin(const string& name, ChiType* type);
+
+        void add_type(ast::Node* node, ChiType* type) { m_ctx->types[node] = type; }
 
         void create_primitives();
 
@@ -49,11 +62,19 @@ namespace cx {
 
         ChiType* to_value_type(ChiType* type);
 
+        ChiStructMember* resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope);
+
+        void resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
+
+        ChiStructMember* get_struct_member(ChiType* struct_type, const string& field_name);
+
+        bool should_resolve_fn_body(const ResolveScope& scope);
+
         void resolve(ast::Module* module);
 
-        ChiType* resolve(ast::Node* node);
+        ChiType* resolve(ast::Node* node, const ResolveScope& scope);
 
-        ChiType* _resolve(ast::Node* node);
+        ChiType* _resolve(ast::Node* node, const ResolveScope& scope);
 
         string to_string(ChiType* type);
 

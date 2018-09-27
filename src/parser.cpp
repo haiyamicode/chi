@@ -478,7 +478,7 @@ Node* Parser::parse_operand(bool lhs, Node* parent) {
         case TokenType::KW_THIS: {
             consume();
             auto node = create_node(NodeType::Identifier, token);
-            node->data.identifier.kind = IdentifierKind::Value;
+            node->data.identifier.kind = IdentifierKind::This;
             node->name = "this";
             return node;
         }
@@ -533,7 +533,9 @@ Node* Parser::parse_fn_call_expr(Node* fn_expr, bool lhs, Node* parent) {
 Node* Parser::parse_return_stmt() {
     auto token = expect(TokenType::KW_RETURN);
     auto node = create_node(NodeType::ReturnStmt, token);
-    node->data.return_stmt.expr = parse_expr();
+    if (get()->type != TokenType::SEMICOLON) {
+        node->data.return_stmt.expr = parse_expr();
+    }
     expect(TokenType::SEMICOLON);
     return node;
 }

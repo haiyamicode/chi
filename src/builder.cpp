@@ -57,11 +57,12 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
     parser.parse();
     print_ast(pc.module->root);
 
-//    resolver.resolve(package);
-//    auto jitc = m_ctx.create_compiler();
-//    jitc.compile(module);
-//    auto& main_fn = jitc.get_context()->functions[package->entry_fn];
-//    main_fn->apply(NULL, NULL);
+    resolver.resolve(package);
+    return;
+    auto jitc = m_ctx.create_compiler();
+    jitc.compile(module);
+    auto& main_fn = jitc.get_context()->functions[package->entry_fn];
+    main_fn->apply(NULL, NULL);
 }
 
 void Builder::build_program(const string& entry_file_name) {
