@@ -12,6 +12,8 @@ using namespace cx;
 int main(int argc, char* argv[]) {
     Builder bld;
     string file_name;
+    array<int> z;
+    
     for (int i = 1; i < argc; i++) {
         string arg = argv[i];
         if (arg[0] == '-') {

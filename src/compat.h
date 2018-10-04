@@ -39,17 +39,12 @@ namespace cx {
 
         array() {}
 
-        array(const array& other) {
-            if (other.size) {
-                items = (T*) malloc(other.size * sizeof(T));
-                memcpy(items, other.items, other.size * sizeof(T));
-            }
-        }
+        array(const array& other) = delete;
 
         array(std::initializer_list<T> values) {
             reserve(values.size());
             for (auto& value: values) {
-                add(value);
+                add(std::move(value));
             }
         }
 

@@ -68,7 +68,7 @@ ast::Node* Resolver::get_builtin(const string& name) {
     return nullptr;
 }
 
-ChiType* Resolver::get_node_type(ast::Node* node) {
+ChiType* Resolver::node_get_type(ast::Node* node) {
     auto result = m_ctx->types.get(node);
     return result ? *result : nullptr;
 }
@@ -111,6 +111,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
         case NodeType::FnDef: {
             auto& data = node->data.fn_def;
             auto proto = resolve(data.fn_proto, scope);
+            add_type(node, proto);
             if (should_resolve_fn_body(scope)) {
                 resolve(data.body, scope.set_parent_fn(proto));
             }
@@ -128,7 +129,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
         case NodeType::Identifier: {
             auto& data = node->data.identifier;
             if (data.kind == ast::IdentifierKind::This) {
-                return scope.parent_struct;
+                return create_pointer_type(scope.parent_struct, true);
             }
             auto type = resolve(data.decl, scope);
             return type;
@@ -188,12 +189,18 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto& data = node->data.dot_expr;
             auto field_name = data.field->str;
             auto expr_type = resolve(data.expr, scope);
-            auto member = get_struct_member(expr_type, field_name);
+            auto sty = expr_type;
+            if (sty->id == TypeId::Pointer) {
+                sty = sty->data.pointer.base;
+            }
+            auto member = get_struct_member(sty, field_name);
             if (!member) {
                 error(node, errors::FIELD_NOT_FOUND, field_name, to_string(expr_type));
                 return nullptr;
             }
-            return member->type;
+            auto type = node_get_type(member->node);
+            type->meta.struct_member = member;
+            return type;
         }
         case NodeType::ComplitExpr: {
             auto& data = node->data.complit_expr;
@@ -207,7 +214,10 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
                 error(node, errors::FIELD_NOT_FOUND, "new", to_string(value_type));
                 return nullptr;
             }
-            resolve_fn_call(node, scope, &constructor->type->data.fn, &data.items);
+            auto constructor_type = node_get_type(constructor->node);
+            auto& fn_type = constructor_type->data.fn;
+            resolve_fn_call(node, scope, &fn_type, &data.items);
+            fn_type.struct_ = value_type;
             return value_type;
         }
         case NodeType::FnCallExpr: {
@@ -242,6 +252,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto& data = node->data.struct_decl;
             auto struct_type = create_type(TypeId::Struct);
             auto struct_ = &struct_type->data.struct_;
+            struct_->node = node;
             auto struct_scope = scope.set_parent_struct(struct_type);
             // first pass, method bodies are skipped
             struct_->resolve_status = ResolveStatus::None;
@@ -252,7 +263,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             // second pass, resolve method bodies
             for (auto member: data.members) {
                 if (member->type == NodeType::FnDef) {
-                    auto fn_type = get_node_type(member);
+                    auto fn_type = node_get_type(member);
                     resolve(member->data.fn_def.body, struct_scope.set_parent_fn(fn_type));
                 }
             }
@@ -269,7 +280,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
 }
 
 ChiType* Resolver::resolve(ast::Node* node, const ResolveScope& scope) {
-    auto cached = get_node_type(node);
+    auto cached = node_get_type(node);
     if (cached) {
         return cached;
     }
@@ -293,14 +304,20 @@ void Resolver::context_init_builtins() {
     create_builtins();
 }
 
-ChiStructMember* Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope) {
+void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope) {
     auto& struct_ = struct_type->data.struct_;
-    auto member = struct_.members.emplace();
-    member->struct_ = struct_type;
-    member->node = node;
-    member->type = resolve(node, scope);
-    struct_.members_table[node->name] = member;
-    return member;
+    ChiStructField* field = nullptr;
+    if (node->type == NodeType::VarDecl) {
+        field = struct_.fields.emplace();
+        field->index = struct_.fields.size - 1;
+        field->struct_ = struct_type;
+        field->node = node;
+        field->type = resolve(node, scope);
+    } else {
+        auto fn_type = resolve(node, scope);
+        fn_type->data.fn.struct_ = struct_type;
+    }
+    struct_.members_table[node->name] = {node, field};
 }
 
 bool Resolver::should_resolve_fn_body(const ResolveScope& scope) {
@@ -313,8 +330,7 @@ ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string&
         return nullptr;
     }
     auto& data = struct_type->data.struct_;
-    auto member = data.members_table.get(field_name);
-    return member ? *member : nullptr;
+    return data.members_table.get(field_name);
 }
 
 void Resolver::resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTypeFn* fn, NodeList* args) {
@@ -328,6 +344,13 @@ void Resolver::resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTy
         auto arg_type = resolve(arg, scope);
         check_assignment(arg, arg_type, fn->params[i]);
     }
+}
+
+ChiType* Resolver::create_pointer_type(ChiType* base, bool is_ref) {
+    auto type = create_type(TypeId::Pointer);
+    type->data.pointer.base = base;
+    type->data.pointer.is_ref = is_ref;
+    return type;
 }
 
 Scope* ScopeResolver::push_scope(ast::Node* owner) {

@@ -19,18 +19,28 @@ namespace cx {
             Compiler* compiler;
             ast::Node* node;
 
-                Function(jit_context& context, jit_type_t signature, Compiler* compiler, ast::Node* node);
+            Function(jit_context& context, jit_type_t signature, Compiler* compiler, ast::Node* node);
 
-                virtual void build();
+            virtual void build();
+        };
+
+        struct DotField {
+            jit_type_t value_type;
+            long offset;
+            ChiStructField* field;
+            jit_value struct_ptr;
+        };
+
+        struct CompileSettings {
+            bool enable_asm_print = false;
         };
 
         struct CompileContext {
             map<ast::Node*, box<Function>> functions;
             map<ast::Node*, jit_value> values;
+            map<ChiType*, jit_type_t> types;
             jit_context jit_ctx;
-
-            CompileContext() {
-            }
+            CompileSettings settings;
         };
 
         class Compiler {
@@ -39,11 +49,17 @@ namespace cx {
 
             jit_context& get_jit_context() { return m_ctx->jit_ctx; }
 
-            ChiType* get_node_type(ast::Node* node) { return m_resolver.get_node_type(node); }
+            ChiType* node_get_type(ast::Node* node) { return m_resolver.node_get_type(node); }
+
+            jit_type_t _to_jit_type(ChiType* type);
 
             jit_type_t to_jit_type(ChiType* type);
 
             inline jit_type_t build_jit_type(ast::Node* node);
+
+            DotField compile_dot_expr(jit::Function* fn, ast::Node* node);
+
+            jit::Function* get_fn(ast::Node* node);
 
             void add_value(ast::Node* node, jit_value value) { m_ctx->values[node] = value; }
 
@@ -58,14 +74,15 @@ namespace cx {
 
             void compile_fn_body(jit::Function* fn);
 
-            void compile_fn(ast::Node* fn);
+            void compile_fn(ast::Node* node);
 
             void compile(ast::Module* module);
 
-            jit::Function* compile_expr_fn_ref(jit::Function* fn, ast::Node* expr);
             jit_value compile_expr_value(jit::Function* fn, ast::Node* expr);
 
             void compile_block(jit::Function* fn, ast::Node* node);
+
+            void compile_struct(ast::Node* node);
         };
     }
 }

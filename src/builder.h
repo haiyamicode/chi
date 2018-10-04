@@ -26,7 +26,6 @@ namespace cx {
 
     class Builder : Allocator {
         bool m_debug_mode = false;
-        bool m_assembly_mode = false;
         array<ast::Package> m_packages;
         array<box<ast::Node>> m_ast_nodes;
         array<box<ChiType>> m_types;
@@ -43,7 +42,7 @@ namespace cx {
 
         void set_debug_mode(bool value) { m_debug_mode = value; }
 
-        void set_assembly_mode(bool value) { m_assembly_mode = value; }
+        void set_assembly_mode(bool value) { m_ctx.jit_ctx->settings.enable_asm_print = value; }
 
         void process_file(ast::Package* package, const string& file_name);
 

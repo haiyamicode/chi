@@ -12,7 +12,7 @@
 namespace cx {
     struct ChiType;
 
-    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String, Struct)
+    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String, Struct, Pointer)
 
     struct ChiTypeTypeName {
         ChiType* giving_type;
@@ -22,20 +22,32 @@ namespace cx {
     struct ChiTypeFn {
         ChiType* return_type;
         array<ChiType*> params;
+        ChiType* struct_ = NULL;
     };
 
-    struct ChiStructMember {
+    struct ChiStructField {
         ChiType* type;
         ChiType* struct_;
         ast::Node* node;
+        long index;
+    };
+
+    struct ChiStructMember {
+        ast::Node* node;
+        ChiStructField* field;
     };
 
     MAKE_ENUM(ResolveStatus, None, MemberTypesKnown);
     struct ChiTypeStruct {
         ast::Node* node;
-        array<ChiStructMember> members;
-        map<string, ChiStructMember*> members_table;
+        array<ChiStructField> fields;
+        map<string, ChiStructMember> members_table;
         ResolveStatus resolve_status;
+    };
+
+    struct ChiTypePointer {
+        ChiType* base;
+        bool is_ref;
     };
 
     struct ChiType {
@@ -45,11 +57,16 @@ namespace cx {
             ChiTypeFn fn;
             ChiTypeTypeName type_name;
             ChiTypeStruct struct_;
+            ChiTypePointer pointer;
 
             Data() {}
 
             ~Data() {}
         } data;
+
+        union Meta {
+            ChiStructMember* struct_member;
+        } meta;
 
         ChiType(TypeId id) {
             this->id = id;

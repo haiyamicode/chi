@@ -55,10 +55,9 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
 
     Parser parser(&pc);
     parser.parse();
-    print_ast(pc.module->root);
+//    print_ast(pc.module->root);
 
     resolver.resolve(package);
-    return;
     auto jitc = m_ctx.create_compiler();
     jitc.compile(module);
     auto& main_fn = jitc.get_context()->functions[package->entry_fn];

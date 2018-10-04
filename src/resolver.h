@@ -44,6 +44,8 @@ namespace cx {
 
         ChiType* create_type(TypeId type_id);
 
+        ChiType* create_pointer_type(ChiType* base, bool is_ref);
+
         ast::Node* create_node(ast::NodeType type);
 
         void add_primitive(const string& name, ChiType* type);
@@ -62,7 +64,7 @@ namespace cx {
 
         ChiType* to_value_type(ChiType* type);
 
-        ChiStructMember* resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope);
+        void resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope);
 
         void resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
 
@@ -95,7 +97,7 @@ namespace cx {
 
         ast::Node* get_builtin(const string& name);
 
-        ChiType* get_node_type(ast::Node* node);
+        ChiType* node_get_type(ast::Node* node);
 
         void resolve(ast::Package* package);
     };

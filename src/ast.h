@@ -61,11 +61,16 @@ namespace cx {
         };
 
         MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
+
         struct FnDef {
             Node* fn_proto;
             Node* body;
             bool is_builtin;
             FnKind fn_kind;
+
+            bool is_instance_method() {
+                return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
+            }
         };
 
         struct ParamDecl {
