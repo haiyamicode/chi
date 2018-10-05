@@ -58,6 +58,7 @@ namespace cx {
             inline jit_type_t build_jit_type(ast::Node* node);
 
             DotField compile_dot_expr(jit::Function* fn, ast::Node* node);
+            void compile_construction(jit::Function* fn, jit_value_t dest, ChiType* struct_type, ast::Node* expr);
 
             jit::Function* get_fn(ast::Node* node);
 

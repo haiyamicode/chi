@@ -134,10 +134,14 @@ void Compiler::compile_stmt(jit::Function* fn, ast::Node* stmt) {
     switch (stmt->type) {
         case ast::NodeType::VarDecl: {
             auto& data = stmt->data.var_decl;
+            auto type = node_get_type(stmt);
             auto var = fn->new_value(build_jit_type(stmt));
             add_value(stmt, var);
             if (data.expr) {
                 fn->store(var, compile_expr_value(fn, data.expr));
+            } else {
+                auto this_ = fn->insn_address_of(var).raw();
+                compile_construction(fn, this_, type, nullptr);
             }
             break;
         }
@@ -253,27 +257,11 @@ jit_value Compiler::compile_expr_value(jit::Function* fn, ast::Node* expr) {
             break;
         }
         case ast::NodeType::ComplitExpr: {
-            auto& data = expr->data.complit_expr;
             auto struct_type = node_get_type(expr);
             auto& struct_ = struct_type->data.struct_;
             auto temp = fn->new_value(to_jit_type(struct_type));
             auto this_ = fn->insn_address_of(temp).raw();
-            if (auto default_cons = get_fn(struct_.node)) {
-                fn->insn_call("_new", default_cons->raw(), default_cons->signature(), &this_, 1, 1);
-            }
-            auto cons_member = struct_.members_table.get("new");
-            if (cons_member) {
-                auto cons_fn = get_fn(cons_member->node);
-                assert(cons_fn);
-                array<jit_value_t> args;
-                args.add(this_);
-                for (auto arg: data.items) {
-                    auto value = compile_expr_value(fn, arg);
-                    args.add(value.raw());
-                }
-                fn->insn_call("new", cons_fn->raw(), cons_fn->signature(), args.items,
-                              (uint32_t) args.size);
-            }
+            compile_construction(fn, this_, struct_type, expr);
             return temp;
         }
         default:
@@ -349,4 +337,28 @@ DotField Compiler::compile_dot_expr(jit::Function* fn, ast::Node* node) {
 jit::Function* Compiler::get_fn(ast::Node* node) {
     auto fn = m_ctx->functions.get(node);
     return fn ? fn->get() : nullptr;
+}
+
+void Compiler::compile_construction(jit::Function* fn, jit_value_t dest, ChiType* struct_type, ast::Node* expr) {
+    auto& struct_ = struct_type->data.struct_;
+    if (auto default_cons = get_fn(struct_.node)) {
+        fn->insn_call("_new", default_cons->raw(), default_cons->signature(), &dest, 1, 1);
+    }
+    auto cons_member = struct_.members_table.get("new");
+    if (cons_member) {
+        auto cons_fn = get_fn(cons_member->node);
+        assert(cons_fn);
+        array<jit_value_t> args;
+        args.add(dest);
+        if (expr) {
+            assert(expr->type == ast::NodeType::ComplitExpr);
+            auto& data = expr->data.complit_expr;
+            for (auto arg: data.items) {
+                auto value = compile_expr_value(fn, arg);
+                args.add(value.raw());
+            }
+        }
+        fn->insn_call("new", cons_fn->raw(), cons_fn->signature(), args.items,
+                      (uint32_t) args.size);
+    }
 }
