@@ -20,8 +20,6 @@ namespace cx {
     struct ResolveContext {
         Allocator* allocator;
         array<ast::Node*> builtins;
-        map<ast::Node*, ChiType*> types;
-
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
 
@@ -51,8 +49,6 @@ namespace cx {
         void add_primitive(const string& name, ChiType* type);
 
         void add_builtin(const string& name, ChiType* type);
-
-        void add_type(ast::Node* node, ChiType* type) { m_ctx->types[node] = type; }
 
         void create_primitives();
 

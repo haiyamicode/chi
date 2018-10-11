@@ -25,7 +25,7 @@ void Resolver::add_primitive(const string& name, ChiType* type) {
     auto type_name = create_type(TypeId::TypeName);
     type_name->data.type_name.name = &node->name;
     type_name->data.type_name.giving_type = type;
-    m_ctx->types[node] = type_name;
+    node->resolved_type = type_name;
 }
 
 void Resolver::create_primitives() {
@@ -39,7 +39,7 @@ void Resolver::add_builtin(const std::string& name, ChiType* type) {
     fn->name = name;
     fn->data.fn_def.is_builtin = true;
     m_ctx->builtins.add(fn);
-    m_ctx->types[fn] = type;
+    fn->resolved_type = type;
 }
 
 void Resolver::create_builtins() {
@@ -69,8 +69,7 @@ ast::Node* Resolver::get_builtin(const string& name) {
 }
 
 ChiType* Resolver::node_get_type(ast::Node* node) {
-    auto result = m_ctx->types.get(node);
-    return result ? *result : nullptr;
+    return node->resolved_type;
 }
 
 void Resolver::resolve(ast::Package* package) {
@@ -111,7 +110,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
         case NodeType::FnDef: {
             auto& data = node->data.fn_def;
             auto proto = resolve(data.fn_proto, scope);
-            add_type(node, proto);
+            node->resolved_type = proto;
             if (should_resolve_fn_body(scope)) {
                 resolve(data.body, scope.set_parent_fn(proto));
             }
@@ -285,7 +284,7 @@ ChiType* Resolver::resolve(ast::Node* node, const ResolveScope& scope) {
         return cached;
     }
     auto result = _resolve(node, scope);
-    m_ctx->types[node] = result;
+    node->resolved_type = result;
     return result;
 }
 

@@ -6,7 +6,6 @@
  */
 
 #pragma once
-
 #include "ast.h"
 
 namespace cx {
@@ -22,7 +21,7 @@ namespace cx {
     struct ChiTypeFn {
         ChiType* return_type;
         array<ChiType*> params;
-        ChiType* struct_ = NULL;
+        ChiType* struct_ = nullptr;
     };
 
     struct ChiStructField {
@@ -94,7 +93,7 @@ namespace cx {
         Scope* parent;
         ast::Node* owner = nullptr;
 
-        Scope(Scope* parent) { this->parent = parent; }
+        explicit Scope(Scope* parent) { this->parent = parent; }
 
         ast::Node* find_one(const string& symbol);
 

@@ -50,7 +50,7 @@ namespace cx {
 
             jit_context& get_jit_context() { return m_ctx->jit_ctx; }
 
-            ChiType* node_get_type(ast::Node* node) { return m_ctx->resolver.node_get_type(node); }
+            ChiType* node_get_type(ast::Node* node) { return node->resolved_type; }
 
             jit_type_t _to_jit_type(ChiType* type);
 

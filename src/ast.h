@@ -10,6 +10,7 @@
 #include "lexer.h"
 
 namespace cx {
+    struct ChiType;
     namespace ast {
         struct Node;
         struct Package;
@@ -45,7 +46,7 @@ namespace cx {
 
         struct Package {
             array<Module> modules;
-            Node* entry_fn = NULL;
+            Node* entry_fn = nullptr;
             string root_src_dir;
             string root_src_path;
         };
@@ -82,12 +83,12 @@ namespace cx {
         };
 
         struct ReturnStmt {
-            Node* expr = NULL;
+            Node* expr = nullptr;
         };
 
         struct VarDecl {
-            Node* type = NULL;
-            Node* expr = NULL;
+            Node* type = nullptr;
+            Node* expr = nullptr;
         };
 
         struct BinOpExpr {
@@ -138,6 +139,7 @@ namespace cx {
             Token* token;
             Module* module;
             string name;
+            ChiType* resolved_type = nullptr;
 
             union NodeData {
                 Root root;
