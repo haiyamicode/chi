@@ -13,13 +13,13 @@
 
 namespace cx {
     namespace jit {
-        class Compiler;
+        class CompileContext;
 
         struct Function : public jit_function {
-            Compiler* compiler;
+            CompileContext* compile_ctx;
             ast::Node* node;
 
-            Function(jit_context& context, jit_type_t signature, Compiler* compiler, ast::Node* node);
+            Function(jit_context& context, jit_type_t signature, CompileContext* compile_ctx, ast::Node* node);
 
             virtual void build();
         };
@@ -41,15 +41,16 @@ namespace cx {
             map<ChiType*, jit_type_t> types;
             jit_context jit_ctx;
             CompileSettings settings;
+            Resolver resolver;
+            CompileContext(ResolveContext* rctx): resolver(rctx) {}
         };
 
         class Compiler {
-            Resolver m_resolver;
             CompileContext* m_ctx;
 
             jit_context& get_jit_context() { return m_ctx->jit_ctx; }
 
-            ChiType* node_get_type(ast::Node* node) { return m_resolver.node_get_type(node); }
+            ChiType* node_get_type(ast::Node* node) { return m_ctx->resolver.node_get_type(node); }
 
             jit_type_t _to_jit_type(ChiType* type);
 
@@ -65,7 +66,7 @@ namespace cx {
             void add_value(ast::Node* node, jit_value value) { m_ctx->values[node] = value; }
 
         public:
-            Compiler(CompileContext* compile_ctx, ResolveContext* resolve_ctx);
+            Compiler(CompileContext* compile_ctx);
 
             CompileContext* get_context() { return m_ctx; }
 

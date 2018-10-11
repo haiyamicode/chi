@@ -16,11 +16,11 @@ using namespace cx;
 
 BuildContext::BuildContext(cx::Allocator* allocator) :
         resolve_ctx(new ResolveContext(allocator)),
-        jit_ctx(new jit::CompileContext()) {
+        jit_ctx(new jit::CompileContext(resolve_ctx.get())) {
 }
 
 jit::Compiler BuildContext::create_compiler() {
-    return {jit_ctx.get(), resolve_ctx.get()};
+    return {jit_ctx.get()};
 }
 
 Builder::Builder() : m_ctx(this) {

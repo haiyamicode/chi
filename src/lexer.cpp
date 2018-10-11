@@ -72,7 +72,7 @@ void Lexer::next(Token* tok) {
 
     next();
 
-    *tok = m_tok;
+    *tok = std::move(m_tok);
 }
 
 void Lexer::next() {
@@ -693,11 +693,11 @@ Token Lexer::get() { return m_tok; }
 void Lexer::tokenize() {
     long i = 0;
     for (;;) {
-        next(&m_tok);
+        auto tok = m_result->tokens.emplace(TokenType::END);
+        next(tok);
         if (m_eof) {
             break;
         }
-        m_result->tokens.add(m_tok);
     }
 }
 

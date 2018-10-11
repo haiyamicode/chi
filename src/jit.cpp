@@ -14,18 +14,19 @@ using namespace cx::jit;
 
 static auto string_type = jit_type_create_pointer(jit_type_sys_char, 1);
 
-Function::Function(jit_context& context, jit_type_t signature, Compiler* compiler, ast::Node* node) : jit_function(
+Function::Function(jit_context& context, jit_type_t signature, CompileContext* compile_ctx, ast::Node* node) : jit_function(
         context, signature) {
-    this->compiler = compiler;
+    this->compile_ctx = compile_ctx;
     this->node = node;
     set_recompilable();
 }
 
 void Function::build() {
-    compiler->compile_fn_body(this);
+    Compiler compiler(compile_ctx);
+    compiler.compile_fn_body(this);
 }
 
-Compiler::Compiler(CompileContext* compile_ctx, ResolveContext* resolve_ctx) : m_resolver(resolve_ctx) {
+Compiler::Compiler(CompileContext* compile_ctx) {
     m_ctx = compile_ctx;
 }
 
@@ -41,7 +42,7 @@ void Compiler::compile(ast::Module* module) {
 }
 
 void Compiler::compile_fn(ast::Node* node) {
-    auto fn = new Function(get_jit_context(), build_jit_type(node), this, node);
+    auto fn = new Function(get_jit_context(), build_jit_type(node), m_ctx, node);
     m_ctx->functions.emplace(node, fn);
 }
 
@@ -105,7 +106,7 @@ void sys_printf(const char* format, int value) {
 }
 
 void Compiler::compile_fn_body(jit::Function* fn) {
-    static auto printf_signature = build_jit_type(m_resolver.get_builtin("printf"));
+    static auto printf_signature = build_jit_type(m_ctx->resolver.get_builtin("printf"));
     if (!fn->node) {
         return;
     }
@@ -140,8 +141,10 @@ void Compiler::compile_stmt(jit::Function* fn, ast::Node* stmt) {
             if (data.expr) {
                 fn->store(var, compile_expr_value(fn, data.expr));
             } else {
-                auto this_ = fn->insn_address_of(var).raw();
-                compile_construction(fn, this_, type, nullptr);
+                if (type->id == TypeId::Struct) {
+                    auto this_ = fn->insn_address_of(var).raw();
+                    compile_construction(fn, this_, type, nullptr);
+                }
             }
             break;
         }
@@ -290,7 +293,7 @@ void Compiler::compile_struct(ast::Node* node) {
     auto this_ = jit_type_create_pointer(struct_jit, 1);
     auto cons_type = jit_type_create_signature
             (jit_abi_cdecl, jit_type_void, &this_, uint32_t(1), 1);
-    auto cons_fn = new Function(get_jit_context(), cons_type, this, nullptr);
+    auto cons_fn = new Function(get_jit_context(), cons_type, m_ctx, nullptr);
     m_ctx->functions.emplace(node, cons_fn);
     auto& data = node->data.struct_decl;
     auto cons_this = cons_fn->get_param(0);
