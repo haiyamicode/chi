@@ -20,6 +20,7 @@ namespace cx {
     struct ResolveContext {
         Allocator* allocator;
         array<ast::Node*> builtins;
+        map<ChiType*, ChiType*> array_types;
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
 
@@ -42,13 +43,15 @@ namespace cx {
 
         ChiType* create_type(TypeId type_id);
 
-        ChiType* create_pointer_type(ChiType* base, bool is_ref);
+        ChiType* create_pointer_type(ChiType* elem, bool is_ref);
+
+        ChiType* create_array_type(ChiType* elem);
 
         ast::Node* create_node(ast::NodeType type);
 
-        void add_primitive(const string& name, ChiType* type);
+        ast::Node* add_primitive(const string& name, ChiType* type);
 
-        void add_builtin(const string& name, ChiType* type);
+        void add_builtin(const string& name, ChiType* type, ast::BuiltinId builtin_id);
 
         void create_primitives();
 

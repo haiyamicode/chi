@@ -241,7 +241,29 @@ Node* Parser::parse_identifier() {
 }
 
 Node* Parser::parse_type_expr() {
-    return parse_identifier();
+    auto type = parse_identifier();
+    if (get()->type == TokenType::LT) {
+        consume();
+        auto node = create_node(NodeType::SubtypeExpr, type->token);
+        auto& data = node->data.subtype_expr;
+        data.type = type;
+        Token* token;
+        for (;;) {
+            token = get();
+            if (token->type == TokenType::GT) {
+                break;
+            }
+            auto param = parse_type_expr();
+            data.args.add(param);
+            if (!at_comma(TokenType::GT)) {
+                break;
+            }
+            consume();
+        }
+        expect(TokenType::GT);
+        return node;
+    }
+    return type;
 }
 
 Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind) {
@@ -462,6 +484,10 @@ Node* Parser::parse_primary_expr(bool lhs, Node* parent) {
                 node = parse_dot_expr(node);
                 break;
 
+            case TokenType::LBRACK:
+                node = parse_index_expr(node);
+                break;
+
             case TokenType::LPAREN:
                 node = parse_fn_call_expr(node, lhs, parent);
                 break;
@@ -637,5 +663,14 @@ Node* Parser::parse_dot_expr(Node* expr) {
     auto node = create_node(NodeType::DotExpr, dot);
     node->data.dot_expr.expr = expr;
     node->data.dot_expr.field = expect(TokenType::IDEN);
+    return node;
+}
+
+Node *Parser::parse_index_expr(Node *expr) {
+    auto lb = expect(TokenType::LBRACK);
+    auto node = create_node(NodeType::IndexExpr, lb);
+    node->data.index_expr.expr = expr;
+    node->data.index_expr.subscript = parse_expr();
+    expect(TokenType::RBRACK);
     return node;
 }

@@ -24,11 +24,19 @@ namespace cx {
             virtual void build();
         };
 
-        struct DotField {
+        struct StructField {
             jit_type_t value_type;
             long offset;
             ChiStructField* field;
-            jit_value struct_ptr;
+            jit_value this_;
+        };
+
+        struct Array {
+            jit_value ptr;
+            jit_value size;
+            jit_value data;
+            jit_type_t elem_type;
+            jit_nint elem_size;
         };
 
         struct CompileSettings {
@@ -58,7 +66,11 @@ namespace cx {
 
             inline jit_type_t build_jit_type(ast::Node* node);
 
-            DotField compile_dot_expr(jit::Function* fn, ast::Node* node);
+            Array compile_array_ref(jit::Function* fn, ast::Node* expr);
+            jit_value compile_array_add(jit::Function* fn, ast::Node* expr, ast::Node* value_arg);
+
+            StructField compile_dot_expr(jit::Function* fn, ast::Node* expr);
+
             void compile_construction(jit::Function* fn, jit_value_t dest, ChiType* struct_type, ast::Node* expr);
 
             jit::Function* get_fn(ast::Node* node);

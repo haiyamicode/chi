@@ -7,10 +7,9 @@
 
 #pragma once
 
-#include "lexer.h"
+#include "sema.h"
 
 namespace cx {
-    struct ChiType;
     namespace ast {
         struct Node;
         struct Package;
@@ -34,7 +33,9 @@ namespace cx {
                   ParenExpr,
                   StructDecl,
                   ComplitExpr,
-                  DotExpr
+                  DotExpr,
+                  SubtypeExpr,
+                  IndexExpr
         );
 
         struct Module {
@@ -62,11 +63,12 @@ namespace cx {
         };
 
         MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
+        MAKE_ENUM(BuiltinId, Invalid, Printf, ArrayAdd)
 
         struct FnDef {
             Node* fn_proto;
             Node* body;
-            bool is_builtin;
+            BuiltinId builtin_id;
             FnKind fn_kind;
 
             bool is_instance_method() {
@@ -121,6 +123,17 @@ namespace cx {
         struct DotExpr {
             Node* expr;
             Token* field;
+            ChiStructMember* resolved_member;
+        };
+
+        struct SubtypeExpr {
+            Node* type;
+            array<Node*> args;
+        };
+
+        struct IndexExpr {
+            Node* expr;
+            Node* subscript;
         };
 
         MAKE_ENUM(IdentifierKind,
@@ -157,6 +170,8 @@ namespace cx {
                 StructDecl struct_decl;
                 ComplitExpr complit_expr;
                 DotExpr dot_expr;
+                SubtypeExpr subtype_expr;
+                IndexExpr index_expr;
 
                 NodeData() {}
 

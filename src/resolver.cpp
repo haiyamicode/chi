@@ -16,7 +16,7 @@ Resolver::Resolver(ResolveContext* ctx) {
     m_ctx = ctx;
 }
 
-void Resolver::add_primitive(const string& name, ChiType* type) {
+ast::Node* Resolver::add_primitive(const string& name, ChiType* type) {
     auto node = create_node(ast::NodeType::Primitive);
     node->token = nullptr;
     node->name = name;
@@ -26,18 +26,20 @@ void Resolver::add_primitive(const string& name, ChiType* type) {
     type_name->data.type_name.name = &node->name;
     type_name->data.type_name.giving_type = type;
     node->resolved_type = type_name;
+    return node;
 }
 
 void Resolver::create_primitives() {
     add_primitive("bool", create_type(TypeId::Bool));
     add_primitive("int", create_type(TypeId::Int));
     add_primitive("void", create_type(TypeId::Void));
+    add_primitive("array", create_type(TypeId::Array));
 }
 
-void Resolver::add_builtin(const std::string& name, ChiType* type) {
+void Resolver::add_builtin(const std::string& name, ChiType* type, ast::BuiltinId builtin_id) {
     auto fn = create_node(ast::NodeType::FnDef);
     fn->name = name;
-    fn->data.fn_def.is_builtin = true;
+    fn->data.fn_def.builtin_id = builtin_id;
     m_ctx->builtins.add(fn);
     fn->resolved_type = type;
 }
@@ -48,7 +50,7 @@ void Resolver::create_builtins() {
     auto& params = printf_type->data.fn.params;
     params.add(create_type(TypeId::String));
     params.add(create_type(TypeId::Int));
-    add_builtin("printf", printf_type);
+    add_builtin("printf", printf_type, ast::BuiltinId::Printf);
 }
 
 ChiType* Resolver::create_type(TypeId type_id) {
@@ -96,6 +98,7 @@ ChiType* Resolver::to_value_type(ChiType* type) {
 
 ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
     static auto bool_type = create_type(TypeId::Bool);
+    static auto int_type = create_type(TypeId::Int);
     static auto void_type = create_type(TypeId::Void);
 
     switch (node->type) {
@@ -190,16 +193,18 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto expr_type = resolve(data.expr, scope);
             auto sty = expr_type;
             if (sty->id == TypeId::Pointer) {
-                sty = sty->data.pointer.base;
+                sty = sty->data.pointer.elem;
+            }
+            if (sty->id == TypeId::Array) {
+                sty = sty->data.array.internal;
             }
             auto member = get_struct_member(sty, field_name);
             if (!member) {
-                error(node, errors::FIELD_NOT_FOUND, field_name, to_string(expr_type));
+                error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type));
                 return nullptr;
             }
-            auto type = node_get_type(member->node);
-            type->meta.struct_member = member;
-            return type;
+            data.resolved_member = member;
+            return member->field ? member->field->type : node_get_type(member->node);
         }
         case NodeType::ComplitExpr: {
             auto& data = node->data.complit_expr;
@@ -209,14 +214,17 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             }
             auto value_type = scope.value_type;
             auto constructor = get_struct_member(value_type, "new");
-            if (!constructor) {
-                error(node, errors::FIELD_NOT_FOUND, "new", to_string(value_type));
-                return nullptr;
+            if (constructor) {
+                auto constructor_type = node_get_type(constructor->node);
+                auto &fn_type = constructor_type->data.fn;
+                resolve_fn_call(node, scope, &fn_type, &data.items);
+                fn_type.struct_ = value_type;
+            } else {
+                if (data.items.size != 0) {
+                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.size);
+                    return nullptr;
+                }
             }
-            auto constructor_type = node_get_type(constructor->node);
-            auto& fn_type = constructor_type->data.fn;
-            resolve_fn_call(node, scope, &fn_type, &data.items);
-            fn_type.struct_ = value_type;
             return value_type;
         }
         case NodeType::FnCallExpr: {
@@ -271,6 +279,31 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             struct_typename->data.type_name.giving_type = struct_type;
             return struct_typename;
         }
+        case NodeType::SubtypeExpr: {
+            auto& data = node->data.subtype_expr;
+            auto type = to_value_type(resolve(data.type, scope));
+            if (type->id == TypeId::Array) {
+                if (data.args.size != 1) {
+                    error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, "array", 1, data.args.size);
+                }
+                auto elem_type = to_value_type(resolve(data.args[0], scope));
+                return create_array_type(elem_type);
+            } else {
+                panic("unhandled");
+            }
+            break;
+        }
+        case NodeType::IndexExpr: {
+            auto& data = node->data.index_expr;
+            auto expr_type = resolve(data.expr, scope);
+            if (expr_type->id != TypeId::Array) {
+                error(node, errors::CANNOT_SUBSCRIPT, to_string(expr_type));
+                return nullptr;
+            }
+            auto subscript_type = resolve(data.subscript, scope);
+            check_assignment(data.subscript, subscript_type, int_type);
+            return expr_type->data.array.elem;
+        }
         default:
             print("\n");
             panic("unhandled {}", PRINT_ENUM(node->type));
@@ -307,8 +340,7 @@ void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, cons
     auto& struct_ = struct_type->data.struct_;
     ChiStructField* field = nullptr;
     if (node->type == NodeType::VarDecl) {
-        field = struct_.fields.emplace();
-        field->index = struct_.fields.size - 1;
+        field = struct_.add_field();
         field->struct_ = struct_type;
         field->node = node;
         field->type = resolve(node, scope);
@@ -316,7 +348,7 @@ void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, cons
         auto fn_type = resolve(node, scope);
         fn_type->data.fn.struct_ = struct_type;
     }
-    struct_.members_table[node->name] = {node, field};
+    struct_.add_member(node->name, node, field);
 }
 
 bool Resolver::should_resolve_fn_body(const ResolveScope& scope) {
@@ -329,7 +361,7 @@ ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string&
         return nullptr;
     }
     auto& data = struct_type->data.struct_;
-    return data.members_table.get(field_name);
+    return data.find_member(field_name);
 }
 
 void Resolver::resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTypeFn* fn, NodeList* args) {
@@ -345,10 +377,48 @@ void Resolver::resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTy
     }
 }
 
-ChiType* Resolver::create_pointer_type(ChiType* base, bool is_ref) {
+ChiType* Resolver::create_pointer_type(ChiType* elem, bool is_ref) {
     auto type = create_type(TypeId::Pointer);
-    type->data.pointer.base = base;
+    type->data.pointer.elem = elem;
     type->data.pointer.is_ref = is_ref;
+    return type;
+}
+
+ChiType* Resolver::create_array_type(ChiType* elem) {
+    static ChiType* size_type = create_type(TypeId::Int);
+    if (auto cached = m_ctx->array_types.get(elem)) {
+        return *cached;
+    }
+    auto type = create_type(TypeId::Array);
+    type->data.array.elem = elem;
+    auto internal_type = create_type(TypeId::Struct);
+    auto& internal_data = internal_type->data.struct_;
+
+    auto data_field = internal_data.add_field();
+    data_field->struct_ = internal_type;
+    data_field->type =  create_pointer_type(elem, false);
+    auto data_field_node = create_node(NodeType::VarDecl);
+    data_field_node->resolved_type = data_field->type;
+    internal_data.add_member("data", data_field_node, data_field);
+
+    auto size_field = internal_data.add_field();
+    size_field->struct_ = internal_type;
+    size_field->type =  size_type;
+    auto size_field_node = create_node(NodeType::VarDecl);
+    size_field_node->resolved_type = size_field->type;
+    internal_data.add_member("size", size_field_node, size_field);
+
+    auto add_fn = create_node(NodeType::FnDef);
+    add_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayAdd;
+    add_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
+    auto add_fn_type = create_type(TypeId::Fn);
+    add_fn_type->data.fn.return_type = create_pointer_type(elem, false);
+    add_fn_type->data.fn.params.add(elem);
+    add_fn->resolved_type = add_fn_type;
+    internal_data.add_member("add", add_fn, nullptr);
+
+    type->data.array.internal = internal_type;
+    m_ctx->array_types[elem] = type;
     return type;
 }
 

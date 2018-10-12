@@ -6,12 +6,15 @@
  */
 
 #pragma once
-#include "ast.h"
+#include "lexer.h"
 
 namespace cx {
+    namespace ast {
+        struct Node;
+    }
     struct ChiType;
 
-    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String, Struct, Pointer)
+    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String, Struct, Pointer, Array)
 
     struct ChiTypeTypeName {
         ChiType* giving_type;
@@ -39,14 +42,23 @@ namespace cx {
     MAKE_ENUM(ResolveStatus, None, MemberTypesKnown);
     struct ChiTypeStruct {
         ast::Node* node;
-        array<ChiStructField> fields;
-        map<string, ChiStructMember> members_table;
+        array<box<ChiStructField>> fields;
+        map<string, box<ChiStructMember>> members_table;
         ResolveStatus resolve_status;
+
+        ChiStructField* add_field();
+        ChiStructMember* add_member(const string& name, ast::Node* node, ChiStructField* field);
+        ChiStructMember* find_member(const string& name);
     };
 
     struct ChiTypePointer {
-        ChiType* base;
+        ChiType* elem;
         bool is_ref;
+    };
+
+    struct ChiTypeArray {
+        ChiType* elem;
+        ChiType* internal;
     };
 
     struct ChiType {
@@ -57,6 +69,7 @@ namespace cx {
             ChiTypeTypeName type_name;
             ChiTypeStruct struct_;
             ChiTypePointer pointer;
+            ChiTypeArray array;
 
             Data() {}
 

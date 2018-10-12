@@ -158,6 +158,22 @@ void AstPrinter::print_node(Node* node) {
             print(")");
             break;
         }
+        case NodeType::SubtypeExpr: {
+            auto& data = node->data.subtype_expr;
+            print_node(data.type);
+            print("<");
+            print_node_list(&data.args);
+            print(">");
+            break;
+        }
+        case NodeType::IndexExpr: {
+            auto& data = node->data.index_expr;
+            print_node(data.expr);
+            print("[");
+            print_node(data.subscript);
+            print("]");
+            break;
+        }
         default:
             print("\n");
             panic("unhandled {}", PRINT_ENUM(node->type));

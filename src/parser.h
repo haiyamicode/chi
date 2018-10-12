@@ -136,5 +136,7 @@ namespace cx {
         Node* parse_complit_expr();
 
         Node* parse_dot_expr(Node* expr);
+
+        Node *parse_index_expr(Node *expr);
     };
 }

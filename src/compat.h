@@ -180,7 +180,8 @@ namespace cx {
             static Buffer from_file(string file_name) {
                 auto stream = new std::fstream(file_name);
                 if (stream->fail()) {
-                    print("unable to open file {}", file_name);
+                    print("unable to open file '{}'", file_name);
+                    exit(2);
                 }
                 return {stream};
             }
