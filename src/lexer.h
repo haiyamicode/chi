@@ -40,6 +40,7 @@ namespace cx {
               KW_TYPEDEF,
               KW_TYPEOF,
               KW_NEW,
+              KW_DELETE,
               KW_THIS,
 
     // literals

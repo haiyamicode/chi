@@ -186,10 +186,10 @@ optional<FnKind> Parser::parse_decl_identifier(Token** iden) {
     auto parent = get_scope()->owner;
     if (parent && parent->type == NodeType::StructDecl) {
         auto token = get();
-        if (token->type == TokenType::TILDE) {
-            fn_kind = FnKind::Destructor;
+        if (token->type == TokenType::KW_DELETE) {
             consume();
-            *iden = expect(TokenType::KW_NEW);
+            fn_kind = FnKind::Destructor;
+            *iden = token;
         } else if (token->type == TokenType::KW_NEW) {
             consume();
             fn_kind = FnKind::Constructor;
@@ -273,6 +273,7 @@ Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind) {
     auto proto = parse_fn_proto(return_type, iden);
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
+    fn->data.fn_def.container = get_scope()->owner;
     proto->data.fn_proto.fn_def_node = fn;
     if (kind == FnKind::TopLevel) {
         save_block_pos(fn);

@@ -218,7 +218,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
                 auto constructor_type = node_get_type(constructor->node);
                 auto &fn_type = constructor_type->data.fn;
                 resolve_fn_call(node, scope, &fn_type, &data.items);
-                fn_type.struct_ = value_type;
+                fn_type.container = value_type;
             } else {
                 if (data.items.size != 0) {
                     error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.size);
@@ -342,11 +342,11 @@ void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, cons
     if (node->type == NodeType::VarDecl) {
         field = struct_.add_field();
         field->struct_ = struct_type;
-        field->node = node;
         field->type = resolve(node, scope);
+        node->data.var_decl.resolved_field = field;
     } else {
         auto fn_type = resolve(node, scope);
-        fn_type->data.fn.struct_ = struct_type;
+        fn_type->data.fn.container = struct_type;
     }
     struct_.add_member(node->name, node, field);
 }

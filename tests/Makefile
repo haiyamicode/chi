@@ -1,6 +1,7 @@
 TESTS = 00_fib.test \
     01_fib_struct.test \
-    02_basic_array.test
+    02_basic_array.test \
+    03_destructors.test
 
 CX = ../cmake-build-debug/src/cx
 

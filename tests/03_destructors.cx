@@ -1,0 +1,31 @@
+struct Bar {
+    int id;
+    void new(int id) {
+        this.id = id;
+    }
+    void delete() {
+        printf("delete bar {}\n", this.id);
+    }
+};
+
+struct Foo {
+    int id;
+    Bar bar1 = {1};
+    Bar bar2 = {2};
+    void new(int id) {
+        this.id = id;
+    }
+    void delete() {
+        printf("delete foo {}\n", this.id);
+    }
+};
+
+int main() {
+    Foo foo1 = {1};
+    if (1 == 1) {
+        Foo foo2 = {2};
+        return 0;
+    }
+    Foo foo2 = {3};
+    return 0;
+}

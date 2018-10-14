@@ -24,13 +24,12 @@ namespace cx {
     struct ChiTypeFn {
         ChiType* return_type;
         array<ChiType*> params;
-        ChiType* struct_ = nullptr;
+        ChiType* container = nullptr;
     };
 
     struct ChiStructField {
         ChiType* type;
         ChiType* struct_;
-        ast::Node* node;
         long index;
     };
 

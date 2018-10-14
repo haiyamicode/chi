@@ -70,6 +70,7 @@ namespace cx {
             Node* body;
             BuiltinId builtin_id;
             FnKind fn_kind;
+            Node* container;
 
             bool is_instance_method() {
                 return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
@@ -91,6 +92,7 @@ namespace cx {
         struct VarDecl {
             Node* type = nullptr;
             Node* expr = nullptr;
+            ChiStructField* resolved_field = nullptr;
         };
 
         struct BinOpExpr {
