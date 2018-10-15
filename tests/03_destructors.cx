@@ -1,8 +1,5 @@
 struct Bar {
-    int id;
-    void new(int id) {
-        this.id = id;
-    }
+    int id = 0;
     void delete() {
         printf("delete bar {}\n", this.id);
     }
@@ -10,10 +7,12 @@ struct Bar {
 
 struct Foo {
     int id;
-    Bar bar1 = {1};
-    Bar bar2 = {2};
+    Bar bar1;
+    Bar bar2;
     void new(int id) {
         this.id = id;
+        this.bar1.id = id * 10 + 1;
+        this.bar2.id = id * 10 + 2;
     }
     void delete() {
         printf("delete foo {}\n", this.id);
@@ -26,6 +25,6 @@ int main() {
         Foo foo2 = {2};
         return 0;
     }
-    Foo foo2 = {3};
+    Foo foo3 = {3};
     return 0;
 }
