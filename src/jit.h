@@ -20,7 +20,9 @@ namespace cx {
             jit_label label;
             ast::Node* var = nullptr;
         };
+
         typedef std::list<VarLabel> VarLabels;
+
         struct Function : public jit_function {
             string qualified_name;
             ast::Node* node;
@@ -48,10 +50,14 @@ namespace cx {
         };
 
         struct StructField {
-            jit_type_t value_type;
+            jit_type_t type;
             long offset;
-            ChiStructField* field;
-            jit_value this_;
+        };
+
+        struct DotValue {
+            jit_value container;
+            optional<StructField> field;
+            DotValue(const jit_value& _container): container(_container) { }
         };
 
         struct Array {
@@ -60,6 +66,13 @@ namespace cx {
             jit_value data;
             jit_type_t elem_type;
             jit_nint elem_size;
+        };
+
+        struct ValueRef {
+            jit_value address;
+            jit_type_t type;
+            Function* fn_ref = nullptr;
+            ValueRef(const jit_value& _address, jit_type_t _type): address(_address), type(_type) {}
         };
 
         struct CompileSettings {
@@ -103,9 +116,9 @@ namespace cx {
 
             bool should_destroy(ast::Node* node);
 
-            void compile_var_destroy(Function *fn, ast::Node* var, jit_value& address);
+            void compile_var_destroy(Function* fn, ast::Node* var, jit_value& address);
 
-            StructField compile_dot_expr(Function* fn, ast::Node* expr);
+            DotValue compile_dot_expr(Function* fn, ast::Node* expr);
 
             void compile_construction(Function* fn, jit_value_t dest, ChiType* struct_type, ast::Node* expr);
 
@@ -113,6 +126,10 @@ namespace cx {
             Function* new_fn(jit_type_t signature, ast::Node* node);
 
             void add_value(ast::Node* node, const jit_value& value) { m_ctx->values[node] = value; }
+
+            jit_value compile_simple_value(Function* fn, ast::Node* expr);
+
+            ValueRef compile_value_ref(Function *fn, ast::Node *expr);
 
         public:
             Compiler(CompileContext* ctx);
@@ -128,8 +145,6 @@ namespace cx {
             void compile_fn(ast::Node* node);
 
             void compile(ast::Module* module);
-
-            jit_value compile_expr_value(Function* fn, ast::Node* expr);
 
             void compile_block(Function* fn, ast::Node* parent, ast::Node* block);
 

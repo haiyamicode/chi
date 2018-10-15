@@ -176,20 +176,20 @@ void Compiler::compile_stmt(Function* fn, ast::Node* stmt) {
             auto var = fn->new_value(build_jit_type(stmt));
             add_value(stmt, var);
             if (data.expr) {
-                fn->store(var, compile_expr_value(fn, data.expr));
+                fn->store(var, compile_simple_value(fn, data.expr));
             }
             break;
         }
         case ast::NodeType::ReturnStmt: {
             auto& data = stmt->data.return_stmt;
             fn->store(fn->is_returning, fn->new_constant(jit_int(1)));
-            fn->store(fn->return_value, compile_expr_value(fn, data.expr));
+            fn->store(fn->return_value, compile_simple_value(fn, data.expr));
             fn->insn_branch(*fn->get_return_label());
             break;
         }
         case ast::NodeType::IfStmt: {
             auto& data = stmt->data.if_stmt;
-            auto cond = compile_expr_value(fn, data.condition);
+            auto cond = compile_simple_value(fn, data.condition);
             jit_label if_end;
             fn->insn_branch_if_not(cond, if_end);
             compile_block(fn, stmt, data.then_block);
@@ -197,11 +197,11 @@ void Compiler::compile_stmt(Function* fn, ast::Node* stmt) {
             break;
         }
         default:
-            compile_expr_value(fn, stmt);
+            compile_simple_value(fn, stmt);
     }
 }
 
-jit_value Compiler::compile_expr_value(Function* fn, ast::Node* expr) {
+jit_value Compiler::compile_simple_value(Function *fn, ast::Node *expr) {
     switch (expr->type) {
         case ast::NodeType::FnCallExpr: {
             auto& data = expr->data.fn_call_expr;
@@ -213,22 +213,20 @@ jit_value Compiler::compile_expr_value(Function* fn, ast::Node* expr) {
                 fn_ref = get_fn(iden.decl);
             } else if (fn_expr->type == ast::NodeType::DotExpr) {
                 auto& dot_expr = fn_expr->data.dot_expr;
-                assert(dot_expr.resolved_member);
                 auto method_node = dot_expr.resolved_member->node;
-                assert(method_node && method_node->type == ast::NodeType::FnDef);
                 auto builtin_id = method_node->data.fn_def.builtin_id;
                 if (builtin_id == ast::BuiltinId::ArrayAdd) {
                     return compile_array_add(fn, dot_expr.expr, data.args[0]);
                 }
-                auto this_ = fn->insn_address_of(compile_expr_value(fn, dot_expr.expr));
-                args.add(this_.raw());
+                auto dot = compile_dot_expr(fn, fn_expr);
+                args.add(dot.container.raw());
                 fn_ref = get_fn(method_node);
             } else {
                 panic("unhandled");
             }
             assert(fn_ref);
             for (auto& arg: data.args) {
-                auto value = compile_expr_value(fn, arg);
+                auto value = compile_simple_value(fn, arg);
                 args.add(value.raw());
             }
             return fn->insn_call(fn_ref, args.items, args.size);
@@ -253,36 +251,26 @@ jit_value Compiler::compile_expr_value(Function* fn, ast::Node* expr) {
             }
             break;
         }
-        case ast::NodeType::DotExpr: {
-            auto dot = compile_dot_expr(fn, expr);
-            return fn->insn_load_relative(dot.this_, dot.offset, dot.value_type);
-        }
         case ast::NodeType::ParenExpr: {
             auto& child = expr->data.child_expr;
-            return compile_expr_value(fn, child);
+            return compile_simple_value(fn, child);
         }
         case ast::NodeType::BinOpExpr: {
             auto& data = expr->data.bin_op_expr;
-            auto op2 = compile_expr_value(fn, data.op2);
+            auto op2 = compile_simple_value(fn, data.op2);
             if (data.op_type == TokenType::ASS) {
                 auto lhs_type = data.op1->type;
-                if (lhs_type == ast::NodeType::DotExpr) {
-                    auto dot = compile_dot_expr(fn, data.op1);
-                    fn->insn_store_relative(dot.this_, dot.offset, op2);
-                    return op2;
-                } else if (lhs_type == ast::NodeType::IndexExpr) {
-                    auto& index_expr = data.op1->data.index_expr;
-                    auto arr = compile_array_ref(fn, index_expr.expr);
-                    auto index = compile_expr_value(fn, index_expr.subscript);
-                    fn->insn_store_elem(arr.data, index, op2);
+                if (lhs_type == ast::NodeType::DotExpr || lhs_type == ast::NodeType::IndexExpr) {
+                    auto ref = compile_value_ref(fn, data.op1);
+                    fn->insn_store_relative(ref.address, 0, op2);
                     return op2;
                 } else {
-                    auto op1 = compile_expr_value(fn, data.op1);
+                    auto op1 = compile_simple_value(fn, data.op1);
                     fn->store(op1, op2);
                     return op2;
                 }
             }
-            auto op1 = compile_expr_value(fn, data.op1);
+            auto op1 = compile_simple_value(fn, data.op1);
             switch (data.op_type) {
                 case TokenType::LT:
                     return fn->insn_lt(op1, op2);
@@ -312,17 +300,39 @@ jit_value Compiler::compile_expr_value(Function* fn, ast::Node* expr) {
             compile_construction(fn, this_, ctn_type, expr);
             return temp;
         }
+        case ast::NodeType::DotExpr:
         case ast::NodeType::IndexExpr: {
-            auto& data = expr->data.index_expr;
-            auto arr = compile_array_ref(fn, data.expr);
-            auto index = compile_expr_value(fn, data.subscript);
-            return fn->insn_load_elem(arr.data, index, arr.elem_type);
+            auto ref = compile_value_ref(fn, expr);
+            return fn->insn_load_relative(ref.address, 0, ref.type);
         }
         default:
             panic("unhandled {}", PRINT_ENUM(expr->type));
             break;
     }
     return fn->new_constant(jit_int(0));
+}
+
+ValueRef Compiler::compile_value_ref(Function *fn, ast::Node *expr) {
+    switch (expr->type) {
+    case ast::NodeType::DotExpr: {
+        auto dot = compile_dot_expr(fn, expr);
+        auto address = fn->insn_add_relative(dot.container, dot.field->offset);
+        return {address, dot.field->type};
+    }
+    case ast::NodeType::IndexExpr: {
+        auto& data = expr->data.index_expr;
+        auto arr = compile_array_ref(fn, data.expr);
+        auto index = compile_simple_value(fn, data.subscript);
+        auto address = fn->insn_load_elem_address(arr.data, index, arr.elem_type);
+        return {address, arr.elem_type};
+    }
+    case ast::NodeType::Identifier: {
+        auto value = compile_simple_value(fn, expr);
+        return {fn->insn_address_of(value), build_jit_type(expr)};
+    }
+    default:
+        unreachable();
+    }
 }
 
 jit_value Compiler::create_string_const(Function* fn, const string& str) {
@@ -403,7 +413,7 @@ void Compiler::compile_struct(ast::Node* node) {
                 auto field = var.resolved_field;
                 assert(field);
                 auto offset = jit_type_get_offset(struct_jit, (uint32_t)field->index);
-                constructor->insn_store_relative(cons_this, offset, compile_expr_value(constructor, var.expr));
+                constructor->insn_store_relative(cons_this, offset, compile_simple_value(constructor, var.expr));
             }
         }
     }
@@ -434,27 +444,27 @@ void Compiler::compile_struct(ast::Node* node) {
     }
 }
 
-StructField Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
+DotValue Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
     auto& data = expr->data.dot_expr;
     auto member_type = node_get_type(expr);
     auto ctn_type = node_get_type(data.expr);
-    auto ctn_jit = to_jit_type(ctn_type);
-    auto ctn_value = compile_expr_value(fn, data.expr);
-    auto ctn_ptr = ctn_type->id == TypeId::Pointer ? ctn_value : fn->insn_address_of(ctn_value);
+    jit_value container;
+    if (ctn_type->id == TypeId::Pointer) {
+        container = compile_simple_value(fn, data.expr);
+        ctn_type = ctn_type->data.pointer.elem;
+    } else {
+        container = compile_value_ref(fn, data.expr).address;
+    }
+    DotValue dot = {container};
     auto member = data.resolved_member;
     assert(member);
     if (member->field) {
-        StructField result;
-        auto offset = jit_type_get_offset(ctn_jit, (uint32_t) member->field->index);
-        result.value_type = to_jit_type(member_type);
-        result.offset = offset;
-        result.field = member->field;
-        result.this_ = ctn_ptr;
-        return result;
-    } else {
-        panic("unhandled");
+        auto offset = jit_type_get_offset(to_jit_type(ctn_type), (uint32_t) member->field->index);
+        dot.field.emplace();
+        dot.field->offset = offset;
+        dot.field->type = to_jit_type(member_type);
     }
-    return {};
+    return dot;
 }
 
 Function* Compiler::get_fn(ast::Node* node) {
@@ -482,7 +492,7 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* str
             assert(expr->type == ast::NodeType::ComplitExpr);
             auto& data = expr->data.complit_expr;
             for (auto arg: data.items) {
-                auto value = compile_expr_value(fn, arg);
+                auto value = compile_simple_value(fn, arg);
                 args.add(value.raw());
             }
         }
@@ -492,7 +502,7 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* str
 
 Array Compiler::compile_array_ref(Function *fn, ast::Node *expr) {
     auto array_type = node_get_type(expr);
-    auto array_ = compile_expr_value(fn, expr);
+    auto array_ = compile_simple_value(fn, expr);
     auto this_ = fn->insn_address_of(array_);
     Array result;
     result.ptr = this_;
@@ -516,7 +526,7 @@ jit_value Compiler::compile_array_add(Function *fn, ast::Node *expr, ast::Node* 
     auto new_data = fn->insn_call_native("realloc", (void*)sys_realloc, realloc_signature, ra_args, 2);
     fn->insn_store_relative(this_, ARRAY_DATA_FIELD_OFFSET, new_data);
     auto address = fn->insn_load_elem_address(new_data, old_size, arr.elem_type);
-    auto value = compile_expr_value(fn, value_arg);
+    auto value = compile_simple_value(fn, value_arg);
     fn->insn_store_relative(address, 0, value);
     return address;
 }
