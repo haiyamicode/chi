@@ -31,8 +31,12 @@ void AstPrinter::print_node(Node* node) {
         case NodeType::FnDef: {
             auto& data = node->data.fn_def;
             print_node(data.fn_proto);
-            print(" ");
-            print_node(data.body);
+            if (data.body) {
+                print(" ");
+                print_node(data.body);
+            } else {
+                print(";");
+            }
             break;
         }
         case NodeType::FnProto: {
@@ -51,8 +55,10 @@ void AstPrinter::print_node(Node* node) {
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
             print_node(data.type);
-            print(" ");
-            print(node->name);
+            if (!node->name.empty()) {
+                print(" ");
+                print(node->name);
+            }
             break;
         }
         case NodeType::Block: {
@@ -160,7 +166,7 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
-            print_node(data.type);
+            print_node(data.iden);
             print("<");
             print_node_list(&data.args);
             print(">");
@@ -172,6 +178,55 @@ void AstPrinter::print_node(Node* node) {
             print("[");
             print_node(data.subscript);
             print("]");
+            break;
+        }
+        case NodeType::TypeSigil: {
+            auto& data = node->data.type_sigil;
+            print_node(data.type);
+            switch (data.sigil) {
+                case SigilKind::Pointer:
+                    print("*");
+                    break;
+                default:
+                    panic("unhandled {}", PRINT_ENUM(data.sigil));
+            }
+            break;
+        }
+        case NodeType::TypedefDecl: {
+            auto& data = node->data.typedef_decl;
+            print("typedef ");
+            print_node(data.type);
+            print(" ");
+            for (int i = 0; i < data.identifiers.size; i++) {
+                print("{}", data.identifiers[i]->str);
+                if (i < data.identifiers.size - 1) {
+                    print(", ");
+                }
+            }
+            print(";");
+            break;
+        }
+        case NodeType::TypeExpr: {
+            auto& data = node->data.type_expr;
+            if (data.c_prefix.is_unsigned) {
+                print("unsigned ");
+            }
+            switch (data.c_prefix.size) {
+                case CSizeClass::Short:
+                    print("short ");
+                    break;
+                case CSizeClass::Long:
+                    print("long ");
+                    break;
+                case CSizeClass::LongLong:
+                    print("long long ");
+                    break;
+                default:
+                    break;
+            }
+            if (data.iden) {
+                print_node(data.iden);
+            }
             break;
         }
         default:

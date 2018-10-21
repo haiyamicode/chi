@@ -57,6 +57,10 @@ void Lexer::setup_keywords() {
     s_keywords["typeof"] = TokenType::KW_TYPEOF;
     s_keywords["new"] = TokenType::KW_NEW;
     s_keywords["this"] = TokenType::KW_THIS;
+
+    // C keywords
+    s_keywords["inline"] = TokenType::KW_INLINE;
+    s_keywords["extern"] = TokenType::KW_EXTERN;
 }
 
 string& Lexer::new_buf(size_t reserve) {
@@ -520,7 +524,7 @@ void Lexer::read_number(char c) {
                     error("malformed hex constant", p);
                     return;
                 }
-            } else {
+            } else if (is_digit(c)) {
                 // octal
                 b = 8;
                 while (is_digit(c)) {
@@ -532,6 +536,11 @@ void Lexer::read_number(char c) {
                     buf.push_back(c);
                     c = read();
                 }
+            } else {
+                do {
+                    c = read();
+                } while (is_letter(c));
+                unread();
             }
         }
     }

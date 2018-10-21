@@ -35,10 +35,16 @@ namespace cx {
                   ComplitExpr,
                   DotExpr,
                   SubtypeExpr,
-                  IndexExpr
+                  IndexExpr,
+                  TypedefDecl,
+                  TypeExpr,
+                  TypeSigil
         );
 
+        MAKE_ENUM(ModuleKind, CX, CHX, HEADER)
+
         struct Module {
+            ModuleKind kind;
             Node* root;
             Package* package;
             string path;
@@ -122,6 +128,11 @@ namespace cx {
             array<Node*> items;
         };
 
+        struct TypedefDecl {
+            Node* type;
+            array<Token*> identifiers;
+        };
+
         struct DotExpr {
             Node* expr;
             Token* field;
@@ -129,7 +140,7 @@ namespace cx {
         };
 
         struct SubtypeExpr {
-            Node* type;
+            Node* iden;
             array<Node*> args;
         };
 
@@ -147,6 +158,30 @@ namespace cx {
         struct Identifier {
             IdentifierKind kind;
             Node* decl;
+        };
+
+        MAKE_ENUM(CSizeClass,
+                  Default,
+                  Long,
+                  LongLong,
+                  Short
+        );
+
+        struct CTypePrefix {
+            bool is_unsigned;
+            CSizeClass size;
+        };
+
+        struct TypeExpr {
+            Node* iden;
+            CTypePrefix c_prefix;
+        };
+
+        MAKE_ENUM(SigilKind, Pointer)
+
+        struct TypeSigil {
+            Node* type;
+            SigilKind sigil;
         };
 
         struct Node {
@@ -174,6 +209,9 @@ namespace cx {
                 DotExpr dot_expr;
                 SubtypeExpr subtype_expr;
                 IndexExpr index_expr;
+                TypedefDecl typedef_decl;
+                TypeExpr type_expr;
+                TypeSigil type_sigil;
 
                 NodeData() {}
 
@@ -196,6 +234,7 @@ namespace cx {
                     AST_CASE_DESTROY_FIELD(block, Block)
                     AST_CASE_DESTROY_FIELD(fn_call_expr, FnCallExpr)
                     AST_CASE_DESTROY_FIELD(struct_decl, StructDecl)
+                    AST_CASE_DESTROY_FIELD(typedef_decl, TypedefDecl)
                     default:
                         break;
                 }

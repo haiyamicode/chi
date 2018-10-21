@@ -31,9 +31,20 @@ ast::Node* Resolver::add_primitive(const string& name, ChiType* type) {
 
 void Resolver::create_primitives() {
     add_primitive("bool", create_type(TypeId::Bool));
-    add_primitive("int", create_type(TypeId::Int));
     add_primitive("void", create_type(TypeId::Void));
     add_primitive("array", create_type(TypeId::Array));
+    add_primitive("int", create_int_type(32, false));
+    add_primitive("int8", create_int_type(8, false));
+    add_primitive("int16", create_int_type(16, false));
+    add_primitive("int32", create_int_type(32, false));
+    add_primitive("int64", create_int_type(64, false));
+    add_primitive("uint8", create_int_type(8, true));
+    add_primitive("uint16", create_int_type(16, true));
+    add_primitive("uint32", create_int_type(32, true));
+    add_primitive("uint64", create_int_type(64, true));
+    add_primitive("char", create_int_type(8, false));
+    add_primitive("float", create_float_type(32));
+    add_primitive("double", create_float_type(64));
 }
 
 void Resolver::add_builtin(const std::string& name, ChiType* type, ast::BuiltinId builtin_id) {
@@ -216,7 +227,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto constructor = get_struct_member(value_type, "new");
             if (constructor) {
                 auto constructor_type = node_get_type(constructor->node);
-                auto &fn_type = constructor_type->data.fn;
+                auto& fn_type = constructor_type->data.fn;
                 resolve_fn_call(node, scope, &fn_type, &data.items);
                 fn_type.container = value_type;
             } else {
@@ -281,7 +292,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
         }
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
-            auto type = to_value_type(resolve(data.type, scope));
+            auto type = to_value_type(resolve(data.iden, scope));
             if (type->id == TypeId::Array) {
                 if (data.args.size != 1) {
                     error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, "array", 1, data.args.size);
@@ -396,14 +407,14 @@ ChiType* Resolver::create_array_type(ChiType* elem) {
 
     auto data_field = internal_data.add_field();
     data_field->struct_ = internal_type;
-    data_field->type =  create_pointer_type(elem, false);
+    data_field->type = create_pointer_type(elem, false);
     auto data_field_node = create_node(NodeType::VarDecl);
     data_field_node->resolved_type = data_field->type;
     internal_data.add_member("data", data_field_node, data_field);
 
     auto size_field = internal_data.add_field();
     size_field->struct_ = internal_type;
-    size_field->type =  size_type;
+    size_field->type = size_type;
     auto size_field_node = create_node(NodeType::VarDecl);
     size_field_node->resolved_type = size_field->type;
     internal_data.add_member("size", size_field_node, size_field);
@@ -419,6 +430,19 @@ ChiType* Resolver::create_array_type(ChiType* elem) {
 
     type->data.array.internal = internal_type;
     m_ctx->array_types[elem] = type;
+    return type;
+}
+
+ChiType* Resolver::create_int_type(int bit_count, bool is_unsigned) {
+    auto type = create_type(TypeId::Int);
+    type->data.int_.bit_count = bit_count;
+    type->data.int_.is_unsigned = is_unsigned;
+    return type;
+}
+
+ChiType* Resolver::create_float_type(int bit_count) {
+    auto type = create_type(TypeId::Float);
+    type->data.float_.bit_count = bit_count;
     return type;
 }
 

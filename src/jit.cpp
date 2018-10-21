@@ -54,7 +54,8 @@ void Function::set_qualified_name(ast::Node* container, const string& name) {
 }
 
 jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args) {
-    return jit_function::insn_call(fn_ref->get_jit_name(), fn_ref->raw(), fn_ref->signature(), args, (uint32_t)num_args);
+    return jit_function::insn_call(fn_ref->get_jit_name(), fn_ref->raw(), fn_ref->signature(), args,
+                                   (uint32_t) num_args);
 }
 
 Compiler::Compiler(CompileContext* ctx) {
@@ -201,7 +202,7 @@ void Compiler::compile_stmt(Function* fn, ast::Node* stmt) {
     }
 }
 
-jit_value Compiler::compile_simple_value(Function *fn, ast::Node *expr) {
+jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
     switch (expr->type) {
         case ast::NodeType::FnCallExpr: {
             auto& data = expr->data.fn_call_expr;
@@ -312,26 +313,27 @@ jit_value Compiler::compile_simple_value(Function *fn, ast::Node *expr) {
     return fn->new_constant(jit_int(0));
 }
 
-ValueRef Compiler::compile_value_ref(Function *fn, ast::Node *expr) {
+ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
     switch (expr->type) {
-    case ast::NodeType::DotExpr: {
-        auto dot = compile_dot_expr(fn, expr);
-        auto address = fn->insn_add_relative(dot.container, dot.field->offset);
-        return {address, dot.field->type};
-    }
-    case ast::NodeType::IndexExpr: {
-        auto& data = expr->data.index_expr;
-        auto arr = compile_array_ref(fn, data.expr);
-        auto index = compile_simple_value(fn, data.subscript);
-        auto address = fn->insn_load_elem_address(arr.data, index, arr.elem_type);
-        return {address, arr.elem_type};
-    }
-    case ast::NodeType::Identifier: {
-        auto value = compile_simple_value(fn, expr);
-        return {fn->insn_address_of(value), build_jit_type(expr)};
-    }
-    default:
-        unreachable();
+        case ast::NodeType::DotExpr: {
+            auto dot = compile_dot_expr(fn, expr);
+            auto address = fn->insn_add_relative(dot.container, dot.field->offset);
+            return {address, dot.field->type};
+        }
+        case ast::NodeType::IndexExpr: {
+            auto& data = expr->data.index_expr;
+            auto arr = compile_array_ref(fn, data.expr);
+            auto index = compile_simple_value(fn, data.subscript);
+            auto address = fn->insn_load_elem_address(arr.data, index, arr.elem_type);
+            return {address, arr.elem_type};
+        }
+        case ast::NodeType::Identifier: {
+            auto value = compile_simple_value(fn, expr);
+            return {fn->insn_address_of(value), build_jit_type(expr)};
+        }
+        default:
+            unreachable();
+            return {};
     }
 }
 
@@ -412,7 +414,7 @@ void Compiler::compile_struct(ast::Node* node) {
             if (var.expr) {
                 auto field = var.resolved_field;
                 assert(field);
-                auto offset = jit_type_get_offset(struct_jit, (uint32_t)field->index);
+                auto offset = jit_type_get_offset(struct_jit, (uint32_t) field->index);
                 constructor->insn_store_relative(cons_this, offset, compile_simple_value(constructor, var.expr));
             }
         }
@@ -426,7 +428,7 @@ void Compiler::compile_struct(ast::Node* node) {
     destructor->set_qualified_name(node, "_delete");
 
     auto des_this = destructor->get_param(0);
-    for (long i=data.members.size-1; i>=0; i--) {
+    for (long i = data.members.size - 1; i >= 0; i--) {
         auto member = data.members[i];
         if (member->type == ast::NodeType::VarDecl) {
             if (should_destroy(member)) {
@@ -500,7 +502,7 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* str
     }
 }
 
-Array Compiler::compile_array_ref(Function *fn, ast::Node *expr) {
+Array Compiler::compile_array_ref(Function* fn, ast::Node* expr) {
     auto array_type = node_get_type(expr);
     auto array_ = compile_simple_value(fn, expr);
     auto this_ = fn->insn_address_of(array_);
@@ -513,7 +515,7 @@ Array Compiler::compile_array_ref(Function *fn, ast::Node *expr) {
     return result;
 }
 
-jit_value Compiler::compile_array_add(Function *fn, ast::Node *expr, ast::Node* value_arg) {
+jit_value Compiler::compile_array_add(Function* fn, ast::Node* expr, ast::Node* value_arg) {
     auto arr = compile_array_ref(fn, expr);
     auto elem_size = fn->new_constant(arr.elem_size);
     auto inc = fn->new_constant(jit_int(1));
@@ -523,7 +525,7 @@ jit_value Compiler::compile_array_add(Function *fn, ast::Node *expr, ast::Node* 
     fn->insn_store_relative(this_, ARRAY_SIZE_FIELD_OFFSET, new_size);
     auto mem_size = fn->insn_mul(new_size, elem_size);
     jit_value_t ra_args[] = {arr.data.raw(), mem_size.raw()};
-    auto new_data = fn->insn_call_native("realloc", (void*)sys_realloc, realloc_signature, ra_args, 2);
+    auto new_data = fn->insn_call_native("realloc", (void*) sys_realloc, realloc_signature, ra_args, 2);
     fn->insn_store_relative(this_, ARRAY_DATA_FIELD_OFFSET, new_data);
     auto address = fn->insn_load_elem_address(new_data, old_size, arr.elem_type);
     auto value = compile_simple_value(fn, value_arg);
@@ -531,13 +533,13 @@ jit_value Compiler::compile_array_add(Function *fn, ast::Node *expr, ast::Node* 
     return address;
 }
 
-void Compiler::compile_array_destroy(Function *fn, jit_value &arr) {
+void Compiler::compile_array_destroy(Function* fn, jit_value& arr) {
     auto data = fn->insn_load_relative(arr, ARRAY_DATA_FIELD_OFFSET, jit_type_nint);
     jit_value_t free_args[] = {data.raw()};
-    fn->insn_call_native("free", (void *) free, free_signature, free_args, 1);
+    fn->insn_call_native("free", (void*) free, free_signature, free_args, 1);
 }
 
-void Compiler::compile_var_destroy(Function *fn, ast::Node *var, jit_value& address) {
+void Compiler::compile_var_destroy(Function* fn, ast::Node* var, jit_value& address) {
     auto type = node_get_type(var);
     switch (type->id) {
         case TypeId::Array:
@@ -559,11 +561,11 @@ void Compiler::compile_var_destroy(Function *fn, ast::Node *var, jit_value& addr
     }
 }
 
-Function *Compiler::new_fn(jit_type_t signature, ast::Node* node) {
+Function* Compiler::new_fn(jit_type_t signature, ast::Node* node) {
     return new Function(signature, get_context(), node);
 }
 
-bool Compiler::should_destroy(ast::Node *node) {
+bool Compiler::should_destroy(ast::Node* node) {
     switch (node_get_type(node)->id) {
         case TypeId::Array:
         case TypeId::Struct:

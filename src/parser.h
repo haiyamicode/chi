@@ -25,7 +25,7 @@ namespace cx {
 
     class Parser {
         ParseContext* m_ctx;
-        size_t m_token_i = 0;
+        long m_token_i = 0;
         Token m_eof_token;
         map<Node*, size_t> m_block_pos;
 
@@ -47,6 +47,8 @@ namespace cx {
 
         void consume() { read(); }
 
+        bool is_c_header() { return m_ctx->module->kind == ModuleKind::HEADER; }
+
         template<typename... Args>
         void error(Token* token, const char* format, const Args& ...args) {
             print("{}:{}:{}: error: {}\n", m_ctx->module->path, token->pos.line + 1,
@@ -55,9 +57,11 @@ namespace cx {
         }
 
     public:
-        Parser(ParseContext* ctx) { m_ctx = ctx; }
+        Parser(ParseContext* ctx);
 
         Node* create_node(NodeType type, Token* token);
+
+        Node* create_type_sigil_node(Node* type, SigilKind sigil);
 
         Node* create_error_node();
 
@@ -70,6 +74,8 @@ namespace cx {
         bool next_is_type_expr();
 
         void add_to_scope(Node* node);
+
+        void add_to_scope(Node* node, const string& name);
 
         Scope* get_scope() { return m_ctx->resolver->get_scope(); }
 
@@ -137,6 +143,8 @@ namespace cx {
 
         Node* parse_dot_expr(Node* expr);
 
-        Node *parse_index_expr(Node *expr);
+        Node* parse_index_expr(Node* expr);
+
+        Node* parse_typedef();
     };
 }

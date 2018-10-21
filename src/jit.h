@@ -73,6 +73,7 @@ namespace cx {
             jit_type_t type;
             Function* fn_ref = nullptr;
             ValueRef(const jit_value& _address, jit_type_t _type): address(_address), type(_type) {}
+            ValueRef() {}
         };
 
         struct CompileSettings {

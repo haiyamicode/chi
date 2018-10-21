@@ -34,7 +34,11 @@ static string get_token_type_repr(TokenType token_type) {
     }
 }
 
-void cx::Parser::parse() {
+Parser::Parser(ParseContext* ctx) {
+    m_ctx = ctx;
+}
+
+void Parser::parse() {
     m_ctx->module->root = parse_root();
 }
 
@@ -156,8 +160,13 @@ Node* Parser::parse_root() {
 void Parser::parse_top_level_decls(NodeList* decls) {
     // first pass, skip all function and struct blocks
     for (;;) {
-        if (get()->type == TokenType::END) {
+        auto token = get();
+        if (token->type == TokenType::END) {
             break;
+        }
+        if (token->type == TokenType::KW_EXTERN || token->type == TokenType::KW_INLINE ||
+            token->type == TokenType::KW_STATIC) {
+            consume();
         }
         decls->add(parse_top_level_decl());
     }
@@ -175,14 +184,19 @@ void Parser::parse_top_level_decls(NodeList* decls) {
 
 Node* Parser::parse_top_level_decl() {
     auto token = get();
-    if (token->type == TokenType::KW_STRUCT) {
-        return parse_struct_decl();
+    switch (token->type) {
+        case TokenType::KW_STRUCT:
+            return parse_struct_decl();
+        case TokenType::KW_TYPEDEF:
+            return parse_typedef();
+        default:
+            return parse_var_or_fn_decl();
     }
-    return parse_var_or_fn_decl();
 }
 
 optional<FnKind> Parser::parse_decl_identifier(Token** iden) {
-    FnKind fn_kind = FnKind::TopLevel;
+    FnKind
+            fn_kind = FnKind::TopLevel;
     auto parent = get_scope()->owner;
     if (parent && parent->type == NodeType::StructDecl) {
         auto token = get();
@@ -240,13 +254,78 @@ Node* Parser::parse_identifier() {
     return node;
 }
 
+Node* Parser::create_type_sigil_node(Node* type, SigilKind sigil) {
+    auto node = create_node(NodeType::TypeSigil, type->token);
+    node->data.type_sigil.type = type;
+    node->data.type_sigil.sigil = sigil;
+    return node;
+}
+
 Node* Parser::parse_type_expr() {
-    auto type = parse_identifier();
+    if (get()->type == TokenType::KW_STRUCT) {
+        consume();
+    }
+    auto node = create_node(NodeType::TypeExpr, get());
+    auto& tx = node->data.type_expr;
+    bool is_prefixed = false;
+    if (is_c_header()) {
+        for (;;) {
+            if (get()->type == TokenType::KW_CONST) {
+                consume();
+                continue;
+            }
+            auto token = expect(TokenType::IDEN);
+            if (token->str == "unsigned") {
+                is_prefixed = true;
+                tx.c_prefix.is_unsigned = true;
+            } else if (token->str == "long") {
+                is_prefixed = true;
+                if (tx.c_prefix.size == CSizeClass::Long) {
+                    tx.c_prefix.size = CSizeClass::LongLong;
+                } else {
+                    tx.c_prefix.size = CSizeClass::Long;
+                }
+            } else if (token->str == "short") {
+                is_prefixed = true;
+                tx.c_prefix.size = CSizeClass::Short;
+            } else {
+                unread();
+                break;
+            }
+        }
+    }
+
+    if (is_prefixed) {
+        auto token = get();
+        if (token->type == TokenType::IDEN && (token->str == "int" || token->str == "char")) {
+            tx.iden = parse_identifier();
+        }
+    } else {
+        tx.iden = parse_identifier();
+    }
+    if (tx.iden) {
+        node->token = tx.iden->token;
+    }
+
+    for (;;) {
+        switch (get()->type) {
+            case TokenType::MUL:
+                node = create_type_sigil_node(node, SigilKind::Pointer);
+                node->token = read();
+                continue;
+            case TokenType::KW_CONST:
+                consume();
+                continue;
+            default:
+                break;
+        }
+        break;
+    }
     if (get()->type == TokenType::LT) {
         consume();
-        auto node = create_node(NodeType::SubtypeExpr, type->token);
-        auto& data = node->data.subtype_expr;
-        data.type = type;
+        node = create_node(NodeType::SubtypeExpr, tx.iden->token);
+        auto& subtype = node->data.subtype_expr;
+        subtype.iden = tx.iden;
         Token* token;
         for (;;) {
             token = get();
@@ -254,7 +333,7 @@ Node* Parser::parse_type_expr() {
                 break;
             }
             auto param = parse_type_expr();
-            data.args.add(param);
+            subtype.args.add(param);
             if (!at_comma(TokenType::GT)) {
                 break;
             }
@@ -263,7 +342,7 @@ Node* Parser::parse_type_expr() {
         expect(TokenType::GT);
         return node;
     }
-    return type;
+    return node;
 }
 
 Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind) {
@@ -275,17 +354,24 @@ Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind) {
     fn->data.fn_def.fn_kind = kind;
     fn->data.fn_def.container = get_scope()->owner;
     proto->data.fn_proto.fn_def_node = fn;
-    if (kind == FnKind::TopLevel) {
-        save_block_pos(fn);
-        skip_block();
+    if (is_c_header() && get()->type == TokenType::SEMICOLON) {
+        consume();
     } else {
-        parse_fn_block(fn);
+        if (kind == FnKind::TopLevel) {
+            save_block_pos(fn);
+            skip_block();
+        } else {
+            parse_fn_block(fn);
+        }
     }
     add_to_scope(fn);
     return fn;
 }
 
 void Parser::parse_fn_block(Node* fn) {
+    if (is_c_header()) {
+        return;
+    }
     m_ctx->resolver->push_scope(fn);
     auto& fn_def = fn->data.fn_def;
     auto& fn_proto = fn_def.fn_proto->data.fn_proto;
@@ -336,11 +422,18 @@ void Parser::parse_fn_params(NodeList* params) {
 }
 
 Node* Parser::parse_fn_param() {
+    Token* token = get();
+    optional<string> name;
     auto type = parse_type_expr();
-    auto iden = expect(TokenType::IDEN);
-    auto param = create_node(NodeType::ParamDecl, iden);
+    if (get()->type == TokenType::IDEN) {
+        token = expect(TokenType::IDEN);
+        name = token->str;
+    }
+    auto param = create_node(NodeType::ParamDecl, token);
     param->data.param_decl.type = type;
-    param->name = iden->str;
+    if (name) {
+        param->name = *name;
+    }
     return param;
 }
 
@@ -569,9 +662,13 @@ Node* Parser::parse_return_stmt() {
 
 void Parser::add_to_scope(Node* node) {
     assert(!node->name.empty());
-    auto ok = m_ctx->resolver->declare_symbol(node->name, node);
+    add_to_scope(node, node->name);
+}
+
+void Parser::add_to_scope(Node* node, const string& name) {
+    auto ok = m_ctx->resolver->declare_symbol(name, node);
     if (!ok) {
-        error(node->token, errors::REDECLARED, node->name);
+        error(node->token, errors::REDECLARED, name);
     }
 }
 
@@ -615,16 +712,21 @@ void Parser::skip_block() {
 }
 
 Node* Parser::parse_struct_decl() {
+    Node* node;
     expect(TokenType::KW_STRUCT);
-    auto iden = expect(TokenType::IDEN);
-    auto node = create_node(NodeType::StructDecl, iden);
-    node->name = iden->str;
+    if (get()->type == TokenType::IDEN) {
+        auto iden = expect(TokenType::IDEN);
+        node = create_node(NodeType::StructDecl, iden);
+        node->name = iden->str;
+        add_to_scope(node);
+    } else {
+        node = create_node(NodeType::StructDecl, get());
+    }
     save_block_pos(node);
     skip_block();
     if (get()->type == TokenType::SEMICOLON) {
         consume();
     }
-    add_to_scope(node);
     return node;
 }
 
@@ -667,11 +769,37 @@ Node* Parser::parse_dot_expr(Node* expr) {
     return node;
 }
 
-Node *Parser::parse_index_expr(Node *expr) {
+Node* Parser::parse_index_expr(Node* expr) {
     auto lb = expect(TokenType::LBRACK);
     auto node = create_node(NodeType::IndexExpr, lb);
     node->data.index_expr.expr = expr;
     node->data.index_expr.subscript = parse_expr();
     expect(TokenType::RBRACK);
+    return node;
+}
+
+Node* Parser::parse_typedef() {
+    auto token = expect(TokenType::KW_TYPEDEF);
+    Node* type_expr;
+    if (get()->type == TokenType::KW_STRUCT && lookahead(1)->type == TokenType::LBRACE) {
+        type_expr = parse_struct_decl();
+    } else {
+        type_expr = parse_type_expr();
+    }
+    auto node = create_node(NodeType::TypedefDecl, token);
+    node->data.typedef_decl.type = type_expr;
+    for (;;) {
+        auto iden = expect(TokenType::IDEN);
+        node->name = iden->str;
+        node->data.typedef_decl.identifiers.add(iden);
+        add_to_scope(node, iden->str);
+        if (get()->type == TokenType::COMMA) {
+            consume();
+            continue;
+        } else {
+            expect(TokenType::SEMICOLON);
+            break;
+        }
+    }
     return node;
 }

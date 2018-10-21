@@ -16,6 +16,7 @@ struct Fib {
     }
 
     int fib(int n) {
+        int x;
         if (n < 2) {
             return n;
         }

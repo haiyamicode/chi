@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "compat.h"
+#include "util.h"
 
 namespace cx {
 
@@ -42,6 +42,8 @@ namespace cx {
               KW_NEW,
               KW_DELETE,
               KW_THIS,
+              KW_EXTERN,
+              KW_INLINE,
 
     // literals
               INT,    // 322, 0322, 0xBadFace

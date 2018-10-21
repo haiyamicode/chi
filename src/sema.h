@@ -6,6 +6,7 @@
  */
 
 #pragma once
+
 #include "lexer.h"
 
 namespace cx {
@@ -14,11 +15,21 @@ namespace cx {
     }
     struct ChiType;
 
-    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Bool, String, Struct, Pointer, Array)
+    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Float, Bool, String,
+              Struct, Pointer, Array)
 
     struct ChiTypeTypeName {
         ChiType* giving_type;
         string* name;
+    };
+
+    struct ChiTypeInt {
+        int bit_count;
+        bool is_unsigned;
+    };
+
+    struct ChiTypeFloat {
+        int bit_count;
     };
 
     struct ChiTypeFn {
@@ -39,6 +50,7 @@ namespace cx {
     };
 
     MAKE_ENUM(ResolveStatus, None, MemberTypesKnown);
+
     struct ChiTypeStruct {
         ast::Node* node;
         array<box<ChiStructField>> fields;
@@ -46,7 +58,9 @@ namespace cx {
         ResolveStatus resolve_status;
 
         ChiStructField* add_field();
+
         ChiStructMember* add_member(const string& name, ast::Node* node, ChiStructField* field);
+
         ChiStructMember* find_member(const string& name);
     };
 
@@ -69,6 +83,8 @@ namespace cx {
             ChiTypeStruct struct_;
             ChiTypePointer pointer;
             ChiTypeArray array;
+            ChiTypeInt int_;
+            ChiTypeFloat float_;
 
             Data() {}
 

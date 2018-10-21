@@ -36,10 +36,19 @@ Builder::Builder() : m_ctx(this) {
 
 void Builder::process_file(ast::Package* package, const string& file_name) {
     auto src = io::Buffer::from_file(file_name);
+    auto parts = string_split(file_name, ".");
+    auto kind = ModuleKind::CX;
+    if (!parts.empty()) {
+        auto ext = parts[parts.size() - 1];
+        if (ext == "h") {
+            kind = ModuleKind::HEADER;
+        }
+    }
 
     auto module = package->modules.emplace();
     module->package = package;
     module->path = file_name;
+    module->kind = kind;
 
     Tokenization tokenization;
     Lexer lexer(&src, &tokenization);
@@ -55,13 +64,13 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
 
     Parser parser(&pc);
     parser.parse();
-//    print_ast(pc.module->root);
+    print_ast(pc.module->root);
 
-    resolver.resolve(package);
-    auto jitc = m_ctx.create_compiler();
-    jitc.compile(module);
-    auto& main_fn = jitc.get_context()->functions[package->entry_fn];
-    main_fn->apply(NULL, NULL);
+//    resolver.resolve(package);
+//    auto jitc = m_ctx.create_compiler();
+//    jitc.compile(module);
+//    auto& main_fn = jitc.get_context()->functions[package->entry_fn];
+//    main_fn->apply(NULL, NULL);
 }
 
 void Builder::build_program(const string& entry_file_name) {

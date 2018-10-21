@@ -21,6 +21,7 @@ namespace cx {
         Allocator* allocator;
         array<ast::Node*> builtins;
         map<ChiType*, ChiType*> array_types;
+
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
 
@@ -46,6 +47,10 @@ namespace cx {
         ChiType* create_pointer_type(ChiType* elem, bool is_ref);
 
         ChiType* create_array_type(ChiType* elem);
+
+        ChiType* create_int_type(int bit_count, bool is_unsigned);
+
+        ChiType* create_float_type(int bit_count);
 
         ast::Node* create_node(ast::NodeType type);
 
