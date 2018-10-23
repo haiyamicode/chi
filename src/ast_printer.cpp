@@ -90,22 +90,28 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::StructDecl: {
             auto& data = node->data.struct_decl;
-            print("struct {} ", node->name);
-            print("{{\n");
-            m_indent++;
-            for (auto member: data.members) {
-                print_indent(m_indent);
-                if (member->type == NodeType::FnDef) {
-                    auto kind = member->data.fn_def.fn_kind;
-                    print("[@{}] ", PRINT_ENUM(kind));
-                }
-                print_node(member);
-                if (member->type == NodeType::VarDecl) {
-                    print(";\n");
-                }
+            print("struct ");
+            if (!node->name.empty()) {
+                print("{} ", node->name);
             }
-            m_indent--;
-            print("}}\n");
+            print("{{");
+            if (data.members.size) {
+                print("\n");
+                m_indent++;
+                for (auto member: data.members) {
+                    print_indent(m_indent);
+                    if (member->type == NodeType::FnDef) {
+                        auto kind = member->data.fn_def.fn_kind;
+                        print("[@{}] ", PRINT_ENUM(kind));
+                    }
+                    print_node(member);
+                    if (member->type == NodeType::VarDecl) {
+                        print(";\n");
+                    }
+                }
+                m_indent--;
+            }
+            print("}}");
             break;
         }
         case NodeType::DotExpr: {

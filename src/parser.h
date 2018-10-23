@@ -43,6 +43,8 @@ namespace cx {
 
         Token* expect(TokenType expected);
 
+        void expected_got(TokenType expected, Token* token);
+
         void save_block_pos(Node* node) { m_block_pos[node] = m_token_i; }
 
         void consume() { read(); }
@@ -72,6 +74,8 @@ namespace cx {
         int get_op_precedence(TokenType op_type);
 
         bool next_is_type_expr();
+
+        bool next_is(TokenType token_type);
 
         void add_to_scope(Node* node);
 
