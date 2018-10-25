@@ -25,7 +25,7 @@ namespace cx {
 
     class Parser {
         ParseContext* m_ctx;
-        long m_token_i = 0;
+        long m_toki = 0;
         Token m_eof_token;
         map<Node*, size_t> m_block_pos;
 
@@ -45,7 +45,7 @@ namespace cx {
 
         void expected_got(TokenType expected, Token* token);
 
-        void save_block_pos(Node* node) { m_block_pos[node] = m_token_i; }
+        void save_block_pos(Node* node) { m_block_pos[node] = m_toki; }
 
         void consume() { read(); }
 
@@ -62,6 +62,12 @@ namespace cx {
         Parser(ParseContext* ctx);
 
         Node* create_node(NodeType type, Token* token);
+
+        Node* create_struct_node(Token* keyword, const string& name);
+
+        Node* create_identifier_node(Token* iden, Node* decl);
+
+        ContainerKind get_container_kind(TokenType keyword);
 
         Node* create_type_sigil_node(Node* type, SigilKind sigil);
 
@@ -105,7 +111,9 @@ namespace cx {
 
         void parse_fn_block(Node* fn);
 
-        Node* parse_var_decl(Node* type_expr, Token* iden);
+        Node* parse_var_identifier();
+
+        Node* parse_var_decl(Node* type_expr);
 
         Node* parse_fn_proto(Node* return_type, Token* iden);
 
@@ -141,7 +149,7 @@ namespace cx {
 
         void parse_struct_block(Node* node);
 
-        Node* parse_struct_decl();
+        Node* parse_struct_decl(TokenType keyword);
 
         Node* parse_complit_expr();
 
@@ -150,5 +158,7 @@ namespace cx {
         Node* parse_index_expr(Node* expr);
 
         Node* parse_typedef();
+
+        Node* parse_enum_member();
     };
 }

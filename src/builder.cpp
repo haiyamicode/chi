@@ -53,6 +53,11 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
     Tokenization tokenization;
     Lexer lexer(&src, &tokenization);
     lexer.tokenize();
+    if (tokenization.error) {
+        print("{}:{}:{}: error: {}\n", module->path, tokenization.error_pos.line + 1,
+              tokenization.error_pos.col + 1, *tokenization.error);
+        exit(0);
+    }
 
     auto resolver = m_ctx.create_resolver();
     ScopeResolver scope_resolver(&resolver);

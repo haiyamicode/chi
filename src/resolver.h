@@ -108,7 +108,7 @@ namespace cx {
 
     class ScopeResolver {
         Resolver* m_resolver;
-        array<Scope> m_scopes;
+        array<box<Scope>> m_scopes;
         Scope* m_current_scope = nullptr;
 
     public:

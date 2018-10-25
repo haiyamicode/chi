@@ -24,6 +24,9 @@ void AstPrinter::print_node(Node* node) {
         case NodeType::Root: {
             for (auto decl: m_root->data.root.top_level_decls) {
                 print_node(decl);
+                if (decl->type != NodeType::FnDef) {
+                    print(";");
+                }
                 print("\n");
             }
             break;
@@ -81,7 +84,8 @@ void AstPrinter::print_node(Node* node) {
             auto& data = node->data.var_decl;
             print("[@var] ");
             print_node(data.type);
-            print(" {}", node->name);
+            print(" ");
+            print_node(data.identifier);
             if (data.expr) {
                 print(" = ");
                 print_node(data.expr);
@@ -90,7 +94,7 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::StructDecl: {
             auto& data = node->data.struct_decl;
-            print("struct ");
+            print("{} ", node->token->str);
             if (!node->name.empty()) {
                 print("{} ", node->name);
             }
@@ -98,6 +102,7 @@ void AstPrinter::print_node(Node* node) {
             if (data.members.size) {
                 print("\n");
                 m_indent++;
+                size_t i = 0;
                 for (auto member: data.members) {
                     print_indent(m_indent);
                     if (member->type == NodeType::FnDef) {
@@ -107,7 +112,14 @@ void AstPrinter::print_node(Node* node) {
                     print_node(member);
                     if (member->type == NodeType::VarDecl) {
                         print(";\n");
+                    } else if (member->type == NodeType::EnumMember) {
+                        if (i != data.members.size - 1) {
+                            print(",\n");
+                        } else {
+                            print("\n");
+                        }
                     }
+                    i++;
                 }
                 m_indent--;
             }
@@ -172,7 +184,7 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
-            print_node(data.iden);
+            print_node(data.type);
             print("<");
             print_node_list(&data.args);
             print(">");
@@ -203,35 +215,25 @@ void AstPrinter::print_node(Node* node) {
             print("typedef ");
             print_node(data.type);
             print(" ");
-            for (int i = 0; i < data.identifiers.size; i++) {
-                print("{}", data.identifiers[i]->str);
-                if (i < data.identifiers.size - 1) {
-                    print(", ");
-                }
-            }
-            print(";");
+            print_node(data.identifier);
             break;
         }
-        case NodeType::TypeExpr: {
-            auto& data = node->data.type_expr;
-            if (data.c_prefix.is_unsigned) {
-                print("unsigned ");
+        case NodeType::EnumMember: {
+            auto& data = node->data.enum_member;
+            print("{}", node->name);
+            if (data.value) {
+                print(" = ");
+                print_node(data.value);
             }
-            switch (data.c_prefix.size) {
-                case CSizeClass::Short:
-                    print("short ");
-                    break;
-                case CSizeClass::Long:
-                    print("long ");
-                    break;
-                case CSizeClass::LongLong:
-                    print("long long ");
-                    break;
-                default:
-                    break;
-            }
-            if (data.iden) {
-                print_node(data.iden);
+            break;
+        }
+        case NodeType::VarIdentifier: {
+            auto& data = node->data.var_identifier;
+            print(node->name);
+            if (data.size_expr) {
+                print("[");
+                print_node(data.size_expr);
+                print("]");
             }
             break;
         }

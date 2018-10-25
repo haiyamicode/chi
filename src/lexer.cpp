@@ -57,6 +57,7 @@ void Lexer::setup_keywords() {
     s_keywords["typeof"] = TokenType::KW_TYPEOF;
     s_keywords["new"] = TokenType::KW_NEW;
     s_keywords["this"] = TokenType::KW_THIS;
+    s_keywords["union"] = TokenType::KW_UNION;
 
     // C keywords
     s_keywords["inline"] = TokenType::KW_INLINE;
@@ -520,7 +521,7 @@ void Lexer::read_number(char c) {
                     buf.push_back(c);
                     c = read();
                 };
-                if (buf.size() == 2) {
+                if (buf.size() < 2) {
                     error("malformed hex constant", p);
                     return;
                 }

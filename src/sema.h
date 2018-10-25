@@ -115,9 +115,9 @@ namespace cx {
         }
     };
 
-    typedef array<ast::Node*> NodeList;
-
     struct Scope {
+        typedef array<ast::Node*> NodeList;
+
         Scope* parent;
         ast::Node* owner = nullptr;
 

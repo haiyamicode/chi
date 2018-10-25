@@ -71,6 +71,8 @@ namespace cx {
 
         array(const array& other) = delete;
 
+        array(array&& other) = delete;
+
         array(std::initializer_list<T> values) {
             reserve(values.size());
             for (auto& value: values) {
@@ -176,6 +178,10 @@ namespace cx {
 
         bool is_empty() {
             return data.empty();
+        }
+
+        bool has_key(const K& key) {
+            return data.find(key) != data.end();
         }
 
         V* get(const K& key) {

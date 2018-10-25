@@ -44,6 +44,7 @@ namespace cx {
               KW_THIS,
               KW_EXTERN,
               KW_INLINE,
+              KW_UNION,
 
     // literals
               INT,    // 322, 0322, 0xBadFace

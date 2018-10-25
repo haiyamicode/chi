@@ -37,8 +37,9 @@ namespace cx {
                   SubtypeExpr,
                   IndexExpr,
                   TypedefDecl,
-                  TypeExpr,
-                  TypeSigil
+                  TypeSigil,
+                  EnumMember,
+                  VarIdentifier
         );
 
         MAKE_ENUM(ModuleKind, CX, CHX, HEADER)
@@ -96,8 +97,9 @@ namespace cx {
         };
 
         struct VarDecl {
-            Node* type = nullptr;
-            Node* expr = nullptr;
+            Node* identifier;
+            Node* type;
+            Node* expr;
             ChiStructField* resolved_field = nullptr;
         };
 
@@ -119,8 +121,11 @@ namespace cx {
             Node* else_node; // can be null, block node, or another if node
         };
 
+        MAKE_ENUM(ContainerKind, Struct, Enum, Union)
+
         struct StructDecl {
             array<Node*> members;
+            ContainerKind kind;
         };
 
         // composite literal
@@ -130,7 +135,7 @@ namespace cx {
 
         struct TypedefDecl {
             Node* type;
-            array<Token*> identifiers;
+            Node* identifier;
         };
 
         struct DotExpr {
@@ -140,7 +145,7 @@ namespace cx {
         };
 
         struct SubtypeExpr {
-            Node* iden;
+            Node* type;
             array<Node*> args;
         };
 
@@ -160,6 +165,10 @@ namespace cx {
             Node* decl;
         };
 
+        struct VarIdentifier {
+            Node* size_expr;
+        };
+
         MAKE_ENUM(CSizeClass,
                   Default,
                   Long,
@@ -167,21 +176,15 @@ namespace cx {
                   Short
         );
 
-        struct CTypePrefix {
-            bool is_unsigned;
-            CSizeClass size;
-        };
-
-        struct TypeExpr {
-            Node* iden;
-            CTypePrefix c_prefix;
-        };
-
         MAKE_ENUM(SigilKind, Pointer)
 
         struct TypeSigil {
             Node* type;
             SigilKind sigil;
+        };
+
+        struct EnumMember {
+            Node* value;
         };
 
         struct Node {
@@ -210,8 +213,9 @@ namespace cx {
                 SubtypeExpr subtype_expr;
                 IndexExpr index_expr;
                 TypedefDecl typedef_decl;
-                TypeExpr type_expr;
                 TypeSigil type_sigil;
+                EnumMember enum_member;
+                VarIdentifier var_identifier;
 
                 NodeData() {}
 
@@ -235,6 +239,7 @@ namespace cx {
                     AST_CASE_DESTROY_FIELD(fn_call_expr, FnCallExpr)
                     AST_CASE_DESTROY_FIELD(struct_decl, StructDecl)
                     AST_CASE_DESTROY_FIELD(typedef_decl, TypedefDecl)
+                    AST_CASE_DESTROY_FIELD(enum_member, EnumMember)
                     default:
                         break;
                 }
@@ -242,4 +247,6 @@ namespace cx {
 
         };
     }
+
+    typedef array<ast::Node*> NodeList;
 }

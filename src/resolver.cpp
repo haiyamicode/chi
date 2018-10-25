@@ -292,7 +292,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
         }
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
-            auto type = to_value_type(resolve(data.iden, scope));
+            auto type = to_value_type(resolve(data.type, scope));
             if (type->id == TypeId::Array) {
                 if (data.args.size != 1) {
                     error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, "array", 1, data.args.size);
@@ -447,7 +447,7 @@ ChiType* Resolver::create_float_type(int bit_count) {
 }
 
 Scope* ScopeResolver::push_scope(ast::Node* owner) {
-    m_current_scope = m_scopes.emplace(m_current_scope);
+    m_current_scope = m_scopes.emplace(std::make_unique<Scope>(m_current_scope))->get();
     m_current_scope->owner = owner;
     return m_current_scope;
 }
