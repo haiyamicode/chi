@@ -1,0 +1,75 @@
+enum Key {
+    Enter = 1,
+    Space,
+    Ctrl = 10,
+    Alt,
+    Delete
+};
+
+struct KeyCombination {
+    Key key;
+    Key modifier;
+};
+
+enum KeyStrokeType {
+    Single,
+    Combination
+};
+
+union KeyStrokeData {
+    Key single;
+    KeyCombination combination;
+};
+
+struct KeyStroke {
+    KeyStrokeType type;
+    KeyStrokeData data;
+};
+
+void print_key(Key key) {
+    if (key == Key.Enter) {
+        printf("Enter ({})", key);
+    }
+    if (key == Key.Ctrl) {
+        printf("Ctrl ({})", key);
+    }
+}
+
+void print_keystroke(KeyStroke ks) {
+    if (ks.type == KeyStrokeType.Single) {
+        printf("single: ", 0);
+        print_key(ks.data.single);
+    }
+    if (ks.type == KeyStrokeType.Combination) {
+        printf("combination: {{key: ", 0);
+        print_key(ks.data.combination.key);
+        printf(", modifier: ", 0);
+        print_key(ks.data.combination.modifier);
+        printf("}} ", 0);
+    }
+    printf("\n", 0);
+}
+
+int main() {
+    printf("enter_key_value: {}\n", Key.Enter);
+    printf("space_key_value: {}\n", Key.Space);
+    Key key = 12;
+    printf("key_value: {}\n", key);
+    if (key == Key.Delete) {
+        printf("delele_key: {}\n", key);
+    }
+
+    KeyStroke ks1;
+    ks1.data.single = Key.Enter;
+    ks1.type = KeyStrokeType.Single;
+    print_keystroke(ks1);
+
+    KeyStroke ks2;
+    ks2.data.combination.key = Key.Enter;
+    ks2.data.combination.modifier = Key.Ctrl;
+    ks2.type = KeyStrokeType.Single;
+    print_keystroke(ks2);
+    ks2.type = KeyStrokeType.Combination;
+    print_keystroke(ks2);
+    return 0;
+}

@@ -115,6 +115,9 @@ jit_type_t Compiler::_to_jit_type(ChiType* type) {
             for (auto& field: struct_.fields) {
                 fields.add(to_jit_type(field->type));
             }
+            if (struct_.kind == ContainerKind::Union) {
+                jit_type_create_union(fields.items, uint32_t(fields.size), 1);
+            }
             return jit_type_create_struct(fields.items, uint32_t(fields.size), 1);
         }
         case TypeId::String: {
@@ -301,7 +304,16 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             compile_construction(fn, this_, ctn_type, expr);
             return temp;
         }
-        case ast::NodeType::DotExpr:
+        case ast::NodeType::DotExpr: {
+            auto& data = expr->data.dot_expr;
+            auto ctn_type = node_get_type(data.expr);
+            if (ctn_type->id == TypeId::TypeName) {
+                auto enum_node = data.resolved_member->node;
+                auto value = enum_node->data.enum_member.resolved_value;
+                return fn->new_constant((jit_int) value);
+            }
+            // fallthrough
+        }
         case ast::NodeType::IndexExpr: {
             auto ref = compile_value_ref(fn, expr);
             return fn->insn_load_relative(ref.address, 0, ref.type);
@@ -392,6 +404,9 @@ void Compiler::compile_block(Function* fn, ast::Node* parent, ast::Node* block) 
 void Compiler::compile_struct(ast::Node* node) {
     auto type = node_get_type(node);
     auto struct_type = type->data.type_name.giving_type;
+    if (struct_type->id != TypeId::Struct) {
+        return;
+    }
     auto& struct_ = struct_type->data.struct_;
     auto struct_jit = to_jit_type(struct_type);
     auto this_ = jit_type_create_pointer(struct_jit, 1);
@@ -461,7 +476,12 @@ DotValue Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
     auto member = data.resolved_member;
     assert(member);
     if (member->field) {
-        auto offset = jit_type_get_offset(to_jit_type(ctn_type), (uint32_t) member->field->index);
+        jit_nuint offset;
+        if (ctn_type->data.struct_.kind == ContainerKind::Union) {
+            offset = 0;
+        } else {
+            offset = jit_type_get_offset(to_jit_type(ctn_type), (uint32_t) member->field->index);
+        }
         dot.field.emplace();
         dot.field->offset = offset;
         dot.field->type = to_jit_type(member_type);

@@ -16,10 +16,11 @@ namespace cx {
     struct ChiType;
 
     MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Float, Bool, String,
-              Struct, Pointer, Array)
+              Struct, Pointer, Array, Enum)
 
     struct ChiTypeTypeName {
         ChiType* giving_type;
+        ChiType* underlying_type;
         string* name;
     };
 
@@ -51,7 +52,10 @@ namespace cx {
 
     MAKE_ENUM(ResolveStatus, None, MemberTypesKnown);
 
+    MAKE_ENUM(ContainerKind, Struct, Enum, Union)
+
     struct ChiTypeStruct {
+        ContainerKind kind;
         ast::Node* node;
         array<box<ChiStructField>> fields;
         map<string, box<ChiStructMember>> members_table;

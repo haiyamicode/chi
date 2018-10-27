@@ -1,0 +1,7 @@
+enter_key_value: 1
+space_key_value: 2
+key_value: 12
+delele_key: 12
+single: Enter (1)
+single: Enter (1)
+combination: {key: Enter (1), modifier: Ctrl (10)}

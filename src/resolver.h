@@ -29,6 +29,7 @@ namespace cx {
         ChiType* parent_fn = nullptr;
         ChiType* parent_struct = nullptr;
         ChiType* value_type = nullptr;
+        int64_t next_enum_value = 0;
 
         ResolveScope set_parent_fn(ChiType* fn) const;
 
@@ -68,19 +69,21 @@ namespace cx {
 
         ChiType* to_value_type(ChiType* type);
 
-        void resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope);
+        void resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope);
 
-        void resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
+        void resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
 
         ChiStructMember* get_struct_member(ChiType* struct_type, const string& field_name);
 
-        bool should_resolve_fn_body(const ResolveScope& scope);
+        bool should_resolve_fn_body(ResolveScope& scope);
 
         void resolve(ast::Module* module);
 
-        ChiType* resolve(ast::Node* node, const ResolveScope& scope);
+        ChiType* resolve(ast::Node* node, ResolveScope& scope);
 
-        ChiType* _resolve(ast::Node* node, const ResolveScope& scope);
+        ChiType* _resolve(ast::Node* node, ResolveScope& scope);
+
+        int64_t resolve_constant_value(ast::Node* node);
 
         string to_string(ChiType* type);
 

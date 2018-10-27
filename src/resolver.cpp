@@ -93,7 +93,8 @@ void Resolver::resolve(ast::Package* package) {
 
 void Resolver::resolve(ast::Module* module) {
     m_module = module;
-    resolve(module->root, ResolveScope());
+    ResolveScope scope;
+    resolve(module->root, scope);
 }
 
 bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
@@ -107,7 +108,7 @@ ChiType* Resolver::to_value_type(ChiType* type) {
     return type;
 }
 
-ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
+ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
     static auto bool_type = create_type(TypeId::Bool);
     static auto int_type = create_type(TypeId::Int);
     static auto void_type = create_type(TypeId::Void);
@@ -126,7 +127,8 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto proto = resolve(data.fn_proto, scope);
             node->resolved_type = proto;
             if (should_resolve_fn_body(scope)) {
-                resolve(data.body, scope.set_parent_fn(proto));
+                auto fn_scope = scope.set_parent_fn(proto);
+                resolve(data.body, fn_scope);
             }
             return proto;
         }
@@ -155,7 +157,8 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto& data = node->data.var_decl;
             auto var_type = to_value_type(resolve(data.type, scope));
             if (data.expr) {
-                auto expr_type = resolve(data.expr, scope.set_value_type(var_type));
+                auto var_scope = scope.set_value_type(var_type);
+                auto expr_type = resolve(data.expr, var_scope);
                 check_assignment(node, expr_type, var_type);
             }
             return var_type;
@@ -205,9 +208,12 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto sty = expr_type;
             if (sty->id == TypeId::Pointer) {
                 sty = sty->data.pointer.elem;
-            }
-            if (sty->id == TypeId::Array) {
+            } else if (sty->id == TypeId::Array) {
                 sty = sty->data.array.internal;
+            } else if (sty->id == TypeId::TypeName) {
+                if (auto underlying_type = sty->data.type_name.underlying_type) {
+                    sty = underlying_type;
+                }
             }
             auto member = get_struct_member(sty, field_name);
             if (!member) {
@@ -271,9 +277,11 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             auto struct_type = create_type(TypeId::Struct);
             auto struct_ = &struct_type->data.struct_;
             struct_->node = node;
+            struct_->kind = data.kind;
             auto struct_scope = scope.set_parent_struct(struct_type);
             // first pass, method bodies are skipped
             struct_->resolve_status = ResolveStatus::None;
+            scope.next_enum_value = 0;
             for (auto member: data.members) {
                 resolve_struct_member(struct_type, member, struct_scope);
             }
@@ -282,12 +290,18 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             for (auto member: data.members) {
                 if (member->type == NodeType::FnDef) {
                     auto fn_type = node_get_type(member);
-                    resolve(member->data.fn_def.body, struct_scope.set_parent_fn(fn_type));
+                    auto fn_scope = struct_scope.set_parent_fn(fn_type);
+                    resolve(member->data.fn_def.body, fn_scope);
                 }
             }
             auto struct_typename = create_type(TypeId::TypeName);
             struct_typename->data.type_name.name = &node->name;
-            struct_typename->data.type_name.giving_type = struct_type;
+            if (data.kind == ContainerKind::Enum) {
+                struct_typename->data.type_name.giving_type = int_type;
+                struct_typename->data.type_name.underlying_type = struct_type;
+            } else {
+                struct_typename->data.type_name.giving_type = struct_type;
+            }
             return struct_typename;
         }
         case NodeType::SubtypeExpr: {
@@ -315,6 +329,18 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
             check_assignment(data.subscript, subscript_type, int_type);
             return expr_type->data.array.elem;
         }
+        case NodeType::EnumMember: {
+            auto& data = node->data.enum_member;
+            if (data.value) {
+                auto value_type = resolve(data.value, scope);
+                check_assignment(data.value, value_type, int_type);
+                data.resolved_value = resolve_constant_value(data.value);
+                scope.next_enum_value = data.resolved_value + 1;
+            } else {
+                data.resolved_value = scope.next_enum_value++;
+            }
+            return int_type;
+        }
         default:
             print("\n");
             panic("unhandled {}", PRINT_ENUM(node->type));
@@ -322,7 +348,7 @@ ChiType* Resolver::_resolve(ast::Node* node, const ResolveScope& scope) {
     return nullptr;
 }
 
-ChiType* Resolver::resolve(ast::Node* node, const ResolveScope& scope) {
+ChiType* Resolver::resolve(ast::Node* node, ResolveScope& scope) {
     auto cached = node_get_type(node);
     if (cached) {
         return cached;
@@ -347,7 +373,7 @@ void Resolver::context_init_builtins() {
     create_builtins();
 }
 
-void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, const ResolveScope& scope) {
+void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope) {
     auto& struct_ = struct_type->data.struct_;
     ChiStructField* field = nullptr;
     if (node->type == NodeType::VarDecl) {
@@ -355,14 +381,16 @@ void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, cons
         field->struct_ = struct_type;
         field->type = resolve(node, scope);
         node->data.var_decl.resolved_field = field;
-    } else {
+    } else if (node->type == NodeType::FnDef) {
         auto fn_type = resolve(node, scope);
         fn_type->data.fn.container = struct_type;
+    } else if (node->type == NodeType::EnumMember) {
+        resolve(node, scope);
     }
     struct_.add_member(node->name, node, field);
 }
 
-bool Resolver::should_resolve_fn_body(const ResolveScope& scope) {
+bool Resolver::should_resolve_fn_body(ResolveScope& scope) {
     auto parent_struct = scope.parent_struct;
     return !parent_struct || parent_struct->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown;
 }
@@ -375,7 +403,7 @@ ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string&
     return data.find_member(field_name);
 }
 
-void Resolver::resolve_fn_call(ast::Node* node, const ResolveScope& scope, ChiTypeFn* fn, NodeList* args) {
+void Resolver::resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args) {
     auto n_args = args->size;
     auto n_params = fn->params.size;
     if (n_args != n_params) {
@@ -444,6 +472,16 @@ ChiType* Resolver::create_float_type(int bit_count) {
     auto type = create_type(TypeId::Float);
     type->data.float_.bit_count = bit_count;
     return type;
+}
+
+int64_t Resolver::resolve_constant_value(ast::Node* node) {
+    switch (node->type) {
+        case NodeType::LiteralExpr:
+            return node->token->val.i;
+        default:
+            panic("unhandled {}", PRINT_ENUM(node->type));
+    }
+    return 0;
 }
 
 Scope* ScopeResolver::push_scope(ast::Node* owner) {

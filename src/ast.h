@@ -121,8 +121,6 @@ namespace cx {
             Node* else_node; // can be null, block node, or another if node
         };
 
-        MAKE_ENUM(ContainerKind, Struct, Enum, Union)
-
         struct StructDecl {
             array<Node*> members;
             ContainerKind kind;
@@ -142,6 +140,7 @@ namespace cx {
             Node* expr;
             Token* field;
             ChiStructMember* resolved_member;
+            int64_t resolved_value;
         };
 
         struct SubtypeExpr {
@@ -185,6 +184,7 @@ namespace cx {
 
         struct EnumMember {
             Node* value;
+            int64_t resolved_value;
         };
 
         struct Node {
