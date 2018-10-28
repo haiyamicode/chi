@@ -194,9 +194,18 @@ void Compiler::compile_stmt(Function* fn, ast::Node* stmt) {
         case ast::NodeType::IfStmt: {
             auto& data = stmt->data.if_stmt;
             auto cond = compile_simple_value(fn, data.condition);
-            jit_label if_end;
-            fn->insn_branch_if_not(cond, if_end);
+            jit_label else_block, if_end;
+            fn->insn_branch_if_not(cond, else_block);
             compile_block(fn, stmt, data.then_block);
+            fn->insn_branch(if_end);
+            fn->insn_label(else_block);
+            if (data.else_node) {
+                if (data.else_node->type == ast::NodeType::Block) {
+                    compile_block(fn, stmt, data.else_node);
+                } else {
+                    compile_stmt(fn, data.else_node);
+                }
+            }
             fn->insn_label(if_end);
             break;
         }

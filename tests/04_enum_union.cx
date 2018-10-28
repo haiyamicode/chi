@@ -30,8 +30,10 @@ void print_key(Key key) {
     if (key == Key.Enter) {
         printf("Enter ({})", key);
     }
-    if (key == Key.Ctrl) {
+    else if (key == Key.Ctrl) {
         printf("Ctrl ({})", key);
+    } else {
+        printf("unhandled key ({})", key);
     }
 }
 
@@ -40,7 +42,7 @@ void print_keystroke(KeyStroke ks) {
         printf("single: ", 0);
         print_key(ks.data.single);
     }
-    if (ks.type == KeyStrokeType.Combination) {
+    else if (ks.type == KeyStrokeType.Combination) {
         printf("combination: {{key: ", 0);
         print_key(ks.data.combination.key);
         printf(", modifier: ", 0);
@@ -71,5 +73,6 @@ int main() {
     print_keystroke(ks2);
     ks2.type = KeyStrokeType.Combination;
     print_keystroke(ks2);
+    print_key(Key.Alt);
     return 0;
 }
