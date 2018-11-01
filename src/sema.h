@@ -15,10 +15,10 @@ namespace cx {
     }
     struct ChiType;
 
-    MAKE_ENUM(TypeId, TypeName, Fn, Void, Int, Float, Bool, String,
+    MAKE_ENUM(TypeId, TypeSymbol, Fn, Void, Int, Float, Bool, String,
               Struct, Pointer, Array, Enum)
 
-    struct ChiTypeTypeName {
+    struct ChiTypeTypeSymbol {
         ChiType* giving_type;
         ChiType* underlying_type;
         string* name;
@@ -80,10 +80,11 @@ namespace cx {
 
     struct ChiType {
         TypeId id;
+        optional<string> name;
 
         union Data {
             ChiTypeFn fn;
-            ChiTypeTypeName type_name;
+            ChiTypeTypeSymbol type_symbol;
             ChiTypeStruct struct_;
             ChiTypePointer pointer;
             ChiTypeArray array;

@@ -105,6 +105,8 @@ namespace cx {
 
             jit_type_t _to_jit_type(ChiType* type);
 
+            jit_type_t to_jit_int_type(ChiType* type);
+
             jit_type_t to_jit_type(ChiType* type);
 
             inline jit_type_t build_jit_type(ast::Node* node);
@@ -129,6 +131,8 @@ namespace cx {
             void add_value(ast::Node* node, const jit_value& value) { m_ctx->values[node] = value; }
 
             jit_value compile_simple_value(Function* fn, ast::Node* expr);
+            jit_value compile_assignment_value(Function* fn, ast::Node* value, ast::Node* dest);
+            jit_value compile_type_conversion(Function* fn, const jit_value& value, ChiType* from_type, ChiType* to_type);
 
             ValueRef compile_value_ref(Function *fn, ast::Node *expr);
 

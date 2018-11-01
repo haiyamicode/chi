@@ -542,8 +542,42 @@ Node* Parser::parse_binary_expr(bool lhs, Node* parent, int prec) {
     return op1;
 }
 
+Node* Parser::parse_child_expr(bool lhs, Node* parent) {
+    return parse_binary_expr(lhs, parent, DEFAULT_PREC);
+}
+
 Node* Parser::parse_unary_expr(bool lhs, Node* parent) {
-    return parse_primary_expr(lhs, parent);
+    auto token = get();
+    switch (token->type) {
+        case TokenType::MUL:
+        case TokenType::AND:
+        case TokenType::SUB:
+        case TokenType::ADD:
+        case TokenType::LNOT:
+        case TokenType::INC:
+        case TokenType::DEC: {
+            consume();
+            auto node = create_unary_expr_node(token);
+            node->data.unary_op_expr.op1 = parse_child_expr(lhs, parent);
+            return node;
+        }
+
+        case TokenType::LPAREN: {
+            consume();
+            if (next_is_type_expr()) {
+                auto node = create_node(NodeType::CastExpr, token);
+                node->data.cast_expr.dest_type = parse_type_expr();
+                expect(TokenType::RPAREN);
+                node->data.cast_expr.expr = parse_child_expr(lhs, parent);
+                return node;
+            } else {
+                unread();
+            }
+        }
+
+        default:
+            return parse_primary_expr(lhs, parent);
+    }
 }
 
 Node* Parser::parse_primary_expr(bool lhs, Node* parent) {
@@ -562,6 +596,15 @@ Node* Parser::parse_primary_expr(bool lhs, Node* parent) {
             case TokenType::LPAREN:
                 node = parse_fn_call_expr(node, lhs, parent);
                 break;
+
+            case TokenType::INC:
+            case TokenType::DEC: {
+                auto op1 = node;
+                node = create_unary_expr_node(read());
+                node->data.unary_op_expr.op1 = op1;
+                node->data.unary_op_expr.is_suffix = true;
+                return node;
+            }
 
             default:
                 return node;
@@ -592,7 +635,7 @@ Node* Parser::parse_operand(bool lhs, Node* parent) {
         case TokenType::LPAREN: {
             consume();
             auto node = create_node(NodeType::ParenExpr, token);
-            node->data.child_expr = parse_binary_expr(lhs, parent, DEFAULT_PREC);
+            node->data.child_expr = parse_child_expr(lhs, parent);
             expect(TokenType::RPAREN);
             return node;
         }
@@ -615,7 +658,7 @@ Node* Parser::parse_fn_call_expr(Node* fn_expr, bool lhs, Node* parent) {
         if (tok->type == TokenType::RPAREN) {
             break;
         } else {
-            auto arg = parse_binary_expr(lhs, parent, COMMA_PREC + 1);
+            auto arg = parse_child_expr(lhs, parent);
             node->data.fn_call_expr.args.add(arg);
         }
         if (!at_comma(TokenType::RPAREN)) {
@@ -789,5 +832,11 @@ Node* Parser::parse_enum_member() {
     if (!next_is(TokenType::RBRACE)) {
         expect(TokenType::COMMA);
     }
+    return node;
+}
+
+Node* Parser::create_unary_expr_node(Token* token) {
+    auto node = create_node(NodeType::UnaryOpExpr, token);
+    node->data.unary_op_expr.op_type = token->type;
     return node;
 }

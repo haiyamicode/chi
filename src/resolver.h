@@ -67,6 +67,10 @@ namespace cx {
 
         void check_assignment(ast::Node* node, ChiType* from_type, ChiType* to_type);
 
+        void check_cast(ast::Node* node, ChiType* from_type, ChiType* to_type);
+
+        bool type_is_int(ChiType* type) { return type->id == TypeId::Int; }
+
         ChiType* to_value_type(ChiType* type);
 
         void resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope);

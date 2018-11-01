@@ -24,6 +24,7 @@ namespace cx {
                   ReturnStmt,
                   VarDecl,
                   BinOpExpr,
+                  UnaryOpExpr,
                   LiteralExpr,
                   IfStmt,
                   FnCallExpr,
@@ -39,7 +40,8 @@ namespace cx {
                   TypedefDecl,
                   TypeSigil,
                   EnumMember,
-                  VarIdentifier
+                  VarIdentifier,
+                  CastExpr
         );
 
         MAKE_ENUM(ModuleKind, CX, CHX, HEADER)
@@ -109,6 +111,12 @@ namespace cx {
             Node* op2;
         };
 
+        struct UnaryOpExpr {
+            TokenType op_type;
+            Node* op1;
+            bool is_suffix;
+        };
+
         struct FnCallExpr {
             Node* fn_ref_expr;
             array<Node*> args;
@@ -168,6 +176,11 @@ namespace cx {
             Node* size_expr;
         };
 
+        struct CastExpr {
+            Node* dest_type;
+            Node* expr;
+        };
+
         MAKE_ENUM(CSizeClass,
                   Default,
                   Long,
@@ -204,6 +217,7 @@ namespace cx {
                 VarDecl var_decl;
                 FnCallExpr fn_call_expr;
                 BinOpExpr bin_op_expr;
+                UnaryOpExpr unary_op_expr;
                 Node* child_expr;
                 Identifier identifier;
                 IfStmt if_stmt;
@@ -216,6 +230,7 @@ namespace cx {
                 TypeSigil type_sigil;
                 EnumMember enum_member;
                 VarIdentifier var_identifier;
+                CastExpr cast_expr;
 
                 NodeData() {}
 

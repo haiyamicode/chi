@@ -237,6 +237,25 @@ void AstPrinter::print_node(Node* node) {
             }
             break;
         }
+        case NodeType::UnaryOpExpr: {
+            auto& data = node->data.unary_op_expr;
+            if (!data.is_suffix) {
+                print("{}", get_token_symbol(data.op_type));
+                print_node(data.op1);
+            } else {
+                print_node(data.op1);
+                print("{}", get_token_symbol(data.op_type));
+            }
+            break;
+        }
+        case NodeType::CastExpr: {
+            auto& data = node->data.cast_expr;
+            print("(");
+            print_node(data.dest_type);
+            print(")");
+            print_node(data.expr);
+            break;
+        }
         default:
             print("\n");
             panic("unhandled {}", PRINT_ENUM(node->type));

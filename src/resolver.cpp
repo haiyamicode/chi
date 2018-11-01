@@ -22,15 +22,17 @@ ast::Node* Resolver::add_primitive(const string& name, ChiType* type) {
     node->name = name;
     m_ctx->builtins.add(node);
 
-    auto type_name = create_type(TypeId::TypeName);
-    type_name->data.type_name.name = &node->name;
-    type_name->data.type_name.giving_type = type;
-    node->resolved_type = type_name;
+    auto sym = create_type(TypeId::TypeSymbol);
+    sym->data.type_symbol.name = &node->name;
+    type->name = name;
+    sym->data.type_symbol.giving_type = type;
+    node->resolved_type = sym;
     return node;
 }
 
 void Resolver::create_primitives() {
     add_primitive("bool", create_type(TypeId::Bool));
+    add_primitive("string", create_type(TypeId::String));
     add_primitive("void", create_type(TypeId::Void));
     add_primitive("array", create_type(TypeId::Array));
     add_primitive("int", create_int_type(32, false));
@@ -38,6 +40,7 @@ void Resolver::create_primitives() {
     add_primitive("int16", create_int_type(16, false));
     add_primitive("int32", create_int_type(32, false));
     add_primitive("int64", create_int_type(64, false));
+    add_primitive("uint", create_int_type(32, true));
     add_primitive("uint8", create_int_type(8, true));
     add_primitive("uint16", create_int_type(16, true));
     add_primitive("uint32", create_int_type(32, true));
@@ -98,19 +101,35 @@ void Resolver::resolve(ast::Module* module) {
 }
 
 bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
+    static auto int_type = create_int_type(32, false);
+    switch (to_type->id) {
+        case TypeId::Void:
+            return false;
+        case TypeId::Pointer:
+            return from_type->id == TypeId::Pointer || can_assign(from_type, int_type);
+        case TypeId::Int:
+            return type_is_int(from_type) ||
+                   from_type->id == TypeId::Pointer || from_type->id == TypeId::Bool;
+        case TypeId::Struct:
+            return from_type == to_type;
+        case TypeId::Bool:
+            return from_type->id == TypeId::Bool || type_is_int(from_type);
+        default:
+            break;
+    }
     return from_type->id == to_type->id;
 }
 
 ChiType* Resolver::to_value_type(ChiType* type) {
-    if (type->id == TypeId::TypeName) {
-        return type->data.type_name.giving_type;
+    if (type->id == TypeId::TypeSymbol) {
+        return type->data.type_symbol.giving_type;
     }
     return type;
 }
 
 ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
     static auto bool_type = create_type(TypeId::Bool);
-    static auto int_type = create_type(TypeId::Int);
+    static auto int_type = create_int_type(32, false);
     static auto void_type = create_type(TypeId::Void);
 
     switch (node->type) {
@@ -149,6 +168,14 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             auto type = resolve(data.decl, scope);
             return type;
         }
+        case NodeType::TypeSigil: {
+            auto& data = node->data.type_sigil;
+            auto type = to_value_type(resolve(data.type, scope));
+            auto sym = create_type(TypeId::TypeSymbol);
+            sym->data.type_symbol.name = nullptr;
+            sym->data.type_symbol.giving_type = create_pointer_type(type, false);
+            return sym;
+        }
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
             return to_value_type(resolve(data.type, scope));
@@ -179,11 +206,42 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     return t1;
             }
         }
+        case NodeType::UnaryOpExpr: {
+            auto& data = node->data.unary_op_expr;
+            auto t = resolve(data.op1, scope);
+            switch (data.op_type) {
+                case TokenType::SUB:
+                case TokenType::ADD:
+                case TokenType::INC:
+                case TokenType::DEC:
+                    check_assignment(node, t, int_type);
+                    return t->id == TypeId::Bool ? int_type : t;
+                case TokenType::LNOT:
+                    check_assignment(node, t, bool_type);
+                    return bool_type;
+                case TokenType::MUL:
+                    if (t->id != TypeId::Pointer || t->data.pointer.elem->id == TypeId::Void) {
+                        error(node, errors::INVALID_OPERATOR, get_token_symbol(data.op_type), to_string(t));
+                        return nullptr;
+                    }
+                    return t->data.pointer.elem;
+                case TokenType::AND:
+                    return create_pointer_type(t, false);
+                default:
+                    unreachable();
+            }
+        }
+        case NodeType::CastExpr: {
+            auto& data = node->data.cast_expr;
+            auto dest_type = to_value_type(resolve(data.dest_type, scope));
+            check_cast(node, resolve(data.expr, scope), dest_type);
+            return dest_type;
+        }
         case NodeType::LiteralExpr: {
             auto token = node->token;
             switch (token->type) {
                 case TokenType::INT:
-                    return create_type(TypeId::Int);
+                    return int_type;
                 case TokenType::STRING:
                     return create_type(TypeId::String);
                 default:
@@ -210,8 +268,8 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                 sty = sty->data.pointer.elem;
             } else if (sty->id == TypeId::Array) {
                 sty = sty->data.array.internal;
-            } else if (sty->id == TypeId::TypeName) {
-                if (auto underlying_type = sty->data.type_name.underlying_type) {
+            } else if (sty->id == TypeId::TypeSymbol) {
+                if (auto underlying_type = sty->data.type_symbol.underlying_type) {
                     sty = underlying_type;
                 }
             }
@@ -275,6 +333,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::StructDecl: {
             auto& data = node->data.struct_decl;
             auto struct_type = create_type(TypeId::Struct);
+            struct_type->name = node->name;
             auto struct_ = &struct_type->data.struct_;
             struct_->node = node;
             struct_->kind = data.kind;
@@ -294,15 +353,15 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     resolve(member->data.fn_def.body, fn_scope);
                 }
             }
-            auto struct_typename = create_type(TypeId::TypeName);
-            struct_typename->data.type_name.name = &node->name;
+            auto sym = create_type(TypeId::TypeSymbol);
+            sym->data.type_symbol.name = &node->name;
             if (data.kind == ContainerKind::Enum) {
-                struct_typename->data.type_name.giving_type = int_type;
-                struct_typename->data.type_name.underlying_type = struct_type;
+                sym->data.type_symbol.giving_type = int_type;
+                sym->data.type_symbol.underlying_type = struct_type;
             } else {
-                struct_typename->data.type_name.giving_type = struct_type;
+                sym->data.type_symbol.giving_type = struct_type;
             }
-            return struct_typename;
+            return sym;
         }
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
@@ -359,6 +418,17 @@ ChiType* Resolver::resolve(ast::Node* node, ResolveScope& scope) {
 }
 
 string Resolver::to_string(ChiType* type) {
+    if (type->name) {
+        return *type->name;
+    }
+    switch (type->id) {
+        case TypeId::String:
+            return "string";
+        case TypeId::Pointer:
+            return to_string(type->data.pointer.elem) + "*";
+        default:
+            break;
+    }
     return PRINT_ENUM(type->id);
 }
 
@@ -366,6 +436,10 @@ void Resolver::check_assignment(ast::Node* node, ChiType* from_type, ChiType* to
     if (!can_assign(from_type, to_type)) {
         error(node, errors::CANNOT_CONVERT, to_string(from_type), to_string(to_type));
     }
+}
+
+void Resolver::check_cast(ast::Node* node, ChiType* from_type, ChiType* to_type) {
+    check_assignment(node, from_type, to_type);
 }
 
 void Resolver::context_init_builtins() {

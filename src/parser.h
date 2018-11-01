@@ -67,6 +67,8 @@ namespace cx {
 
         Node* create_identifier_node(Token* iden, Node* decl);
 
+        Node* create_unary_expr_node(Token* token);
+
         ContainerKind get_container_kind(TokenType keyword);
 
         Node* create_type_sigil_node(Node* type, SigilKind sigil);
@@ -130,6 +132,8 @@ namespace cx {
         Node* parse_expr_clause(bool lhs);
 
         Node* parse_binary_expr(bool lhs, Node* parent, int prec);
+
+        Node* parse_child_expr(bool lhs, Node* parent);
 
         Node* parse_unary_expr(bool lhs, Node* parent);
 

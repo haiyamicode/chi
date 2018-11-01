@@ -23,5 +23,6 @@ namespace cx {
         constexpr auto MEMBER_NOT_FOUND = "member '{}' not found for type {}";
         constexpr auto COMPLIT_CANNOT_INFER_TYPE = "cannot infer type for composite literal";
         constexpr auto CANNOT_SUBSCRIPT = "cannot perform array subscript on type {}";
+        constexpr auto INVALID_OPERATOR = "invalid operator {} on type {}";
     }
 }
