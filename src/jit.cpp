@@ -242,6 +242,40 @@ void Compiler::compile_stmt(Function* fn, ast::Node* stmt) {
             fn->insn_label(if_end);
             break;
         }
+        case ast::NodeType::ForStmt: {
+            auto& data = stmt->data.for_stmt;
+            auto loop = fn->push_loop();
+            if (data.init) {
+                compile_stmt(fn, data.init);
+            }
+            fn->insn_label(loop->start);
+            if (data.condition) {
+                auto cond = compile_simple_value(fn, data.condition);
+                fn->insn_branch_if_not(cond, loop->end);
+            }
+            compile_block(fn, stmt, data.body);
+            if (data.post) {
+                compile_stmt(fn, data.post);
+            }
+            fn->insn_branch(loop->start);
+            fn->insn_label(loop->end);
+            fn->pop_loop();
+            break;
+        }
+        case ast::NodeType::BranchStmt: {
+            auto loop = fn->get_loop();
+            switch (stmt->token->type) {
+                case TokenType::KW_BREAK:
+                    fn->insn_branch(loop->end);
+                    break;
+                case TokenType::KW_CONTINUE:
+                    fn->insn_branch(loop->start);
+                    break;
+                default:
+                    unreachable();
+            }
+            break;
+        }
         default:
             compile_simple_value(fn, stmt);
     }

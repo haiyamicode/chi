@@ -639,9 +639,8 @@ void Lexer::read_iden(char c) {
             m_tok.type = *kw;
             if (m_tok.type == TokenType::BOOL) {
                 m_tok.val.b = buf == "true" ? true : false;
-            } else {
-                m_tok.str = buf;
             }
+            m_tok.str = buf;
             return;
         }
     }
@@ -836,6 +835,9 @@ string Token::to_string() const {
         case TokenType::FLOAT:
             return fmt::format("{}", val.d);
         default:
+            if (type >= TokenType::KW_BREAK && type <= TokenType::KW_UNION) {
+                return str;
+            }
             return get_token_symbol(type);
     }
 }

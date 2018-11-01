@@ -3,7 +3,8 @@ TESTS = 00_fib.test \
     02_basic_array.test \
     03_destructors.test \
     04_enum_union.test \
-    05_ptr_casting.test
+    05_ptr_casting.test \
+    06_for_loop.test
 
 CX = ../cmake-build-debug/src/cx
 

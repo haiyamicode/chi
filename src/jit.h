@@ -21,6 +21,11 @@ namespace cx {
             ast::Node* var = nullptr;
         };
 
+        struct LoopLabels {
+            jit_label start;
+            jit_label end;
+        };
+
         typedef std::list<VarLabel> VarLabels;
 
         struct Function : public jit_function {
@@ -31,6 +36,7 @@ namespace cx {
             jit_value is_returning;
             jit_value return_value;
             std::list<VarLabels> return_labels; // state value
+            std::list<LoopLabels> loop_labels;
 
             Function(jit_type_t signature, CompileContext* _ctx, ast::Node* _node);
 
@@ -42,11 +48,13 @@ namespace cx {
 
             jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
 
-//            jit_label* get_return_label(ast::Node* var) { return var ? return_labels.get(var) : &end; }
-//            jit_label* get_return_label() { return get_return_label(current_var); }
             jit_label* get_return_label() { return &return_labels.back().back().label; }
             VarLabels* push_return_scope() { return &return_labels.emplace_back(); }
             void pop_return_scope() { return_labels.pop_back(); }
+
+            LoopLabels* push_loop() { return &loop_labels.emplace_back(); }
+            void pop_loop() { loop_labels.pop_back(); }
+            LoopLabels* get_loop() { return &loop_labels.back(); }
         };
 
         struct StructField {

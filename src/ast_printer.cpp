@@ -71,13 +71,13 @@ void AstPrinter::print_node(Node* node) {
             for (auto stmt: data.statements) {
                 print_indent(m_indent);
                 print_node(stmt);
-                if (stmt->type != NodeType::IfStmt) {
+                if (stmt->type != NodeType::IfStmt && stmt->type != NodeType::ForStmt) {
                     print(";\n");
                 }
             }
             m_indent--;
             print_indent(m_indent);
-            print("}}\n");
+            print("}}");
             break;
         }
         case NodeType::VarDecl: {
@@ -172,6 +172,11 @@ void AstPrinter::print_node(Node* node) {
             print_node(data.condition);
             print(" ");
             print_node(data.then_block);
+            if (data.else_node) {
+                print(" else ");
+                print_node(data.else_node);
+            }
+            print("\n");
             break;
         }
         case NodeType::FnCallExpr: {
@@ -254,6 +259,31 @@ void AstPrinter::print_node(Node* node) {
             print_node(data.dest_type);
             print(")");
             print_node(data.expr);
+            break;
+        }
+        case NodeType::ForStmt: {
+            auto& data = node->data.for_stmt;
+            print("for (");
+            if (data.init) {
+                print_node(data.init);
+            }
+            print(";");
+            if (data.condition) {
+                print(" ");
+                print_node(data.condition);
+            }
+            print(";");
+            if (data.post) {
+                print(" ");
+                print_node(data.post);
+            }
+            print(") ");
+            print_node(data.body);
+            print("\n");
+            break;
+        }
+        case NodeType::BranchStmt: {
+            print("{}", node->token->to_string());
             break;
         }
         default:

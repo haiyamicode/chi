@@ -24,5 +24,6 @@ namespace cx {
         constexpr auto COMPLIT_CANNOT_INFER_TYPE = "cannot infer type for composite literal";
         constexpr auto CANNOT_SUBSCRIPT = "cannot perform array subscript on type {}";
         constexpr auto INVALID_OPERATOR = "invalid operator {} on type {}";
+        constexpr auto STMT_NOT_WITHIN_LOOP = "{} statement not within a loop";
     }
 }

@@ -143,11 +143,15 @@ namespace cx {
 
         Node* parse_fn_call_expr(Node* fn_expr, bool lhs, Node* parent);
 
-        Node* parse_simple_stmt();
+        Node* parse_simple_stmt(bool semicolon = true);
 
         Node* parse_return_stmt();
 
+        Node* parse_branch_stmt();
+
         Node* parse_if_stmt();
+
+        Node* parse_for_stmt();
 
         void skip_block();
 

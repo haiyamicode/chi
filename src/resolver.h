@@ -30,12 +30,15 @@ namespace cx {
         ChiType* parent_struct = nullptr;
         ChiType* value_type = nullptr;
         int64_t next_enum_value = 0;
+        ast::Node* parent_loop = nullptr;
 
         ResolveScope set_parent_fn(ChiType* fn) const;
 
         ResolveScope set_parent_struct(ChiType* struct_) const;
 
         ResolveScope set_value_type(ChiType* value_type) const;
+
+        ResolveScope set_parent_loop(ast::Node* loop) const;
     };
 
     class Resolver {

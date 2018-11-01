@@ -41,7 +41,9 @@ namespace cx {
                   TypeSigil,
                   EnumMember,
                   VarIdentifier,
-                  CastExpr
+                  CastExpr,
+                  ForStmt,
+                  BranchStmt
         );
 
         MAKE_ENUM(ModuleKind, CX, CHX, HEADER)
@@ -181,6 +183,13 @@ namespace cx {
             Node* expr;
         };
 
+        struct ForStmt {
+            Node* init;
+            Node* condition;
+            Node* post;
+            Node* body;
+        };
+
         MAKE_ENUM(CSizeClass,
                   Default,
                   Long,
@@ -231,6 +240,7 @@ namespace cx {
                 EnumMember enum_member;
                 VarIdentifier var_identifier;
                 CastExpr cast_expr;
+                ForStmt for_stmt;
 
                 NodeData() {}
 

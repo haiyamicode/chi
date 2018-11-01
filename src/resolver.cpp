@@ -403,6 +403,28 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             }
             return int_type;
         }
+        case NodeType::ForStmt: {
+            auto& data = node->data.for_stmt;
+            if (data.init) {
+                resolve(data.init, scope);
+            }
+            if (data.condition) {
+                auto cond_type = resolve(data.condition, scope);
+                check_assignment(data.condition, cond_type, bool_type);
+            }
+            if (data.post) {
+                resolve(data.post, scope);
+            }
+            auto loop_scope = scope.set_parent_loop(node);
+            resolve(data.body, loop_scope);
+            return nullptr;
+        }
+        case NodeType::BranchStmt: {
+            if (!scope.parent_loop) {
+                error(node, errors::STMT_NOT_WITHIN_LOOP, node->token->to_string());
+            }
+            return nullptr;
+        }
         default:
             print("\n");
             panic("unhandled {}", PRINT_ENUM(node->type));
@@ -615,4 +637,8 @@ ResolveScope ResolveScope::set_parent_struct(ChiType* struct_) const {
 
 ResolveScope ResolveScope::set_value_type(ChiType* value_type) const {
     RS_SET_PROP_COPY(value_type, value_type);
+}
+
+ResolveScope ResolveScope::set_parent_loop(ast::Node* loop) const {
+    RS_SET_PROP_COPY(parent_loop, loop);
 }

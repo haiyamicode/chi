@@ -432,6 +432,9 @@ Node* Parser::parse_stmt() {
         case TokenType::KW_IF:
             return parse_if_stmt();
 
+        case TokenType::KW_FOR:
+            return parse_for_stmt();
+
         case TokenType::KW_LET:
         case TokenType::KW_THIS:
         case TokenType::IDEN:
@@ -453,6 +456,10 @@ Node* Parser::parse_stmt() {
         case TokenType::KW_RETURN:
             return parse_return_stmt();
 
+        case TokenType::KW_CONTINUE:
+        case TokenType::KW_BREAK:
+            return parse_branch_stmt();
+
         case TokenType::LBRACE:
             return parse_block();
 
@@ -466,13 +473,15 @@ Node* Parser::parse_stmt() {
     }
 }
 
-Node* Parser::parse_simple_stmt() {
+Node* Parser::parse_simple_stmt(bool semicolon) {
     if (next_is_type_expr()) {
         auto type_expr = parse_type_expr();
         return parse_var_decl(type_expr);
     }
     auto node = parse_expr();
-    expect(TokenType::SEMICOLON);
+    if (semicolon) {
+        expect(TokenType::SEMICOLON);
+    }
     return node;
 }
 
@@ -684,6 +693,12 @@ Node* Parser::parse_return_stmt() {
     return node;
 }
 
+Node* Parser::parse_branch_stmt() {
+    auto node = create_node(NodeType::BranchStmt, read());
+    expect(TokenType::SEMICOLON);
+    return node;
+}
+
 void Parser::add_to_scope(Node* node) {
     assert(!node->name.empty());
     add_to_scope(node, node->name);
@@ -714,6 +729,31 @@ Node* Parser::parse_if_stmt() {
             error(token, "expecting if statement or block");
         }
     }
+    m_ctx->resolver->pop_scope();
+    return node;
+}
+
+Node* Parser::parse_for_stmt() {
+    auto kw = expect(TokenType::KW_FOR);
+    auto node = create_node(NodeType::ForStmt, kw);
+    m_ctx->resolver->push_scope(node);
+    if (!next_is(TokenType::LBRACE)) {
+        expect(TokenType::LPAREN);
+        if (next_is(TokenType::SEMICOLON)) {
+            consume();
+        } else {
+            node->data.for_stmt.init = parse_simple_stmt();
+        }
+        if (!next_is(TokenType::SEMICOLON)) {
+            node->data.for_stmt.condition = parse_expr();
+        }
+        expect(TokenType::SEMICOLON);
+        if (!next_is(TokenType::RPAREN)) {
+            node->data.for_stmt.post = parse_expr();
+        }
+        expect(TokenType::RPAREN);
+    }
+    node->data.for_stmt.body = parse_block();
     m_ctx->resolver->pop_scope();
     return node;
 }
