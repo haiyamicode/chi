@@ -47,6 +47,7 @@ namespace cx {
               KW_UNION,
 
     // literals
+              BOOL, // true / false
               INT,    // 322, 0322, 0xBadFace
               FLOAT,  // 322.0
               CHAR,   // '海'
@@ -121,6 +122,7 @@ namespace cx {
 
     struct Token {
         union Value {
+            bool b; // bool value
             double d;   // floating point value
             int64_t i;  // integer value
         } val;

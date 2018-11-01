@@ -287,6 +287,8 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
         case ast::NodeType::LiteralExpr: {
             auto token = expr->token;
             switch (token->type) {
+                case TokenType::BOOL:
+                    return fn->new_constant(jit_sbyte(token->val.b));
                 case TokenType::INT:
                     return fn->new_constant(jit_int(token->val.i));
                 case TokenType::STRING: {

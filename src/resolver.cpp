@@ -50,7 +50,7 @@ void Resolver::create_primitives() {
     add_primitive("double", create_float_type(64));
 }
 
-void Resolver::add_builtin(const std::string& name, ChiType* type, ast::BuiltinId builtin_id) {
+void Resolver::add_builtin_fn(const std::string& name, ChiType* type, ast::BuiltinId builtin_id) {
     auto fn = create_node(ast::NodeType::FnDef);
     fn->name = name;
     fn->data.fn_def.builtin_id = builtin_id;
@@ -59,12 +59,13 @@ void Resolver::add_builtin(const std::string& name, ChiType* type, ast::BuiltinI
 }
 
 void Resolver::create_builtins() {
+    // printf
     auto printf_type = create_type(TypeId::Fn);
     printf_type->data.fn.return_type = create_type(TypeId::Void);
     auto& params = printf_type->data.fn.params;
     params.add(create_type(TypeId::String));
     params.add(create_type(TypeId::Int));
-    add_builtin("printf", printf_type, ast::BuiltinId::Printf);
+    add_builtin_fn("printf", printf_type, ast::BuiltinId::Printf);
 }
 
 ChiType* Resolver::create_type(TypeId type_id) {
@@ -240,6 +241,8 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::LiteralExpr: {
             auto token = node->token;
             switch (token->type) {
+                case TokenType::BOOL:
+                    return bool_type;
                 case TokenType::INT:
                     return int_type;
                 case TokenType::STRING:

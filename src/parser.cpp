@@ -25,6 +25,8 @@ static string get_token_type_repr(TokenType token_type) {
             return "character";
         case TokenType::STRING:
             return "string literal";
+        case TokenType::BOOL:
+            return "bool literal";
         case TokenType::INT:
             return "int literal";
         case TokenType::FLOAT:
@@ -433,6 +435,7 @@ Node* Parser::parse_stmt() {
         case TokenType::KW_LET:
         case TokenType::KW_THIS:
         case TokenType::IDEN:
+        case TokenType::BOOL:
         case TokenType::INT:
         case TokenType::FLOAT:
         case TokenType::CHAR:
@@ -626,6 +629,7 @@ Node* Parser::parse_operand(bool lhs, Node* parent) {
             return parse_identifier();
         }
         case TokenType::INT:
+        case TokenType::BOOL:
         case TokenType::FLOAT:
         case TokenType::CHAR:
         case TokenType::STRING: {

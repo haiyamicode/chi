@@ -57,7 +57,7 @@ namespace cx {
 
         ast::Node* add_primitive(const string& name, ChiType* type);
 
-        void add_builtin(const string& name, ChiType* type, ast::BuiltinId builtin_id);
+        void add_builtin_fn(const string& name, ChiType* type, ast::BuiltinId builtin_id);
 
         void create_primitives();
 

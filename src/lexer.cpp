@@ -62,6 +62,10 @@ void Lexer::setup_keywords() {
     // C keywords
     s_keywords["inline"] = TokenType::KW_INLINE;
     s_keywords["extern"] = TokenType::KW_EXTERN;
+
+    // bool
+    s_keywords["true"] = TokenType::BOOL;
+    s_keywords["false"] = TokenType::BOOL;
 }
 
 string& Lexer::new_buf(size_t reserve) {
@@ -633,7 +637,11 @@ void Lexer::read_iden(char c) {
         auto kw = s_keywords.get(buf);
         if (kw) {
             m_tok.type = *kw;
-            m_tok.str = buf;
+            if (m_tok.type == TokenType::BOOL) {
+                m_tok.val.b = buf == "true" ? true : false;
+            } else {
+                m_tok.str = buf;
+            }
             return;
         }
     }
