@@ -36,6 +36,7 @@ namespace cx {
               KW_SELECT,
               KW_STATIC,
               KW_STRUCT,
+              KW_TRAIT,
               KW_SWITCH,
               KW_TYPEDEF,
               KW_TYPEOF,

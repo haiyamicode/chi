@@ -7,7 +7,7 @@
 
 #include "parser.h"
 #include "ast.h"
-#include "error.h"
+#include "errors.h"
 
 using namespace cx;
 using namespace cx::ast;
@@ -205,6 +205,7 @@ Node* Parser::parse_top_level_decl() {
         case TokenType::KW_STRUCT:
         case TokenType::KW_UNION:
         case TokenType::KW_ENUM:
+        case TokenType::KW_TRAIT:
             return parse_struct_decl(token->type);
         case TokenType::KW_TYPEDEF:
             return parse_typedef();
@@ -239,12 +240,12 @@ optional<FnKind> Parser::parse_decl_identifier(Token** iden) {
     return fn_kind;
 }
 
-Node* Parser::parse_var_or_fn_decl() {
+Node* Parser::parse_var_or_fn_decl(bool requires_body) {
     auto type_expr = parse_type_expr();
     Token* iden = nullptr;
     auto fn_kind = parse_decl_identifier(&iden);
     if (fn_kind) {
-        return parse_fn_decl(type_expr, iden, *fn_kind);
+        return parse_fn_decl(type_expr, iden, *fn_kind, requires_body);
     } else {
         unread();
         return parse_var_decl(type_expr);
@@ -316,7 +317,7 @@ Node* Parser::parse_type_expr() {
     return type;
 }
 
-Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind) {
+Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind, bool requires_body) {
     expect(TokenType::LPAREN);
     auto fn = create_node(NodeType::FnDef, iden);
     fn->name = iden->str;
@@ -329,7 +330,11 @@ Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind) {
         save_block_pos(fn);
         skip_block();
     } else {
-        parse_fn_block(fn);
+        if (!requires_body && next_is(TokenType::SEMICOLON)) {
+            consume();
+        } else {
+            parse_fn_block(fn);
+        }
     }
     add_to_scope(fn);
     return fn;
@@ -362,6 +367,10 @@ Node* Parser::parse_var_decl(Node* type_expr) {
     auto node = create_node(NodeType::VarDecl, iden->token);
     node->data.var_decl.type = type_expr;
     node->data.var_decl.identifier = iden;
+    if (next_is(TokenType::ELLIPSIS)) {
+        consume();
+        node->data.var_decl.is_embed = true;
+    }
     if (next_is(TokenType::ASS)) {
         consume();
         node->data.var_decl.expr = parse_expr_clause(false);
@@ -781,6 +790,8 @@ ContainerKind Parser::get_container_kind(TokenType keyword) {
             return ContainerKind::Enum;
         case TokenType::KW_UNION:
             return ContainerKind::Union;
+        case TokenType::KW_TRAIT:
+            return ContainerKind::Trait;
         default:
             return ContainerKind::Struct;
     }
@@ -806,12 +817,27 @@ Node* Parser::parse_struct_decl(TokenType keyword) {
     return node;
 }
 
+Node* Parser::parse_struct_member(ContainerKind container_kind) {
+    switch (container_kind) {
+        case ContainerKind::Enum:
+            return parse_enum_member();
+        case ContainerKind::Trait: {
+            auto node = parse_var_or_fn_decl(false);
+            if (node->type == NodeType::VarDecl) {
+                error(node->token, errors::TRAIT_FIELD_NOT_ALLOWED);
+            }
+            return node;
+        }
+        default:
+            return parse_var_or_fn_decl();
+    }
+}
+
 void Parser::parse_struct_block(Node* node) {
     expect(TokenType::LBRACE);
     m_ctx->resolver->push_scope(node);
-    bool is_enum = node->data.struct_decl.kind == ContainerKind::Enum;
     while (get()->type != TokenType::RBRACE) {
-        auto member = is_enum ? parse_enum_member() : parse_var_or_fn_decl();
+        auto member = parse_struct_member(node->data.struct_decl.kind);
         node->data.struct_decl.members.add(member);
     }
     m_ctx->resolver->pop_scope();

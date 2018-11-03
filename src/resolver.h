@@ -26,6 +26,7 @@ namespace cx {
     };
 
     struct ResolveScope {
+        bool skip_fn_bodies = false;
         ChiType* parent_fn = nullptr;
         ChiType* parent_struct = nullptr;
         ChiType* value_type = nullptr;
@@ -77,6 +78,10 @@ namespace cx {
         ChiType* to_value_type(ChiType* type);
 
         void resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope);
+
+        void resolve_struct_embed(ChiType* struct_type, ast::Node* node, ResolveScope& parent_scope);
+
+        void resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::Node* embed_node);
 
         void resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
 

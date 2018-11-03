@@ -25,5 +25,8 @@ namespace cx {
         constexpr auto CANNOT_SUBSCRIPT = "cannot perform array subscript on type {}";
         constexpr auto INVALID_OPERATOR = "invalid operator {} on type {}";
         constexpr auto STMT_NOT_WITHIN_LOOP = "{} statement not within a loop";
+        constexpr auto TRAIT_FIELD_NOT_ALLOWED = "member field declaration is not allowed within a trait";
+        constexpr auto INVALID_EMBED = "invalid embed, can only embed a trait or struct";
+        constexpr auto METHOD_NOT_IMPLEMENTED = "trait method '{}' has not been implemented";
     }
 }

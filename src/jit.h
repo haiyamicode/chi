@@ -63,9 +63,11 @@ namespace cx {
         };
 
         struct DotValue {
-            jit_value container;
+            ChiType* ctn_type;
+            jit_value ctn_value;
             optional<StructField> field;
-            DotValue(const jit_value& _container): container(_container) { }
+            optional<ast::Node*> method;
+            optional<jit_value> vtable_fn;
         };
 
         struct Array {
@@ -134,15 +136,20 @@ namespace cx {
             void compile_construction(Function* fn, jit_value_t dest, ChiType* struct_type, ast::Node* expr);
 
             Function* get_fn(ast::Node* node);
+
             Function* new_fn(jit_type_t signature, ast::Node* node);
 
             void add_value(ast::Node* node, const jit_value& value) { m_ctx->values[node] = value; }
 
             jit_value compile_simple_value(Function* fn, ast::Node* expr);
+
             jit_value compile_assignment_value(Function* fn, ast::Node* value, ast::Node* dest);
+
             jit_value compile_type_conversion(Function* fn, const jit_value& value, ChiType* from_type, ChiType* to_type);
 
             ValueRef compile_value_ref(Function *fn, ast::Node *expr);
+
+            void build_jump_table(TraitImpl* impl);
 
         public:
             Compiler(CompileContext* ctx);
@@ -155,7 +162,7 @@ namespace cx {
 
             void compile_fn_body(Function* fn);
 
-            void compile_fn(ast::Node* node);
+            Function* compile_fn(ast::Node* node);
 
             void compile(ast::Module* module);
 

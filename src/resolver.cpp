@@ -6,7 +6,7 @@
  */
 
 #include "resolver.h"
-#include "error.h"
+#include "errors.h"
 
 using namespace cx;
 
@@ -111,8 +111,25 @@ bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
         case TypeId::Int:
             return type_is_int(from_type) ||
                    from_type->id == TypeId::Pointer || from_type->id == TypeId::Bool;
-        case TypeId::Struct:
+        case TypeId::Struct: {
+            auto& dest = to_type->data.struct_;
+            if (dest.kind == ContainerKind::Trait && from_type->id == TypeId::Pointer) {
+                auto& ptr = from_type->data.pointer;
+                if (ptr.elem->id != TypeId::Struct) {
+                    return false;
+                }
+                auto& src = ptr.elem->data.struct_;
+                if (src.kind == ContainerKind::Struct) {
+                    for (auto& impl: src.traits) {
+                        if (impl->trait_type == to_type) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            }
             return from_type == to_type;
+        }
         case TypeId::Bool:
             return from_type->id == TypeId::Bool || type_is_int(from_type);
         default:
@@ -134,14 +151,39 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
     static auto void_type = create_type(TypeId::Void);
 
     switch (node->type) {
-        case NodeType::Root:
+        case NodeType::Root: {
+            // first pass: skip function and struct bodies
+            scope.skip_fn_bodies = true;
             for (auto decl: node->data.root.top_level_decls) {
                 resolve(decl, scope);
                 if (decl->type == NodeType::FnDef && decl->name == "main") {
                     node->module->package->entry_fn = decl;
                 }
             }
+
+            // second pass: resolve struct members
+            for (auto decl: node->data.root.top_level_decls) {
+                if (decl->type == NodeType::StructDecl) {
+                    _resolve(decl, scope);
+                }
+            }
+
+            // third pass: resolve struct embeds
+            for (auto decl: node->data.root.top_level_decls) {
+                if (decl->type == NodeType::StructDecl) {
+                    _resolve(decl, scope);
+                }
+            }
+
+            // fourth pass: resolve function and method bodies
+            scope.skip_fn_bodies = false;
+            for (auto decl: node->data.root.top_level_decls) {
+                if (decl->type == NodeType::StructDecl || decl->type == NodeType::FnDef) {
+                    _resolve(decl, scope);
+                }
+            }
             return nullptr;
+        }
         case NodeType::FnDef: {
             auto& data = node->data.fn_def;
             auto proto = resolve(data.fn_proto, scope);
@@ -335,34 +377,60 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         }
         case NodeType::StructDecl: {
             auto& data = node->data.struct_decl;
-            auto struct_type = create_type(TypeId::Struct);
-            struct_type->name = node->name;
-            auto struct_ = &struct_type->data.struct_;
-            struct_->node = node;
-            struct_->kind = data.kind;
-            auto struct_scope = scope.set_parent_struct(struct_type);
-            // first pass, method bodies are skipped
-            struct_->resolve_status = ResolveStatus::None;
-            scope.next_enum_value = 0;
-            for (auto member: data.members) {
-                resolve_struct_member(struct_type, member, struct_scope);
-            }
-            struct_->resolve_status = ResolveStatus::MemberTypesKnown;
-            // second pass, resolve method bodies
-            for (auto member: data.members) {
-                if (member->type == NodeType::FnDef) {
-                    auto fn_type = node_get_type(member);
-                    auto fn_scope = struct_scope.set_parent_fn(fn_type);
-                    resolve(member->data.fn_def.body, fn_scope);
+            ChiType* sym;
+            ChiType* struct_type;
+            ChiTypeStruct* struct_;
+            if (!node->resolved_type) {
+                struct_type = create_type(TypeId::Struct);
+                struct_type->name = node->name;
+                struct_ = &struct_type->data.struct_;
+                struct_->node = node;
+                struct_->kind = data.kind;
+
+                // first pass, all members are skipped
+                struct_->resolve_status = ResolveStatus::None;
+                sym = create_type(TypeId::TypeSymbol);
+                sym->data.type_symbol.name = &node->name;
+                if (data.kind == ContainerKind::Enum) {
+                    sym->data.type_symbol.giving_type = int_type;
+                    sym->data.type_symbol.underlying_type = struct_type;
+                } else {
+                    sym->data.type_symbol.giving_type = struct_type;
+                    sym->data.type_symbol.underlying_type = struct_type;
                 }
+                return sym;
             }
-            auto sym = create_type(TypeId::TypeSymbol);
-            sym->data.type_symbol.name = &node->name;
-            if (data.kind == ContainerKind::Enum) {
-                sym->data.type_symbol.giving_type = int_type;
-                sym->data.type_symbol.underlying_type = struct_type;
+            sym = node->resolved_type;
+            struct_type = sym->data.type_symbol.underlying_type;
+            struct_ = &struct_type->data.struct_;
+            auto struct_scope = scope.set_parent_struct(struct_type);
+            if (struct_->resolve_status == ResolveStatus::None) {
+                // second pass
+                scope.next_enum_value = 0;
+                for (auto member: data.members) {
+                    resolve_struct_member(struct_type, member, struct_scope);
+                }
+                struct_->resolve_status = ResolveStatus::MemberTypesKnown;
+            } else if (struct_->resolve_status == ResolveStatus::MemberTypesKnown) {
+                // third pass
+                for (auto member: data.members) {
+                    if (member->type == NodeType::VarDecl && member->data.var_decl.is_embed) {
+                        resolve_struct_embed(struct_type, member, scope);
+                    }
+                }
+                struct_->resolve_status = ResolveStatus::EmbedsResolved;
             } else {
-                sym->data.type_symbol.giving_type = struct_type;
+                // fourth pass
+                for (auto member: data.members) {
+                    if (member->type == NodeType::FnDef) {
+                        auto fn_type = node_get_type(member);
+                        auto fn_scope = struct_scope.set_parent_fn(fn_type);
+                        if (auto body = member->data.fn_def.body) {
+                            resolve(body, fn_scope);
+                        }
+                    }
+                }
+                struct_->resolve_status = ResolveStatus::Done;
             }
             return sym;
         }
@@ -447,6 +515,8 @@ string Resolver::to_string(ChiType* type) {
         return *type->name;
     }
     switch (type->id) {
+        case TypeId::TypeSymbol:
+            return *type->data.type_symbol.name;
         case TypeId::String:
             return "string";
         case TypeId::Pointer:
@@ -489,9 +559,62 @@ void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, Reso
     struct_.add_member(node->name, node, field);
 }
 
+void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::Node* embed_node) {
+    auto& base = base_type->data.struct_;
+    auto& derived = derived_type->data.struct_;
+    TraitImpl* trait_impl = nullptr;
+    if (base.kind == ContainerKind::Trait) {
+        trait_impl = derived.add_trait(base_type, derived_type);
+    }
+    for (auto& member: base.members) {
+        auto node = member->node;
+        if (node->type == NodeType::FnDef) {
+            auto method = derived.find_member(node->name);
+            if (node->data.fn_def.body) {
+                if (!method) {
+                    method = derived.add_member(node->name, member->node, member->field);
+                    method->orig = base_type;
+                }
+            } else if (!method) {
+                error(embed_node, errors::METHOD_NOT_IMPLEMENTED, node->name);
+                break;
+            }
+            if (trait_impl) {
+                assert(method);
+                trait_impl->impl_table.add(method);
+            }
+        }
+    }
+    for (auto& impl: base.traits) {
+        resolve_vtable(impl->trait_type, derived_type, embed_node);
+    }
+}
+
+void Resolver::resolve_struct_embed(ChiType* struct_type, ast::Node* node, ResolveScope& parent_scope) {
+    auto& container = struct_type->data.struct_;
+    auto base_type = node_get_type(node);
+    if (base_type->id != TypeId::Struct) {
+        error(node, errors::INVALID_EMBED);
+        return;
+    }
+    auto& base = base_type->data.struct_;
+    if (base.kind != ContainerKind::Struct && base.kind != ContainerKind::Trait) {
+        error(node, errors::INVALID_EMBED);
+        return;
+    }
+    if (base.resolve_status < ResolveStatus::Done) {
+        _resolve(base.node, parent_scope);
+    }
+    resolve_vtable(base_type, struct_type, node);
+}
+
 bool Resolver::should_resolve_fn_body(ResolveScope& scope) {
     auto parent_struct = scope.parent_struct;
-    return !parent_struct || parent_struct->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown;
+    if (!parent_struct) {
+        return !scope.skip_fn_bodies;
+    }
+    auto& struct_ = parent_struct->data.struct_;
+    return struct_.kind != ContainerKind::Trait && struct_.resolve_status >= ResolveStatus::MemberTypesKnown;
 }
 
 ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string& field_name) {

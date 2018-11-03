@@ -1,0 +1,46 @@
+struct Sheep {
+    Animal animal...;
+    int id;
+
+    void new(int id) {
+        this.id = id;
+    }
+
+    int get_id() {
+        return this.id;
+    }
+
+    void talk() {
+        printf("baaaaahh {}\n", this.get_id());
+    }
+};
+
+struct Cat {
+    Animal animal...;
+
+    int get_id() {
+        return 0;
+    }
+
+    void talk() {
+        printf("meeoooww {}\n", this.get_id());
+    }
+};
+
+trait Animal {
+        int get_id();
+        void talk();
+}
+
+int main() {
+    Cat cat = {};
+    Sheep sheep = {1};
+    Sheep sheep2 = {2};
+    Animal animal = &cat;
+    animal.talk();
+    animal = &sheep;
+    animal.talk();
+    animal = &sheep2;
+    animal.talk();
+    return 0;
+}

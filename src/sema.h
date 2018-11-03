@@ -48,24 +48,43 @@ namespace cx {
     struct ChiStructMember {
         ast::Node* node;
         ChiStructField* field;
+        ChiType* orig;
+        long vtable_index = -1;
     };
 
-    MAKE_ENUM(ResolveStatus, None, MemberTypesKnown);
+    typedef array<ChiStructMember*> ImplTable;
 
-    MAKE_ENUM(ContainerKind, Struct, Enum, Union)
+    struct TraitImpl {
+        ChiType* trait_type;
+        ChiType* impl_type;
+        ImplTable impl_table;
+        long id = -1;
+    };
+
+    MAKE_ENUM(ResolveStatus, None, MemberTypesKnown, EmbedsResolved, Done);
+
+    MAKE_ENUM(ContainerKind, Struct, Enum, Union, Trait)
 
     struct ChiTypeStruct {
         ContainerKind kind;
         ast::Node* node;
         array<box<ChiStructField>> fields;
-        map<string, box<ChiStructMember>> members_table;
+        array<box<ChiStructMember>> members;
+        map<string, ChiStructMember*> members_table;
+        array<box<TraitImpl>> traits;
+        map<ChiType*, TraitImpl*> traits_table;
         ResolveStatus resolve_status;
+        int vtable_size = 0;
 
         ChiStructField* add_field();
 
         ChiStructMember* add_member(const string& name, ast::Node* node, ChiStructField* field);
 
         ChiStructMember* find_member(const string& name);
+
+        TraitImpl* add_trait(ChiType* trait, ChiType* impl);
+
+        static bool is_trait(ChiType* type);
     };
 
     struct ChiTypePointer {

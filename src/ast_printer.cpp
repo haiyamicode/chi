@@ -86,6 +86,9 @@ void AstPrinter::print_node(Node* node) {
             print_node(data.type);
             print(" ");
             print_node(data.identifier);
+            if (data.is_embed) {
+                print("...");
+            }
             if (data.expr) {
                 print(" = ");
                 print_node(data.expr);
@@ -112,6 +115,8 @@ void AstPrinter::print_node(Node* node) {
                     print_node(member);
                     if (member->type == NodeType::VarDecl) {
                         print(";\n");
+                    } else if (member->type == NodeType::FnDef) {
+                        print("\n");
                     } else if (member->type == NodeType::EnumMember) {
                         if (i != data.members.size - 1) {
                             print(",\n");

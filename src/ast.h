@@ -104,6 +104,7 @@ namespace cx {
             Node* identifier;
             Node* type;
             Node* expr;
+            bool is_embed;
             ChiStructField* resolved_field = nullptr;
         };
 
