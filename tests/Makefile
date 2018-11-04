@@ -5,7 +5,7 @@ TESTS = 00_fib.test \
     04_enum_union.test \
     05_ptr_casting.test \
     06_for_loop.test \
-    07_trait.test
+    07_trait_embed.test
 
 CX = ../cmake-build-debug/src/cx
 

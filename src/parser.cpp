@@ -376,7 +376,9 @@ Node* Parser::parse_var_decl(Node* type_expr) {
         node->data.var_decl.expr = parse_expr_clause(false);
     }
     expect(TokenType::SEMICOLON);
-    add_to_scope(node);
+    if (get_scope()->owner->type != NodeType::StructDecl) {
+        add_to_scope(node);
+    }
     return node;
 }
 

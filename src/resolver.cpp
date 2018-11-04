@@ -236,7 +236,13 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::BinOpExpr: {
             auto& data = node->data.bin_op_expr;
             auto t1 = resolve(data.op1, scope);
-            auto t2 = resolve(data.op2, scope);
+            ChiType* t2;
+            if (data.op_type == TokenType::ASS) {
+                auto var_scope = scope.set_value_type(t1);
+                t2 = resolve(data.op2, var_scope);
+            } else {
+                t2 = resolve(data.op2, scope);
+            }
             check_assignment(node, t2, t1);
             switch (data.op_type) {
                 case TokenType::EQ:

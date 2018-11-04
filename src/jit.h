@@ -97,7 +97,7 @@ namespace cx {
 
         struct CompileContext {
             map<ast::Node*, box<Function>> functions;
-            map<ast::Node*, DefaultMethods> defaults;
+            map<ast::Node*, DefaultMethods> structs;
             map<ast::Node*, jit_value> values;
             map<ChiType*, jit_type_t> types;
             jit_context jit_ctx;

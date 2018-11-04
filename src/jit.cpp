@@ -601,6 +601,9 @@ void Compiler::compile_block(Function* fn, ast::Node* parent, ast::Node* block) 
 }
 
 void Compiler::compile_struct(ast::Node* node) {
+    if (m_ctx->structs.get(node)) {
+        return;
+    }
     auto type = node_get_type(node);
     auto struct_type = type->data.type_symbol.giving_type;
     if (struct_type->id != TypeId::Struct) {
@@ -609,7 +612,7 @@ void Compiler::compile_struct(ast::Node* node) {
     auto& struct_ = struct_type->data.struct_;
     auto struct_jit = to_jit_type(struct_type);
     auto this_ = jit_type_create_pointer(struct_jit, 1);
-    auto& dflt = m_ctx->defaults[node];
+    auto& dflt = m_ctx->structs[node];
 
     // default constructor
     auto cons_signature = jit_type_create_signature
@@ -625,6 +628,15 @@ void Compiler::compile_struct(ast::Node* node) {
             compile_fn(member);
         } else if (member->type == ast::NodeType::VarDecl) {
             auto& var = member->data.var_decl;
+            auto var_type = node_get_type(member);
+            // compile dependencies
+            if (var_type->id == TypeId::Struct) {
+                auto struct_decl = var_type->data.struct_.node;
+                if (struct_decl && !m_ctx->structs.get(struct_decl)) {
+                    compile_struct(struct_decl);
+                }
+            }
+            // compile assignment
             if (var.expr) {
                 auto field = var.resolved_field;
                 assert(field);
@@ -714,7 +726,7 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* str
         return;
     }
     auto& struct_ = struct_type->data.struct_;
-    auto& dflt = m_ctx->defaults[struct_.node];
+    auto& dflt = m_ctx->structs[struct_.node];
     fn->insn_call(dflt.constructor.get(), &dest, 1);
     auto cons_member = struct_.find_member("new");
     if (cons_member) {
@@ -779,7 +791,7 @@ void Compiler::compile_var_destroy(Function* fn, ast::Node* var, jit_value& addr
             break;
         case TypeId::Struct: {
             auto& struct_ = type->data.struct_;
-            auto& dflt = m_ctx->defaults[struct_.node];
+            auto& dflt = m_ctx->structs[struct_.node];
             jit_value_t args[] = {address.raw()};
             fn->insn_call(dflt.destructor.get(), args, 1);
             if (auto destructor = struct_.find_member("delete")) {
