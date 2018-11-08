@@ -29,7 +29,6 @@ namespace cx {
               KW_GOTO,
               KW_WHILE,
               KW_IF,
-              KW_INTERFACE,
               KW_PUBLIC,
               KW_PRIVATE,
               KW_RETURN,
@@ -46,6 +45,7 @@ namespace cx {
               KW_EXTERN,
               KW_INLINE,
               KW_UNION,
+              KW_TEMPLATE,
 
     // literals
               BOOL, // true / false

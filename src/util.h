@@ -69,9 +69,17 @@ namespace cx {
 
         array() {}
 
-        array(const array& other) = delete;
+        array(const array<T>& other) = delete;
 
-        array(array&& other) = delete;
+        array(array<T>&& other) = delete;
+
+//        array(const array<T>& other) {
+//            size = 0;
+//            reserve(other.size);
+//            for (auto item: other) {
+//                add(item);
+//            }
+//        }
 
         array(std::initializer_list<T> values) {
             reserve(values.size());

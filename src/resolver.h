@@ -21,6 +21,7 @@ namespace cx {
         Allocator* allocator;
         array<ast::Node*> builtins;
         map<ChiType*, ChiType*> array_types;
+        map<ChiType*, ChiType*> pointer_types;
 
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
@@ -42,16 +43,24 @@ namespace cx {
         ResolveScope set_parent_loop(ast::Node* loop) const;
     };
 
+    struct ResolvedMember {
+        ChiStructMember* member;
+        ChiType* resolved_type;
+    };
+
     class Resolver {
+        typedef array<ChiType*> TypeList;
         ResolveContext* m_ctx;
 
         ast::Module* m_module = nullptr;
 
         ChiType* create_type(TypeId type_id);
 
-        ChiType* create_pointer_type(ChiType* elem, bool is_ref);
+        ChiType* create_type_symbol(string* name, ChiType* type);
 
-        ChiType* create_array_type(ChiType* elem);
+        ChiType* get_pointer_type(ChiType* elem);
+
+        ChiType* get_array_type(ChiType* elem);
 
         ChiType* create_int_type(int bit_count, bool is_unsigned);
 
@@ -69,6 +78,8 @@ namespace cx {
 
         bool can_assign(ChiType* from_type, ChiType* to_type);
 
+        bool is_same_type(ChiType* a, ChiType* b);
+
         void check_assignment(ast::Node* node, ChiType* from_type, ChiType* to_type);
 
         void check_cast(ast::Node* node, ChiType* from_type, ChiType* to_type);
@@ -76,6 +87,8 @@ namespace cx {
         bool type_is_int(ChiType* type) { return type->id == TypeId::Int; }
 
         ChiType* to_value_type(ChiType* type);
+
+        ChiType* resolve_value(ast::Node* node, ResolveScope& scope);
 
         void resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope);
 
@@ -85,7 +98,11 @@ namespace cx {
 
         void resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
 
-        ChiStructMember* get_struct_member(ChiType* struct_type, const string& field_name);
+        ChiType* type_placeholders_sub(ChiType* type, TypeList& subs);
+
+        void type_placeholders_sub_each(TypeList& input, TypeList& subs, TypeList& output);
+
+        ResolvedMember get_struct_member(ChiType* struct_type, const string& field_name);
 
         bool should_resolve_fn_body(ResolveScope& scope);
 
@@ -117,6 +134,8 @@ namespace cx {
         ast::Node* get_builtin(const string& name);
 
         ChiType* node_get_type(ast::Node* node);
+
+        ChiType* get_subtype(ChiType* generic, array<ChiType*>& type_args);
 
         void resolve(ast::Package* package);
     };

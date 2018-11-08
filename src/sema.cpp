@@ -44,6 +44,10 @@ bool ChiTypeStruct::is_trait(ChiType* type) {
     return type->id == TypeId::Struct && type->data.struct_.kind == ContainerKind::Trait;
 }
 
+bool ChiTypeStruct::is_generic(ChiType* type) {
+    return type->id == TypeId::Struct && type->data.struct_.type_params.size > 0;
+}
+
 ast::Node* Scope::find_one(const string& symbol) {
     if (auto val = symbols.get(symbol)) {
         return val->at(0);

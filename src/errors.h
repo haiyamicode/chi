@@ -21,12 +21,13 @@ namespace cx {
         constexpr auto SUBTYPE_WRONG_NUMBER_OF_ARGS = "wrong number of type arguments for {}, expected {}, got {}";
         constexpr auto CANNOT_CALL_NON_FUNCTION = "cannot call non-function value";
         constexpr auto MEMBER_NOT_FOUND = "member '{}' not found for type {}";
-        constexpr auto COMPLIT_CANNOT_INFER_TYPE = "cannot infer type for composite literal";
+        constexpr auto CONSTRUCT_CANNOT_INFER_TYPE = "cannot infer type for construct expression";
         constexpr auto CANNOT_SUBSCRIPT = "cannot perform array subscript on type {}";
         constexpr auto INVALID_OPERATOR = "invalid operator {} on type {}";
         constexpr auto STMT_NOT_WITHIN_LOOP = "{} statement not within a loop";
         constexpr auto TRAIT_FIELD_NOT_ALLOWED = "member field declaration is not allowed within a trait";
         constexpr auto INVALID_EMBED = "invalid embed, can only embed a trait or struct";
         constexpr auto METHOD_NOT_IMPLEMENTED = "trait method '{}' has not been implemented";
+        constexpr auto MISSING_TYPE_ARGUMENTS = "type arguments are required for generic type '{}'";
     }
 }

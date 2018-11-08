@@ -31,9 +31,9 @@ namespace cx {
                   Primitive,
                   Identifier,
                   EmptyStmt,
+                  ConstructExpr,
                   ParenExpr,
                   StructDecl,
-                  ComplitExpr,
                   DotExpr,
                   SubtypeExpr,
                   IndexExpr,
@@ -43,7 +43,8 @@ namespace cx {
                   VarIdentifier,
                   CastExpr,
                   ForStmt,
-                  BranchStmt
+                  BranchStmt,
+                  TypeParam
         );
 
         MAKE_ENUM(ModuleKind, CX, CHX, HEADER)
@@ -92,6 +93,11 @@ namespace cx {
             Node* type;
         };
 
+        struct TypeParam {
+            Node* type;
+            long index;
+        };
+
         struct Block {
             array<Node*> statements;
         };
@@ -135,11 +141,13 @@ namespace cx {
         struct StructDecl {
             array<Node*> members;
             ContainerKind kind;
+            array<Node*> type_params;
         };
 
         // composite literal
-        struct ComplitExpr {
+        struct ConstructExpr {
             array<Node*> items;
+            Node* type;
         };
 
         struct TypedefDecl {
@@ -232,7 +240,7 @@ namespace cx {
                 Identifier identifier;
                 IfStmt if_stmt;
                 StructDecl struct_decl;
-                ComplitExpr complit_expr;
+                ConstructExpr construct_expr;
                 DotExpr dot_expr;
                 SubtypeExpr subtype_expr;
                 IndexExpr index_expr;
@@ -242,6 +250,7 @@ namespace cx {
                 VarIdentifier var_identifier;
                 CastExpr cast_expr;
                 ForStmt for_stmt;
+                TypeParam type_param;
 
                 NodeData() {}
 

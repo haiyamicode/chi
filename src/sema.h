@@ -16,12 +16,12 @@ namespace cx {
     struct ChiType;
 
     MAKE_ENUM(TypeId, TypeSymbol, Fn, Void, Int, Float, Bool, String,
-              Struct, Pointer, Array, Enum)
+              Struct, Pointer, Array, Enum, Any, Subtype, Placeholder)
 
     struct ChiTypeTypeSymbol {
         ChiType* giving_type;
         ChiType* underlying_type;
-        string* name;
+        bool is_placeholder; // is generic placeholder symbol
     };
 
     struct ChiTypeInt {
@@ -48,7 +48,8 @@ namespace cx {
     struct ChiStructMember {
         ast::Node* node;
         ChiStructField* field;
-        ChiType* orig;
+        ChiType* orig_parent;
+        ChiType* resolved_type;
         long vtable_index = -1;
     };
 
@@ -73,6 +74,8 @@ namespace cx {
         map<string, ChiStructMember*> members_table;
         array<box<TraitImpl>> traits;
         map<ChiType*, TraitImpl*> traits_table;
+        array<ChiType*> type_params;
+        array<ChiType*> subtypes;
         ResolveStatus resolve_status;
         int vtable_size = 0;
 
@@ -85,11 +88,12 @@ namespace cx {
         TraitImpl* add_trait(ChiType* trait, ChiType* impl);
 
         static bool is_trait(ChiType* type);
+
+        static bool is_generic(ChiType* type);
     };
 
     struct ChiTypePointer {
         ChiType* elem;
-        bool is_ref;
     };
 
     struct ChiTypeArray {
@@ -97,9 +101,20 @@ namespace cx {
         ChiType* internal;
     };
 
+    struct ChiTypeSubtype {
+        ChiType* type;
+        array<ChiType*> args;
+    };
+
+    struct ChiTypePlaceholder {
+        ChiType* trait;
+        long index;
+    };
+
     struct ChiType {
         TypeId id;
         optional<string> name;
+        bool is_placeholder = false;
 
         union Data {
             ChiTypeFn fn;
@@ -109,6 +124,8 @@ namespace cx {
             ChiTypeArray array;
             ChiTypeInt int_;
             ChiTypeFloat float_;
+            ChiTypeSubtype subtype;
+            ChiTypePlaceholder placeholder;
 
             Data() {}
 
@@ -133,6 +150,7 @@ namespace cx {
             switch (id) {
                 CHITYPE_CASE_DESTROY_FIELD(fn, Fn, ChiTypeFn)
                 CHITYPE_CASE_DESTROY_FIELD(struct_, Struct, ChiTypeStruct)
+                CHITYPE_CASE_DESTROY_FIELD(subtype, Subtype, ChiTypeSubtype)
                 default:
                     break;
             }

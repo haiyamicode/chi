@@ -161,7 +161,7 @@ namespace cx {
 
         Node* parse_struct_decl(TokenType keyword);
 
-        Node* parse_complit_expr();
+        Node* parse_construct_expr();
 
         Node* parse_dot_expr(Node* expr);
 

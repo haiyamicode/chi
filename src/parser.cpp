@@ -163,6 +163,12 @@ Node* Parser::create_identifier_node(Token* iden, Node* decl) {
     return node;
 }
 
+Node* Parser::create_unary_expr_node(Token* token) {
+    auto node = create_node(NodeType::UnaryOpExpr, token);
+    node->data.unary_op_expr.op_type = token->type;
+    return node;
+}
+
 Node* Parser::create_error_node() {
     return create_node(NodeType::Error, read());
 }
@@ -253,12 +259,14 @@ Node* Parser::parse_var_or_fn_decl(bool requires_body) {
 }
 
 IdentifierKind Parser::get_identifier_kind(Node* node) {
-    if (node->type == NodeType::Primitive
-        || node->type == NodeType::StructDecl
-        || node->type == NodeType::TypedefDecl) {
-        return IdentifierKind::TypeName;
-    } else {
-        return IdentifierKind::Value;
+    switch (node->type) {
+        case NodeType::Primitive:
+        case NodeType::StructDecl:
+        case NodeType::TypedefDecl:
+        case NodeType::TypeParam:
+            return IdentifierKind::TypeName;
+        default:
+            return IdentifierKind::Value;
     }
 }
 
@@ -281,23 +289,12 @@ Node* Parser::create_type_sigil_node(Node* type, SigilKind sigil) {
 
 Node* Parser::parse_type_expr() {
     auto iden = parse_identifier();
-    auto type = iden;
-    for (;;) {
-        switch (get()->type) {
-            case TokenType::MUL:
-                type = create_type_sigil_node(type, SigilKind::Pointer);
-                type->token = read();
-                continue;
-            default:
-                break;
-        }
-        break;
-    }
+    auto node = iden;
     if (next_is(TokenType::LT)) {
         consume();
-        auto node = create_node(NodeType::SubtypeExpr, iden->token);
+        node = create_node(NodeType::SubtypeExpr, iden->token);
         auto& subtype = node->data.subtype_expr;
-        subtype.type = type;
+        subtype.type = iden;
         Token* token;
         for (;;) {
             token = get();
@@ -312,9 +309,19 @@ Node* Parser::parse_type_expr() {
             consume();
         }
         expect(TokenType::GT);
-        return node;
     }
-    return type;
+    for (;;) {
+        switch (get()->type) {
+            case TokenType::MUL:
+                node = create_type_sigil_node(node, SigilKind::Pointer);
+                node->token = read();
+                continue;
+            default:
+                break;
+        }
+        break;
+    }
+    return node;
 }
 
 Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind, bool requires_body) {
@@ -462,6 +469,8 @@ Node* Parser::parse_stmt() {
         case TokenType::AND:
         case TokenType::XOR:
         case TokenType::NOT:
+        case TokenType::INC:
+        case TokenType::DEC:
             return parse_simple_stmt();
 
         case TokenType::KW_RETURN:
@@ -572,10 +581,12 @@ Node* Parser::parse_child_expr(bool lhs, Node* parent) {
 Node* Parser::parse_unary_expr(bool lhs, Node* parent) {
     auto token = get();
     switch (token->type) {
+        case TokenType::ADD:
+            return parse_construct_expr();
+
         case TokenType::MUL:
         case TokenType::AND:
         case TokenType::SUB:
-        case TokenType::ADD:
         case TokenType::LNOT:
         case TokenType::INC:
         case TokenType::DEC: {
@@ -664,7 +675,7 @@ Node* Parser::parse_operand(bool lhs, Node* parent) {
             return node;
         }
         case TokenType::LBRACE: {
-            return parse_complit_expr();
+            return parse_construct_expr();
         }
         default:
             unexpected(token);
@@ -810,6 +821,28 @@ Node* Parser::parse_struct_decl(TokenType keyword) {
     auto kw = expect(keyword);
     auto iden = expect(TokenType::IDEN);
     Node* node = create_struct_node(kw, iden->str);
+    auto& params = node->data.struct_decl.type_params;
+    if (next_is(TokenType::LT)) {
+        expect(TokenType::LT);
+        Token* token;
+        for (;;) {
+            token = get();
+            if (token->type == TokenType::GT) {
+                break;
+            }
+            auto type = parse_type_expr();
+            auto param_iden = expect(TokenType::IDEN);
+            auto param_node = create_node(NodeType::TypeParam, param_iden);
+            param_node->data.type_param.type = type;
+            param_node->data.type_param.index = params.size;
+            params.add(param_node);
+            if (!at_comma(TokenType::GT)) {
+                break;
+            }
+            consume();
+        }
+        expect(TokenType::GT);
+    }
     save_block_pos(node);
     skip_block();
     if (next_is(TokenType::SEMICOLON)) {
@@ -838,6 +871,9 @@ Node* Parser::parse_struct_member(ContainerKind container_kind) {
 void Parser::parse_struct_block(Node* node) {
     expect(TokenType::LBRACE);
     m_ctx->resolver->push_scope(node);
+    for (auto param: node->data.struct_decl.type_params) {
+        add_to_scope(param);
+    }
     while (get()->type != TokenType::RBRACE) {
         auto member = parse_struct_member(node->data.struct_decl.kind);
         node->data.struct_decl.members.add(member);
@@ -846,9 +882,13 @@ void Parser::parse_struct_block(Node* node) {
     expect(TokenType::RBRACE);
 }
 
-Node* Parser::parse_complit_expr() {
-    auto lb = expect(TokenType::LBRACE);
-    auto node = create_node(NodeType::ComplitExpr, lb);
+Node* Parser::parse_construct_expr() {
+    Node* node = create_node(NodeType::ConstructExpr, get());
+    if (next_is(TokenType::ADD)) {
+        consume();
+        node->data.construct_expr.type = parse_type_expr();
+    }
+    expect(TokenType::LBRACE);
     Token* token;
     for (;;) {
         token = get();
@@ -856,7 +896,7 @@ Node* Parser::parse_complit_expr() {
             break;
         }
         auto expr = parse_expr();
-        node->data.complit_expr.items.add(expr);
+        node->data.construct_expr.items.add(expr);
         if (!at_comma(TokenType::RBRACE)) {
             break;
         }
@@ -904,11 +944,5 @@ Node* Parser::parse_enum_member() {
     if (!next_is(TokenType::RBRACE)) {
         expect(TokenType::COMMA);
     }
-    return node;
-}
-
-Node* Parser::create_unary_expr_node(Token* token) {
-    auto node = create_node(NodeType::UnaryOpExpr, token);
-    node->data.unary_op_expr.op_type = token->type;
     return node;
 }

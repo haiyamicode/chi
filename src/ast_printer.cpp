@@ -55,6 +55,7 @@ void AstPrinter::print_node(Node* node) {
             print("{}", node->name);
             break;
         }
+        case NodeType::TypeParam:
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
             print_node(data.type);
@@ -99,9 +100,14 @@ void AstPrinter::print_node(Node* node) {
             auto& data = node->data.struct_decl;
             print("{} ", node->token->str);
             if (!node->name.empty()) {
-                print("{} ", node->name);
+                print("{}", node->name);
             }
-            print("{{");
+            if (data.type_params.size) {
+                print("<");
+                print_node_list(&data.type_params);
+                print(">");
+            }
+            print(" {{");
             if (data.members.size) {
                 print("\n");
                 m_indent++;
@@ -137,8 +143,12 @@ void AstPrinter::print_node(Node* node) {
             print(".{}", data.field->str);
             break;
         }
-        case NodeType::ComplitExpr: {
-            auto& data = node->data.complit_expr;
+        case NodeType::ConstructExpr: {
+            auto& data = node->data.construct_expr;
+            if (data.type) {
+                print("+");
+                print_node(data.type);
+            }
             print("{{");
             print_node_list(&data.items);
             print("}}");

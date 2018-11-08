@@ -450,7 +450,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             }
             break;
         }
-        case ast::NodeType::ComplitExpr: {
+        case ast::NodeType::ConstructExpr: {
             auto ctn_type = node_get_type(expr);
             auto temp = fn->new_value(to_jit_type(ctn_type));
             auto this_ = fn->insn_address_of(temp).raw();
@@ -735,8 +735,8 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* str
         array<jit_value_t> args;
         args.add(dest);
         if (expr) {
-            assert(expr->type == ast::NodeType::ComplitExpr);
-            auto& data = expr->data.complit_expr;
+            assert(expr->type == ast::NodeType::ConstructExpr);
+            auto& data = expr->data.construct_expr;
             for (auto arg: data.items) {
                 auto value = compile_simple_value(fn, arg);
                 args.add(value.raw());
