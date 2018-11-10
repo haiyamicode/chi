@@ -17,7 +17,7 @@ struct LinkedList<any T> {
             this.head = this.tail;
         } else {
             Node<T>* node = this.head;
-            for (int i=0;i<10;i++) {
+            for (;;) {
                 if (!node.next) {
                     break;
                 }
