@@ -130,7 +130,7 @@ namespace cx {
 
             jit_type_t compile_type(ChiType* type);
 
-            inline jit_type_t compile_type(ast::Node* node);
+            inline jit_type_t compile_type_of(ast::Node* node);
 
             Array compile_array_ref(Function* fn, ast::Node* expr);
 

@@ -104,7 +104,7 @@ Function* Compiler::compile_fn(ast::Node* node) {
     if (auto fn = m_ctx->functions.get(node)) {
         return fn->get();
     }
-    auto fn = new_fn(compile_type(node), node);
+    auto fn = new_fn(compile_type_of(node), node);
     m_ctx->functions.emplace(node, fn);
     return fn;
 }
@@ -206,12 +206,12 @@ jit_type_t Compiler::_compile_type(ChiType* type) {
     }
 }
 
-inline jit_type_t Compiler::compile_type(cx::ast::Node* node) {
+inline jit_type_t Compiler::compile_type_of(cx::ast::Node* node) {
     return compile_type(get_type_of(node));
 }
 
 void Compiler::compile_fn_body(Function* fn) {
-    static auto printf_signature = compile_type(m_ctx->resolver.get_builtin("printf"));
+    static auto printf_signature = compile_type_of(m_ctx->resolver.get_builtin("printf"));
     if (!fn->node) {
         return;
     }
@@ -246,7 +246,7 @@ void Compiler::compile_stmt(Function* fn, ast::Node* stmt) {
     switch (stmt->type) {
         case ast::NodeType::VarDecl: {
             auto& data = stmt->data.var_decl;
-            auto var = fn->new_value(compile_type(stmt));
+            auto var = fn->new_value(compile_type_of(stmt));
             add_value(stmt, var);
             if (data.expr) {
                 fn->store(var, compile_assignment_value(fn, data.expr, stmt));
@@ -350,7 +350,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 args.add(value.raw());
             }
             if (fn_ref_vtable) {
-                return fn->insn_call_indirect_vtable(*fn_ref_vtable, compile_type(fn_ref),
+                return fn->insn_call_indirect_vtable(*fn_ref_vtable, compile_type_of(fn_ref),
                                                      args.items, uint32_t(args.size));
             }
             auto fn_instance = get_fn(fn_ref);
@@ -452,10 +452,8 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                     return value;
                 case TokenType::LNOT:
                     return fn->insn_to_not_bool(value);
-                case TokenType::MUL: {
-                    auto ptr_type = get_type_of(data.op1);
-                    return fn->insn_load_relative(value, 0, compile_type(expr));
-                }
+                case TokenType::MUL:
+                    return fn->insn_load_relative(value, 0, compile_type_of(expr));
                 default:
                     unreachable();
             }
@@ -554,7 +552,7 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
         }
         case ast::NodeType::Identifier: {
             auto value = compile_simple_value(fn, expr);
-            return {fn->insn_address_of(value), compile_type(expr)};
+            return {fn->insn_address_of(value), compile_type_of(expr)};
         }
         case ast::NodeType::ParenExpr: {
             return compile_value_ref(fn, expr->data.child_expr);
@@ -562,7 +560,7 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
         case ast::NodeType::UnaryOpExpr: {
             auto& data = expr->data.unary_op_expr;
             assert(data.op_type == TokenType::MUL);
-            return {compile_simple_value(fn, data.op1), compile_type(expr)};
+            return {compile_simple_value(fn, data.op1), compile_type_of(expr)};
         }
         default:
             unreachable();
