@@ -43,20 +43,14 @@ namespace cx {
         ResolveScope set_parent_loop(ast::Node* loop) const;
     };
 
-    struct ResolvedMember {
-        ChiStructMember* member;
-        ChiType* resolved_type;
-    };
-
     class Resolver {
-        typedef array<ChiType*> TypeList;
         ResolveContext* m_ctx;
 
         ast::Module* m_module = nullptr;
 
         ChiType* create_type(TypeId type_id);
 
-        ChiType* create_type_symbol(string* name, ChiType* type);
+        ChiType* create_type_symbol(optional<string> name, ChiType* type);
 
         ChiType* get_pointer_type(ChiType* elem);
 
@@ -86,11 +80,9 @@ namespace cx {
 
         bool type_is_int(ChiType* type) { return type->id == TypeId::Int; }
 
-        ChiType* to_value_type(ChiType* type);
-
         ChiType* resolve_value(ast::Node* node, ResolveScope& scope);
 
-        void resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope);
+        ChiStructMember* resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope);
 
         void resolve_struct_embed(ChiType* struct_type, ast::Node* node, ResolveScope& parent_scope);
 
@@ -98,11 +90,9 @@ namespace cx {
 
         void resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
 
-        ChiType* type_placeholders_sub(ChiType* type, TypeList& subs);
+        void type_placeholders_sub_each(TypeList* input, ChiTypeSubtype* subs, TypeList* output);
 
-        void type_placeholders_sub_each(TypeList& input, TypeList& subs, TypeList& output);
-
-        ResolvedMember get_struct_member(ChiType* struct_type, const string& field_name);
+        ChiStructMember* get_struct_member(ChiType* struct_type, const string& field_name);
 
         bool should_resolve_fn_body(ResolveScope& scope);
 
@@ -113,8 +103,6 @@ namespace cx {
         ChiType* _resolve(ast::Node* node, ResolveScope& scope);
 
         int64_t resolve_constant_value(ast::Node* node);
-
-        string to_string(ChiType* type);
 
         template<typename... Args>
         void error(ast::Node* node, const char* format, const Args& ...args) {
@@ -135,9 +123,17 @@ namespace cx {
 
         ChiType* node_get_type(ast::Node* node);
 
-        ChiType* get_subtype(ChiType* generic, array<ChiType*>& type_args);
+        string to_string(ChiType* type);
+
+        ChiType* to_value_type(ChiType* type);
+
+        ChiType* get_subtype(ChiType* generic, TypeList* type_args);
+
+        ChiType* resolve_subtype(ChiType* subtype);
 
         void resolve(ast::Package* package);
+
+        ChiType* type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs);
     };
 
     class ScopeResolver {

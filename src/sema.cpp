@@ -10,12 +10,15 @@
 
 using namespace cx;
 
-ChiStructMember* ChiTypeStruct::add_member(const string& name, ast::Node* node, ChiStructField* field) {
+ChiStructMember* ChiTypeStruct::add_member(const string& name, ast::Node* node, ChiType* resolved_type) {
     auto member = members.emplace(new ChiStructMember())->get();
     member->node = node;
-    member->field = field;
+    member->resolved_type = resolved_type;
     if (node->type == ast::NodeType::FnDef) {
-        member->vtable_index = vtable_size++;
+        member->method_index = vtable_size++;
+    } else {
+        member->field_index = fields.size;
+        fields.add(member);
     }
     members_table[name] = member;
     return member;
@@ -24,12 +27,6 @@ ChiStructMember* ChiTypeStruct::add_member(const string& name, ast::Node* node, 
 ChiStructMember* ChiTypeStruct::find_member(const string& name) {
     auto found = members_table.get(name);
     return found ? *found : nullptr;
-}
-
-ChiStructField* ChiTypeStruct::add_field() {
-    auto field = fields.emplace(new ChiStructField())->get();
-    field->index = fields.size - 1;
-    return field;
 }
 
 TraitImpl* ChiTypeStruct::add_trait(ChiType* trait, ChiType* impl) {
@@ -47,6 +44,8 @@ bool ChiTypeStruct::is_trait(ChiType* type) {
 bool ChiTypeStruct::is_generic(ChiType* type) {
     return type->id == TypeId::Struct && type->data.struct_.type_params.size > 0;
 }
+
+string ChiStructMember::get_name() { return node->name; }
 
 ast::Node* Scope::find_one(const string& symbol) {
     if (auto val = symbols.get(symbol)) {

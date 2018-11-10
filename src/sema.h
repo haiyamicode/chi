@@ -39,18 +39,16 @@ namespace cx {
         ChiType* container = nullptr;
     };
 
-    struct ChiStructField {
-        ChiType* type;
-        ChiType* struct_;
-        long index;
-    };
-
     struct ChiStructMember {
         ast::Node* node;
-        ChiStructField* field;
         ChiType* orig_parent;
         ChiType* resolved_type;
-        long vtable_index = -1;
+        long field_index = -1;
+        long method_index = -1;
+
+        string get_name();
+
+        bool is_field() { return field_index > -1; }
     };
 
     typedef array<ChiStructMember*> ImplTable;
@@ -62,15 +60,17 @@ namespace cx {
         long id = -1;
     };
 
-    MAKE_ENUM(ResolveStatus, None, MemberTypesKnown, EmbedsResolved, Done);
+    MAKE_ENUM(ResolveStatus, None, MemberTypesKnown, EmbedsResolved, BodiesResolved, Done);
 
     MAKE_ENUM(ContainerKind, Struct, Enum, Union, Trait)
+
+    typedef array<ChiType*> TypeList;
 
     struct ChiTypeStruct {
         ContainerKind kind;
         ast::Node* node;
-        array<box<ChiStructField>> fields;
         array<box<ChiStructMember>> members;
+        array<ChiStructMember*> fields;
         map<string, ChiStructMember*> members_table;
         array<box<TraitImpl>> traits;
         map<ChiType*, TraitImpl*> traits_table;
@@ -79,9 +79,7 @@ namespace cx {
         ResolveStatus resolve_status;
         int vtable_size = 0;
 
-        ChiStructField* add_field();
-
-        ChiStructMember* add_member(const string& name, ast::Node* node, ChiStructField* field);
+        ChiStructMember* add_member(const string& name, ast::Node* node, ChiType* resolved_type);
 
         ChiStructMember* find_member(const string& name);
 
@@ -102,8 +100,9 @@ namespace cx {
     };
 
     struct ChiTypeSubtype {
-        ChiType* type;
+        ChiType* generic;
         array<ChiType*> args;
+        ChiType* resolved_struct;
     };
 
     struct ChiTypePlaceholder {

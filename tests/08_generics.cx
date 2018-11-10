@@ -1,6 +1,6 @@
 struct Node<any T> {
     T data;
-    Node<T>* next;
+    Node<T>* next = 0;
     void new(T data) {
         this.data = data;
     }
@@ -17,7 +17,7 @@ struct LinkedList<any T> {
             this.head = this.tail;
         } else {
             Node<T>* node = this.head;
-            for (;;) {
+            for (int i=0;i<10;i++) {
                 if (!node.next) {
                     break;
                 }

@@ -111,7 +111,7 @@ namespace cx {
             Node* type;
             Node* expr;
             bool is_embed;
-            ChiStructField* resolved_field = nullptr;
+            ChiStructMember* resolved_field = nullptr;
         };
 
         struct BinOpExpr {

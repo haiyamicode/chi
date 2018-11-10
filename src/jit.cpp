@@ -24,6 +24,13 @@ void* sys_realloc(void* dest, size_t size) {
     return realloc(dest, size);
 }
 
+static jit_type_t malloc_params[] = {jit_type_nuint};
+static auto malloc_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_nint, malloc_params, 1, 1);
+
+void* sys_malloc(size_t size) {
+    return malloc(size);
+}
+
 static jit_type_t free_params[] = {jit_type_nint};
 static auto free_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_void, free_params, 1, 1);
 
@@ -58,22 +65,14 @@ Function::Function(jit_type_t signature, CompileContext* _ctx, ast::Node* _node)
         _ctx->jit_ctx, signature), ctx(_ctx), node(_node) {
     set_recompilable();
     if (node) {
-        set_qualified_name(node->data.fn_def.container, node->name);
+        qualified_name = node->name;
     }
     is_returning = this->new_value(jit_type_sys_bool);
 }
 
 void Function::build() {
-    Compiler compiler(ctx);
+    Compiler compiler(ctx, this);
     compiler.compile_fn_body(this);
-}
-
-void Function::set_qualified_name(ast::Node* container, const string& name) {
-    if (container) {
-        qualified_name = container->name + "::" + name;
-    } else {
-        qualified_name = name;
-    }
 }
 
 jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args) {
@@ -81,8 +80,13 @@ jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args
                                    (uint32_t) num_args);
 }
 
-Compiler::Compiler(CompileContext* ctx) {
+void Function::set_qualified_name(const std::string& container_name, const std::string& name) {
+    qualified_name = container_name + "::" + name;
+}
+
+Compiler::Compiler(CompileContext* ctx, Function* fn) {
     m_ctx = ctx;
+    m_fn = fn;
 }
 
 void Compiler::compile(ast::Module* module) {
@@ -100,19 +104,9 @@ Function* Compiler::compile_fn(ast::Node* node) {
     if (auto fn = m_ctx->functions.get(node)) {
         return fn->get();
     }
-    auto fn = new_fn(build_jit_type(node), node);
+    auto fn = new_fn(compile_type(node), node);
     m_ctx->functions.emplace(node, fn);
     return fn;
-}
-
-jit_type_t Compiler::to_jit_type(ChiType* type) {
-    auto cached = m_ctx->types.get(type);
-    if (cached) {
-        return *cached;
-    }
-    auto result = _to_jit_type(type);
-    m_ctx->types[type] = result;
-    return result;
 }
 
 jit_type_t Compiler::to_jit_int_type(ChiType* type) {
@@ -147,7 +141,18 @@ jit_type_t Compiler::to_jit_int_type(ChiType* type) {
     return jit_type_int;
 }
 
-jit_type_t Compiler::_to_jit_type(ChiType* type) {
+jit_type_t Compiler::compile_type(ChiType* type) {
+    type = eval_type(type);
+    auto cached = m_ctx->types.get(type);
+    if (cached) {
+        return *cached;
+    }
+    auto result = _compile_type(type);
+    m_ctx->types[type] = result;
+    return result;
+}
+
+jit_type_t Compiler::_compile_type(ChiType* type) {
     switch (type->id) {
         case TypeId::Bool:
             return jit_type_sbyte;
@@ -160,12 +165,12 @@ jit_type_t Compiler::_to_jit_type(ChiType* type) {
             array<jit_type_t> params;
             auto& fn = type->data.fn;
             if (fn.container) {
-                params.add(jit_type_create_pointer(to_jit_type(fn.container), 1));
+                params.add(jit_type_create_pointer(compile_type(fn.container), 1));
             }
             for (auto param: fn.params) {
-                params.add(to_jit_type(param));
+                params.add(compile_type(param));
             }
-            auto return_type = to_jit_type(fn.return_type);
+            auto return_type = compile_type(fn.return_type);
             return jit_type_create_signature
                     (jit_abi_cdecl, return_type, params.items, uint32_t(params.size), 1);
         }
@@ -176,34 +181,37 @@ jit_type_t Compiler::_to_jit_type(ChiType* type) {
             }
             array<jit_type_t> fields;
             for (auto& field: struct_.fields) {
-                fields.add(to_jit_type(field->type));
+                fields.add(compile_type(field->resolved_type));
             }
             if (struct_.kind == ContainerKind::Union) {
                 jit_type_create_union(fields.items, uint32_t(fields.size), 1);
             }
             return jit_type_create_struct(fields.items, uint32_t(fields.size), 1);
         }
+        case TypeId::Subtype: {
+            return compile_type(eval_type(type));
+        }
         case TypeId::String: {
             return string_type;
         }
         case TypeId::Pointer: {
-            return jit_type_create_pointer(to_jit_type(type->data.pointer.elem), 1);
+            return jit_type_nint;
         }
         case TypeId::Array: {
-            return to_jit_type(type->data.array.internal);
+            return compile_type(type->data.array.internal);
         }
         default:
-            panic("unhandled");
+            panic("unhandled {}", PRINT_ENUM(type->id));
             return {};
     }
 }
 
-inline jit_type_t Compiler::build_jit_type(cx::ast::Node* node) {
-    return to_jit_type(node_get_type(node));
+inline jit_type_t Compiler::compile_type(cx::ast::Node* node) {
+    return compile_type(get_type_of(node));
 }
 
 void Compiler::compile_fn_body(Function* fn) {
-    static auto printf_signature = build_jit_type(m_ctx->resolver.get_builtin("printf"));
+    static auto printf_signature = compile_type(m_ctx->resolver.get_builtin("printf"));
     if (!fn->node) {
         return;
     }
@@ -221,11 +229,9 @@ void Compiler::compile_fn_body(Function* fn) {
         for (uint32_t i = 0; i < proto.params.size; i++) {
             add_value(proto.params[i], fn->get_param(uint32_t(i + skip)));
         }
-        auto fn_type = node_get_type(fn->node);
+        auto fn_type = get_type_of(fn->node);
         auto& fn_end = fn->push_return_scope()->emplace_back();
-        auto s2 = fn->return_labels.size();
-        auto size = fn->return_labels.back().size();
-        fn->return_value = fn->new_value(to_jit_type(fn_type->data.fn.return_type));
+        fn->return_value = fn->new_value(compile_type(fn_type->data.fn.return_type));
         compile_block(fn, fn->node, fn_def.body);
         fn->insn_label(fn_end.label);
         fn->pop_return_scope();
@@ -240,7 +246,7 @@ void Compiler::compile_stmt(Function* fn, ast::Node* stmt) {
     switch (stmt->type) {
         case ast::NodeType::VarDecl: {
             auto& data = stmt->data.var_decl;
-            auto var = fn->new_value(build_jit_type(stmt));
+            auto var = fn->new_value(compile_type(stmt));
             add_value(stmt, var);
             if (data.expr) {
                 fn->store(var, compile_assignment_value(fn, data.expr, stmt));
@@ -344,10 +350,12 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 args.add(value.raw());
             }
             if (fn_ref_vtable) {
-                return fn->insn_call_indirect_vtable(*fn_ref_vtable, build_jit_type(fn_ref),
+                return fn->insn_call_indirect_vtable(*fn_ref_vtable, compile_type(fn_ref),
                                                      args.items, uint32_t(args.size));
             }
-            return fn->insn_call(compile_fn(fn_ref), args.items, args.size);
+            auto fn_instance = get_fn(fn_ref);
+            assert(fn_instance);
+            return fn->insn_call(fn_instance, args.items, args.size);
         }
         case ast::NodeType::Identifier: {
             auto& data = expr->data.identifier;
@@ -416,8 +424,11 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
         case ast::NodeType::UnaryOpExpr: {
             auto& data = expr->data.unary_op_expr;
             switch (data.op_type) {
-                case TokenType::AND:
-                    return compile_value_ref(fn, data.op1).address;
+                case TokenType::AND: {
+                    auto temp = fn->new_value(jit_type_nint);
+                    fn->store(temp, compile_value_ref(fn, data.op1).address);
+                    return temp;
+                }
                 case TokenType::INC:
                 case TokenType::DEC: {
                     auto ref = compile_value_ref(fn, data.op1);
@@ -442,8 +453,8 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 case TokenType::LNOT:
                     return fn->insn_to_not_bool(value);
                 case TokenType::MUL: {
-                    auto ptr_type = node_get_type(data.op1);
-                    return fn->insn_load_relative(value, 0, build_jit_type(expr));
+                    auto ptr_type = get_type_of(data.op1);
+                    return fn->insn_load_relative(value, 0, compile_type(expr));
                 }
                 default:
                     unreachable();
@@ -451,15 +462,26 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             break;
         }
         case ast::NodeType::ConstructExpr: {
-            auto ctn_type = node_get_type(expr);
-            auto temp = fn->new_value(to_jit_type(ctn_type));
-            auto this_ = fn->insn_address_of(temp).raw();
-            compile_construction(fn, this_, ctn_type, expr);
-            return temp;
+            auto& data = expr->data.construct_expr;
+            auto ctn_type = get_type_of(expr);
+            jit_value this_;
+            jit_value value;
+            if (data.type && ctn_type->id == TypeId::Pointer) {
+                ctn_type = ctn_type->data.pointer.elem;
+                jit_nuint size_value = jit_type_get_size(compile_type(ctn_type));
+                jit_value_t args[] = {fn->new_constant(size_value).raw()};
+                this_ = fn->insn_call_native("malloc", (void*) sys_malloc, malloc_signature, args, 1);
+                value = this_;
+            } else {
+                value = fn->new_value(compile_type(ctn_type));
+                this_ = fn->insn_address_of(value);
+            }
+            compile_construction(fn, this_.raw(), ctn_type, expr);
+            return value;
         }
         case ast::NodeType::DotExpr: {
             auto& data = expr->data.dot_expr;
-            auto ctn_type = node_get_type(data.expr);
+            auto ctn_type = get_type_of(data.expr);
             if (ctn_type->id == TypeId::TypeSymbol) {
                 auto enum_node = data.resolved_member->node;
                 auto value = enum_node->data.enum_member.resolved_value;
@@ -474,8 +496,8 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
         case ast::NodeType::CastExpr: {
             auto& data = expr->data.cast_expr;
             auto value = compile_simple_value(fn, data.expr);
-            auto from_type = node_get_type(data.expr);
-            auto to_type = node_get_type(expr);
+            auto from_type = get_type_of(data.expr);
+            auto to_type = get_type_of(expr);
             return compile_type_conversion(fn, value, from_type, to_type);
         }
         default:
@@ -487,8 +509,8 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
 
 jit_value Compiler::compile_assignment_value(Function* fn, ast::Node* value, ast::Node* dest) {
     auto value_ = compile_simple_value(fn, value);
-    auto src_type = node_get_type(value);
-    auto dest_type = node_get_type(dest);
+    auto src_type = get_type_of(value);
+    auto dest_type = get_type_of(dest);
     return compile_type_conversion(fn, value_, src_type, dest_type);
 }
 
@@ -510,7 +532,7 @@ jit_value Compiler::compile_type_conversion(Function* fn, const jit_value& value
         return temp;
     } else {
         if (from_type->id != to_type->id || to_type->id == TypeId::Int) {
-            return fn->insn_convert(value, to_jit_type(to_type), 0);
+            return fn->insn_convert(value, compile_type(to_type), 0);
         }
     }
     return value;
@@ -532,7 +554,7 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
         }
         case ast::NodeType::Identifier: {
             auto value = compile_simple_value(fn, expr);
-            return {fn->insn_address_of(value), build_jit_type(expr)};
+            return {fn->insn_address_of(value), compile_type(expr)};
         }
         case ast::NodeType::ParenExpr: {
             return compile_value_ref(fn, expr->data.child_expr);
@@ -540,7 +562,7 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
         case ast::NodeType::UnaryOpExpr: {
             auto& data = expr->data.unary_op_expr;
             assert(data.op_type == TokenType::MUL);
-            return {compile_simple_value(fn, data.op1), build_jit_type(expr)};
+            return {compile_simple_value(fn, data.op1), compile_type(expr)};
         }
         default:
             unreachable();
@@ -601,47 +623,65 @@ void Compiler::compile_block(Function* fn, ast::Node* parent, ast::Node* block) 
 }
 
 void Compiler::compile_struct(ast::Node* node) {
-    if (m_ctx->structs.get(node)) {
+    auto struct_type = get_resolver()->to_value_type(get_type_of(node));
+    if (m_ctx->structs.get(struct_type)) {
         return;
     }
-    auto type = node_get_type(node);
-    auto struct_type = type->data.type_symbol.giving_type;
     if (struct_type->id != TypeId::Struct) {
         return;
     }
+    if (!ChiTypeStruct::is_generic(struct_type)) {
+        return _compile_struct(node, struct_type);
+    }
+    get_struct_data(struct_type);
     auto& struct_ = struct_type->data.struct_;
-    auto struct_jit = to_jit_type(struct_type);
+    for (auto subtype: struct_.subtypes) {
+        if (subtype->is_placeholder) {
+            continue;
+        }
+        _compile_struct(node, subtype);
+    }
+}
+
+void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
+    ChiTypeSubtype* subtype = nullptr;
+    if (struct_type->id == TypeId::Subtype) {
+        subtype = &struct_type->data.subtype;
+        struct_type = subtype->resolved_struct;
+    }
+    auto& struct_ = struct_type->data.struct_;
+    auto struct_jit = compile_type(struct_type);
     auto this_ = jit_type_create_pointer(struct_jit, 1);
-    auto& dflt = m_ctx->structs[node];
+    auto sdata = get_struct_data(struct_type);
 
     // default constructor
     auto cons_signature = jit_type_create_signature
             (jit_abi_cdecl, jit_type_void, &this_, uint32_t(1), 1);
     auto constructor = new_fn(cons_signature, nullptr);
-    dflt.constructor.reset(constructor);
-    constructor->set_qualified_name(node, "_new");
+    fn_method(constructor, "_new", struct_type, subtype);
+    sdata->constructor.reset(constructor);
 
-    auto& data = node->data.struct_decl;
     auto cons_this = constructor->get_param(0);
-    for (auto member: data.members) {
-        if (member->type == ast::NodeType::FnDef) {
-            compile_fn(member);
-        } else if (member->type == ast::NodeType::VarDecl) {
-            auto& var = member->data.var_decl;
-            auto var_type = node_get_type(member);
+    for (auto& member: struct_.members) {
+        auto node_type = member->node->type;
+        if (node_type == ast::NodeType::FnDef) {
+            auto method = compile_fn(member->node);
+            fn_method(method, member->get_name(), struct_type, subtype);
+        } else if (node_type == ast::NodeType::VarDecl) {
+            auto& var = member->node->data.var_decl;
+            auto var_type = member->resolved_type;
             // compile dependencies
             if (var_type->id == TypeId::Struct) {
                 auto struct_decl = var_type->data.struct_.node;
-                if (struct_decl && !m_ctx->structs.get(struct_decl)) {
+                if (struct_decl && !m_ctx->structs.get(var_type)) {
                     compile_struct(struct_decl);
                 }
             }
             // compile assignment
             if (var.expr) {
                 auto field = var.resolved_field;
-                assert(field);
-                auto offset = jit_type_get_offset(struct_jit, (uint32_t) field->index);
-                auto value = compile_assignment_value(constructor, var.expr, member);
+                auto offset = jit_type_get_offset(struct_jit, (uint32_t) field->field_index);
+                auto value = compile_assignment_value(constructor, var.expr, member->node);
                 constructor->insn_store_relative(cons_this, offset, value);
             }
         }
@@ -651,18 +691,17 @@ void Compiler::compile_struct(ast::Node* node) {
     auto des_signature = jit_type_create_signature
             (jit_abi_cdecl, jit_type_void, &this_, uint32_t(1), 1);
     auto destructor = new_fn(des_signature, nullptr);
-    dflt.destructor.reset(destructor);
-    destructor->set_qualified_name(node, "_delete");
+    fn_method(destructor, "_delete", struct_type, subtype);
+    sdata->destructor.reset(destructor);
 
     auto des_this = destructor->get_param(0);
-    for (long i = data.members.size - 1; i >= 0; i--) {
-        auto member = data.members[i];
-        if (member->type == ast::NodeType::VarDecl) {
-            if (should_destroy(member)) {
-                auto field = member->data.var_decl.resolved_field;
-                auto offset = jit_type_get_offset(struct_jit, (uint32_t) field->index);
+    for (long i = struct_.members.size - 1; i >= 0; i--) {
+        auto& member = struct_.members[i];
+        if (member->node->type == ast::NodeType::VarDecl) {
+            if (should_destroy(member->node)) {
+                auto offset = jit_type_get_offset(struct_jit, (uint32_t) member->field_index);
                 auto address = destructor->insn_add_relative(des_this.raw(), offset);
-                compile_var_destroy(destructor, member, address);
+                compile_var_destroy(destructor, member->node, address);
             }
         }
     }
@@ -675,28 +714,29 @@ void Compiler::compile_struct(ast::Node* node) {
 
 DotValue Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
     auto& data = expr->data.dot_expr;
-    auto member_type = node_get_type(expr);
+    auto member_type = get_type_of(expr);
     DotValue dot;
-    dot.ctn_type = node_get_type(data.expr);
+    dot.ctn_type = get_type_of(data.expr);
     if (dot.ctn_type->id == TypeId::Pointer) {
         dot.ctn_value = compile_simple_value(fn, data.expr);
         dot.ctn_type = dot.ctn_type->data.pointer.elem;
     } else {
         dot.ctn_value = compile_value_ref(fn, data.expr).address;
     }
+    dot.ctn_type = get_struct(dot.ctn_type).type;
     auto member = data.resolved_member;
     assert(member);
-    if (member->field) {
+    if (member->is_field()) {
         jit_nuint offset;
         if (dot.ctn_type->data.struct_.kind == ContainerKind::Union) {
             offset = 0;
         } else {
-            auto index = (uint32_t) member->field->index;
-            offset = jit_type_get_offset(to_jit_type(dot.ctn_type), index);
+            auto index = (uint32_t) member->field_index;
+            offset = jit_type_get_offset(compile_type(dot.ctn_type), index);
         }
         dot.field.emplace();
         dot.field->offset = offset;
-        dot.field->type = to_jit_type(member_type);
+        dot.field->type = compile_type(member_type);
     } else {
         assert(member->node->type == ast::NodeType::FnDef);
         dot.method = member->node;
@@ -704,7 +744,7 @@ DotValue Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
             auto trait_ref = dot.ctn_value;
             dot.ctn_value = fn->insn_load_relative(trait_ref, ptr_size, jit_type_nint);
             auto impl_ref = fn->insn_load_relative(trait_ref, 0, jit_type_nint);
-            auto method_index = fn->new_constant(jit_int(member->vtable_index));
+            auto method_index = fn->new_constant(jit_int(member->method_index));
             jit_value_t args[] = {impl_ref.raw(), method_index.raw()};
             dot.vtable_fn = fn->insn_call_native("_get_vtable_fn", (void*) get_vtable_fn,
                                                  get_vtable_fn_signature, args, 2);
@@ -725,10 +765,10 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* str
         fn->insn_store_relative(dest, ARRAY_SIZE_FIELD_OFFSET, zero);
         return;
     }
-    auto& struct_ = struct_type->data.struct_;
-    auto& dflt = m_ctx->structs[struct_.node];
-    fn->insn_call(dflt.constructor.get(), &dest, 1);
-    auto cons_member = struct_.find_member("new");
+    auto struct_ = get_struct(struct_type);
+    assert(struct_.data->constructor.get());
+    fn->insn_call(struct_.data->constructor.get(), &dest, 1);
+    auto cons_member = struct_.spec->find_member("new");
     if (cons_member) {
         auto constructor = get_fn(cons_member->node);
         assert(constructor);
@@ -746,15 +786,28 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* str
     }
 }
 
+StructData* Compiler::get_struct_data(ChiType* struct_type) {
+    if (auto data = m_ctx->structs.get(struct_type)) {
+        return data->get();
+    }
+    m_ctx->structs.emplace(struct_type, new StructData());
+    return m_ctx->structs[struct_type].get();
+}
+
+Struct Compiler::get_struct(cx::ChiType* struct_type) {
+    struct_type = eval_type(struct_type);
+    return {struct_type, &struct_type->data.struct_, get_struct_data(struct_type)};
+}
+
 Array Compiler::compile_array_ref(Function* fn, ast::Node* expr) {
-    auto array_type = node_get_type(expr);
+    auto array_type = get_type_of(expr);
     auto array_ = compile_simple_value(fn, expr);
     auto this_ = fn->insn_address_of(array_);
     Array result;
     result.ptr = this_;
     result.data = fn->insn_load_relative(this_, ARRAY_DATA_FIELD_OFFSET, jit_type_nint);
     result.size = fn->insn_load_relative(this_, ARRAY_SIZE_FIELD_OFFSET, jit_type_nint);
-    result.elem_type = to_jit_type(array_type->data.array.elem);
+    result.elem_type = compile_type(array_type->data.array.elem);
     result.elem_size = jit_type_get_size(result.elem_type);
     return result;
 }
@@ -784,17 +837,16 @@ void Compiler::compile_array_destroy(Function* fn, jit_value& arr) {
 }
 
 void Compiler::compile_var_destroy(Function* fn, ast::Node* var, jit_value& address) {
-    auto type = node_get_type(var);
+    auto type = get_type_of(var);
     switch (type->id) {
         case TypeId::Array:
             compile_array_destroy(fn, address);
             break;
         case TypeId::Struct: {
-            auto& struct_ = type->data.struct_;
-            auto& dflt = m_ctx->structs[struct_.node];
+            auto struct_ = get_struct(type);
             jit_value_t args[] = {address.raw()};
-            fn->insn_call(dflt.destructor.get(), args, 1);
-            if (auto destructor = struct_.find_member("delete")) {
+            fn->insn_call(struct_.data->destructor.get(), args, 1);
+            if (auto destructor = struct_.spec->find_member("delete")) {
                 auto des_fn = get_fn(destructor->node);
                 fn->insn_call(des_fn, args, 1);
             }
@@ -809,8 +861,13 @@ Function* Compiler::new_fn(jit_type_t signature, ast::Node* node) {
     return new Function(signature, get_context(), node);
 }
 
+void Compiler::fn_method(Function* fn, const string& name, ChiType* struct_type, ChiTypeSubtype* subtype) {
+    fn->set_qualified_name(get_resolver()->to_string(struct_type), name);
+    fn->container_subtype = subtype;
+}
+
 bool Compiler::should_destroy(ast::Node* node) {
-    auto type = node_get_type(node);
+    auto type = get_type_of(node);
     switch (type->id) {
         case TypeId::Array:
         case TypeId::Struct:
@@ -830,3 +887,18 @@ void Compiler::build_jump_table(TraitImpl* impl) {
         }
     }
 }
+
+ChiType* Compiler::eval_type(ChiType* type) {
+    if (type->is_placeholder && m_fn && m_fn->container_subtype) {
+        type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+    }
+    if (type->id == TypeId::Subtype) {
+        return type->data.subtype.resolved_struct;
+    }
+    return type;
+}
+
+ChiType* Compiler::get_type_of(ast::Node* node) {
+    return eval_type(node->resolved_type);
+}
+

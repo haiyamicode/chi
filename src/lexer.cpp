@@ -543,10 +543,10 @@ void Lexer::read_number(char c) {
                     c = read();
                 }
             } else {
+                unread();
                 do {
                     c = read();
                 } while (is_letter(c));
-                unread();
             }
         }
     }

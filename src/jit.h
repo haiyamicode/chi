@@ -37,12 +37,13 @@ namespace cx {
             jit_value return_value;
             std::list<VarLabels> return_labels; // state value
             std::list<LoopLabels> loop_labels;
+            ChiTypeSubtype* container_subtype;
 
             Function(jit_type_t signature, CompileContext* _ctx, ast::Node* _node);
 
             virtual void build();
 
-            void set_qualified_name(ast::Node* container, const string& name);
+            void set_qualified_name(const string& container_name, const string& name);
 
             const char* get_jit_name() { return qualified_name.c_str(); }
 
@@ -90,15 +91,21 @@ namespace cx {
             bool enable_asm_print = false;
         };
 
-        struct DefaultMethods {
+        struct StructData {
             box<Function> constructor;
             box<Function> destructor;
         };
 
+        struct Struct {
+            ChiType* type;
+            ChiTypeStruct* spec;
+            StructData* data;
+        };
+
         struct CompileContext {
             map<ast::Node*, box<Function>> functions;
-            map<ast::Node*, DefaultMethods> structs;
             map<ast::Node*, jit_value> values;
+            map<ChiType*, box<StructData>> structs;
             map<ChiType*, jit_type_t> types;
             jit_context jit_ctx;
             CompileSettings settings;
@@ -108,18 +115,22 @@ namespace cx {
 
         class Compiler {
             CompileContext* m_ctx;
+            Function* m_fn = nullptr;
 
             jit_context& get_jit_context() { return m_ctx->jit_ctx; }
 
-            ChiType* node_get_type(ast::Node* node) { return node->resolved_type; }
+            Resolver* get_resolver() { return &m_ctx->resolver; }
 
-            jit_type_t _to_jit_type(ChiType* type);
+            ChiType* eval_type(ChiType* type);
+            ChiType* get_type_of(ast::Node* node);
+
+            jit_type_t _compile_type(ChiType* type);
 
             jit_type_t to_jit_int_type(ChiType* type);
 
-            jit_type_t to_jit_type(ChiType* type);
+            jit_type_t compile_type(ChiType* type);
 
-            inline jit_type_t build_jit_type(ast::Node* node);
+            inline jit_type_t compile_type(ast::Node* node);
 
             Array compile_array_ref(Function* fn, ast::Node* expr);
 
@@ -139,6 +150,8 @@ namespace cx {
 
             Function* new_fn(jit_type_t signature, ast::Node* node);
 
+            void fn_method(Function* fn, const string& name, ChiType* struct_type, ChiTypeSubtype* subtype);
+
             void add_value(ast::Node* node, const jit_value& value) { m_ctx->values[node] = value; }
 
             jit_value compile_simple_value(Function* fn, ast::Node* expr);
@@ -152,7 +165,7 @@ namespace cx {
             void build_jump_table(TraitImpl* impl);
 
         public:
-            Compiler(CompileContext* ctx);
+            Compiler(CompileContext* ctx, Function* fn = nullptr);
 
             CompileContext* get_context() { return m_ctx; }
 
@@ -169,6 +182,12 @@ namespace cx {
             void compile_block(Function* fn, ast::Node* parent, ast::Node* block);
 
             void compile_struct(ast::Node* node);
+
+            void _compile_struct(ast::Node* node, ChiType* struct_type);
+
+            StructData* get_struct_data(ChiType* struct_type);
+
+            Struct get_struct(ChiType* struct_type);
         };
     }
 }

@@ -22,7 +22,7 @@ ast::Node* Resolver::add_primitive(const string& name, ChiType* type) {
     node->name = name;
     m_ctx->builtins.add(node);
 
-    auto sym = create_type_symbol(&node->name, type);
+    auto sym = create_type_symbol(node->name, type);
     node->resolved_type = sym;
     return node;
 }
@@ -70,11 +70,9 @@ ChiType* Resolver::create_type(TypeId type_id) {
     return m_ctx->allocator->create_type(type_id);
 }
 
-ChiType* Resolver::create_type_symbol(string* name, ChiType* type) {
+ChiType* Resolver::create_type_symbol(optional<string> name, ChiType* type) {
     auto tysym = create_type(TypeId::TypeSymbol);
-    if (name) {
-        tysym->name = *name;
-    }
+    tysym->name = name;
     tysym->data.type_symbol.giving_type = type;
     tysym->data.type_symbol.underlying_type = type;
     return tysym;
@@ -168,9 +166,10 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
 
     switch (node->type) {
         case NodeType::Root: {
+            auto& data = node->data.root;
             // first pass: skip function and struct bodies
             scope.skip_fn_bodies = true;
-            for (auto decl: node->data.root.top_level_decls) {
+            for (auto decl: data.top_level_decls) {
                 resolve(decl, scope);
                 if (decl->type == NodeType::FnDef && decl->name == "main") {
                     node->module->package->entry_fn = decl;
@@ -178,14 +177,14 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             }
 
             // second pass: resolve struct members
-            for (auto decl: node->data.root.top_level_decls) {
+            for (auto decl: data.top_level_decls) {
                 if (decl->type == NodeType::StructDecl) {
                     _resolve(decl, scope);
                 }
             }
 
             // third pass: resolve struct embeds
-            for (auto decl: node->data.root.top_level_decls) {
+            for (auto decl: data.top_level_decls) {
                 if (decl->type == NodeType::StructDecl) {
                     _resolve(decl, scope);
                 }
@@ -193,9 +192,22 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
 
             // fourth pass: resolve function and method bodies
             scope.skip_fn_bodies = false;
-            for (auto decl: node->data.root.top_level_decls) {
+            for (auto decl: data.top_level_decls) {
                 if (decl->type == NodeType::StructDecl || decl->type == NodeType::FnDef) {
                     _resolve(decl, scope);
+                }
+            }
+
+            // final pass: ensure subtypes are resolved
+            for (auto decl: data.top_level_decls) {
+                if (decl->type == NodeType::StructDecl && decl->data.struct_decl.type_params.size > 0) {
+                    auto& struct_ = decl->data.struct_decl;
+                    if (struct_.type_params.size > 0) {
+                        auto struct_type = to_value_type(decl->resolved_type);
+                        for (auto subtype: struct_type->data.struct_.subtypes) {
+                            resolve_subtype(subtype);
+                        }
+                    }
                 }
             }
             return nullptr;
@@ -236,7 +248,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::TypeSigil: {
             auto& data = node->data.type_sigil;
             auto type = resolve_value(data.type, scope);
-            return create_type_symbol(nullptr, get_pointer_type(type));
+            return create_type_symbol({}, get_pointer_type(type));
         }
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
@@ -333,24 +345,32 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             auto& data = node->data.dot_expr;
             auto field_name = data.field->str;
             auto expr_type = resolve(data.expr, scope);
-            auto r = get_struct_member(expr_type, field_name);
-            if (!r.member) {
+            auto member = get_struct_member(expr_type, field_name);
+            if (!member) {
                 error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type));
                 return nullptr;
             }
-            data.resolved_member = r.member;
-            return r.resolved_type;
+            data.resolved_member = member;
+            return member->resolved_type;
         }
         case NodeType::ConstructExpr: {
             auto& data = node->data.construct_expr;
-            if (!scope.value_type) {
-                error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
-                return nullptr;
+            ChiType* value_type;
+            ChiType* result_type;
+            if (data.type) {
+                value_type = resolve_value(data.type, scope);
+                result_type = get_pointer_type(value_type);
+            } else {
+                if (!scope.value_type) {
+                    error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
+                    return nullptr;
+                }
+                value_type = scope.value_type;
+                result_type = value_type;
             }
-            auto value_type = scope.value_type;
             auto constructor = get_struct_member(value_type, "new");
-            if (constructor.member) {
-                auto& fn_type = constructor.resolved_type->data.fn;
+            if (constructor) {
+                auto& fn_type = constructor->resolved_type->data.fn;
                 resolve_fn_call(node, scope, &fn_type, &data.items);
                 fn_type.container = value_type;
             } else {
@@ -359,7 +379,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     return nullptr;
                 }
             }
-            return data.type ? get_pointer_type(value_type) : value_type;
+            return result_type;
         }
         case NodeType::FnCallExpr: {
             auto& data = node->data.fn_call_expr;
@@ -406,7 +426,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     struct_->type_params.add(resolve(param, scope));
                 }
                 struct_->resolve_status = ResolveStatus::None;
-                sym = create_type_symbol(&node->name, struct_type);
+                sym = create_type_symbol(node->name, struct_type);
                 if (data.kind == ContainerKind::Enum) {
                     sym->data.type_symbol.giving_type = int_type;
                 }
@@ -465,8 +485,8 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             for (auto arg: data.args) {
                 args.add(resolve_value(arg, scope));
             }
-            auto subtype = get_subtype(type, args);
-            return create_type_symbol(nullptr, subtype);
+            auto subtype = get_subtype(type, &args);
+            return create_type_symbol({}, subtype);
         }
         case NodeType::IndexExpr: {
             auto& data = node->data.index_expr;
@@ -520,7 +540,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             phty->data.placeholder.trait = to_value_type(resolve(data.type, scope));
             phty->data.placeholder.index = data.index;
             phty->is_placeholder = true;
-            return create_type_symbol(&node->name, phty);
+            return create_type_symbol(node->name, phty);
         }
         default:
             print("\n");
@@ -547,7 +567,7 @@ string Resolver::to_string(ChiType* type) {
         case TypeId::Subtype: {
             auto& data = type->data.subtype;
             std::stringstream ss;
-            ss << to_string(data.type) << "<";
+            ss << to_string(data.generic) << "<";
             for (int i = 0; i < data.args.size; i++) {
                 ss << to_string(data.args[i]);
                 if (i < data.args.size - 1) {
@@ -582,21 +602,19 @@ void Resolver::context_init_builtins() {
     create_builtins();
 }
 
-void Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope) {
+ChiStructMember* Resolver::resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope) {
     auto& struct_ = struct_type->data.struct_;
-    ChiStructField* field = nullptr;
+    auto member = struct_.add_member(node->name, node, nullptr);
     if (node->type == NodeType::VarDecl) {
-        field = struct_.add_field();
-        field->struct_ = struct_type;
-        field->type = resolve(node, scope);
-        node->data.var_decl.resolved_field = field;
+        member->resolved_type = resolve(node, scope);
+        node->data.var_decl.resolved_field = member;
     } else if (node->type == NodeType::FnDef) {
-        auto fn_type = resolve(node, scope);
-        fn_type->data.fn.container = struct_type;
+        member->resolved_type = resolve(node, scope);
+        member->resolved_type->data.fn.container = struct_type;
     } else if (node->type == NodeType::EnumMember) {
-        resolve(node, scope);
+        member->resolved_type = resolve(node, scope);
     }
-    struct_.add_member(node->name, node, field);
+    return member;
 }
 
 void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::Node* embed_node) {
@@ -608,11 +626,11 @@ void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::No
     }
     for (auto& member: base.members) {
         auto node = member->node;
-        if (node->type == NodeType::FnDef) {
+        if (member->node->type == NodeType::FnDef) {
             auto method = derived.find_member(node->name);
             if (node->data.fn_def.body) {
                 if (!method) {
-                    method = derived.add_member(node->name, member->node, member->field);
+                    method = derived.add_member(node->name, node, member->resolved_type);
                     method->orig_parent = base_type;
                 }
             } else if (!method) {
@@ -657,16 +675,16 @@ bool Resolver::should_resolve_fn_body(ResolveScope& scope) {
     return struct_.kind != ContainerKind::Trait && struct_.resolve_status >= ResolveStatus::MemberTypesKnown;
 }
 
-void Resolver::type_placeholders_sub_each(TypeList& list, TypeList& subs, TypeList& output) {
-    for (auto arg: list) {
-        output.add(type_placeholders_sub(arg, subs));
+void Resolver::type_placeholders_sub_each(TypeList* list, ChiTypeSubtype* subs, TypeList* output) {
+    for (auto arg: *list) {
+        output->add(type_placeholders_sub(arg, subs));
     }
 }
 
-ChiType* Resolver::type_placeholders_sub(ChiType* type, TypeList& subs) {
+ChiType* Resolver::type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs) {
     switch (type->id) {
         case TypeId::Placeholder:
-            return subs[type->data.placeholder.index];
+            return subs->args[type->data.placeholder.index];
         case TypeId::Array:
             return get_array_type(type_placeholders_sub(type->data.array.elem, subs));
         case TypeId::Pointer:
@@ -674,14 +692,15 @@ ChiType* Resolver::type_placeholders_sub(ChiType* type, TypeList& subs) {
         case TypeId::Subtype: {
             auto& data = type->data.subtype;
             array<ChiType*> args;
-            type_placeholders_sub_each(data.args, subs, args);
-            return get_subtype(data.type, args);
+            type_placeholders_sub_each(&data.args, subs, &args);
+            return get_subtype(data.generic, &args);
         }
         case TypeId::Fn: {
             auto& data = type->data.fn;
             auto fn = create_type(TypeId::Fn);
             fn->data.fn.return_type = type_placeholders_sub(data.return_type, subs);
-            type_placeholders_sub_each(data.params, subs, fn->data.fn.params);
+            fn->data.fn.container = data.container;
+            type_placeholders_sub_each(&data.params, subs, &fn->data.fn.params);
             return fn;
         }
         default:
@@ -689,33 +708,25 @@ ChiType* Resolver::type_placeholders_sub(ChiType* type, TypeList& subs) {
     }
 }
 
-ResolvedMember Resolver::get_struct_member(ChiType* struct_type, const string& field_name) {
+ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string& field_name) {
     auto sty = struct_type;
     if (sty->id == TypeId::Pointer) {
         sty = sty->data.pointer.elem;
-    } else if (sty->id == TypeId::Array) {
+    }
+    if (sty->id == TypeId::Array) {
         sty = sty->data.array.internal;
     } else if (sty->id == TypeId::TypeSymbol) {
         if (auto underlying_type = sty->data.type_symbol.underlying_type) {
             sty = underlying_type;
         }
-    }
-    if (sty->id == TypeId::Subtype) {
-        auto& data = sty->data.subtype;
-        auto r = get_struct_member(data.type, field_name);
-        auto type = r.resolved_type;
-        if (type->is_placeholder) {
-            type = type_placeholders_sub(type, data.args);
-        }
-        return {r.member, type};
+    } else if (sty->id == TypeId::Subtype) {
+        sty = resolve_subtype(sty);
     }
     if (sty->id != TypeId::Struct) {
-        return {nullptr, nullptr};
+        return nullptr;
     }
     auto& data = sty->data.struct_;
-    auto member = data.find_member(field_name);
-    auto type = member->field ? member->field->type : node_get_type(member->node);
-    return {member, type};
+    return data.find_member(field_name);
 }
 
 void Resolver::resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args) {
@@ -724,7 +735,7 @@ void Resolver::resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* 
     if (n_args != n_params) {
         error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, n_params, n_args);
     }
-    for (int i = 0; i < n_args; i++) {
+    for (size_t i = 0; i < n_args; i++) {
         auto arg = args->at(i);
         auto arg_type = resolve(arg, scope);
         check_assignment(arg, arg_type, fn->params[i]);
@@ -752,19 +763,14 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
     auto internal_type = create_type(TypeId::Struct);
     auto& internal_data = internal_type->data.struct_;
 
-    auto data_field = internal_data.add_field();
-    data_field->struct_ = internal_type;
-    data_field->type = get_pointer_type(elem);
     auto data_field_node = create_node(NodeType::VarDecl);
-    data_field_node->resolved_type = data_field->type;
-    internal_data.add_member("data", data_field_node, data_field);
+    auto data_field_type = get_pointer_type(elem);
+    data_field_node->resolved_type = data_field_type;
+    internal_data.add_member("data", data_field_node, data_field_type);
 
-    auto size_field = internal_data.add_field();
-    size_field->struct_ = internal_type;
-    size_field->type = size_type;
     auto size_field_node = create_node(NodeType::VarDecl);
-    size_field_node->resolved_type = size_field->type;
-    internal_data.add_member("size", size_field_node, size_field);
+    size_field_node->resolved_type = size_type;
+    internal_data.add_member("size", size_field_node, size_type);
 
     auto add_fn = create_node(NodeType::FnDef);
     add_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayAdd;
@@ -773,7 +779,7 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
     add_fn_type->data.fn.return_type = get_pointer_type(elem);
     add_fn_type->data.fn.params.add(elem);
     add_fn->resolved_type = add_fn_type;
-    internal_data.add_member("add", add_fn, nullptr);
+    internal_data.add_member("add", add_fn, add_fn_type);
 
     type->data.array.internal = internal_type;
     m_ctx->array_types[elem] = type;
@@ -808,19 +814,20 @@ bool Resolver::is_same_type(ChiType* a, ChiType* b) {
     return to_value_type(a) == to_value_type(b);
 }
 
-ChiType* Resolver::get_subtype(ChiType* generic, array<ChiType*>& type_args) {
+ChiType* Resolver::get_subtype(ChiType* generic, TypeList* type_args) {
     assert(generic->id == TypeId::Struct);
-    for (auto subtype: generic->data.struct_.subtypes) {
+    auto& gen = generic->data.struct_;
+    for (auto subtype: gen.subtypes) {
         assert(subtype->id == TypeId::Subtype);
         auto& subtype_data = subtype->data.subtype;
-        if (subtype_data.args.size != type_args.size) {
+        if (subtype_data.args.size != type_args->size) {
             continue;
         }
         bool matches = true;
-        for (size_t i = 0; i < type_args.size; i++) {
-            auto a = type_args[i];
+        for (size_t i = 0; i < type_args->size; i++) {
+            auto a = type_args->at(i);
             auto b = subtype_data.args[i];
-            if (is_same_type(a, b)) {
+            if (!is_same_type(a, b)) {
                 matches = false;
                 break;
             }
@@ -829,12 +836,46 @@ ChiType* Resolver::get_subtype(ChiType* generic, array<ChiType*>& type_args) {
             return subtype;
         }
     }
-    auto subtype = create_type(TypeId::Subtype);
-    subtype->data.subtype.type = generic;
-    for (auto arg: type_args) {
-        subtype->data.subtype.args.add(arg);
+    auto sub = create_type(TypeId::Subtype);
+    sub->data.subtype.generic = generic;
+    for (auto arg: *type_args) {
+        sub->data.subtype.args.add(arg);
+        if (arg->is_placeholder) {
+            sub->is_placeholder = true;
+        }
     }
-    return subtype;
+    gen.subtypes.add(sub);
+    if (gen.resolve_status >= ResolveStatus::MemberTypesKnown) {
+        resolve_subtype(sub);
+    }
+    return sub;
+}
+
+ChiType* Resolver::resolve_subtype(ChiType* subtype) {
+    auto& data = subtype->data.subtype;
+    if (data.resolved_struct) {
+        return data.resolved_struct;
+    }
+    auto& base = data.generic->data.struct_;
+    auto sty = create_type(TypeId::Struct);
+    sty->name = to_string(subtype);
+    auto& cpy = sty->data.struct_;
+    cpy.kind = base.kind;
+    cpy.node = base.node;
+    for (auto& member: base.members) {
+        auto type = type_placeholders_sub(member->resolved_type, &data);
+        if (member->node->type == NodeType::FnDef) {
+            type->data.fn.container = subtype;
+        }
+        auto node = create_node(member->node->type);
+        node->name = member->node->name;
+        node->token = member->node->token;
+        node->resolved_type = type;
+        memcpy(&node->data, &member->node->data, sizeof(member->node->data));
+        cpy.add_member(member->get_name(), node, type);
+    }
+    data.resolved_struct = sty;
+    return sty;
 }
 
 Scope* ScopeResolver::push_scope(ast::Node* owner) {
