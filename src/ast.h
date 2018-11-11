@@ -146,6 +146,7 @@ namespace cx {
 
         // composite literal
         struct ConstructExpr {
+            bool is_new;
             array<Node*> items;
             Node* type;
         };

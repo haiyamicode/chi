@@ -84,7 +84,11 @@ void AstPrinter::print_node(Node* node) {
         case NodeType::VarDecl: {
             auto& data = node->data.var_decl;
             print("[@var] ");
-            print_node(data.type);
+            if (data.type) {
+                print_node(data.type);
+            } else {
+                print("let");
+            }
             print(" ");
             print_node(data.identifier);
             if (data.is_embed) {

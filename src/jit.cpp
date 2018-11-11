@@ -464,7 +464,8 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             auto ctn_type = get_type_of(expr);
             jit_value this_;
             jit_value value;
-            if (data.type && ctn_type->id == TypeId::Pointer) {
+            if (data.is_new) {
+                assert(ctn_type->id == TypeId::Pointer);
                 ctn_type = ctn_type->data.pointer.elem;
                 jit_nuint size_value = jit_type_get_size(compile_type(ctn_type));
                 jit_value_t args[] = {fn->new_constant(size_value).raw()};

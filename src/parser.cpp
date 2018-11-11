@@ -378,8 +378,8 @@ Node* Parser::parse_var_decl(Node* type_expr) {
         consume();
         node->data.var_decl.is_embed = true;
     }
-    if (next_is(TokenType::ASS)) {
-        consume();
+    if (!type_expr || next_is(TokenType::ASS)) {
+        expect(TokenType::ASS);
         node->data.var_decl.expr = parse_expr_clause(false);
     }
     expect(TokenType::SEMICOLON);
@@ -455,6 +455,7 @@ Node* Parser::parse_stmt() {
 
         case TokenType::KW_LET:
         case TokenType::KW_THIS:
+        case TokenType::KW_NEW:
         case TokenType::IDEN:
         case TokenType::BOOL:
         case TokenType::INT:
@@ -494,7 +495,10 @@ Node* Parser::parse_stmt() {
 }
 
 Node* Parser::parse_simple_stmt(bool semicolon) {
-    if (next_is_type_expr()) {
+    if (next_is(TokenType::KW_LET)) {
+        consume();
+        return parse_var_decl(nullptr);
+    } else if (next_is_type_expr()) {
         auto type_expr = parse_type_expr();
         return parse_var_decl(type_expr);
     }
@@ -582,6 +586,7 @@ Node* Parser::parse_unary_expr(bool lhs, Node* parent) {
     auto token = get();
     switch (token->type) {
         case TokenType::ADD:
+        case TokenType::KW_NEW:
             return parse_construct_expr();
 
         case TokenType::MUL:
@@ -884,9 +889,12 @@ void Parser::parse_struct_block(Node* node) {
 
 Node* Parser::parse_construct_expr() {
     Node* node = create_node(NodeType::ConstructExpr, get());
-    if (next_is(TokenType::ADD)) {
+    if (next_is(TokenType::ADD) || next_is(TokenType::KW_NEW)) {
         consume();
-        node->data.construct_expr.type = parse_type_expr();
+        node->data.construct_expr.is_new = true;
+        if (!next_is(TokenType::LBRACE)) {
+            node->data.construct_expr.type = parse_type_expr();
+        }
     }
     expect(TokenType::LBRACE);
     Token* token;

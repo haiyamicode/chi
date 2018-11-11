@@ -256,11 +256,18 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         }
         case NodeType::VarDecl: {
             auto& data = node->data.var_decl;
-            auto var_type = resolve_value(data.type, scope);
+            ChiType* var_type = nullptr;
+            if (data.type) {
+                var_type = resolve_value(data.type, scope);
+            }
             if (data.expr) {
-                auto var_scope = scope.set_value_type(var_type);
+                auto var_scope = var_type ? scope.set_value_type(var_type) : scope;
                 auto expr_type = resolve(data.expr, var_scope);
-                check_assignment(node, expr_type, var_type);
+                if (var_type) {
+                    check_assignment(node, expr_type, var_type);
+                } else {
+                    var_type = expr_type;
+                }
             }
             return var_type;
         }
@@ -359,7 +366,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             ChiType* result_type;
             if (data.type) {
                 value_type = resolve_value(data.type, scope);
-                result_type = get_pointer_type(value_type);
+                result_type = data.is_new ? get_pointer_type(value_type) : value_type;
             } else {
                 if (!scope.value_type) {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);

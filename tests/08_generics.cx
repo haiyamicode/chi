@@ -12,11 +12,11 @@ struct LinkedList<any T> {
     int size = 0;
 
     Node<T>* add(T value) {
-        this.tail = +Node<T>{value};
+        this.tail = new {value};
         if (!this.head) {
             this.head = this.tail;
         } else {
-            Node<T>* node = this.head;
+            let node = this.head;
             for (;;) {
                 if (!node.next) {
                     break;
@@ -37,7 +37,7 @@ int main() {
     list.add(2);
     list.add(3);
     printf("list.size: {}\n", list.size);
-    for (Node<int>* node=list.head; node; node = node.next) {
+    for (let node=list.head; node; node = node.next) {
         printf("item value: {}\n", node.data);
     }
     return 0;
