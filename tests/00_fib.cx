@@ -1,7 +1,8 @@
 int main() {
     int N;
     N = 10; // Should return 55
-    printf("fib: {}\n", fib(N));
+    let value = fib(N);
+    printf("fib: {}\n", value);
     return 0;
 }
 

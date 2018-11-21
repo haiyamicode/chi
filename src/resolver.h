@@ -17,8 +17,19 @@ namespace cx {
         virtual ChiType* create_type(TypeId type_id) = 0;
     };
 
+    struct SystemTypes {
+        ChiType* int_;
+        ChiType* void_;
+        ChiType* char_;
+        ChiType* str_lit;
+        ChiType* any;
+        ChiType* string;
+        ChiType* bool_;
+    };
+
     struct ResolveContext {
         Allocator* allocator;
+        SystemTypes system_types;
         array<ast::Node*> builtins;
         map<ChiType*, ChiType*> array_types;
         map<ChiType*, ChiType*> pointer_types;
@@ -54,6 +65,8 @@ namespace cx {
 
         ChiType* get_pointer_type(ChiType* elem);
 
+        ChiType* create_pointer_type(ChiType* elem);
+
         ChiType* get_array_type(ChiType* elem);
 
         ChiType* create_int_type(int bit_count, bool is_unsigned);
@@ -74,11 +87,11 @@ namespace cx {
 
         bool is_same_type(ChiType* a, ChiType* b);
 
-        void check_assignment(ast::Node* node, ChiType* from_type, ChiType* to_type);
+        void check_assignment(ast::Node* value, ChiType* from_type, ChiType* to_type);
 
-        void check_cast(ast::Node* node, ChiType* from_type, ChiType* to_type);
+        bool is_addressable(ast::Node* node);
 
-        bool type_is_int(ChiType* type) { return type->id == TypeId::Int; }
+        void check_cast(ast::Node* value, ChiType* from_type, ChiType* to_type);
 
         ChiType* resolve_value(ast::Node* node, ResolveScope& scope);
 
@@ -103,6 +116,8 @@ namespace cx {
         ChiType* _resolve(ast::Node* node, ResolveScope& scope);
 
         int64_t resolve_constant_value(ast::Node* node);
+
+        SystemTypes* get_system_types() { return &m_ctx->system_types; }
 
         template<typename... Args>
         void error(ast::Node* node, const char* format, const Args& ...args) {
@@ -132,6 +147,10 @@ namespace cx {
         ChiType* resolve_subtype(ChiType* subtype);
 
         void resolve(ast::Package* package);
+
+        bool type_is_int(ChiType* type) {
+            return type->id == TypeId::Int || type->id == TypeId::Bool || type->id == TypeId::Pointer;
+        }
 
         ChiType* type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs);
     };

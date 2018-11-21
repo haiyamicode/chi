@@ -29,5 +29,6 @@ namespace cx {
         constexpr auto INVALID_EMBED = "invalid embed, can only embed a trait or struct";
         constexpr auto METHOD_NOT_IMPLEMENTED = "trait method '{}' has not been implemented";
         constexpr auto MISSING_TYPE_ARGUMENTS = "type arguments are required for generic type '{}'";
+        constexpr auto CANNOT_TAKE_ADDRESS_UNADDRESSABLE = "cannot take address of unaddressable value";
     }
 }

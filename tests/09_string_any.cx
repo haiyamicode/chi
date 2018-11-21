@@ -1,0 +1,13 @@
+string world() {
+    return "world";
+}
+
+int main() {
+    printf("hello {}\n", world());
+    any id = world();
+    printf("hello {}\n", id);
+    id = -1;
+    printf("hello {}\n", -1);
+    printf("hello {}\n", id);
+    return 0;
+}

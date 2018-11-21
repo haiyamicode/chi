@@ -9,6 +9,7 @@
 
 #include <jit/jit-plus.h>
 #include <list>
+#include <fmt/ostream.h>
 
 #include "resolver.h"
 
@@ -48,6 +49,7 @@ namespace cx {
             const char* get_jit_name() { return qualified_name.c_str(); }
 
             jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
+            jit_value get_null_constant();
 
             jit_label* get_return_label() { return &return_labels.back().back().label; }
             VarLabels* push_return_scope() { return &return_labels.emplace_back(); }
@@ -102,6 +104,20 @@ namespace cx {
             StructData* data;
         };
 
+        struct StringInternal {
+            char* data;
+            uint32_t size;
+        };
+
+        struct AnyInternal {
+            ChiType* type;
+            struct {
+                void* a;
+                void* b;
+            } data;
+            friend std::ostream&operator<<(std::ostream&os, const AnyInternal &v);
+        };
+
         struct CompileContext {
             map<ast::Node*, box<Function>> functions;
             map<ast::Node*, jit_value> values;
@@ -122,7 +138,7 @@ namespace cx {
             Resolver* get_resolver() { return &m_ctx->resolver; }
 
             ChiType* eval_type(ChiType* type);
-            ChiType* get_type_of(ast::Node* node);
+            ChiType* get_chitype(ast::Node* node);
 
             jit_type_t _compile_type(ChiType* type);
 
@@ -134,17 +150,23 @@ namespace cx {
 
             Array compile_array_ref(Function* fn, ast::Node* expr);
 
-            void compile_array_destroy(Function *fn, jit_value &arr);
+            void compile_field_destroy(Function* fn, jit_value& arr, jit_nuint offset);
 
             jit_value compile_array_add(Function* fn, ast::Node* expr, ast::Node* value_arg);
 
             bool should_destroy(ast::Node* node);
 
-            void compile_var_destroy(Function* fn, ast::Node* var, jit_value& address);
+            void compile_destruction(Function* fn, jit_value& address, ast::Node* node);
 
             DotValue compile_dot_expr(Function* fn, ast::Node* expr);
 
-            void compile_construction(Function* fn, jit_value_t dest, ChiType* struct_type, ast::Node* expr);
+            void compile_array_construction(Function* fn, const jit_value& dest, ast::Node* expr);
+
+            void compile_construction(Function* fn, jit_value_t dest, ChiType* type, ast::Node* expr);
+
+            jit_value compile_string_alloc(Function* fn, const jit_value& data);
+
+            void compile_string_construction(Function* fn, const jit_value& dest, optional<jit_value> data);
 
             Function* get_fn(ast::Node* node);
 
@@ -158,11 +180,20 @@ namespace cx {
 
             jit_value compile_assignment_value(Function* fn, ast::Node* value, ast::Node* dest);
 
-            jit_value compile_type_conversion(Function* fn, const jit_value& value, ChiType* from_type, ChiType* to_type);
+            jit_value compile_assignment_to_type(Function* fn, ast::Node* value, ChiType* dest_type);
+
+            void compile_assignment(Function* fn, const jit_value& dest, const jit_value& value,
+                                    ChiType* from_type, ChiType* to_type);
+
+            jit_value compile_conversion(Function* fn, const jit_value& value, ChiType* from_type, ChiType* to_type);
 
             ValueRef compile_value_ref(Function *fn, ast::Node *expr);
 
             void build_jump_table(TraitImpl* impl);
+
+            jit_value compile_mem_alloc(Function* fn, const jit_value& size_value);
+
+            ChiType* ptr_type_deref(ChiType* ptr_type) { return ptr_type->data.pointer.elem; }
 
         public:
             Compiler(CompileContext* ctx, Function* fn = nullptr);
