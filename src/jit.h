@@ -182,9 +182,6 @@ namespace cx {
 
             jit_value compile_assignment_to_type(Function* fn, ast::Node* value, ChiType* dest_type);
 
-            void compile_assignment(Function* fn, const jit_value& dest, const jit_value& value,
-                                    ChiType* from_type, ChiType* to_type);
-
             jit_value compile_conversion(Function* fn, const jit_value& value, ChiType* from_type, ChiType* to_type);
 
             ValueRef compile_value_ref(Function *fn, ast::Node *expr);
@@ -194,6 +191,8 @@ namespace cx {
             jit_value compile_mem_alloc(Function* fn, const jit_value& size_value);
 
             ChiType* ptr_type_deref(ChiType* ptr_type) { return ptr_type->data.pointer.elem; }
+
+            jit_value compile_string_concat(Function* fn, const jit_value& s1, const jit_value& s2);
 
         public:
             Compiler(CompileContext* ctx, Function* fn = nullptr);

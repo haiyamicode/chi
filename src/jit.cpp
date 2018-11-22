@@ -73,9 +73,8 @@ static auto string_internal_struct = jit_type_create_struct(string_internal_fiel
 void sys_string_set_data(StringInternal* dest, const char* data) {
     if (data) {
         dest->size = (uint32_t) strlen(data);
-        auto size = dest->size + 1;
-        dest->data = (char*) realloc(dest->data, size);
-        memcpy(dest->data, data, size);
+        dest->data = (char*) realloc(dest->data, dest->size + 1);
+        memcpy(dest->data, data, dest->size + 1);
     } else {
         dest->size = 0;
         dest->data = NULL;
@@ -86,9 +85,17 @@ static jit_type_t string_set_data_params[] = {jit_type_nint, jit_type_nint};
 static auto string_set_data_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_nint, string_set_data_params,
                                                                   2, 1);
 
-static jit_type_t delete_string_params[] = {jit_type_nint};
-static auto delete_string_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_void, delete_string_params, 1,
-                                                                1);
+void sys_string_concat(StringInternal* dest, StringInternal s1, StringInternal s2) {
+    dest->size = (uint32_t) (s1.size + s2.size);
+    dest->data = (char*) malloc(dest->size + 1);
+    memcpy(dest->data, s1.data, s1.size + 1);
+    strncat(dest->data, s2.data, s2.size);
+}
+
+static jit_type_t string_concat_params[] = {jit_type_nint, string_internal_struct, string_internal_struct};
+static auto string_concat_signature = jit_type_create_signature(jit_abi_cdecl,
+                                                                jit_type_void, string_concat_params, 3, 1);
+
 
 std::ostream& cx::jit::operator<<(std::ostream& os, const AnyInternal& v) {
     switch (v.type->id) {
@@ -447,6 +454,16 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             }
             auto op1 = compile_simple_value(fn, data.op1);
             switch (data.op_type) {
+                case TokenType::ADD: {
+                    if (get_chitype(expr)->id == TypeId::String) {
+                        return compile_string_concat(fn, op1, op2);
+                    }
+                    return fn->insn_add(op1, op2);
+                }
+                case TokenType::MUL:
+                    return fn->insn_mul(op1, op2);
+                case TokenType::SUB:
+                    return fn->insn_sub(op1, op2);
                 case TokenType::LT:
                     return fn->insn_lt(op1, op2);
                 case TokenType::LE:
@@ -457,12 +474,6 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                     return fn->insn_gt(op1, op2);
                 case TokenType::GE:
                     return fn->insn_ge(op1, op2);
-                case TokenType::ADD:
-                    return fn->insn_add(op1, op2);
-                case TokenType::MUL:
-                    return fn->insn_mul(op1, op2);
-                case TokenType::SUB:
-                    return fn->insn_sub(op1, op2);
                 default:
                     panic("unhandled");
             }
@@ -1001,5 +1012,13 @@ jit_value Compiler::compile_string_alloc(Function* fn, const jit_value& data) {
     auto temp = fn->new_value(string_internal_struct);
     auto addr = fn->insn_address_of(temp);
     compile_string_construction(fn, addr, data);
+    return temp;
+}
+
+jit_value Compiler::compile_string_concat(Function* fn, const jit_value& s1, const jit_value& s2) {
+    auto temp = fn->new_value(string_internal_struct);
+    auto addr = fn->insn_address_of(temp);
+    jit_value_t args[] = {addr.raw(), s1.raw(), s2.raw()};
+    fn->insn_call_native("_string_concat", (void*) sys_string_concat, string_concat_signature, args, 3);
     return temp;
 }

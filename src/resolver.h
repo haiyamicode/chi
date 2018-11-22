@@ -89,6 +89,8 @@ namespace cx {
 
         void check_assignment(ast::Node* value, ChiType* from_type, ChiType* to_type);
 
+        void check_binary_op(ast::Node* node, TokenType op_type, ChiType* type);
+
         bool is_addressable(ast::Node* node);
 
         void check_cast(ast::Node* value, ChiType* from_type, ChiType* to_type);

@@ -3,7 +3,7 @@ string world() {
 }
 
 int main() {
-    printf("hello {}\n", world());
+    printf("hello {}\n", "the " + world());
     any id = world();
     printf("hello {}\n", id);
     id = -1;

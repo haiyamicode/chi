@@ -544,7 +544,7 @@ Node* Parser::parse_expr() {
         default:
             return lhs;
     }
-    auto node = create_node(NodeType::BinOpExpr, lhs->token);
+    auto node = create_node(NodeType::BinOpExpr, token);
     node->data.bin_op_expr.op1 = lhs;
     node->data.bin_op_expr.op_type = token->type;
     node->data.bin_op_expr.op2 = parse_expr_clause(false);

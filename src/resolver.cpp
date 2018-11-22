@@ -312,6 +312,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                 case TokenType::GE:
                     return bool_type;
                 default:
+                    check_binary_op(node, data.op_type, t1);
                     return t1;
             }
         }
@@ -933,6 +934,23 @@ ChiType* Resolver::resolve_subtype(ChiType* subtype) {
     }
     data.resolved_struct = sty;
     return sty;
+}
+
+void Resolver::check_binary_op(ast::Node* node, TokenType op_type, ChiType* type) {
+    bool ok;
+    switch (op_type) {
+        case TokenType::ASS:
+            return;
+        case TokenType::ADD:
+            ok = type_is_int(type) || type->id == TypeId::String;
+            break;
+        default:
+            ok = type_is_int(type);
+            break;
+    }
+    if (!ok) {
+        error(node, errors::INVALID_OPERATOR, get_token_symbol(op_type), to_string(type));
+    }
 }
 
 Scope* ScopeResolver::push_scope(ast::Node* owner) {
