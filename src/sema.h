@@ -36,7 +36,10 @@ namespace cx {
     struct ChiTypeFn {
         ChiType* return_type;
         array<ChiType*> params;
+        bool is_variadic;
         ChiType* container = nullptr;
+
+        ChiType* get_param_at(size_t index);
     };
 
     struct ChiStructMember {

@@ -91,6 +91,7 @@ namespace cx {
 
         struct ParamDecl {
             Node* type;
+            bool is_variadic;
         };
 
         struct TypeParam {

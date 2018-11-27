@@ -63,11 +63,7 @@ namespace cx {
 
         ChiType* create_type_symbol(optional<string> name, ChiType* type);
 
-        ChiType* get_pointer_type(ChiType* elem);
-
         ChiType* create_pointer_type(ChiType* elem);
-
-        ChiType* get_array_type(ChiType* elem);
 
         ChiType* create_int_type(int bit_count, bool is_unsigned);
 
@@ -145,6 +141,10 @@ namespace cx {
         ChiType* to_value_type(ChiType* type);
 
         ChiType* get_subtype(ChiType* generic, TypeList* type_args);
+
+        ChiType* get_pointer_type(ChiType* elem);
+
+        ChiType* get_array_type(ChiType* elem);
 
         ChiType* resolve_subtype(ChiType* subtype);
 

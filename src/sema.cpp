@@ -65,3 +65,7 @@ void Scope::put(const string& name, ast::Node* node) {
     symbols[name];
     symbols[name].add(node);
 }
+
+ChiType* ChiTypeFn::get_param_at(size_t index) {
+    return index < params.size ? params[index] : params.last();
+}

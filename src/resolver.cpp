@@ -73,6 +73,7 @@ void Resolver::create_builtins() {
     auto& params = printf_type->data.fn.params;
     params.add(get_system_types()->string);
     params.add(get_system_types()->any);
+    printf_type->data.fn.is_variadic = true;
     add_builtin_fn("printf", printf_type, ast::BuiltinId::Printf);
 }
 
@@ -782,13 +783,15 @@ ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string&
 void Resolver::resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args) {
     auto n_args = args->size;
     auto n_params = fn->params.size;
-    if (n_args != n_params) {
+    bool ok = fn->is_variadic ? n_args >= n_params - 1 : n_args == n_params;
+    if (!ok) {
         error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, n_params, n_args);
     }
     for (size_t i = 0; i < n_args; i++) {
         auto arg = args->at(i);
         auto arg_type = resolve(arg, scope);
-        check_assignment(arg, arg_type, fn->params[i]);
+        auto param = fn->get_param_at(i);
+        check_assignment(arg, arg_type, param);
     }
 }
 

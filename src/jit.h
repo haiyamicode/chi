@@ -74,11 +74,13 @@ namespace cx {
         };
 
         struct Array {
+            ChiType* array_type;
+            ChiType* elem_type;
             jit_value ptr;
             jit_value size;
             jit_value data;
-            jit_type_t elem_type;
-            jit_nint elem_size;
+            jit_type_t elem;
+            jit_uint elem_size;
         };
 
         struct ValueRef {
@@ -102,20 +104,6 @@ namespace cx {
             ChiType* type;
             ChiTypeStruct* spec;
             StructData* data;
-        };
-
-        struct StringInternal {
-            char* data;
-            uint32_t size;
-        };
-
-        struct AnyInternal {
-            ChiType* type;
-            struct {
-                void* a;
-                void* b;
-            } data;
-            friend std::ostream&operator<<(std::ostream&os, const AnyInternal &v);
         };
 
         struct CompileContext {
@@ -150,9 +138,9 @@ namespace cx {
 
             Array compile_array_ref(Function* fn, ast::Node* expr);
 
-            void compile_field_destroy(Function* fn, jit_value& arr, jit_nuint offset);
+            void compile_field_mem_free(Function* fn, jit_value& arr, jit_nuint offset);
 
-            jit_value compile_array_add(Function* fn, ast::Node* expr, ast::Node* value_arg);
+            jit_value compile_array_add(Function* fn, const jit_value& dest, jit_uint elem_size, const jit_value& value);
 
             bool should_destroy(ast::Node* node);
 
@@ -160,7 +148,7 @@ namespace cx {
 
             DotValue compile_dot_expr(Function* fn, ast::Node* expr);
 
-            void compile_array_construction(Function* fn, const jit_value& dest, ast::Node* expr);
+            void compile_array_construction(Function* fn, const jit_value& dest);
 
             void compile_construction(Function* fn, jit_value_t dest, ChiType* type, ast::Node* expr);
 
