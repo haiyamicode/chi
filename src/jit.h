@@ -166,6 +166,8 @@ namespace cx {
 
             jit_value compile_simple_value(Function* fn, ast::Node* expr);
 
+            jit_value compile_arithmetic_op(Function* fn, ChiType* value_type, TokenType op_type, const jit_value& op1, const jit_value& op2);
+
             jit_value compile_assignment_value(Function* fn, ast::Node* value, ast::Node* dest);
 
             jit_value compile_assignment_to_type(Function* fn, ast::Node* value, ChiType* dest_type);

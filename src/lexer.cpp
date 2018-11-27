@@ -202,14 +202,14 @@ void Lexer::next() {
 
     } else if (c == '>') {
         if (read_expect('>')) {
-            m_tok.type = TokenType::RSHIFT;
+            m_tok.type = read_rep('=', TokenType::RSHIFT_ASS, TokenType::RSHIFT);
         } else {
             m_tok.type = read_rep('=', TokenType::GE, TokenType::GT);
         }
 
     } else if (c == '<') {
         if (read_expect('<')) {
-            m_tok.type = TokenType::LSHIFT;
+            m_tok.type = read_rep('=', TokenType::LSHIFT_ASS, TokenType::LSHIFT);
         } else {
             m_tok.type = read_rep('=', TokenType::LE, TokenType::LT);
         }
@@ -841,4 +841,37 @@ string Token::to_string() const {
             }
             return get_token_symbol(type);
     }
+}
+
+TokenType cx::get_assignment_op(TokenType token_type) {
+    switch (token_type) {
+        case TokenType::ASS:
+            return token_type;
+        case TokenType::ADD_ASS:
+            return TokenType::ADD;
+        case TokenType::SUB_ASS:
+            return TokenType::SUB;
+        case TokenType::MUL_ASS:
+            return TokenType::MUL;
+        case TokenType::DIV_ASS:
+            return TokenType::DIV;
+        case TokenType::MOD_ASS:
+            return TokenType::MOD;
+        case TokenType::LSHIFT_ASS:
+            return TokenType::LSHIFT;
+        case TokenType::RSHIFT_ASS:
+            return TokenType::RSHIFT;
+        case TokenType::AND_ASS:
+            return TokenType::AND;
+        case TokenType::OR_ASS:
+            return TokenType::OR;
+        case TokenType::XOR_ASS:
+            return TokenType::XOR;
+        default:
+            return TokenType::END;
+    }
+}
+
+bool cx::is_assignment_op(TokenType tokenType) {
+    return get_assignment_op(tokenType) != TokenType::END;
 }

@@ -60,12 +60,12 @@ namespace cx {
               MUL,    // *
               DIV,    // /
               MOD,    // %
-              OR,     // |
-              AND,    // &
-              NOT,    // ~
-              XOR,    // ^
               LSHIFT, // <<
               RSHIFT, // >>
+              AND,    // &
+              OR,     // |
+              XOR,    // ^
+              NOT,    // ~
               LOR,    // ||
               LAND,   // &&
               LNOT,   // !
@@ -78,16 +78,16 @@ namespace cx {
 
     // assignment
               ASS,        // =
+              ADD_ASS,    // +=
+              SUB_ASS,    // -=
               MUL_ASS,    // *=
               DIV_ASS,    // /=
               MOD_ASS,    // %=
-              ADD_ASS,    // +=
-              SUB_ASS,    // -=
               LSHIFT_ASS, // <<=
               RSHIFT_ASS, // >>=
               AND_ASS,    // &=
-              XOR_ASS,    // ^=
               OR_ASS,     // |=
+              XOR_ASS,    // ^=
 
     // increment / decrement
               INC, // ++
@@ -214,4 +214,8 @@ namespace cx {
     };
 
     string get_token_symbol(TokenType token_type);
+
+    TokenType get_assignment_op(TokenType token_type);
+
+    bool is_assignment_op(TokenType token_type);
 }

@@ -940,10 +940,11 @@ ChiType* Resolver::resolve_subtype(ChiType* subtype) {
 }
 
 void Resolver::check_binary_op(ast::Node* node, TokenType op_type, ChiType* type) {
+    if (is_assignment_op(op_type)) {
+        return;
+    }
     bool ok;
     switch (op_type) {
-        case TokenType::ASS:
-            return;
         case TokenType::ADD:
             ok = type_is_int(type) || type->id == TypeId::String;
             break;

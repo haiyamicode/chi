@@ -439,40 +439,22 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
         case ast::NodeType::BinOpExpr: {
             auto& data = expr->data.bin_op_expr;
             auto op2 = compile_assignment_value(fn, data.op2, data.op1);
-            if (data.op_type == TokenType::ASS) {
+            auto value_type = get_chitype(expr);
+            if (is_assignment_op(data.op_type)) {
                 auto ref = compile_value_ref(fn, data.op1);
                 if (should_destroy(data.op1)) {
                     compile_destruction(fn, ref.address, data.op1);
+                }
+                if (data.op_type != TokenType::ASS) {
+                    auto op = get_assignment_op(data.op_type);
+                    auto op1 = fn->insn_load_relative(ref.address, 0, compile_type(value_type));
+                    op2 = compile_arithmetic_op(fn, value_type, op, op1, op2);
                 }
                 fn->insn_store_relative(ref.address, 0, op2);
                 return op2;
             }
             auto op1 = compile_simple_value(fn, data.op1);
-            switch (data.op_type) {
-                case TokenType::ADD: {
-                    if (get_chitype(expr)->id == TypeId::String) {
-                        return compile_string_concat(fn, op1, op2);
-                    }
-                    return fn->insn_add(op1, op2);
-                }
-                case TokenType::MUL:
-                    return fn->insn_mul(op1, op2);
-                case TokenType::SUB:
-                    return fn->insn_sub(op1, op2);
-                case TokenType::LT:
-                    return fn->insn_lt(op1, op2);
-                case TokenType::LE:
-                    return fn->insn_le(op1, op2);
-                case TokenType::EQ:
-                    return fn->insn_eq(op1, op2);
-                case TokenType::GT:
-                    return fn->insn_gt(op1, op2);
-                case TokenType::GE:
-                    return fn->insn_ge(op1, op2);
-                default:
-                    panic("unhandled");
-            }
-            break;
+            return compile_arithmetic_op(fn, value_type, data.op_type, op1, op2);
         }
         case ast::NodeType::UnaryOpExpr: {
             auto& data = expr->data.unary_op_expr;
@@ -505,6 +487,8 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                     return value;
                 case TokenType::LNOT:
                     return fn->insn_to_not_bool(value);
+                case TokenType::NOT:
+                    return fn->insn_not(value);
                 case TokenType::MUL:
                     return fn->insn_load_relative(value, 0, compile_type_of(expr));
                 default:
@@ -1015,4 +999,47 @@ jit_value Compiler::compile_string_concat(Function* fn, const jit_value& s1, con
     jit_value_t args[] = {addr.raw(), s1.raw(), s2.raw()};
     fn->insn_call_native("_string_concat", (void*) internals::string_concat, string_concat_signature, args, 3);
     return temp;
+}
+
+jit_value Compiler::compile_arithmetic_op(Function* fn, ChiType* value_type,
+                                          TokenType op_type, const jit_value& op1, const jit_value& op2) {
+    switch (op_type) {
+        case TokenType::ADD: {
+            if (value_type->id == TypeId::String) {
+                return compile_string_concat(fn, op1, op2);
+            }
+            return fn->insn_add(op1, op2);
+        }
+        case TokenType::MUL:
+            return fn->insn_mul(op1, op2);
+        case TokenType::SUB:
+            return fn->insn_sub(op1, op2);
+        case TokenType::DIV:
+            return fn->insn_div(op1, op2);
+        case TokenType::LSHIFT:
+            return fn->insn_shl(op1, op2);
+        case TokenType::RSHIFT:
+            return fn->insn_shr(op1, op2);
+        case TokenType::AND:
+        case TokenType::LAND:
+            return fn->insn_and(op1, op2);
+        case TokenType::OR:
+        case TokenType::LOR:
+            return fn->insn_or(op1, op2);
+        case TokenType::XOR:
+            return fn->insn_xor(op1, op2);
+        case TokenType::LT:
+            return fn->insn_lt(op1, op2);
+        case TokenType::LE:
+            return fn->insn_le(op1, op2);
+        case TokenType::EQ:
+            return fn->insn_eq(op1, op2);
+        case TokenType::GT:
+            return fn->insn_gt(op1, op2);
+        case TokenType::GE:
+            return fn->insn_ge(op1, op2);
+        default:
+            unreachable();
+            return fn->get_null_constant();
+    }
 }
