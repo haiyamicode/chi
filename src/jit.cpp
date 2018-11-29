@@ -415,6 +415,12 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             if (data.kind == ast::IdentifierKind::This) {
                 return fn->get_param(0);
             }
+            if (data.decl->type == ast::NodeType::VarDecl) {
+                auto& var = data.decl->data.var_decl;
+                if (var.is_const) {
+                    return compile_constant_value(fn, var.resolved_value, get_chitype(data.decl));
+                }
+            }
             return m_ctx->values[data.decl];
         }
         case ast::NodeType::LiteralExpr: {
@@ -425,7 +431,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 case TokenType::INT:
                     return fn->new_constant(jit_int(token->val.i));
                 case TokenType::STRING: {
-                    return compile_string_alloc(fn, create_string_const(fn, token->str));
+                    return compile_string_alloc(fn, create_string_constant(fn, token->str));
                 }
                 default:
                     panic("unhandled");
@@ -539,7 +545,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             panic("unhandled {}", PRINT_ENUM(expr->type));
             break;
     }
-    return fn->new_constant(jit_int(0));
+    return jit_value();
 }
 
 jit_value Compiler::compile_assignment_value(Function* fn, ast::Node* value, ast::Node* dest) {
@@ -633,7 +639,7 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
     }
 }
 
-jit_value Compiler::create_string_const(Function* fn, const string& str) {
+jit_value Compiler::create_string_constant(Function* fn, const string& str) {
     return jit_value_create_nint_constant(fn->raw(), str_lit_type, jit_nint(str.c_str()));
 }
 
@@ -1040,6 +1046,18 @@ jit_value Compiler::compile_arithmetic_op(Function* fn, ChiType* value_type,
             return fn->insn_ge(op1, op2);
         default:
             unreachable();
-            return fn->get_null_constant();
+            return jit_value();
     }
+}
+
+jit_value Compiler::compile_constant_value(Function* fn, const ConstantValue& value, ChiType* type) {
+    auto t = compile_type(type);
+    if (VARIANT_TRY(value, const_int_t, v)) {
+        return fn->new_constant(jit_long(*v), t);
+    } else if (VARIANT_TRY(value, const_float_t, v)) {
+        return fn->new_constant(jit_float64(*v), t);
+    } else if (VARIANT_TRY(value, string, v)) {
+        return compile_string_alloc(fn, create_string_constant(fn, *v));
+    }
+    return jit_value();
 }

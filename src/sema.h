@@ -176,4 +176,8 @@ namespace cx {
     private:
         map<string, NodeList> symbols;
     };
+
+    typedef int64_t const_int_t;
+    typedef double const_float_t;
+    typedef variant<const_int_t, const_float_t, string> ConstantValue;
 }

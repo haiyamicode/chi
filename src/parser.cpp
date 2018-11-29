@@ -215,6 +215,8 @@ Node* Parser::parse_top_level_decl() {
             return parse_struct_decl(token->type);
         case TokenType::KW_TYPEDEF:
             return parse_typedef();
+        case TokenType::KW_CONST:
+            return parse_var_decl(nullptr);
         default:
             return parse_var_or_fn_decl();
     }
@@ -370,10 +372,18 @@ Node* Parser::parse_var_identifier() {
 }
 
 Node* Parser::parse_var_decl(Node* type_expr) {
+    bool is_const = false;
+    if (!type_expr) {
+        if (next_is(TokenType::KW_CONST)) {
+            is_const = true;
+        }
+        consume();
+    }
     auto iden = parse_var_identifier();
     auto node = create_node(NodeType::VarDecl, iden->token);
     node->data.var_decl.type = type_expr;
     node->data.var_decl.identifier = iden;
+    node->data.var_decl.is_const = is_const;
     if (next_is(TokenType::ELLIPSIS)) {
         consume();
         node->data.var_decl.is_embed = true;
@@ -383,7 +393,8 @@ Node* Parser::parse_var_decl(Node* type_expr) {
         node->data.var_decl.expr = parse_expr_clause(false);
     }
     expect(TokenType::SEMICOLON);
-    if (get_scope()->owner->type != NodeType::StructDecl) {
+    auto scope_owner = get_scope()->owner;
+    if (!scope_owner || scope_owner->type != NodeType::StructDecl) {
         add_to_scope(node);
     }
     return node;
@@ -496,7 +507,6 @@ Node* Parser::parse_stmt() {
 
 Node* Parser::parse_simple_stmt(bool semicolon) {
     if (next_is(TokenType::KW_LET)) {
-        consume();
         return parse_var_decl(nullptr);
     } else if (next_is_type_expr()) {
         auto type_expr = parse_type_expr();

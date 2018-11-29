@@ -11,18 +11,21 @@
 #include <functional>
 #include <fstream>
 #include <sstream>
-#include <optional>
 #include <fmt/format.h>
 
+#include "include/optional.h"
 #include "include/enum.h"
-#include "include/tsl/hopscotch_map.h"
+#include "include/variant.h"
 
 namespace cx {
-    using std::optional;
     using fmt::print;
     template<typename T> using func = std::function<T>;
     template<typename T> using box = std::unique_ptr<T>;
     using std::string;
+    using stx::optional;
+    using namespace mpark;
+
+#define VARIANT_TRY(value, type, output) const auto output (get_if<type>(&value)); output
 
     template<typename... Args>
     static inline void panic(const char* format, const Args& ...args) {

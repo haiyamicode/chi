@@ -32,6 +32,9 @@ void Resolver::create_primitives() {
     system_types.any = create_type(TypeId::Any);
     system_types.char_ = create_int_type(8, false);
     system_types.int_ = create_int_type(32, false);
+    system_types.int64 = create_int_type(64, false);
+    system_types.float_ = create_float_type(32);
+    system_types.double_ = create_float_type(64);
     system_types.void_ = create_type(TypeId::Void);
     system_types.bool_ = create_type(TypeId::Bool);
     system_types.string = create_type(TypeId::String);
@@ -42,20 +45,20 @@ void Resolver::create_primitives() {
     add_primitive("any", system_types.any);
     add_primitive("void", system_types.void_);
     add_primitive("int", system_types.int_);
+    add_primitive("int64", system_types.int64);
     add_primitive("char", system_types.char_);
+    add_primitive("float", system_types.float_);
+    add_primitive("double", system_types.double_);
 
     add_primitive("array", create_type(TypeId::Array));
     add_primitive("int8", create_int_type(8, false));
     add_primitive("int16", create_int_type(16, false));
     add_primitive("int32", create_int_type(32, false));
-    add_primitive("int64", create_int_type(64, false));
     add_primitive("uint", create_int_type(32, true));
     add_primitive("uint8", create_int_type(8, true));
     add_primitive("uint16", create_int_type(16, true));
     add_primitive("uint32", create_int_type(32, true));
     add_primitive("uint64", create_int_type(64, true));
-    add_primitive("float", create_float_type(32));
-    add_primitive("double", create_float_type(64));
 }
 
 void Resolver::add_builtin_fn(const std::string& name, ChiType* type, ast::BuiltinId builtin_id) {
@@ -291,6 +294,9 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                 } else {
                     var_type = expr_type;
                 }
+            }
+            if (data.is_const) {
+                data.resolved_value = resolve_constant_value(data.expr);
             }
             return var_type;
         }
@@ -540,7 +546,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             if (data.value) {
                 auto value_type = resolve(data.value, scope);
                 check_assignment(data.value, value_type, int_type);
-                data.resolved_value = resolve_constant_value(data.value);
+                data.resolved_value = get<int64_t>(resolve_constant_value(data.value));
                 scope.next_enum_value = data.resolved_value + 1;
             } else {
                 data.resolved_value = scope.next_enum_value++;
@@ -861,14 +867,80 @@ ChiType* Resolver::create_float_type(int bit_count) {
     return type;
 }
 
-int64_t Resolver::resolve_constant_value(ast::Node* node) {
+ConstantValue Resolver::resolve_constant_value(ast::Node* node) {
     switch (node->type) {
-        case NodeType::LiteralExpr:
-            return node->token->val.i;
+        case NodeType::LiteralExpr: {
+            auto token = node->token;
+            switch (token->type) {
+                case TokenType::INT: {
+                    return token->val.i;
+                }
+                case TokenType::FLOAT: {
+                    return token->val.d;
+                }
+                case TokenType::STRING: {
+                    return token->str;
+                }
+                default:
+                    break;
+            }
+            break;
+        }
+
+#define _BIN_OP_CAST(op1, op, op2, type) get<type>(op1) op get<type>(op2)
+#define _BIN_OP_INT(op1, op, op2) _BIN_OP_CAST(op1, op, op2, const_int_t)
+
+        case NodeType::BinOpExpr: {
+            auto& data = node->data.bin_op_expr;
+            auto a = resolve_constant_value(data.op1);
+            auto b = resolve_constant_value(data.op2);
+            switch (data.op_type) {
+                case TokenType::ADD:
+                    return _BIN_OP_INT(a, +, b);
+                case TokenType::SUB:
+                    return _BIN_OP_INT(a, -, b);
+                case TokenType::LSHIFT:
+                    return _BIN_OP_INT(a, <<, b);
+                default:
+                    break;
+            }
+        }
+
+        case NodeType::ParenExpr: {
+            auto child = node->data.child_expr;
+            return resolve_constant_value(child);
+        }
+
+        case NodeType::UnaryOpExpr: {
+            auto& data = node->data.unary_op_expr;
+            switch (data.op_type) {
+                case TokenType::SUB: {
+                    auto v = resolve_constant_value(data.op1);
+                    return -get<const_int_t>(v);
+                }
+                default:
+                    break;
+            }
+        }
+
+        case NodeType::Identifier: {
+            auto& data = node->data.identifier;
+            if (data.decl) {
+                return resolve_constant_value(data.decl);
+            }
+        }
+        case NodeType::VarDecl: {
+            auto& data = node->data.var_decl;
+            if (data.is_const) {
+                return data.resolved_value;
+            }
+        }
         default:
-            panic("unhandled {}", PRINT_ENUM(node->type));
+            break;
+
     }
-    return 0;
+    error(node, errors::VALUE_NOT_CONSTANT);
+    return {};
 }
 
 bool Resolver::is_same_type(ChiType* a, ChiType* b) {

@@ -30,5 +30,6 @@ namespace cx {
         constexpr auto METHOD_NOT_IMPLEMENTED = "trait method '{}' has not been implemented";
         constexpr auto MISSING_TYPE_ARGUMENTS = "type arguments are required for generic type '{}'";
         constexpr auto CANNOT_TAKE_ADDRESS_UNADDRESSABLE = "cannot take address of unaddressable value";
+        constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant expression";
     }
 }

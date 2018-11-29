@@ -176,6 +176,8 @@ namespace cx {
 
             ValueRef compile_value_ref(Function *fn, ast::Node *expr);
 
+            jit_value compile_constant_value(Function *fn, const ConstantValue& value, ChiType* type);
+
             void build_jump_table(TraitImpl* impl);
 
             jit_value compile_mem_alloc(Function* fn, const jit_value& size_value);
@@ -189,7 +191,7 @@ namespace cx {
 
             CompileContext* get_context() { return m_ctx; }
 
-            jit_value create_string_const(Function* fn, const string& str);
+            jit_value create_string_constant(Function* fn, const string& str);
 
             void compile_stmt(Function* fn, ast::Node* stmt);
 

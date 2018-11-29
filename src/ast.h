@@ -111,8 +111,10 @@ namespace cx {
             Node* identifier;
             Node* type;
             Node* expr;
+            bool is_const;
             bool is_embed;
             ChiStructMember* resolved_field = nullptr;
+            ConstantValue resolved_value;
         };
 
         struct BinOpExpr {

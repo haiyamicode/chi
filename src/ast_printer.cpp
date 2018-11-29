@@ -87,7 +87,7 @@ void AstPrinter::print_node(Node* node) {
             if (data.type) {
                 print_node(data.type);
             } else {
-                print("let");
+                print(data.is_const ? "const" : "let");
             }
             print(" ");
             print_node(data.identifier);

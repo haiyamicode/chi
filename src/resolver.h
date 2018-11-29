@@ -19,6 +19,9 @@ namespace cx {
 
     struct SystemTypes {
         ChiType* int_;
+        ChiType* int64;
+        ChiType* float_;
+        ChiType* double_;
         ChiType* void_;
         ChiType* char_;
         ChiType* str_lit;
@@ -113,7 +116,7 @@ namespace cx {
 
         ChiType* _resolve(ast::Node* node, ResolveScope& scope);
 
-        int64_t resolve_constant_value(ast::Node* node);
+        ConstantValue resolve_constant_value(ast::Node* node);
 
         SystemTypes* get_system_types() { return &m_ctx->system_types; }
 

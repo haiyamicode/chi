@@ -43,7 +43,7 @@ static std::string to_string(const Any& v) {
     }
 }
 
-static string format_cstr(String format, Any* values) {
+static string format_cstr(String format, const Array<Any>& values) {
     int val_i = 0;
     int state = 0;
     std::stringstream ss;
@@ -60,7 +60,9 @@ static string format_cstr(String format, Any* values) {
                 break;
             case '}':
                 if (state == 1) {
-                    ss << to_string(values[val_i++]);
+                    if (val_i < values.size) {
+                        ss << to_string(values.data[val_i++]);
+                    }
                     state = 0;
                 } else if (state == 2) {
                     ss.write(&c, 1);
@@ -79,13 +81,13 @@ static string format_cstr(String format, Any* values) {
 }
 
 void cx::internals::string_format(String* dest, String format, Array<Any> values) {
-    auto str = format_cstr(format, values.data);
+    auto str = format_cstr(format, values);
     dest->data = str.data();
     dest->size = (uint32_t) str.size();
 }
 
 void cx::internals::printf(String format, Array<Any> values) {
-    ::printf("%s", format_cstr(format, values.data).c_str());
+    ::printf("%s", format_cstr(format, values).c_str());
 }
 
 void cx::internals::array_construct(GenericArray* dest) {
