@@ -28,6 +28,8 @@ namespace cx {
         ChiType* any;
         ChiType* string;
         ChiType* bool_;
+        ChiType* array;
+        ChiType* optional;
     };
 
     struct ResolveContext {
@@ -36,6 +38,7 @@ namespace cx {
         array<ast::Node*> builtins;
         map<ChiType*, ChiType*> array_types;
         map<ChiType*, ChiType*> pointer_types;
+        map<ChiType*, ChiType*> optional_types;
 
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
@@ -59,14 +62,18 @@ namespace cx {
 
     class Resolver {
         ResolveContext* m_ctx;
-
+        map<ast::Node*, ChiType*> m_tmods;
         ast::Module* m_module = nullptr;
+
+        void set_tmod(ast::Node* iden, ChiType* type) { m_tmods[iden->data.identifier.decl] = type; }
+
+        void unset_tmod(ast::Node* iden) { m_tmods.unset(iden->data.identifier.decl); }
 
         ChiType* create_type(TypeId type_id);
 
         ChiType* create_type_symbol(optional<string> name, ChiType* type);
 
-        ChiType* create_pointer_type(ChiType* elem);
+        ChiType* create_pointer_type(ChiType* elem, TypeId id);
 
         ChiType* create_int_type(int bit_count, bool is_unsigned);
 
@@ -118,8 +125,6 @@ namespace cx {
 
         ConstantValue resolve_constant_value(ast::Node* node);
 
-        SystemTypes* get_system_types() { return &m_ctx->system_types; }
-
         template<typename... Args>
         void error(ast::Node* node, const char* format, const Args& ...args) {
             auto pos = node->token->pos;
@@ -137,6 +142,10 @@ namespace cx {
 
         ast::Node* get_builtin(const string& name);
 
+        SystemTypes* get_system_types() { return &m_ctx->system_types; }
+
+        ChiType* get_system_type(TypeId type_id);
+
         ChiType* node_get_type(ast::Node* node);
 
         string to_string(ChiType* type);
@@ -148,6 +157,10 @@ namespace cx {
         ChiType* get_pointer_type(ChiType* elem);
 
         ChiType* get_array_type(ChiType* elem);
+
+        ChiType* get_optional_type(ChiType* elem);
+
+        ChiType* get_wrapped_type(ChiType* elem, TypeId wrapper_type);
 
         ChiType* resolve_subtype(ChiType* subtype);
 

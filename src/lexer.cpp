@@ -835,6 +835,8 @@ string Token::to_string() const {
             return fmt::format("{}", val.i);
         case TokenType::FLOAT:
             return fmt::format("{}", val.d);
+        case TokenType::BOOL:
+            return val.b ? "true" : "false";
         default:
             if (type >= TokenType::KW_BREAK && type <= TokenType::KW_UNION) {
                 return str;

@@ -69,3 +69,16 @@ void Scope::put(const string& name, ast::Node* node) {
 ChiType* ChiTypeFn::get_param_at(size_t index) {
     return index < params.size ? params[index] : params.last();
 }
+
+ChiType* ChiType::get_elem() {
+    switch (id) {
+        case TypeId::Pointer:
+        case TypeId::Optional:
+            return data.pointer.elem;
+        case TypeId::Array:
+            return data.array.elem;
+        default:
+            unreachable();
+            return nullptr;
+    }
+}

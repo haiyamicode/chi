@@ -16,7 +16,7 @@ namespace cx {
     struct ChiType;
 
     MAKE_ENUM(TypeId, TypeSymbol, Fn, Void, Int, Float, Bool, String,
-              Struct, Pointer, Array, Enum, Any, Subtype, Placeholder)
+              Struct, Pointer, Array, Enum, Any, Subtype, Placeholder, Optional)
 
     struct ChiTypeTypeSymbol {
         ChiType* giving_type;
@@ -157,6 +157,8 @@ namespace cx {
                     break;
             }
         }
+
+        ChiType* get_elem();
     };
 
     struct Scope {

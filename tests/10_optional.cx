@@ -1,0 +1,22 @@
+struct Node {
+    int id;
+    void new(int id) { this.id = id; }
+};
+
+void f(optional<Node*> node, bool force) {
+    if (node) {
+        printf("has value: node.id == {}\n", node.id);
+    } else {
+        printf("has no value, !node == {}\n", !node);
+    }
+    if (force) {
+        printf("forced print: node!.id == {}\n", node!.id);
+    }
+}
+
+int main() {
+    Node a = {1};
+    f(&a, false);
+    f(&a, true);
+    f({}, false);
+}

@@ -67,7 +67,7 @@ namespace cx {
 
         struct DotValue {
             ChiType* ctn_type;
-            jit_value ctn_value;
+            jit_value ctn_address;
             optional<StructField> field;
             optional<ast::Node*> method;
             optional<jit_value> vtable_fn;
@@ -80,7 +80,7 @@ namespace cx {
             jit_value size;
             jit_value data;
             jit_type_t elem;
-            jit_uint elem_size;
+            jit_nuint elem_size;
         };
 
         struct ValueRef {
@@ -89,6 +89,15 @@ namespace cx {
             Function* fn_ref = nullptr;
             ValueRef(const jit_value& _address, jit_type_t _type): address(_address), type(_type) {}
             ValueRef() {}
+        };
+
+        struct Optional {
+            jit_type_t data_type;
+            jit_nuint data_size;
+
+            jit_uint get_flag_field_offset() {
+                return data_size;
+            }
         };
 
         struct CompileSettings {
@@ -125,6 +134,8 @@ namespace cx {
 
             Resolver* get_resolver() { return &m_ctx->resolver; }
 
+            SystemTypes* get_system_types() { return get_resolver()->get_system_types(); }
+
             ChiType* eval_type(ChiType* type);
             ChiType* get_chitype(ast::Node* node);
 
@@ -133,6 +144,8 @@ namespace cx {
             jit_type_t to_jit_int_type(ChiType* type);
 
             jit_type_t compile_type(ChiType* type);
+
+            Optional compile_optional_type(ChiType* type);
 
             inline jit_type_t compile_type_of(ast::Node* node);
 
@@ -143,6 +156,10 @@ namespace cx {
             jit_value compile_array_add(Function* fn, const jit_value& dest, jit_uint elem_size, const jit_value& value);
 
             bool should_destroy(ast::Node* node);
+
+            bool should_destroy_for_type(ChiType* type);
+
+            void compile_destruction_for_type(Function* fn, jit_value& address, ChiType* type);
 
             void compile_destruction(Function* fn, jit_value& address, ast::Node* node);
 
@@ -168,9 +185,9 @@ namespace cx {
 
             jit_value compile_arithmetic_op(Function* fn, ChiType* value_type, TokenType op_type, const jit_value& op1, const jit_value& op2);
 
-            jit_value compile_assignment_value(Function* fn, ast::Node* value, ast::Node* dest);
+            jit_value compile_assignment_value(Function* fn, ast::Node* expr, ast::Node* dest);
 
-            jit_value compile_assignment_to_type(Function* fn, ast::Node* value, ChiType* dest_type);
+            jit_value compile_assignment_to_type(Function* fn, ast::Node* expr, ChiType* dest_type);
 
             jit_value compile_conversion(Function* fn, const jit_value& value, ChiType* from_type, ChiType* to_type);
 
@@ -181,8 +198,6 @@ namespace cx {
             void build_jump_table(TraitImpl* impl);
 
             jit_value compile_mem_alloc(Function* fn, const jit_value& size_value);
-
-            ChiType* ptr_type_deref(ChiType* ptr_type) { return ptr_type->data.pointer.elem; }
 
             jit_value compile_string_concat(Function* fn, const jit_value& s1, const jit_value& s2);
 

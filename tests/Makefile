@@ -7,7 +7,8 @@ TESTS = 00_fib.test \
     06_for_loop.test \
     07_trait_embed.test \
     08_generics.test \
-    09_string_any.test
+    09_string_any.test \
+    10_optional.test
 
 CX = ../cmake-build-debug/src/cx
 

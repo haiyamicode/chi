@@ -195,6 +195,10 @@ namespace cx {
             return data.find(key) != data.end();
         }
 
+        bool unset(const K& key) {
+            return data.erase(key);
+        }
+
         V* get(const K& key) {
             auto iter = data.find(key);
             if (iter != data.end()) {

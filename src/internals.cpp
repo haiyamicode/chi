@@ -33,8 +33,9 @@ static std::string to_string(const Any& v) {
             auto s = (String*) &v.data;
             return fmt::format(s->data);
         }
-        case TypeId::Int:
         case TypeId::Bool:
+            return fmt::format("{}", *(bool*) &v.data);
+        case TypeId::Int:
         case TypeId::Pointer:
             return fmt::format("{}", *(int64_t*) &v.data);
 

@@ -647,12 +647,13 @@ Node* Parser::parse_primary_expr(bool lhs, Node* parent) {
                 break;
 
             case TokenType::INC:
-            case TokenType::DEC: {
+            case TokenType::DEC:
+            case TokenType::LNOT: {
                 auto op1 = node;
                 node = create_unary_expr_node(read());
                 node->data.unary_op_expr.op1 = op1;
                 node->data.unary_op_expr.is_suffix = true;
-                return node;
+                break;
             }
 
             default:
@@ -752,7 +753,9 @@ Node* Parser::parse_if_stmt() {
     auto kw = expect(TokenType::KW_IF);
     auto node = create_node(NodeType::IfStmt, kw);
     m_ctx->resolver->push_scope(node);
+    expect(TokenType::LPAREN);
     node->data.if_stmt.condition = parse_expr();
+    expect(TokenType::RPAREN);
     node->data.if_stmt.then_block = parse_block();
     auto token = get();
     if (token->type == TokenType::KW_ELSE) {

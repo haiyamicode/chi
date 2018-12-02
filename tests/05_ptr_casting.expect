@@ -1,6 +1,6 @@
 b: -2019
 b after inc: -2018
-b after inc == -2018: 1
+b after inc == -2018: true
 (int)((int8)b + 1): 31
 foo_cpy.a: -2018
 *(int*)p: -2018

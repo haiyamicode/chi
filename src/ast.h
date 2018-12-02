@@ -228,6 +228,7 @@ namespace cx {
             Module* module;
             string name;
             ChiType* resolved_type = nullptr;
+            ChiType* orig_type = nullptr;
 
             union NodeData {
                 Root root;
