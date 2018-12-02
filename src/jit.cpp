@@ -79,6 +79,10 @@ static jit_type_t string_concat_params[] = {jit_type_nint, string_internal_struc
 static auto string_concat_signature = jit_type_create_signature(jit_abi_cdecl,
                                                                 jit_type_void, string_concat_params, 3, 1);
 
+static jit_type_t printf_params[] = {string_internal_struct, array_internal_struct};
+static auto printf_signature = jit_type_create_signature(jit_abi_cdecl,
+                                                         jit_type_void, printf_params, 2, 1);
+
 Function::Function(jit_type_t signature, CompileContext* _ctx, ast::Node* _node) : jit_function(
         _ctx->jit_ctx, signature), ctx(_ctx), node(_node) {
     set_recompilable();
@@ -96,6 +100,19 @@ void Function::build() {
 jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args) {
     return jit_function::insn_call(fn_ref->get_jit_name(), fn_ref->raw(), fn_ref->signature(), args,
                                    (uint32_t) num_args);
+}
+
+void sys_printf(char* str) {
+
+}
+
+void Function::insn_panic(const char* message) {
+    static jit_type_t params[] = {jit_type_nint};
+    static auto signature = jit_type_create_signature(jit_abi_cdecl,
+                                                      jit_type_void, params, 1, 1);
+    jit_value_t args[] = {jit_value_create_nint_constant(raw(), str_lit_type, (jit_nint) message)};
+    insn_call_native("_printf", (void*) printf, signature, args, 1);
+    insn_throw(get_null_constant());
 }
 
 void Function::set_qualified_name(const std::string& container_name, const std::string& name) {
@@ -244,7 +261,6 @@ inline jit_type_t Compiler::compile_type_of(cx::ast::Node* node) {
 }
 
 void Compiler::compile_fn_body(Function* fn) {
-    static auto printf_signature = compile_type_of(m_ctx->resolver.get_builtin("printf"));
     if (!fn->node) {
         return;
     }
@@ -498,7 +514,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                         auto flag = fn->insn_load_relative(ref.address, opt.get_flag_field_offset(), jit_type_sbyte);
                         jit_label if_ok;
                         fn->insn_branch_if(flag, if_ok);
-                        fn->insn_throw(fn->new_constant(jit_int(0)));
+                        fn->insn_panic("panic: unwrapping null optional value\n");
                         fn->insn_label(if_ok);
                         return fn->insn_load_relative(ref.address, 0, opt.data_type);
                     } else {
@@ -702,7 +718,7 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
 }
 
 jit_value Compiler::create_string_constant(Function* fn, const string& str) {
-    return jit_value_create_nint_constant(fn->raw(), str_lit_type, jit_nint(str.c_str()));
+    return jit_value_create_nint_constant(fn->raw(), str_lit_type, (jit_nint) str.c_str());
 }
 
 void Compiler::compile_block(Function* fn, ast::Node* parent, ast::Node* block) {

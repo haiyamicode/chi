@@ -48,7 +48,6 @@ namespace cx {
 
             const char* get_jit_name() { return qualified_name.c_str(); }
 
-            jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
             jit_value get_null_constant();
 
             jit_label* get_return_label() { return &return_labels.back().back().label; }
@@ -58,6 +57,10 @@ namespace cx {
             LoopLabels* push_loop() { return &loop_labels.emplace_back(); }
             void pop_loop() { loop_labels.pop_back(); }
             LoopLabels* get_loop() { return &loop_labels.back(); }
+
+            jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
+
+            void insn_panic(const char* message);
         };
 
         struct StructField {
