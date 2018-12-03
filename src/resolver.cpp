@@ -673,8 +673,13 @@ bool Resolver::is_addressable(ast::Node* node) {
         case NodeType::IndexExpr:
             return true;
 
-        case NodeType::UnaryOpExpr:
-            return node->data.unary_op_expr.op_type == TokenType::MUL;
+        case NodeType::ParenExpr:
+            return is_addressable(node->data.child_expr);
+
+        case NodeType::UnaryOpExpr: {
+            auto& data = node->data.unary_op_expr;
+            return data.op_type == TokenType::MUL || (data.is_suffix && data.op_type == TokenType::LNOT);
+        }
 
         default:
             return false;

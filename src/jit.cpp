@@ -708,8 +708,17 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
         }
         case ast::NodeType::UnaryOpExpr: {
             auto& data = expr->data.unary_op_expr;
-            assert(data.op_type == TokenType::MUL);
-            return {compile_simple_value(fn, data.op1), compile_type_of(expr)};
+            switch (data.op_type) {
+                case TokenType::MUL:
+                    return {compile_simple_value(fn, data.op1), compile_type_of(expr)};
+                case TokenType::LNOT: {
+                    auto ref = compile_value_ref(fn, data.op1);
+                    auto elem_type = get_chitype(data.op1)->get_elem();
+                    return {ref.address, compile_type(elem_type)};
+                }
+                default:
+                    break;
+            }
         }
         default:
             unreachable();
