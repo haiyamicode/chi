@@ -1,0 +1,6 @@
+a[0]: id=1
+a[1]: id=2
+destroy data id=2
+destroy data id=1
+destroy data id=2
+destroy data id=3

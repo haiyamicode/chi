@@ -8,7 +8,8 @@ TESTS = 00_fib.test \
     07_trait_embed.test \
     08_generics.test \
     09_string_any.test \
-    10_optional.test
+    10_optional.test \
+    11_box.test
 
 CX = ../cmake-build-debug/src/cx
 

@@ -94,12 +94,13 @@ namespace cx {
             ValueRef() {}
         };
 
-        struct Optional {
-            jit_type_t data_type;
-            jit_nuint data_size;
+        struct WrappedType {
+            jit_type_t type;
+            jit_type_t elem;
+            jit_nuint elem_size;
 
-            jit_uint get_flag_field_offset() {
-                return data_size;
+            jit_uint get_opt_flag_offset() {
+                return elem_size;
             }
         };
 
@@ -148,7 +149,7 @@ namespace cx {
 
             jit_type_t compile_type(ChiType* type);
 
-            Optional compile_optional_type(ChiType* type);
+            WrappedType compile_wrapped_type(ChiType* type);
 
             inline jit_type_t compile_type_of(ast::Node* node);
 

@@ -202,7 +202,12 @@ void Lexer::next() {
 
     } else if (c == '>') {
         if (read_expect('>')) {
-            m_tok.type = read_rep('=', TokenType::RSHIFT_ASS, TokenType::RSHIFT);
+            if (read_expect('=')) {
+                m_tok.type = TokenType::RSHIFT_ASS;
+            } else {
+                unread();
+                m_tok.type = TokenType::GT;
+            }
         } else {
             m_tok.type = read_rep('=', TokenType::GE, TokenType::GT);
         }

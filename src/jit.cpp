@@ -250,6 +250,10 @@ jit_type_t Compiler::_compile_type(ChiType* type) {
             jit_type_t fields[] = {compile_type(type->get_elem()), jit_type_sbyte};
             return jit_type_create_struct(fields, 2, 1);
         }
+        case TypeId::Box: {
+            static jit_type_t fields[] = {jit_type_nint};
+            return jit_type_create_struct(fields, 1, 1);
+        }
         default:
             panic("unhandled {}", PRINT_ENUM(type->id));
             return {};
@@ -510,13 +514,13 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 case TokenType::LNOT: {
                     if (data.is_suffix) {
                         auto ref = compile_value_ref(fn, data.op1);
-                        auto opt = compile_optional_type(get_chitype(data.op1));
-                        auto flag = fn->insn_load_relative(ref.address, opt.get_flag_field_offset(), jit_type_sbyte);
+                        auto opt = compile_wrapped_type(get_chitype(data.op1));
+                        auto flag = fn->insn_load_relative(ref.address, opt.get_opt_flag_offset(), jit_type_sbyte);
                         jit_label if_ok;
                         fn->insn_branch_if(flag, if_ok);
                         fn->insn_panic("panic: unwrapping null optional value\n");
                         fn->insn_label(if_ok);
-                        return fn->insn_load_relative(ref.address, 0, opt.data_type);
+                        return fn->insn_load_relative(ref.address, 0, opt.elem);
                     } else {
                         return fn->insn_to_not_bool(
                                 compile_assignment_to_type(fn, data.op1, get_system_types()->bool_));
@@ -546,7 +550,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             jit_value this_;
             jit_value value;
             if (data.is_new) {
-                assert(ctn_type->id == TypeId::Pointer);
+                assert(ctn_type->is_raw_pointer());
                 ctn_type = ctn_type->get_elem();
                 jit_nuint size_value = jit_type_get_size(compile_type(ctn_type));
                 this_ = compile_mem_alloc(fn, fn->new_constant(size_value));
@@ -604,7 +608,7 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
     switch (to_type->id) {
         case TypeId::Struct: {
             if (ChiTypeStruct::is_trait(to_type)) {
-                assert(from_type->id == TypeId::Pointer);
+                assert(from_type->is_raw_pointer());
                 auto& struct_ = from_type->get_elem()->data.struct_;
                 auto impl = struct_.traits_table[to_type];
                 build_jump_table(impl);
@@ -645,18 +649,18 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             jit_value flag;
             bool skip_check = false;
             auto elem_type = to_type->get_elem();
-            auto opt = compile_optional_type(to_type);
+            auto opt = compile_wrapped_type(to_type);
             if (from_type == to_type) {
                 auto addr = fn->insn_address_of(value);
-                val = fn->insn_load_relative(addr, 0, opt.data_type);
-                flag = fn->insn_load_relative(addr, opt.get_flag_field_offset(), jit_type_sbyte);
+                val = fn->insn_load_relative(addr, 0, opt.elem);
+                flag = fn->insn_load_relative(addr, opt.get_opt_flag_offset(), jit_type_sbyte);
             } else {
                 flag = fn->new_constant(jit_sbyte(1));
                 skip_check = true;
             }
-            auto temp = fn->new_value(compile_type(to_type));
+            auto temp = fn->new_value(opt.type);
             auto addr = fn->insn_address_of(temp);
-            fn->insn_store_relative(addr, opt.get_flag_field_offset(), flag);
+            fn->insn_store_relative(addr, opt.get_opt_flag_offset(), flag);
             jit_label skip_data;
             if (!skip_check) {
                 fn->insn_branch_if_not(flag, skip_data);
@@ -666,13 +670,28 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             fn->insn_label(skip_data);
             return temp;
         }
+        case TypeId::Box: {
+            assert(from_type->id == TypeId::Box);
+            auto box = compile_wrapped_type(to_type);
+            auto elem_type = to_type->get_elem();
+            auto addr = fn->insn_address_of(value);
+            auto data = fn->insn_load_relative(addr, 0, jit_type_nint);
+            auto val = fn->insn_load_relative(data, 0, box.elem);
+            val = compile_conversion(fn, val, elem_type, elem_type);
+            auto temp = fn->new_value(box.type);
+            auto dest = fn->insn_address_of(temp);
+            auto ptr = compile_mem_alloc(fn, fn->new_constant(box.elem_size));
+            fn->insn_store_relative(dest, 0, ptr);
+            fn->insn_store_relative(ptr, 0, val);
+            return temp;
+        }
         case TypeId::Bool: {
             if (from_type->id == TypeId::Bool) {
                 return value;
             } else if (from_type->id == TypeId::Optional) {
                 auto addr = fn->insn_address_of(value);
-                auto opt = compile_optional_type(from_type);
-                return fn->insn_load_relative(addr, opt.get_flag_field_offset(), jit_type_sbyte);
+                auto opt = compile_wrapped_type(from_type);
+                return fn->insn_load_relative(addr, opt.get_opt_flag_offset(), jit_type_sbyte);
             }
             return fn->insn_to_bool(value);
         }
@@ -873,7 +892,7 @@ DotValue Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
     auto member_type = get_chitype(expr);
     DotValue dot;
     dot.ctn_type = get_chitype(data.expr);
-    if (dot.ctn_type->id == TypeId::Pointer) {
+    if (dot.ctn_type->is_pointer()) {
         dot.ctn_address = compile_simple_value(fn, data.expr);
         dot.ctn_type = dot.ctn_type->get_elem();
     } else {
@@ -920,8 +939,13 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* typ
     } else if (type->id == TypeId::String) {
         return compile_string_construction(fn, dest, {});
     } else if (type->id == TypeId::Optional) {
-        auto opt = compile_optional_type(type);
-        return fn->insn_store_relative(dest, opt.get_flag_field_offset(), fn->new_constant(jit_sbyte(0)));
+        auto opt = compile_wrapped_type(type);
+        return fn->insn_store_relative(dest, opt.get_opt_flag_offset(), fn->new_constant(jit_sbyte(0)));
+    } else if (type->id == TypeId::Box) {
+        auto box = compile_wrapped_type(type);
+        auto ptr = compile_mem_alloc(fn, fn->new_constant(box.elem_size));
+        fn->insn_store_relative(dest, 0, ptr);
+        return compile_construction(fn, ptr.raw(), type->get_elem(), expr);
     }
     auto struct_ = get_struct(type);
     assert(struct_.data->constructor.get());
@@ -966,9 +990,33 @@ void Compiler::compile_field_mem_free(Function* fn, jit_value& arr, jit_nuint of
 void Compiler::compile_destruction_for_type(Function* fn, jit_value& address, ChiType* type) {
     switch (type->id) {
         case TypeId::String:
-        case TypeId::Array:
             compile_field_mem_free(fn, address, 0);
             break;
+
+        case TypeId::Array: {
+            auto data = fn->insn_load_relative(address, 0, jit_type_nint);
+            auto elem_type = compile_type(type->get_elem());
+            auto index = fn->new_value(jit_type_uint);
+            fn->store(index, fn->new_constant(0));
+            auto size = fn->insn_load_relative(address, ARRAY_SIZE_FIELD_OFFSET, jit_type_uint);
+            jit_label loop_start, loop_end;
+            fn->insn_label(loop_start); // for loop
+            fn->insn_branch_if(fn->insn_ge(index, size), loop_end); // if (index >= size) break;
+            auto elem = fn->insn_load_elem_address(data, index, elem_type);
+            compile_destruction_for_type(fn, elem, type->get_elem()); // delete data[i]
+            fn->store(index, fn->insn_add(index, fn->new_constant(1))); // index++
+            fn->insn_branch(loop_start);
+            fn->insn_label(loop_end);
+            compile_field_mem_free(fn, address, 0);
+            break;
+        }
+
+        case TypeId::Box: {
+            auto data = fn->insn_load_relative(address, 0, jit_type_nint);
+            compile_destruction_for_type(fn, data, type->get_elem());
+            compile_field_mem_free(fn, address, 0);
+            break;
+        }
 
         case TypeId::Optional:
             compile_destruction_for_type(fn, address, type->get_elem());
@@ -1010,6 +1058,7 @@ bool Compiler::should_destroy_for_type(ChiType* type) {
     switch (type->id) {
         case TypeId::Array:
         case TypeId::String:
+        case TypeId::Box:
             return true;
         case TypeId::Struct:
             return type->data.struct_.kind == ContainerKind::Struct;
@@ -1164,9 +1213,10 @@ jit_value Compiler::compile_constant_value(Function* fn, const ConstantValue& va
     return jit_value();
 }
 
-Optional Compiler::compile_optional_type(ChiType* type) {
-    Optional opt;
-    opt.data_type = compile_type(type->get_elem());
-    opt.data_size = jit_type_get_size(opt.data_type);
+WrappedType Compiler::compile_wrapped_type(ChiType* type) {
+    WrappedType opt;
+    opt.type = compile_type(type);
+    opt.elem = compile_type(type->get_elem());
+    opt.elem_size = jit_type_get_size(opt.elem);
     return opt;
 }

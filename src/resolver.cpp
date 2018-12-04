@@ -41,6 +41,7 @@ void Resolver::create_primitives() {
     system_types.str_lit = create_pointer_type(system_types.char_, TypeId::Pointer);
     system_types.array = create_type(TypeId::Array);
     system_types.optional = create_type(TypeId::Optional);
+    system_types.box = create_type(TypeId::Box);
 
     add_primitive("bool", system_types.bool_);
     add_primitive("string", system_types.string);
@@ -53,6 +54,7 @@ void Resolver::create_primitives() {
     add_primitive("double", system_types.double_);
     add_primitive("optional", system_types.optional);
     add_primitive("array", system_types.array);
+    add_primitive("box", system_types.box);
 
     add_primitive("int8", create_int_type(8, false));
     add_primitive("int16", create_int_type(16, false));
@@ -162,15 +164,14 @@ bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
         }
         case TypeId::Bool:
             return type_is_int(from_type) || from_type->id == TypeId::Optional;
-        case TypeId::Optional: {
+        case TypeId::Optional:
             return from_type == to_type || to_type->get_elem() == from_type;
-        }
         case TypeId::Array:
             return false;
         default:
             break;
     }
-    return from_type->id == to_type->id;
+    return from_type == to_type;
 }
 
 ChiType* Resolver::to_value_type(ChiType* type) {
@@ -347,19 +348,24 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     return t->id == TypeId::Bool ? int_type : t;
                 case TokenType::LNOT: {
                     if (data.is_suffix) {
-                        if (t->id != TypeId::Optional) {
-                            goto invalid;
+                        if (t->id == TypeId::Optional) {
+                            return t->get_elem();
+                        } else if (t->id == TypeId::Box) {
+                            return get_pointer_type(t->get_elem());
                         }
-                        return t->get_elem();
+                        goto invalid;
+                    } else {
+                        check_assignment(data.op1, t, bool_type);
+                        return bool_type;
                     }
-                    check_assignment(data.op1, t, bool_type);
-                    return bool_type;
+                    break;
                 }
-                case TokenType::MUL:
-                    if (t->id != TypeId::Pointer || t->get_elem()->id == TypeId::Void) {
+                case TokenType::MUL: {
+                    if (!t->is_pointer() || t->get_elem()->id == TypeId::Void) {
                         goto invalid;
                     }
                     return t->get_elem();
+                }
                 case TokenType::AND: {
                     if (!is_addressable(data.op1)) {
                         error(node, errors::CANNOT_TAKE_ADDRESS_UNADDRESSABLE);
@@ -428,14 +434,16 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
                     return nullptr;
                 }
-                value_type = scope.value_type;
-                result_type = value_type;
+                result_type = scope.value_type;
+                if (data.is_new != result_type->is_raw_pointer()) {
+                    error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
+                }
+                value_type = data.is_new ? result_type->get_elem() : result_type;
             }
             auto constructor = get_struct_member(value_type, "new");
             if (constructor) {
                 auto& fn_type = constructor->resolved_type->data.fn;
                 resolve_fn_call(node, scope, &fn_type, &data.items);
-                fn_type.container = value_type;
             } else {
                 if (data.items.size != 0) {
                     error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.size);
@@ -540,7 +548,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
             auto type = to_value_type(resolve(data.type, scope));
-            if (type->id == TypeId::Array || type->id == TypeId::Optional) {
+            if (type->id == TypeId::Array || type->id == TypeId::Optional || type->id == TypeId::Box) {
                 if (data.args.size != 1) {
                     error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
                           to_string(get_system_type(type->id)), 1, data.args.size);
@@ -781,6 +789,7 @@ ChiType* Resolver::type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs) {
         case TypeId::Array:
         case TypeId::Pointer:
         case TypeId::Optional:
+        case TypeId::Box:
             return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->id);
         case TypeId::Subtype: {
             auto& data = type->data.subtype;
@@ -803,7 +812,7 @@ ChiType* Resolver::type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs) {
 
 ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string& field_name) {
     auto sty = struct_type;
-    if (sty->id == TypeId::Pointer) {
+    if (sty->is_pointer()) {
         sty = sty->get_elem();
     }
     if (sty->id == TypeId::Array) {
@@ -839,29 +848,21 @@ void Resolver::resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* 
     scope.value_type = nullptr;
 }
 
-ChiType* Resolver::create_pointer_type(ChiType* elem, TypeId id) {
-    auto ptr_type = create_type(id);
+ChiType* Resolver::create_pointer_type(ChiType* elem, TypeId type_id) {
+    auto ptr_type = create_type(type_id);
     ptr_type->data.pointer.elem = elem;
     ptr_type->is_placeholder = elem->is_placeholder;
     return ptr_type;
 }
 
-ChiType* Resolver::get_pointer_type(ChiType* elem) {
-    if (auto cached = m_ctx->pointer_types.get(elem)) {
+ChiType* Resolver::get_pointer_type(ChiType* elem, TypeId type_id) {
+    auto& m = m_ctx->pointer_types[(int) type_id];
+    if (auto cached = m.get(elem)) {
         return *cached;
     }
-    auto ptr_type = create_pointer_type(elem, TypeId::Pointer);
-    m_ctx->pointer_types[elem] = ptr_type;
+    auto ptr_type = create_pointer_type(elem, type_id);
+    m[elem] = ptr_type;
     return ptr_type;
-}
-
-ChiType* Resolver::get_optional_type(ChiType* elem) {
-    if (auto cached = m_ctx->optional_types.get(elem)) {
-        return *cached;
-    }
-    auto opt_type = create_pointer_type(elem, TypeId::Optional);
-    m_ctx->optional_types[elem] = opt_type;
-    return opt_type;
 }
 
 ChiType* Resolver::get_array_type(ChiType* elem) {
@@ -1086,6 +1087,8 @@ ChiType* Resolver::get_system_type(TypeId type_id) {
             return types->array;
         case TypeId::Optional:
             return types->optional;
+        case TypeId::Box:
+            return types->box;
         case TypeId::Bool:
             return types->bool_;
         case TypeId::Void:
@@ -1103,7 +1106,9 @@ ChiType* Resolver::get_wrapped_type(ChiType* elem, TypeId wrapper_type) {
         case TypeId::Array:
             return get_array_type(elem);
         case TypeId::Optional:
-            return get_optional_type(elem);
+            return get_pointer_type(elem, TypeId::Optional);
+        case TypeId::Box:
+            return get_pointer_type(elem, TypeId::Box);
         default:
             unreachable();
             return nullptr;

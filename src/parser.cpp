@@ -569,7 +569,12 @@ Node* Parser::parse_binary_expr(bool lhs, Node* parent, int prec) {
     auto op1 = parse_unary_expr(lhs, parent);
     for (;;) {
         auto op_token = get();
-        auto op_prec = get_op_precedence(op_token->type);
+        auto tok_type = op_token->type;
+        if (op_token->type == TokenType::GT && lookahead(1)->type == TokenType::GT) { // check RSHIFT >> operator
+            consume();
+            tok_type = TokenType::RSHIFT;
+        }
+        auto op_prec = get_op_precedence(tok_type);
         if (op_prec < prec) {
             return op1;
         }
@@ -580,7 +585,7 @@ Node* Parser::parse_binary_expr(bool lhs, Node* parent, int prec) {
         auto op2 = parse_binary_expr(lhs, parent, op_prec + 1);
         auto node = create_node(NodeType::BinOpExpr, op_token);
         node->data.bin_op_expr.op1 = op1;
-        node->data.bin_op_expr.op_type = op_token->type;
+        node->data.bin_op_expr.op_type = tok_type;
         node->data.bin_op_expr.op2 = op2;
         op1 = node;
 //        }

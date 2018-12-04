@@ -1,0 +1,21 @@
+struct Data {
+    int id;
+
+    void new(int id) {
+        this.id = id;
+    }
+
+    void delete() {
+        printf("destroy data id={}\n", this.id);
+    }
+};
+
+int main() {
+    array<box<Data>> a;
+    a.add({1});
+    a.add({2});
+    a.add({3});
+    let v = a[1];
+    printf("a[0]: id={}\n", a[0].id);
+    printf("a[1]: id={}\n", a[1].id);
+}

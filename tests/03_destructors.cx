@@ -1,5 +1,6 @@
 struct Bar {
     int id = 0;
+    void new(int id) { this.id = id; }
     void delete() {
         printf("delete bar {}\n", this.id);
     }
@@ -20,6 +21,11 @@ struct Foo {
 };
 
 int main() {
+    array<Bar> arr;
+    arr.add({-1});
+    arr.add({-2});
+    arr.add({-3});
+    arr.add({-4});
     Foo foo1 = {1};
     if (1 == 1) {
         Foo foo2 = {2};

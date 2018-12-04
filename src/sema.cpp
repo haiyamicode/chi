@@ -74,6 +74,7 @@ ChiType* ChiType::get_elem() {
     switch (id) {
         case TypeId::Pointer:
         case TypeId::Optional:
+        case TypeId::Box:
             return data.pointer.elem;
         case TypeId::Array:
             return data.array.elem;

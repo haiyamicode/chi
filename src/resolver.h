@@ -30,6 +30,7 @@ namespace cx {
         ChiType* bool_;
         ChiType* array;
         ChiType* optional;
+        ChiType* box;
     };
 
     struct ResolveContext {
@@ -37,8 +38,7 @@ namespace cx {
         SystemTypes system_types;
         array<ast::Node*> builtins;
         map<ChiType*, ChiType*> array_types;
-        map<ChiType*, ChiType*> pointer_types;
-        map<ChiType*, ChiType*> optional_types;
+        map<ChiType*, ChiType*> pointer_types[(int) TypeId::__COUNT];
 
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
@@ -73,7 +73,7 @@ namespace cx {
 
         ChiType* create_type_symbol(optional<string> name, ChiType* type);
 
-        ChiType* create_pointer_type(ChiType* elem, TypeId id);
+        ChiType* create_pointer_type(ChiType* elem, TypeId type_id);
 
         ChiType* create_int_type(int bit_count, bool is_unsigned);
 
@@ -154,11 +154,9 @@ namespace cx {
 
         ChiType* get_subtype(ChiType* generic, TypeList* type_args);
 
-        ChiType* get_pointer_type(ChiType* elem);
+        ChiType* get_pointer_type(ChiType* elem, TypeId type_id = TypeId::Pointer);
 
         ChiType* get_array_type(ChiType* elem);
-
-        ChiType* get_optional_type(ChiType* elem);
 
         ChiType* get_wrapped_type(ChiType* elem, TypeId wrapper_type);
 
