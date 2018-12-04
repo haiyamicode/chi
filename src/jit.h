@@ -99,9 +99,7 @@ namespace cx {
             jit_type_t elem;
             jit_nuint elem_size;
 
-            jit_uint get_opt_flag_offset() {
-                return elem_size;
-            }
+            jit_nuint get_opt_flag_offset() { return elem_size; }
         };
 
         struct CompileSettings {
@@ -129,6 +127,8 @@ namespace cx {
             Resolver resolver;
             CompileContext(ResolveContext* rctx): resolver(rctx) {}
         };
+
+        enum ArrayOp { Destroy, Copy };
 
         class Compiler {
             CompileContext* m_ctx;
@@ -159,6 +159,8 @@ namespace cx {
 
             jit_value compile_array_add(Function* fn, const jit_value& dest, jit_uint elem_size, const jit_value& value);
 
+            jit_value compile_array_loop(Function* fn, jit_value& address, ChiType* type, ArrayOp op);
+
             bool should_destroy(ast::Node* node);
 
             bool should_destroy_for_type(ChiType* type);
@@ -170,6 +172,8 @@ namespace cx {
             DotValue compile_dot_expr(Function* fn, ast::Node* expr);
 
             void compile_array_construction(Function* fn, const jit_value& dest);
+
+            void compile_array_reserve(Function* fn, const jit_value& dest, jit_uint elem_size, const jit_value& size);
 
             void compile_construction(Function* fn, jit_value_t dest, ChiType* type, ast::Node* expr);
 
@@ -194,6 +198,8 @@ namespace cx {
             jit_value compile_assignment_to_type(Function* fn, ast::Node* expr, ChiType* dest_type);
 
             jit_value compile_conversion(Function* fn, const jit_value& value, ChiType* from_type, ChiType* to_type);
+
+            jit_value compile_value_copy(Function* fn, const jit_value& value, ChiType* type);
 
             ValueRef compile_value_ref(Function *fn, ast::Node *expr);
 

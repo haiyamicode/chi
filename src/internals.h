@@ -28,7 +28,7 @@ namespace cx {
             uint32_t capacity;
         };
 
-        typedef Array<void> GenericArray; 
+        typedef Array<void> GenericArray;
 
         void string_set_data(String* dest, const char* data);
 

@@ -18,4 +18,13 @@ int main() {
     let v = a[1];
     printf("a[0]: id={}\n", a[0].id);
     printf("a[1]: id={}\n", a[1].id);
+    printf("a[2]: id={}\n", a[2].id);
+    let b = a;
+    a.add({4});
+    printf("a[3]: id={}\n", a[3].id);
+    printf("a.size={}, b.size={}\n", a.size, b.size);
+    printf("b[0]: id={}\n", b[0].id);
+    printf("b[1]: id={}\n", b[1].id);
+    printf("b[2]: id={}\n", b[2].id);
+    return 0;
 }

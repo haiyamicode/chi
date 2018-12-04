@@ -417,7 +417,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 auto elem_size = jit_type_get_size(compile_type(elem_type));
                 for (size_t i = param_last; i < data.args.size; i++) {
                     auto value = compile_assignment_to_type(fn, data.args[i], elem_type);
-                    compile_array_add(fn, va_addr, elem_size, value);
+                    compile_array_add(fn, va_addr, (jit_uint) elem_size, value);
                 }
                 args.add(va_tmp.raw());
                 va_list_ref = va_addr;
@@ -665,7 +665,7 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             if (!skip_check) {
                 fn->insn_branch_if_not(flag, skip_data);
             }
-            auto data = compile_conversion(fn, val, elem_type, elem_type);
+            auto data = compile_value_copy(fn, val, elem_type);
             fn->insn_store_relative(addr, 0, data);
             fn->insn_label(skip_data);
             return temp;
@@ -677,13 +677,18 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             auto addr = fn->insn_address_of(value);
             auto data = fn->insn_load_relative(addr, 0, jit_type_nint);
             auto val = fn->insn_load_relative(data, 0, box.elem);
-            val = compile_conversion(fn, val, elem_type, elem_type);
+            val = compile_value_copy(fn, val, elem_type);
             auto temp = fn->new_value(box.type);
             auto dest = fn->insn_address_of(temp);
             auto ptr = compile_mem_alloc(fn, fn->new_constant(box.elem_size));
             fn->insn_store_relative(dest, 0, ptr);
             fn->insn_store_relative(ptr, 0, val);
             return temp;
+        }
+        case TypeId::Array: {
+            assert(from_type->id == TypeId::Array);
+            auto addr = fn->insn_address_of(value);
+            return compile_array_loop(fn, addr, to_type, ArrayOp::Copy);
         }
         case TypeId::Bool: {
             if (from_type->id == TypeId::Bool) {
@@ -702,6 +707,10 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
         return fn->insn_convert(value, compile_type(to_type), 0);
     }
     return value;
+}
+
+jit_value Compiler::compile_value_copy(Function* fn, const jit_value& value, ChiType* type) {
+    return compile_conversion(fn, value, type, type);
 }
 
 ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
@@ -994,19 +1003,7 @@ void Compiler::compile_destruction_for_type(Function* fn, jit_value& address, Ch
             break;
 
         case TypeId::Array: {
-            auto data = fn->insn_load_relative(address, 0, jit_type_nint);
-            auto elem_type = compile_type(type->get_elem());
-            auto index = fn->new_value(jit_type_uint);
-            fn->store(index, fn->new_constant(0));
-            auto size = fn->insn_load_relative(address, ARRAY_SIZE_FIELD_OFFSET, jit_type_uint);
-            jit_label loop_start, loop_end;
-            fn->insn_label(loop_start); // for loop
-            fn->insn_branch_if(fn->insn_ge(index, size), loop_end); // if (index >= size) break;
-            auto elem = fn->insn_load_elem_address(data, index, elem_type);
-            compile_destruction_for_type(fn, elem, type->get_elem()); // delete data[i]
-            fn->store(index, fn->insn_add(index, fn->new_constant(1))); // index++
-            fn->insn_branch(loop_start);
-            fn->insn_label(loop_end);
+            compile_array_loop(fn, address, type, ArrayOp::Destroy);
             compile_field_mem_free(fn, address, 0);
             break;
         }
@@ -1108,6 +1105,15 @@ void Compiler::compile_array_construction(Function* fn, const jit_value& dest) {
                          array_construct_signature, args, 1);
 }
 
+void Compiler::compile_array_reserve(Function* fn, const jit_value& dest, jit_uint elem_size, const jit_value& size) {
+    static jit_type_t array_reserve_params[] = {jit_type_nint, jit_type_uint, jit_type_uint};
+    static auto array_reserve_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_void,
+                                                                    array_reserve_params, 3, 1);
+    jit_value_t args[] = {dest.raw(), fn->new_constant(elem_size).raw(), size.raw()};
+    fn->insn_call_native("_array_reserve", (void*) internals::array_reserve,
+                         array_reserve_signature, args, 3);
+}
+
 Array Compiler::compile_array_ref(Function* fn, ast::Node* expr) {
     auto array_type = get_chitype(expr);
     auto array_ = compile_simple_value(fn, expr);
@@ -1197,7 +1203,7 @@ jit_value Compiler::compile_arithmetic_op(Function* fn, ChiType* value_type,
             return fn->insn_ge(op1, op2);
         default:
             unreachable();
-            return jit_value();
+            return {};
     }
 }
 
@@ -1210,7 +1216,7 @@ jit_value Compiler::compile_constant_value(Function* fn, const ConstantValue& va
     } else if (VARIANT_TRY(value, string, v)) {
         return compile_string_alloc(fn, create_string_constant(fn, *v));
     }
-    return jit_value();
+    return {};
 }
 
 WrappedType Compiler::compile_wrapped_type(ChiType* type) {
@@ -1219,4 +1225,41 @@ WrappedType Compiler::compile_wrapped_type(ChiType* type) {
     opt.elem = compile_type(type->get_elem());
     opt.elem_size = jit_type_get_size(opt.elem);
     return opt;
+}
+
+jit_value Compiler::compile_array_loop(Function* fn, jit_value& address, cx::ChiType* type, ArrayOp op) {
+    jit_value dst, temp, arr;
+    auto elem = compile_type(type->get_elem());
+    auto index = fn->new_value(jit_type_uint);
+    fn->store(index, fn->new_constant(0));
+    auto src = fn->insn_load_relative(address, 0, jit_type_nint);
+    auto size = fn->insn_load_relative(address, ARRAY_SIZE_FIELD_OFFSET, jit_type_uint);
+    if (op == ArrayOp::Copy) {
+        temp = fn->new_value(compile_type(type));
+        arr = fn->insn_address_of(temp);
+        compile_array_construction(fn, arr);
+        compile_array_reserve(fn, arr, (jit_uint) jit_type_get_size(elem), size);
+        dst = fn->insn_load_relative(arr, 0, jit_type_nint);
+        fn->insn_store_relative(arr, ARRAY_SIZE_FIELD_OFFSET, size);
+    }
+    jit_label loop_start, loop_end;
+    fn->insn_label(loop_start); // for loop
+    fn->insn_branch_if(fn->insn_ge(index, size), loop_end); // if (index >= size) break;
+    switch (op) {
+        case ArrayOp::Destroy: { // delete src[i]
+            auto item = fn->insn_load_elem_address(src, index, elem);
+            compile_destruction_for_type(fn, item, type->get_elem());
+            break;
+        }
+        case ArrayOp::Copy: { // dst[i] = src[i]
+            auto val = fn->insn_load_elem(src, index, elem);
+            auto elem_type = type->get_elem();
+            fn->insn_store_elem(dst, index, compile_value_copy(fn, val, elem_type));
+            break;
+        }
+    }
+    fn->store(index, fn->insn_add(index, fn->new_constant(1))); // index++
+    fn->insn_branch(loop_start);
+    fn->insn_label(loop_end);
+    return temp;
 }

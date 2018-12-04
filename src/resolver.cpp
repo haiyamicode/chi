@@ -166,8 +166,6 @@ bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
             return type_is_int(from_type) || from_type->id == TypeId::Optional;
         case TypeId::Optional:
             return from_type == to_type || to_type->get_elem() == from_type;
-        case TypeId::Array:
-            return false;
         default:
             break;
     }
