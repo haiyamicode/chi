@@ -82,12 +82,12 @@ void Resolver::create_builtins() {
     printf_params.add(get_system_types()->string);
     printf_params.add(get_system_types()->any);
     printf_type->data.fn.is_variadic = true;
-    add_builtin_fn("printf", printf_type, ast::BuiltinId::Printf);
+    add_builtin_fn("print", printf_type, ast::BuiltinId::Printf);
 
-    // __test
+    // debug
     auto test_type = create_type(TypeId::Fn);
     test_type->data.fn.return_type = create_type(TypeId::Void);
-    add_builtin_fn("__test", test_type, ast::BuiltinId::Test);
+    add_builtin_fn("debug", test_type, ast::BuiltinId::Debug);
 }
 
 ChiType* Resolver::create_type(TypeId type_id) {

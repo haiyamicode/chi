@@ -6,7 +6,7 @@ struct Sheep {
     }
 
     void talk() {
-        printf("baaaaahh {}\n", this.get_id());
+        print("baaaaahh {}\n", this.get_id());
     }
 };
 
@@ -22,7 +22,7 @@ struct Dog {
     }
 
     void talk() {
-        printf("wuff wuff {}\n", this.get_id());
+        print("wuff wuff {}\n", this.get_id());
     }
 };
 
@@ -34,7 +34,7 @@ struct Cat {
     }
 
     void talk() {
-        printf("meeoooww {}\n", this.get_id());
+        print("meeoooww {}\n", this.get_id());
     }
 };
 

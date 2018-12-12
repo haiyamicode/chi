@@ -5,12 +5,12 @@ struct Node {
 
 void f(optional<Node*> node, bool force) {
     if (node) {
-        printf("has value: node.id == {}\n", node.id);
+        print("has value: node.id == {}\n", node.id);
     } else {
-        printf("has no value, !node == {}\n", !node);
+        print("has no value, !node == {}\n", !node);
     }
     if (force) {
-        printf("forced print: node!.id == {}\n", node!.id);
+        print("forced print: node!.id == {}\n", node!.id);
     }
 }
 

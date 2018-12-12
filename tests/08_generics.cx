@@ -33,12 +33,12 @@ struct LinkedList<any T> {
 int main() {
     LinkedList<int> list;
     list.add(1);
-    printf("list.size: {}\n", list.size);
+    print("list.size: {}\n", list.size);
     list.add(2);
     list.add(3);
-    printf("list.size: {}\n", list.size);
+    print("list.size: {}\n", list.size);
     for (let node=list.head; node; node = node.next) {
-        printf("item value: {}\n", node.data);
+        print("item value: {}\n", node.data);
     }
     return 0;
 }

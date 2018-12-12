@@ -1,6 +1,6 @@
 BUILD_DIR=cmake-build-debug
 TEST_DIR=$(BUILD_DIR)
-CX = $(BUILD_DIR)/src/chc
+CX = $(BUILD_DIR)/src/chi
 
 all: debug
 

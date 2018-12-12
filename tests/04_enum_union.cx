@@ -28,37 +28,37 @@ struct KeyStroke {
 
 void print_key(Key key) {
     if (key == Key.Enter) {
-        printf("Enter ({})", key);
+        print("Enter ({})", key);
     }
     else if (key == Key.Ctrl) {
-        printf("Ctrl ({})", key);
+        print("Ctrl ({})", key);
     } else {
-        printf("unhandled key ({})", key);
+        print("unhandled key ({})", key);
     }
 }
 
 void print_keystroke(KeyStroke ks) {
     if (ks.type == KeyStrokeType.Single) {
-        printf("single: ", 0);
+        print("single: ", 0);
         print_key(ks.data.single);
     }
     else if (ks.type == KeyStrokeType.Combination) {
-        printf("combination: {{key: ", 0);
+        print("combination: {{key: ", 0);
         print_key(ks.data.combination.key);
-        printf(", modifier: ", 0);
+        print(", modifier: ", 0);
         print_key(ks.data.combination.modifier);
-        printf("}} ", 0);
+        print("}} ", 0);
     }
-    printf("\n", 0);
+    print("\n", 0);
 }
 
 int main() {
-    printf("enter_key_value: {}\n", Key.Enter);
-    printf("space_key_value: {}\n", Key.Space);
+    print("enter_key_value: {}\n", Key.Enter);
+    print("space_key_value: {}\n", Key.Space);
     Key key = 12;
-    printf("key_value: {}\n", key);
+    print("key_value: {}\n", key);
     if (key == Key.Delete) {
-        printf("delele_key: {}\n", key);
+        print("delele_key: {}\n", key);
     }
 
     KeyStroke ks1;

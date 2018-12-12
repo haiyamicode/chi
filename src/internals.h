@@ -45,7 +45,7 @@ void cx_array_reserve(CxArray* dest, uint32_t elem_size, uint32_t new_cap);
 
 void* cx_array_add(CxArray* dest, uint32_t elem_size);
 
-void cx_puts(const char* s);
+void cx_debug(const char* s);
 
 #ifdef __cplusplus
 }

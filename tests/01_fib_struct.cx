@@ -1,6 +1,6 @@
 int main() {
     Fib fib = {12};
-    printf("fib: {}\n", fib.calculate());
+    print("fib: {}\n", fib.calculate());
     return 0;
 }
 

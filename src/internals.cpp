@@ -114,6 +114,6 @@ void* cx_array_add(CxArray* dest, uint32_t elem_size) {
     return ((char*) dest->data) + (dest->size - 1) * elem_size;
 }
 
-void cx_puts(const char* s) {
-    fmt::print("hello {}\n", s);
+void cx_debug(const char* s) {
+    fmt::print(s);
 }

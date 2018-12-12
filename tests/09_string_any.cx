@@ -8,11 +8,11 @@ string world() {
 }
 
 int main() {
-    printf("hello {} {}\n", "the", world());
+    print("hello {} {}\n", "the", world());
     any id = world();
-    printf("hello {}\n", id);
-    printf("hello {}\n", ID1);
+    print("hello {}\n", id);
+    print("hello {}\n", ID1);
     id = ID2;
-    printf("hello {}, {}, {}\n", ID1, id, ID3);
+    print("hello {}, {}, {}\n", ID1, id, ID3);
     return 0;
 }

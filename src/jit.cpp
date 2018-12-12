@@ -396,10 +396,10 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             if (fn_expr->type == ast::NodeType::Identifier) {
                 auto& iden = fn_expr->data.identifier;
                 fn_ref = iden.decl;
-                if (fn_ref->data.fn_def.builtin_id == ast::BuiltinId::Test) {
-                    static jit_type_t test_params[] = {jit_type_nint};
-                    static auto test_sig = jit_type_create_signature(jit_abi_cdecl, jit_type_void, test_params, 1, 1);
-                    return fn->insn_call_native("_cx_puts", (void*) cx_puts, test_sig, nullptr, 0);
+                if (fn_ref->data.fn_def.builtin_id == ast::BuiltinId::Debug) {
+                    static jit_type_t debug_params[] = {jit_type_nint};
+                    static auto debug_sig = jit_type_create_signature(jit_abi_cdecl, jit_type_void, debug_params, 1, 1);
+                    return fn->insn_call_native("_cx_debug", (void*) cx_debug, debug_sig, nullptr, 0);
                 }
             } else if (fn_expr->type == ast::NodeType::DotExpr) {
                 auto& dot_expr = fn_expr->data.dot_expr;

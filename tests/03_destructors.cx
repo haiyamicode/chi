@@ -2,7 +2,7 @@ struct Bar {
     int id = 0;
     void new(int id) { this.id = id; }
     void delete() {
-        printf("delete bar {}\n", this.id);
+        print("delete bar {}\n", this.id);
     }
 };
 
@@ -16,7 +16,7 @@ struct Foo {
         this.bar2.id = id * 10 + 2;
     }
     void delete() {
-        printf("delete foo {}\n", this.id);
+        print("delete foo {}\n", this.id);
     }
 };
 

@@ -2,7 +2,7 @@ int main() {
     int N;
     N = 10; // Should return 55
     let value = fib(N);
-    printf("fib: {}\n", value);
+    print("fib: {}\n", value);
     return 0;
 }
 

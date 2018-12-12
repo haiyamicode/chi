@@ -1,9 +1,9 @@
 int main() {
-    printf("print from 1 to 5:\n", 0);
+    print("print from 1 to 5:\n", 0);
     for (int i=0; i<5; i++) {
-        printf("{}\n", i+1);
+        print("{}\n", i+1);
     }
-    printf("print from 1 to 5 without 4:\n", 0);
+    print("print from 1 to 5 without 4:\n", 0);
     int i = 0;
     for (;;) {
         if (i == 3) {
@@ -12,7 +12,7 @@ int main() {
         } else if (i >= 5) {
             break;
         }
-        printf("{}\n", i+1);
+        print("{}\n", i+1);
         i++;
     }
     return 0;

@@ -12,18 +12,18 @@ void inc(int* ref) {
 
 int main() {
     int b = -2019;
-    printf("b: {}\n", b);
+    print("b: {}\n", b);
     inc(&b);
-    printf("b after inc: {}\n", b);
-    printf("b after inc == -2018: {}\n", b == -2018);
-    printf("(int)((int8)b + 1): {}\n", (int8)b + 1);
+    print("b after inc: {}\n", b);
+    print("b after inc == -2018: {}\n", b == -2018);
+    print("(int)((int8)b + 1): {}\n", (int8)b + 1);
 
     void* p = 0;
     Bar bar1;
     bar1.foo.a = b;
     p = &bar1.foo;
     Foo foo_cpy = *(Foo*)p;
-    printf("foo_cpy.a: {}\n", foo_cpy.a);
-    printf("*(int*)p: {}\n", *(int*)p);
+    print("foo_cpy.a: {}\n", foo_cpy.a);
+    print("*(int*)p: {}\n", *(int*)p);
     return 0;
 }
