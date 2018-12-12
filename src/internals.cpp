@@ -7,9 +7,8 @@
 #include "internals.h"
 
 using namespace cx;
-using namespace cx::internals;
 
-void cx::internals::string_set_data(String* dest, const char* data) {
+void cx_string_set_data(CxString* dest, const char* data) {
     if (data) {
         dest->size = (uint32_t) strlen(data);
         dest->data = (char*) realloc(dest->data, dest->size + 1);
@@ -20,17 +19,17 @@ void cx::internals::string_set_data(String* dest, const char* data) {
     }
 }
 
-void cx::internals::string_concat(String* dest, String s1, String s2) {
+void cx_string_concat(CxString* dest, CxString s1, CxString s2) {
     dest->size = (uint32_t) (s1.size + s2.size);
     dest->data = (char*) malloc(dest->size + 1);
     memcpy(dest->data, s1.data, s1.size + 1);
     strncat(dest->data, s2.data, s2.size);
 }
 
-static std::string to_string(const Any& v) {
-    switch (v.type->id) {
+static std::string to_string(const CxAny& v) {
+    switch (v.type) {
         case TypeId::String: {
-            auto s = (String*) &v.data;
+            auto s = (CxString*) &v.data;
             return fmt::format(s->data);
         }
         case TypeId::Bool:
@@ -40,11 +39,11 @@ static std::string to_string(const Any& v) {
             return fmt::format("{}", *(int64_t*) &v.data);
 
         default:
-            return fmt::format("<{}>", PRINT_ENUM(v.type->id));
+            return fmt::format("<{}>", PRINT_ENUM(v.type));
     }
 }
 
-static string format_cstr(String format, const Array<Any>& values) {
+static string format_cstr(CxString format, const CxArray& values) {
     int val_i = 0;
     int state = 0;
     std::stringstream ss;
@@ -62,7 +61,7 @@ static string format_cstr(String format, const Array<Any>& values) {
             case '}':
                 if (state == 1) {
                     if (val_i < values.size) {
-                        ss << to_string(values.data[val_i++]);
+                        ss << to_string(((CxAny*) values.data)[val_i++]);
                     }
                     state = 0;
                 } else if (state == 2) {
@@ -81,23 +80,23 @@ static string format_cstr(String format, const Array<Any>& values) {
     return ss.str();
 }
 
-void cx::internals::string_format(String* dest, String format, Array<Any> values) {
+void cx_string_format(CxString* dest, CxString format, CxArray values) {
     auto str = format_cstr(format, values);
     dest->data = str.data();
     dest->size = (uint32_t) str.size();
 }
 
-void cx::internals::printf(String format, Array<Any> values) {
-    ::printf("%s", format_cstr(format, values).c_str());
+void cx_printf(CxString format, CxArray values) {
+    printf("%s", format_cstr(format, values).c_str());
 }
 
-void cx::internals::array_construct(GenericArray* dest) {
+void cx_array_construct(CxArray* dest) {
     dest->size = 0;
     dest->capacity = 0;
     dest->data = NULL;
 }
 
-void cx::internals::array_reserve(GenericArray* dest, uint32_t elem_size, uint32_t new_cap) {
+void cx_array_reserve(CxArray* dest, uint32_t elem_size, uint32_t new_cap) {
     if (dest->capacity >= new_cap)
         return;
 
@@ -110,7 +109,11 @@ void cx::internals::array_reserve(GenericArray* dest, uint32_t elem_size, uint32
     dest->capacity = (uint32_t) better_cap;
 }
 
-void* cx::internals::array_add(GenericArray* dest, uint32_t elem_size) {
-    array_reserve(dest, elem_size, ++dest->size);
+void* cx_array_add(CxArray* dest, uint32_t elem_size) {
+    cx_array_reserve(dest, elem_size, ++dest->size);
     return ((char*) dest->data) + (dest->size - 1) * elem_size;
+}
+
+void cx_puts(const char* s) {
+    fmt::print("hello {}\n", s);
 }

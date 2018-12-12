@@ -11,7 +11,7 @@
 #include <vector>
 
 #define MAKE_ENUM(name, ...)                                                   \
-    enum class name { __VA_ARGS__, __COUNT };                                  \
+    enum class name: int32_t { __VA_ARGS__, __COUNT };                         \
     inline std::ostream &operator<<(std::ostream &os, name value) {            \
         std::string enum_name = #name;                                          \
         std::string str = #__VA_ARGS__;                                        \

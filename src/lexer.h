@@ -215,6 +215,8 @@ namespace cx {
 
     string get_token_symbol(TokenType token_type);
 
+    string get_strlit_repr(const string& str);
+
     TokenType get_assignment_op(TokenType token_type);
 
     bool is_assignment_op(TokenType token_type);

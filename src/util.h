@@ -24,6 +24,7 @@ namespace cx {
     using std::string;
     using stx::optional;
     using namespace mpark;
+    using std::stringstream;
 
 #define VARIANT_TRY(value, type, output) const auto output (get_if<type>(&value)); output
 
@@ -56,6 +57,16 @@ namespace cx {
             current = strtok(NULL, sep.c_str());
         }
         return arr;
+    }
+
+    static inline std::string string_replace(std::string subject,
+                                             const std::string& search, const std::string& replace) {
+        size_t pos = 0;
+        while ((pos = subject.find(search, pos)) != std::string::npos) {
+            subject.replace(pos, search.length(), replace);
+            pos += replace.length();
+        }
+        return subject;
     }
 
     // part of this is from zig by Andrew Kelley
@@ -175,6 +186,7 @@ namespace cx {
     template<typename K, typename V>
     struct map {
         typedef std::unordered_map<K, V> Map;
+        Map data;
 
         template<typename... Args>
         void emplace(const K& key, Args&& ... args) {
@@ -207,9 +219,6 @@ namespace cx {
                 return nullptr;
             }
         }
-
-    private:
-        Map data;
     };
 
     namespace io {
@@ -255,6 +264,8 @@ namespace cx {
                 }
                 return {};
             };
+
+
         };
     }
 }

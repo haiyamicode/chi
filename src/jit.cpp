@@ -44,7 +44,7 @@ static auto free_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_v
 static jit_type_t trait_internal_fields[] = {jit_type_nint, jit_type_nint};
 static auto trait_internal_struct = jit_type_create_struct(trait_internal_fields, 2, 1);
 
-static jit_type_t any_internal_fields[] = {jit_type_nint, jit_type_nint, jit_type_nint};
+static jit_type_t any_internal_fields[] = {jit_type_int, jit_type_nint, jit_type_nint};
 static auto any_internal_struct = jit_type_create_struct(any_internal_fields, 3, 1);
 
 static jit_type_t array_internal_fields[] = {jit_type_nint, jit_type_uint, jit_type_uint};
@@ -85,9 +85,13 @@ static auto printf_signature = jit_type_create_signature(jit_abi_cdecl,
 
 Function::Function(jit_type_t signature, CompileContext* _ctx, ast::Node* _node) : jit_function(
         _ctx->jit_ctx, signature), ctx(_ctx), node(_node) {
-    set_recompilable();
     if (node) {
         qualified_name = node->name;
+    }
+    if (_ctx->is_aot_enabled()) {
+        asm_name = "_" + qualified_name;
+    } else {
+        set_recompilable();
     }
     is_returning = this->new_value(jit_type_sys_bool);
 }
@@ -98,12 +102,22 @@ void Function::build() {
 }
 
 jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args) {
+    if (ctx->jit_ctx.is_aot_enabled()) {
+        auto fid = ctx->add_fn_symbol(fn_ref->get_asm_name());
+        return jit_function::insn_call_native(fn_ref->get_jit_name(), (void*) (-fid), fn_ref->signature(), args,
+                                              (uint32_t) num_args);
+    }
     return jit_function::insn_call(fn_ref->get_jit_name(), fn_ref->raw(), fn_ref->signature(), args,
                                    (uint32_t) num_args);
 }
 
-void sys_printf(char* str) {
-
+jit_value Function::insn_call_native(const char* name, void* native_func, jit_type_t signature,
+                                     jit_value_t* args, unsigned int num_args, int flags) {
+    if (ctx->jit_ctx.is_aot_enabled()) {
+        return jit_function::insn_call_native(name, (void*) (-ctx->add_fn_symbol(name)),
+                                              signature, args, num_args, flags);
+    }
+    return jit_function::insn_call_native(name, native_func, signature, args, num_args, flags);
 }
 
 void Function::insn_panic(const char* message) {
@@ -115,12 +129,14 @@ void Function::insn_panic(const char* message) {
     insn_throw(get_null_constant());
 }
 
-void Function::set_qualified_name(const std::string& container_name, const std::string& name) {
-    qualified_name = container_name + "::" + name;
-}
-
 jit_value Function::get_null_constant() {
     return new_constant(jit_nint(NULL));
+}
+
+Function* CompileContext::add_fn(ast::Node* node, Function* fn) {
+    functions.emplace(fn)->get();
+    fn_by_node[node] = fn;
+    return fn;
 }
 
 Compiler::Compiler(CompileContext* ctx, Function* fn) {
@@ -140,12 +156,10 @@ void Compiler::compile(ast::Module* module) {
 }
 
 Function* Compiler::compile_fn(ast::Node* node) {
-    if (auto fn = m_ctx->functions.get(node)) {
-        return fn->get();
+    if (auto fn = get_fn(node)) {
+        return fn;
     }
-    auto fn = new_fn(compile_type_of(node), node);
-    m_ctx->functions.emplace(node, fn);
-    return fn;
+    return add_fn(compile_type_of(node), node);
 }
 
 jit_type_t Compiler::to_jit_int_type(ChiType* type) {
@@ -272,7 +286,7 @@ void Compiler::compile_fn_body(Function* fn) {
     if (fn_def.builtin_id != ast::BuiltinId::Invalid) {
         if (fn_def.builtin_id == ast::BuiltinId::Printf) {
             jit_value_t args[] = {fn->get_param(0).raw(), fn->get_param(1).raw()};
-            fn->insn_call_native("_printf", (void*) internals::printf, printf_signature, args, 2);
+            fn->insn_call_native("_cx_printf", (void*) cx_printf, printf_signature, args, 2);
         }
     } else {
         auto& proto = fn_def.fn_proto->data.fn_proto;
@@ -382,6 +396,11 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             if (fn_expr->type == ast::NodeType::Identifier) {
                 auto& iden = fn_expr->data.identifier;
                 fn_ref = iden.decl;
+                if (fn_ref->data.fn_def.builtin_id == ast::BuiltinId::Test) {
+                    static jit_type_t test_params[] = {jit_type_nint};
+                    static auto test_sig = jit_type_create_signature(jit_abi_cdecl, jit_type_void, test_params, 1, 1);
+                    return fn->insn_call_native("_cx_puts", (void*) cx_puts, test_sig, nullptr, 0);
+                }
             } else if (fn_expr->type == ast::NodeType::DotExpr) {
                 auto& dot_expr = fn_expr->data.dot_expr;
                 auto dot = compile_dot_expr(fn, fn_expr);
@@ -633,7 +652,7 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             if (from_type->id != TypeId::Any) {
                 auto temp = fn->new_value(any_internal_struct);
                 auto addr = fn->insn_address_of(temp);
-                auto typ = fn->new_constant((void*) from_type);
+                auto typ = fn->new_constant(jit_int(from_type->id));
                 fn->insn_store_relative(addr, TRAIT_TYPE_FIELD_OFFSET, typ);
                 auto val = value;
                 if (get_resolver()->type_is_int(from_type)) {
@@ -755,6 +774,9 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
 }
 
 jit_value Compiler::create_string_constant(Function* fn, const string& str) {
+    if (is_aot_enabled()) {
+        m_ctx->string_literals.add(str.c_str());
+    }
     return jit_value_create_nint_constant(fn->raw(), str_lit_type, (jit_nint) str.c_str());
 }
 
@@ -841,7 +863,7 @@ void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
     // default constructor
     auto cons_signature = jit_type_create_signature
             (jit_abi_cdecl, jit_type_void, &this_, uint32_t(1), 1);
-    auto constructor = new_fn(cons_signature, nullptr);
+    auto constructor = add_fn(cons_signature, nullptr);
     fn_method(constructor, "_new", struct_type, subtype);
     sdata->constructor.reset(constructor);
 
@@ -874,7 +896,7 @@ void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
     // default destructor
     auto des_signature = jit_type_create_signature
             (jit_abi_cdecl, jit_type_void, &this_, uint32_t(1), 1);
-    auto destructor = new_fn(des_signature, nullptr);
+    auto destructor = add_fn(des_signature, nullptr);
     fn_method(destructor, "_delete", struct_type, subtype);
     sdata->destructor.reset(destructor);
 
@@ -938,8 +960,8 @@ DotValue Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
 }
 
 Function* Compiler::get_fn(ast::Node* node) {
-    auto fn = m_ctx->functions.get(node);
-    return fn ? fn->get() : nullptr;
+    auto iter = m_ctx->fn_by_node.get(node);
+    return iter ? *iter : nullptr;
 }
 
 void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* type, ast::Node* expr) {
@@ -1042,8 +1064,33 @@ Function* Compiler::new_fn(jit_type_t signature, ast::Node* node) {
     return new Function(signature, get_context(), node);
 }
 
-void Compiler::fn_method(Function* fn, const string& name, ChiType* struct_type, ChiTypeSubtype* subtype) {
-    fn->set_qualified_name(get_resolver()->to_string(struct_type), name);
+Function* Compiler::add_fn(jit_type_t signature, ast::Node* node) {
+    auto fn = new_fn(signature, node);
+    return m_ctx->add_fn(node, fn);
+}
+
+void Compiler::fn_method(Function* fn, const string& fn_name, ChiType* struct_type, ChiTypeSubtype* subtype) {
+    auto ctn_name = get_resolver()->to_string(struct_type);
+    fn->qualified_name = fmt::format("{}::{}", ctn_name, fn_name);
+    if (is_aot_enabled()) {
+        stringstream ss;
+        for (auto c: ctn_name) {
+            switch (c) {
+                case '<':
+                    ss << "A_.";
+                    break;
+                case '>':
+                    ss << ".V_";
+                    break;
+                case ',':
+                    ss << ".C_.";
+                    break;
+                default:
+                    ss.put(c);
+            }
+        }
+        fn->asm_name = fmt::format("_{}._{}", ss.str(), fn_name);
+    }
     fn->container_subtype = subtype;
 }
 
@@ -1101,7 +1148,7 @@ void Compiler::compile_array_construction(Function* fn, const jit_value& dest) {
     static auto array_construct_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_void,
                                                                       array_construct_params, 1, 1);
     jit_value_t args[] = {dest.raw()};
-    fn->insn_call_native("_array_construct", (void*) internals::array_construct,
+    fn->insn_call_native("_cx_array_construct", (void*) cx_array_construct,
                          array_construct_signature, args, 1);
 }
 
@@ -1110,7 +1157,7 @@ void Compiler::compile_array_reserve(Function* fn, const jit_value& dest, jit_ui
     static auto array_reserve_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_void,
                                                                     array_reserve_params, 3, 1);
     jit_value_t args[] = {dest.raw(), fn->new_constant(elem_size).raw(), size.raw()};
-    fn->insn_call_native("_array_reserve", (void*) internals::array_reserve,
+    fn->insn_call_native("_cx_array_reserve", (void*) cx_array_reserve,
                          array_reserve_signature, args, 3);
 }
 
@@ -1133,7 +1180,7 @@ jit_value Compiler::compile_array_add(Function* fn, const jit_value& dest, jit_u
     static auto array_add_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_nint,
                                                                 array_add_params, 2, 1);
     jit_value_t args[] = {dest.raw(), fn->new_constant(elem_size).raw()};
-    auto address = fn->insn_call_native("_array_add", (void*) internals::array_add,
+    auto address = fn->insn_call_native("_cx_array_add", (void*) cx_array_add,
                                         array_add_signature, args, 2);
     fn->insn_store_relative(address, 0, value);
     return address;
@@ -1144,7 +1191,7 @@ void Compiler::compile_string_construction(Function* fn, const jit_value& dest, 
     fn->insn_store_relative(dest, STRING_SIZE_FIELD_OFFSET, fn->new_constant(jit_int(0)));
     if (data) {
         jit_value_t args[] = {dest.raw(), data->raw()};
-        fn->insn_call_native("_string_set_data", (void*) internals::string_set_data,
+        fn->insn_call_native("_cx_string_set_data", (void*) cx_string_set_data,
                              string_set_data_signature, args, 2);
     }
 }
@@ -1160,7 +1207,7 @@ jit_value Compiler::compile_string_concat(Function* fn, const jit_value& s1, con
     auto temp = fn->new_value(string_internal_struct);
     auto addr = fn->insn_address_of(temp);
     jit_value_t args[] = {addr.raw(), s1.raw(), s2.raw()};
-    fn->insn_call_native("_string_concat", (void*) internals::string_concat, string_concat_signature, args, 3);
+    fn->insn_call_native("_cx_string_concat", (void*) cx_string_concat, string_concat_signature, args, 3);
     return temp;
 }
 

@@ -11,7 +11,7 @@ TESTS = 00_fib.test \
     10_optional.test \
     11_box.test
 
-CX = ../cmake-build-debug/src/cx
+CX = ../cmake-build-debug/src/chc
 
 %.test: %.expect %.cx
 	@echo Test: $*...

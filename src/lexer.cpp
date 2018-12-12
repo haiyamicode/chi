@@ -828,6 +828,26 @@ string cx::get_token_symbol(TokenType token_type) {
     }
 }
 
+string cx::get_strlit_repr(const string& str) {
+    stringstream out;
+    for (auto c: str) {
+        switch (c) {
+            case '"':
+                out << "\\\"";
+                break;
+            case '\t':
+                out << "\\t";
+                break;
+            case '\n':
+                out << "\\n";
+                break;
+            default:
+                out.put(c);
+        }
+    }
+    return out.str();
+}
+
 string Token::to_string() const {
     switch (type) {
         case TokenType::IDEN:
@@ -835,7 +855,7 @@ string Token::to_string() const {
         case TokenType::CHAR:
             return fmt::format("'{}'", (char) val.i);
         case TokenType::STRING:
-            return fmt::format("\"{}\"", str);
+            return fmt::format("\"{}\"", get_strlit_repr(str));
         case TokenType::INT:
             return fmt::format("{}", val.i);
         case TokenType::FLOAT:

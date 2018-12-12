@@ -31,6 +31,7 @@ namespace cx {
 
         struct Function : public jit_function {
             string qualified_name;
+            optional<string> asm_name;
             ast::Node* node;
             CompileContext* ctx;
 
@@ -44,9 +45,9 @@ namespace cx {
 
             virtual void build();
 
-            void set_qualified_name(const string& container_name, const string& name);
+            const char* get_jit_name() const { return qualified_name.c_str(); }
 
-            const char* get_jit_name() { return qualified_name.c_str(); }
+            string get_asm_name() const { return asm_name ? *asm_name : qualified_name; }
 
             jit_value get_null_constant();
 
@@ -57,6 +58,9 @@ namespace cx {
             LoopLabels* push_loop() { return &loop_labels.emplace_back(); }
             void pop_loop() { loop_labels.pop_back(); }
             LoopLabels* get_loop() { return &loop_labels.back(); }
+
+            jit_value insn_call_native(const char *name, void *native_func, jit_type_t signature,
+                                       jit_value_t *args, unsigned int num_args, int flags=0);
 
             jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
 
@@ -118,14 +122,28 @@ namespace cx {
         };
 
         struct CompileContext {
-            map<ast::Node*, box<Function>> functions;
+            array<box<Function>> functions;
+            array<string> fn_symbols;
+            array<const char*> string_literals;
             map<ast::Node*, jit_value> values;
             map<ChiType*, box<StructData>> structs;
             map<ChiType*, jit_type_t> types;
             jit_context jit_ctx;
             CompileSettings settings;
             Resolver resolver;
+            map<ast::Node*, Function*> fn_by_node;
+
             CompileContext(ResolveContext* rctx): resolver(rctx) {}
+
+            Function* add_fn(ast::Node* node, Function* fn);
+
+            int64_t add_fn_symbol(const string& name) {
+                    fn_symbols.add(name);
+                    return (int64_t)fn_symbols.size; 
+            }
+
+            void enable_aot_compilation(bool value) { jit_context_set_enable_aot(jit_ctx.raw(), value); }
+            bool is_aot_enabled() { return jit_ctx.is_aot_enabled(); }
         };
 
         enum ArrayOp { Destroy, Copy };
@@ -185,7 +203,9 @@ namespace cx {
 
             Function* new_fn(jit_type_t signature, ast::Node* node);
 
-            void fn_method(Function* fn, const string& name, ChiType* struct_type, ChiTypeSubtype* subtype);
+            Function* add_fn(jit_type_t signature, ast::Node* node);
+
+            void fn_method(Function* fn, const string& fn_name, ChiType* struct_type, ChiTypeSubtype* subtype);
 
             void add_value(ast::Node* node, const jit_value& value) { m_ctx->values[node] = value; }
 
@@ -235,6 +255,8 @@ namespace cx {
             StructData* get_struct_data(ChiType* struct_type);
 
             Struct get_struct(ChiType* struct_type);
+
+            bool is_aot_enabled() { return m_ctx->is_aot_enabled(); }
         };
     }
 }

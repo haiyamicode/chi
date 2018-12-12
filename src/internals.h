@@ -6,42 +6,47 @@
 
 #include "sema.h"
 
-namespace cx {
-    namespace internals {
-        struct String {
-            char* data;
-            uint32_t size;
-        };
+using namespace cx;
 
-        struct Any {
-            ChiType* type;
-            struct {
-                void* a;
-                void* b;
-            } data;
-        };
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-        template<typename T>
-        struct Array {
-            T* data;
-            uint32_t size;
-            uint32_t capacity;
-        };
+struct CxString {
+    char* data;
+    uint32_t size;
+};
 
-        typedef Array<void> GenericArray;
+struct CxAny {
+    TypeId type;
+    struct {
+        void* a;
+        void* b;
+    } data;
+};
 
-        void string_set_data(String* dest, const char* data);
+struct CxArray {
+    void* data;
+    uint32_t size;
+    uint32_t capacity;
+};
 
-        void string_concat(String* dest, String s1, String s2);
+void cx_string_set_data(CxString* dest, const char* data);
 
-        void string_format(String* dest, String format, Array<Any> values);
+void cx_string_concat(CxString* dest, CxString s1, CxString s2);
 
-        void printf(String format, Array<Any> values);
+void cx_string_format(CxString* dest, CxString format, CxArray values);
 
-        void array_construct(GenericArray* dest);
+void cx_printf(CxString format, CxArray values);
 
-        void array_reserve(GenericArray* dest, uint32_t elem_size, uint32_t new_cap);
+void cx_array_construct(CxArray* dest);
 
-        void* array_add(GenericArray* dest, uint32_t elem_size);
-    }
+void cx_array_reserve(CxArray* dest, uint32_t elem_size, uint32_t new_cap);
+
+void* cx_array_add(CxArray* dest, uint32_t elem_size);
+
+void cx_puts(const char* s);
+
+#ifdef __cplusplus
 }
+#endif

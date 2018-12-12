@@ -21,7 +21,7 @@ struct Foo {
 };
 
 int main() {
-    array<Bar> arr;
+    array<Bar> arr = {};
     arr.add({-1});
     arr.add({-2});
     arr.add({-3});
