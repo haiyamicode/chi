@@ -1,6 +1,6 @@
 BUILD_DIR=cmake-build-debug
 TEST_DIR=$(BUILD_DIR)
-CX = $(BUILD_DIR)/src/chi
+CHI = $(BUILD_DIR)/src/chi
 
 all: debug
 
@@ -10,13 +10,18 @@ build:
 	cd cmake-build-debug && cmake .. && $(MAKE)
 
 asm: build
-	$(CX) -s $(TEST_DIR)/test.cx
+	$(CHI) -s $(TEST_DIR)/test.cx
 
 run: build
-	$(CX) $(TEST_DIR)/test.cx
+	$(CHI) $(TEST_DIR)/test.cx
 
 debug: build
-	$(CX) -d $(TEST_DIR)/test.cx
+	$(CHI) -d $(TEST_DIR)/test.cx
 
-test: build
+test: test_jit test_aot
+
+test_jit: build
 	(cd tests; make test)
+
+test_aot: build
+	(cd tests; make test CHI_AOT=1)

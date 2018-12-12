@@ -15,13 +15,22 @@
 #include "jit.h"
 
 namespace cx {
-    struct AotCompilation {
-        map<int64_t, string> symbol_names;
-    };
-
-    struct AotFnInput {
+    struct AotFunctionInput {
         int32_t fid;
         array<ZyanU8>* instructions;
+    };
+
+    struct AotCompilation {
+        map<int64_t, string> symbol_names;
+        ZydisDecoder decoder;
+        ZydisFormatter formatter;
+    };
+
+    struct AssemblyState {
+        ZydisDecodedInstruction instruction;
+        string* fn_call = nullptr;
+        ZyanUSize offset = 0;
+        map<ZyanUSize, string> labels;
     };
 
     struct BuildContext {
@@ -70,7 +79,10 @@ namespace cx {
 
         void build_program(const string& entry_file_name);
 
-        void generate_fn_asm(AotCompilation* ctx, AotFnInput* input, FILE* stream);
+    private:
+        bool generate_insn_asm(AotCompilation* ctx, AotFunctionInput* fn, AssemblyState* as, FILE* stream);
+
+        void generate_fn_asm(AotCompilation* ctx, AotFunctionInput* fn, FILE* stream);
 
         string get_tmp_file_path(const string& filename);
 

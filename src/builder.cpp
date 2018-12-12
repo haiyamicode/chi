@@ -109,103 +109,96 @@ void Builder::set_build_mode(BuildMode value) {
     }
 }
 
-void Builder::generate_fn_asm(AotCompilation* ctx, AotFnInput* input, FILE* stream) {
-    // Initialize decoder context
-    ZydisDecoder decoder;
-
-    ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64);
-
-    // Initialize formatter. Only required when you actually plan to do instruction
-    // formatting ("disassembling"), like we do here
-    ZydisFormatter formatter;
-    ZydisFormatterInit(&formatter, ZYDIS_FORMATTER_STYLE_ATT);
-
-    // Loop over the instructions in our buffer.
-    ZyanU64 runtime_address = 0;
-    ZyanUSize offset = 0;
-    auto data = input->instructions->items;
-    const ZyanUSize length = input->instructions->size;
-    ZydisDecodedInstruction instruction;
-    string* fn_name = nullptr;
-    map<ZyanUSize, string> labels;
-
-    // scan for labels
-    while (ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(&decoder, data + offset, length - offset,
-                                                 &instruction))) {
-        if (instruction.meta.category == ZYDIS_CATEGORY_COND_BR || instruction.mnemonic == ZYDIS_MNEMONIC_JMP) {
-            auto rel = instruction.operands[0].imm.value.s;
-            auto abs = offset + instruction.length + rel;
-            if (!labels.get(abs)) {
-                auto id = int(labels.data.size() + 1);
-                auto label = fmt::format("Lf{}tmp{}", input->fid, id);
-                labels[abs] = label;
+bool Builder::generate_insn_asm(AotCompilation* ctx, AotFunctionInput* input, AssemblyState* as, FILE* stream) {
+    auto& insn = as->instruction;
+    if (insn.mnemonic == ZYDIS_MNEMONIC_MOV) {
+        auto& dest = insn.operands[0];
+        auto& src = insn.operands[1];
+        if (dest.type == ZYDIS_OPERAND_TYPE_REGISTER && dest.reg.value == ZYDIS_REGISTER_R11) {
+            auto fid = src.imm.value.s;
+            as->fn_call = ctx->symbol_names.get(fid);
+            if (as->fn_call) {
+                return true;
+            }
+        } else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+            auto value = src.imm.value.s;
+            char buffer[256];
+            ZydisFormatterFormatOperand(&ctx->formatter, &insn, 0, buffer, sizeof(buffer), 0);
+            if (auto name = ctx->symbol_names.get(value)) {
+                fmt::print(stream, "\tleaq {}(%rip), {}\n", *name, buffer);
+                return true;
             }
         }
-        offset += instruction.length;
+
+    } else if (insn.mnemonic == ZYDIS_MNEMONIC_MOVSXD) {
+        insn.mnemonic = ZYDIS_MNEMONIC_MOVSX;
+        return false;
+
+    } else if (insn.meta.category == ZYDIS_CATEGORY_COND_BR || insn.mnemonic == ZYDIS_MNEMONIC_JMP) {
+        auto rel = insn.operands[0].imm.value.s;
+        auto abs = as->offset + insn.length + rel;
+        string label = as->labels[abs];
+        fmt::print(stream, "\t{} {}\n", ZydisMnemonicGetString(insn.mnemonic), label);
+        return true;
+
+    } else if (insn.mnemonic == ZYDIS_MNEMONIC_CALL && as->fn_call) {
+        fmt::print(stream, "\tcallq {}\n", *as->fn_call);
+        return true;
     }
 
-    offset = 0;
-    // generate code
-    while (ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(&decoder, data + offset, length - offset,
-                                                 &instruction))) {
-        if (auto label = labels.get(offset)) {
-            fmt::print(stream, "\t{}:\n", *label);
-        }
-        bool skip = false;
-        if (instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
-            auto& dest = instruction.operands[0];
-            auto& src = instruction.operands[1];
-            if (dest.type == ZYDIS_OPERAND_TYPE_REGISTER && dest.reg.value == ZYDIS_REGISTER_R11) {
-                auto fid = src.imm.value.s;
-                fn_name = ctx->symbol_names.get(fid);
-                if (fn_name) {
-                    skip = true;
-                }
-            } else if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                auto value = src.imm.value.s;
-                char buffer[256];
-                ZydisFormatterFormatOperand(&formatter, &instruction, 0, buffer, sizeof(buffer), runtime_address);
-                if (auto name = ctx->symbol_names.get(value)) {
-                    fmt::print(stream, "\tleaq {}(%rip), {}\n", *name, buffer);
-                    skip = true;
-                }
+    return false;
+}
+
+void Builder::generate_fn_asm(AotCompilation* ctx, AotFunctionInput* fn, FILE* stream) {
+    auto decoder = &ctx->decoder;
+    auto formatter = &ctx->formatter;
+    auto data = fn->instructions->items;
+    const ZyanUSize length = fn->instructions->size;
+    AssemblyState as;
+    auto& insn = as.instruction;
+
+    // scan for labels
+    as.offset = 0;
+    while (ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(decoder, data + as.offset, length - as.offset,
+                                                 &insn))) {
+        if (insn.meta.category == ZYDIS_CATEGORY_COND_BR || insn.mnemonic == ZYDIS_MNEMONIC_JMP) {
+            auto rel = insn.operands[0].imm.value.s;
+            auto abs = as.offset + insn.length + rel;
+            if (!as.labels.get(abs)) {
+                auto id = int(as.labels.data.size() + 1);
+                auto label = fmt::format("Lf{}.tmp{}", fn->fid, id);
+                as.labels[abs] = label;
             }
-
-        } else if (instruction.mnemonic == ZYDIS_MNEMONIC_MOVSXD) {
-            instruction.mnemonic = ZYDIS_MNEMONIC_MOVSX;
-//            skip = true;
-//            for (int i = 0; i < instruction.length; i++) {
-//                fmt::print(stream, ".byte {}\n", data[offset + i]);
-//            }
-        } else if (instruction.meta.category == ZYDIS_CATEGORY_COND_BR || instruction.mnemonic == ZYDIS_MNEMONIC_JMP) {
-            auto rel = instruction.operands[0].imm.value.s;
-            auto abs = offset + instruction.length + rel;
-            string label = labels[abs];
-            fmt::print(stream, "\t{} {}\n", ZydisMnemonicGetString(instruction.mnemonic), label);
-            skip = true;
-
-        } else if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL && fn_name) {
-            fmt::print(stream, "\tcallq {}\n", *fn_name);
-            skip = true;
         }
+        as.offset += insn.length;
+    }
 
-        if (!skip) {
+    // generate assembly
+    as.offset = 0;
+    while (ZYAN_SUCCESS(ZydisDecoderDecodeBuffer(decoder, data + as.offset, length - as.offset,
+                                                 &insn))) {
+        if (auto label = as.labels.get(as.offset)) {
+            fmt::print(stream, "{}:\n", *label);
+        }
+        if (!generate_insn_asm(ctx, fn, &as, stream)) {
             fmt::print(stream, "\t");
-            fn_name = nullptr;
+            as.fn_call = nullptr;
             char buffer[256];
-            ZydisFormatterFormatInstruction(&formatter, &instruction, buffer, sizeof(buffer),
-                                            runtime_address);
+            ZydisFormatterFormatInstruction(formatter, &insn, buffer, sizeof(buffer),
+                                            0);
             fputs(buffer, stream);
             fputc('\n', stream);
         }
-        offset += instruction.length;
-        runtime_address += instruction.length;
+        as.offset += insn.length;
     }
 }
 
 void Builder::build_binary(jit::Compiler* compiler) {
     static const auto exec_header = ".globl _main\n";
+
     AotCompilation ctx;
+    ZydisDecoderInit(&ctx.decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64);
+    ZydisFormatterInit(&ctx.formatter, ZYDIS_FORMATTER_STYLE_ATT);
 
     string build_name = "chi_build";
     auto asm_path = get_tmp_file_path(build_name + ".s");
@@ -255,7 +248,7 @@ void Builder::build_binary(jit::Compiler* compiler) {
             ++pc;
         }
         fmt::print(asm_out, "{}:\n", fn->get_asm_name());
-        AotFnInput input;
+        AotFunctionInput input;
         input.instructions = &buf;
         input.fid = ++fid;
         generate_fn_asm(&ctx, &input, asm_out);

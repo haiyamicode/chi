@@ -11,15 +11,16 @@ TESTS = 00_fib.test \
     10_optional.test \
     11_box.test
 
-CX = ../cmake-build-debug/src/chi
+CHI = ../cmake-build-debug/src/chi
+TMP = /tmp/chitests
 
 %.test: %.expect %.cx
 	@echo Test: $*...
-	@if [ "x`echo $* | grep args`" != "x" ]; \
+	@if [ "${CHI_AOT}" == "" ]; \
 	then \
-		$(CX) $*.cx - arg1 arg2 arg3 arg4 2>&1 >$*.output; \
+		$(CHI) $*.cx 2>&1 >$*.output; \
 	else \
-		$(CX) $*.cx 2>&1 >$*.output; \
+        $(CHI) -o $(TMP).$* $*.cx && $(TMP).$* 2>&1 >$*.output; \
 	fi
 	@if [ "x`diff -qbu $*.expect $*.output`" != "x" ]; \
 	then \
