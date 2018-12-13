@@ -38,11 +38,11 @@ TraitImpl* ChiTypeStruct::add_trait(ChiType* trait, ChiType* impl) {
 }
 
 bool ChiTypeStruct::is_trait(ChiType* type) {
-    return type->id == TypeId::Struct && type->data.struct_.kind == ContainerKind::Trait;
+    return type->kind == TypeKind::Struct && type->data.struct_.kind == ContainerKind::Trait;
 }
 
 bool ChiTypeStruct::is_generic(ChiType* type) {
-    return type->id == TypeId::Struct && type->data.struct_.type_params.size > 0;
+    return type->kind == TypeKind::Struct && type->data.struct_.type_params.size > 0;
 }
 
 string ChiStructMember::get_name() { return node->name; }
@@ -71,12 +71,12 @@ ChiType* ChiTypeFn::get_param_at(size_t index) {
 }
 
 ChiType* ChiType::get_elem() {
-    switch (id) {
-        case TypeId::Pointer:
-        case TypeId::Optional:
-        case TypeId::Box:
+    switch (kind) {
+        case TypeKind::Pointer:
+        case TypeKind::Optional:
+        case TypeKind::Box:
             return data.pointer.elem;
-        case TypeId::Array:
+        case TypeKind::Array:
             return data.array.elem;
         default:
             unreachable();

@@ -29,19 +29,19 @@ ast::Node* Resolver::add_primitive(const string& name, ChiType* type) {
 
 void Resolver::create_primitives() {
     auto& system_types = m_ctx->system_types;
-    system_types.any = create_type(TypeId::Any);
+    system_types.any = create_type(TypeKind::Any);
     system_types.char_ = create_int_type(8, false);
     system_types.int_ = create_int_type(32, false);
     system_types.int64 = create_int_type(64, false);
     system_types.float_ = create_float_type(32);
     system_types.double_ = create_float_type(64);
-    system_types.void_ = create_type(TypeId::Void);
-    system_types.bool_ = create_type(TypeId::Bool);
-    system_types.string = create_type(TypeId::String);
-    system_types.str_lit = create_pointer_type(system_types.char_, TypeId::Pointer);
-    system_types.array = create_type(TypeId::Array);
-    system_types.optional = create_type(TypeId::Optional);
-    system_types.box = create_type(TypeId::Box);
+    system_types.void_ = create_type(TypeKind::Void);
+    system_types.bool_ = create_type(TypeKind::Bool);
+    system_types.string = create_type(TypeKind::String);
+    system_types.str_lit = create_pointer_type(system_types.char_, TypeKind::Pointer);
+    system_types.array = create_type(TypeKind::Array);
+    system_types.optional = create_type(TypeKind::Optional);
+    system_types.box = create_type(TypeKind::Box);
 
     add_primitive("bool", system_types.bool_);
     add_primitive("string", system_types.string);
@@ -76,8 +76,8 @@ void Resolver::add_builtin_fn(const std::string& name, ChiType* type, ast::Built
 
 void Resolver::create_builtins() {
     // printf
-    auto printf_type = create_type(TypeId::Fn);
-    printf_type->data.fn.return_type = create_type(TypeId::Void);
+    auto printf_type = create_type(TypeKind::Fn);
+    printf_type->data.fn.return_type = create_type(TypeKind::Void);
     auto& printf_params = printf_type->data.fn.params;
     printf_params.add(get_system_types()->string);
     printf_params.add(get_system_types()->any);
@@ -85,17 +85,17 @@ void Resolver::create_builtins() {
     add_builtin_fn("print", printf_type, ast::BuiltinId::Printf);
 
     // debug
-    auto test_type = create_type(TypeId::Fn);
-    test_type->data.fn.return_type = create_type(TypeId::Void);
+    auto test_type = create_type(TypeKind::Fn);
+    test_type->data.fn.return_type = create_type(TypeKind::Void);
     add_builtin_fn("debug", test_type, ast::BuiltinId::Debug);
 }
 
-ChiType* Resolver::create_type(TypeId type_id) {
-    return m_ctx->allocator->create_type(type_id);
+ChiType* Resolver::create_type(TypeKind kind) {
+    return m_ctx->allocator->create_type(kind);
 }
 
 ChiType* Resolver::create_type_symbol(optional<string> name, ChiType* type) {
-    auto tysym = create_type(TypeId::TypeSymbol);
+    auto tysym = create_type(TypeKind::TypeSymbol);
     tysym->name = name;
     tysym->data.type_symbol.giving_type = type;
     tysym->data.type_symbol.underlying_type = type;
@@ -134,25 +134,25 @@ void Resolver::resolve(ast::Module* module) {
 bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
     static auto int_type = get_system_types()->int_;
     static auto str_lit_type = get_system_types()->str_lit;
-    switch (to_type->id) {
-        case TypeId::Void:
-            return from_type->id == TypeId::Void;
-        case TypeId::String:
-            return from_type->id == TypeId::String || from_type == str_lit_type;
-        case TypeId::Pointer:
-            return from_type->id == TypeId::Pointer || can_assign(from_type, int_type);
-        case TypeId::Int:
+    switch (to_type->kind) {
+        case TypeKind::Void:
+            return from_type->kind == TypeKind::Void;
+        case TypeKind::String:
+            return from_type->kind == TypeKind::String || from_type == str_lit_type;
+        case TypeKind::Pointer:
+            return from_type->kind == TypeKind::Pointer || can_assign(from_type, int_type);
+        case TypeKind::Int:
             return type_is_int(from_type);
-        case TypeId::Any:
-            return from_type->id != TypeId::Struct || ChiTypeStruct::is_trait(from_type);
-        case TypeId::Struct: {
+        case TypeKind::Any:
+            return from_type->kind != TypeKind::Struct || ChiTypeStruct::is_trait(from_type);
+        case TypeKind::Struct: {
             auto& dest = to_type->data.struct_;
             if (dest.kind == ContainerKind::Trait) {
-                if (from_type->id != TypeId::Pointer) {
+                if (from_type->kind != TypeKind::Pointer) {
                     return false;
                 }
                 auto sty = from_type->get_elem();
-                if (sty->id != TypeId::Struct) {
+                if (sty->kind != TypeKind::Struct) {
                     return false;
                 }
                 auto& src = sty->data.struct_;
@@ -167,9 +167,9 @@ bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
             }
             return from_type == to_type;
         }
-        case TypeId::Bool:
-            return type_is_int(from_type) || from_type->id == TypeId::Optional;
-        case TypeId::Optional:
+        case TypeKind::Bool:
+            return type_is_int(from_type) || from_type->kind == TypeKind::Optional;
+        case TypeKind::Optional:
             return from_type == to_type || to_type->get_elem() == from_type;
         default:
             break;
@@ -178,7 +178,7 @@ bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
 }
 
 ChiType* Resolver::to_value_type(ChiType* type) {
-    if (type->id == TypeId::TypeSymbol) {
+    if (type->kind == TypeKind::TypeSymbol) {
         return type->data.type_symbol.giving_type;
     }
     return type;
@@ -258,7 +258,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         }
         case NodeType::FnProto: {
             auto& data = node->data.fn_proto;
-            auto type = create_type(TypeId::Fn);
+            auto type = create_type(TypeKind::Fn);
             auto return_type = resolve_value(data.return_type, scope);
             type->data.fn.return_type = return_type;
             type->is_placeholder = return_type->is_placeholder;
@@ -348,12 +348,12 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                 case TokenType::INC:
                 case TokenType::DEC:
                     check_assignment(data.op1, t, int_type);
-                    return t->id == TypeId::Bool ? int_type : t;
+                    return t->kind == TypeKind::Bool ? int_type : t;
                 case TokenType::LNOT: {
                     if (data.is_suffix) {
-                        if (t->id == TypeId::Optional) {
+                        if (t->kind == TypeKind::Optional) {
                             return t->get_elem();
-                        } else if (t->id == TypeId::Box) {
+                        } else if (t->kind == TypeKind::Box) {
                             return get_pointer_type(t->get_elem());
                         }
                         goto invalid;
@@ -364,7 +364,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     break;
                 }
                 case TokenType::MUL: {
-                    if (!t->is_pointer() || t->get_elem()->id == TypeId::Void) {
+                    if (!t->is_pointer() || t->get_elem()->kind == TypeKind::Void) {
                         goto invalid;
                     }
                     return t->get_elem();
@@ -458,7 +458,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::FnCallExpr: {
             auto& data = node->data.fn_call_expr;
             auto fn_type = resolve(data.fn_ref_expr, scope);
-            if (fn_type->id != TypeId::Fn) {
+            if (fn_type->kind != TypeKind::Fn) {
                 error(data.fn_ref_expr, errors::CANNOT_CALL_NON_FUNCTION);
                 return nullptr;
             }
@@ -470,7 +470,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             auto& data = node->data.if_stmt;
             auto cond_type = resolve(data.condition, scope);
             ast::Node* tmod_iden = nullptr;
-            if (data.condition->type == NodeType::Identifier && cond_type->id == TypeId::Optional) {
+            if (data.condition->type == NodeType::Identifier && cond_type->kind == TypeKind::Optional) {
                 tmod_iden = data.condition;
                 set_tmod(tmod_iden, cond_type->get_elem());
             }
@@ -497,7 +497,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             ChiType* struct_type;
             ChiTypeStruct* struct_;
             if (!node->resolved_type) {
-                struct_type = create_type(TypeId::Struct);
+                struct_type = create_type(TypeKind::Struct);
                 struct_type->name = node->name;
                 struct_ = &struct_type->data.struct_;
                 struct_->node = node;
@@ -551,13 +551,13 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
             auto type = to_value_type(resolve(data.type, scope));
-            if (type->id == TypeId::Array || type->id == TypeId::Optional || type->id == TypeId::Box) {
+            if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional || type->kind == TypeKind::Box) {
                 if (data.args.size != 1) {
                     error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
-                          to_string(get_system_type(type->id)), 1, data.args.size);
+                          to_string(get_system_type(type->kind)), 1, data.args.size);
                 }
                 auto elem_type = to_value_type(resolve(data.args[0], scope));
-                return get_wrapped_type(elem_type, type->id);
+                return get_wrapped_type(elem_type, type->kind);
             }
             auto& params = type->data.struct_.type_params;
             if (params.size != data.args.size) {
@@ -574,7 +574,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::IndexExpr: {
             auto& data = node->data.index_expr;
             auto expr_type = resolve(data.expr, scope);
-            if (expr_type->id != TypeId::Array) {
+            if (expr_type->kind != TypeKind::Array) {
                 error(node, errors::CANNOT_SUBSCRIPT, to_string(expr_type));
                 return nullptr;
             }
@@ -618,7 +618,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         }
         case NodeType::TypeParam: {
             auto& data = node->data.type_param;
-            auto phty = create_type(TypeId::Placeholder);
+            auto phty = create_type(TypeKind::Placeholder);
             phty->name = node->name;
             phty->data.placeholder.trait = to_value_type(resolve(data.type, scope));
             phty->data.placeholder.index = data.index;
@@ -647,8 +647,8 @@ string Resolver::to_string(ChiType* type) {
     if (type->name) {
         return *type->name;
     }
-    switch (type->id) {
-        case TypeId::Subtype: {
+    switch (type->kind) {
+        case TypeKind::Subtype: {
             auto& data = type->data.subtype;
             std::stringstream ss;
             ss << to_string(data.generic) << "<";
@@ -661,14 +661,14 @@ string Resolver::to_string(ChiType* type) {
             ss << ">";
             return ss.str();
         }
-        case TypeId::String:
+        case TypeKind::String:
             return "string";
-        case TypeId::Pointer:
+        case TypeKind::Pointer:
             return to_string(type->get_elem()) + "*";
         default:
             break;
     }
-    return PRINT_ENUM(type->id);
+    return PRINT_ENUM(type->kind);
 }
 
 void Resolver::check_assignment(ast::Node* value, ChiType* from_type, ChiType* to_type) {
@@ -755,7 +755,7 @@ void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::No
 void Resolver::resolve_struct_embed(ChiType* struct_type, ast::Node* node, ResolveScope& parent_scope) {
     auto& container = struct_type->data.struct_;
     auto base_type = node_get_type(node);
-    if (base_type->id != TypeId::Struct) {
+    if (base_type->kind != TypeKind::Struct) {
         error(node, errors::INVALID_EMBED);
         return;
     }
@@ -786,23 +786,23 @@ void Resolver::type_placeholders_sub_each(TypeList* list, ChiTypeSubtype* subs, 
 }
 
 ChiType* Resolver::type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs) {
-    switch (type->id) {
-        case TypeId::Placeholder:
+    switch (type->kind) {
+        case TypeKind::Placeholder:
             return subs->args[type->data.placeholder.index];
-        case TypeId::Array:
-        case TypeId::Pointer:
-        case TypeId::Optional:
-        case TypeId::Box:
-            return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->id);
-        case TypeId::Subtype: {
+        case TypeKind::Array:
+        case TypeKind::Pointer:
+        case TypeKind::Optional:
+        case TypeKind::Box:
+            return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->kind);
+        case TypeKind::Subtype: {
             auto& data = type->data.subtype;
             array<ChiType*> args;
             type_placeholders_sub_each(&data.args, subs, &args);
             return get_subtype(data.generic, &args);
         }
-        case TypeId::Fn: {
+        case TypeKind::Fn: {
             auto& data = type->data.fn;
-            auto fn = create_type(TypeId::Fn);
+            auto fn = create_type(TypeKind::Fn);
             fn->data.fn.return_type = type_placeholders_sub(data.return_type, subs);
             fn->data.fn.container = data.container;
             type_placeholders_sub_each(&data.params, subs, &fn->data.fn.params);
@@ -818,16 +818,16 @@ ChiStructMember* Resolver::get_struct_member(ChiType* struct_type, const string&
     if (sty->is_pointer()) {
         sty = sty->get_elem();
     }
-    if (sty->id == TypeId::Array) {
+    if (sty->kind == TypeKind::Array) {
         sty = sty->data.array.internal;
-    } else if (sty->id == TypeId::TypeSymbol) {
+    } else if (sty->kind == TypeKind::TypeSymbol) {
         if (auto underlying_type = sty->data.type_symbol.underlying_type) {
             sty = underlying_type;
         }
-    } else if (sty->id == TypeId::Subtype) {
+    } else if (sty->kind == TypeKind::Subtype) {
         sty = resolve_subtype(sty);
     }
-    if (sty->id != TypeId::Struct) {
+    if (sty->kind != TypeKind::Struct) {
         return nullptr;
     }
     auto& data = sty->data.struct_;
@@ -851,19 +851,19 @@ void Resolver::resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* 
     scope.value_type = nullptr;
 }
 
-ChiType* Resolver::create_pointer_type(ChiType* elem, TypeId type_id) {
-    auto ptr_type = create_type(type_id);
+ChiType* Resolver::create_pointer_type(ChiType* elem, TypeKind kind) {
+    auto ptr_type = create_type(kind);
     ptr_type->data.pointer.elem = elem;
     ptr_type->is_placeholder = elem->is_placeholder;
     return ptr_type;
 }
 
-ChiType* Resolver::get_pointer_type(ChiType* elem, TypeId type_id) {
-    auto& m = m_ctx->pointer_types[(int) type_id];
+ChiType* Resolver::get_pointer_type(ChiType* elem, TypeKind kind) {
+    auto& m = m_ctx->pointer_types[(int) kind];
     if (auto cached = m.get(elem)) {
         return *cached;
     }
-    auto ptr_type = create_pointer_type(elem, type_id);
+    auto ptr_type = create_pointer_type(elem, kind);
     m[elem] = ptr_type;
     return ptr_type;
 }
@@ -873,9 +873,9 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
     if (auto cached = m_ctx->array_types.get(elem)) {
         return *cached;
     }
-    auto type = create_type(TypeId::Array);
+    auto type = create_type(TypeKind::Array);
     type->data.array.elem = elem;
-    auto internal_type = create_type(TypeId::Struct);
+    auto internal_type = create_type(TypeKind::Struct);
     auto& internal_struct = internal_type->data.struct_;
 
     auto data_field_node = create_node(NodeType::VarDecl);
@@ -890,7 +890,7 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
     auto add_fn = create_node(NodeType::FnDef);
     add_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayAdd;
     add_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
-    auto add_fn_type = create_type(TypeId::Fn);
+    auto add_fn_type = create_type(TypeKind::Fn);
     add_fn_type->data.fn.return_type = get_pointer_type(elem);
     add_fn_type->data.fn.params.add(elem);
     add_fn->resolved_type = add_fn_type;
@@ -903,14 +903,14 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
 }
 
 ChiType* Resolver::create_int_type(int bit_count, bool is_unsigned) {
-    auto type = create_type(TypeId::Int);
+    auto type = create_type(TypeKind::Int);
     type->data.int_.bit_count = bit_count;
     type->data.int_.is_unsigned = is_unsigned;
     return type;
 }
 
 ChiType* Resolver::create_float_type(int bit_count) {
-    auto type = create_type(TypeId::Float);
+    auto type = create_type(TypeKind::Float);
     type->data.float_.bit_count = bit_count;
     return type;
 }
@@ -996,10 +996,10 @@ bool Resolver::is_same_type(ChiType* a, ChiType* b) {
 }
 
 ChiType* Resolver::get_subtype(ChiType* generic, TypeList* type_args) {
-    assert(generic->id == TypeId::Struct);
+    assert(generic->kind == TypeKind::Struct);
     auto& gen = generic->data.struct_;
     for (auto subtype: gen.subtypes) {
-        assert(subtype->id == TypeId::Subtype);
+        assert(subtype->kind == TypeKind::Subtype);
         auto& subtype_data = subtype->data.subtype;
         if (subtype_data.args.size != type_args->size) {
             continue;
@@ -1017,7 +1017,7 @@ ChiType* Resolver::get_subtype(ChiType* generic, TypeList* type_args) {
             return subtype;
         }
     }
-    auto sub = create_type(TypeId::Subtype);
+    auto sub = create_type(TypeKind::Subtype);
     sub->data.subtype.generic = generic;
     for (auto arg: *type_args) {
         sub->data.subtype.args.add(arg);
@@ -1038,7 +1038,7 @@ ChiType* Resolver::resolve_subtype(ChiType* subtype) {
         return data.resolved_struct;
     }
     auto& base = data.generic->data.struct_;
-    auto sty = create_type(TypeId::Struct);
+    auto sty = create_type(TypeKind::Struct);
     sty->name = to_string(subtype);
     auto& cpy = sty->data.struct_;
     cpy.kind = base.kind;
@@ -1066,7 +1066,7 @@ void Resolver::check_binary_op(ast::Node* node, TokenType op_type, ChiType* type
     bool ok;
     switch (op_type) {
         case TokenType::ADD:
-            ok = type_is_int(type) || type->id == TypeId::String;
+            ok = type_is_int(type) || type->kind == TypeKind::String;
             break;
         default:
             ok = type_is_int(type);
@@ -1077,24 +1077,24 @@ void Resolver::check_binary_op(ast::Node* node, TokenType op_type, ChiType* type
     }
 }
 
-ChiType* Resolver::get_system_type(TypeId type_id) {
+ChiType* Resolver::get_system_type(TypeKind kind) {
     auto types = get_system_types();
-    switch (type_id) {
-        case TypeId::Int:
+    switch (kind) {
+        case TypeKind::Int:
             return types->int64;
-        case TypeId::Float:
+        case TypeKind::Float:
             return types->double_;
-        case TypeId::String:
+        case TypeKind::String:
             return types->string;
-        case TypeId::Array:
+        case TypeKind::Array:
             return types->array;
-        case TypeId::Optional:
+        case TypeKind::Optional:
             return types->optional;
-        case TypeId::Box:
+        case TypeKind::Box:
             return types->box;
-        case TypeId::Bool:
+        case TypeKind::Bool:
             return types->bool_;
-        case TypeId::Void:
+        case TypeKind::Void:
             return types->void_;
         default:
             panic("unhandled");
@@ -1102,16 +1102,16 @@ ChiType* Resolver::get_system_type(TypeId type_id) {
     }
 }
 
-ChiType* Resolver::get_wrapped_type(ChiType* elem, TypeId wrapper_type) {
-    switch (wrapper_type) {
-        case TypeId::Pointer:
+ChiType* Resolver::get_wrapped_type(ChiType* elem, TypeKind kind) {
+    switch (kind) {
+        case TypeKind::Pointer:
             return get_pointer_type(elem);
-        case TypeId::Array:
+        case TypeKind::Array:
             return get_array_type(elem);
-        case TypeId::Optional:
-            return get_pointer_type(elem, TypeId::Optional);
-        case TypeId::Box:
-            return get_pointer_type(elem, TypeId::Box);
+        case TypeKind::Optional:
+            return get_pointer_type(elem, TypeKind::Optional);
+        case TypeKind::Box:
+            return get_pointer_type(elem, TypeKind::Box);
         default:
             unreachable();
             return nullptr;

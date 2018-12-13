@@ -15,7 +15,7 @@ namespace cx {
     }
     struct ChiType;
 
-    MAKE_ENUM(TypeId, TypeSymbol, Fn, Void, Int, Float, Bool, String,
+    MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String,
               Struct, Pointer, Array, Enum, Any, Subtype, Placeholder, Optional, Box)
 
     struct ChiTypeTypeSymbol {
@@ -114,7 +114,7 @@ namespace cx {
     };
 
     struct ChiType {
-        TypeId id;
+        TypeKind kind;
         optional<string> name;
         bool is_placeholder = false;
 
@@ -138,9 +138,9 @@ namespace cx {
             ChiStructMember* struct_member;
         } meta;
 
-        ChiType(TypeId id) {
-            this->id = id;
-            if (id == TypeId::Struct) {
+        ChiType(TypeKind kind) {
+            this->kind = kind;
+            if (kind == TypeKind::Struct) {
                 new(&data.struct_) ChiTypeStruct();
             } else {
                 memset(&data, 0, sizeof(data));
@@ -148,8 +148,8 @@ namespace cx {
         }
 
         ~ChiType() {
-#define CHITYPE_CASE_DESTROY_FIELD(field, type, type_struct) case TypeId::type: data.field.~type_struct(); break;
-            switch (id) {
+#define CHITYPE_CASE_DESTROY_FIELD(field, type, type_struct) case TypeKind::type: data.field.~type_struct(); break;
+            switch (kind) {
                 CHITYPE_CASE_DESTROY_FIELD(fn, Fn, ChiTypeFn)
                 CHITYPE_CASE_DESTROY_FIELD(struct_, Struct, ChiTypeStruct)
                 CHITYPE_CASE_DESTROY_FIELD(subtype, Subtype, ChiTypeSubtype)
@@ -160,9 +160,9 @@ namespace cx {
 
         ChiType* get_elem();
 
-        bool is_raw_pointer() { return id == TypeId::Pointer; }
+        bool is_raw_pointer() { return kind == TypeKind::Pointer; }
 
-        bool is_pointer() { return is_raw_pointer() || id == TypeId::Box; }
+        bool is_pointer() { return is_raw_pointer() || kind == TypeKind::Box; }
     };
 
     struct Scope {

@@ -18,7 +18,7 @@ struct CxString {
 };
 
 struct CxAny {
-    TypeId type;
+    TypeKind type;
     struct {
         void* a;
         void* b;

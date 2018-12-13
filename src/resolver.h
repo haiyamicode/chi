@@ -14,7 +14,7 @@ namespace cx {
     struct Allocator {
         virtual ast::Node* create_node(ast::NodeType type) = 0;
 
-        virtual ChiType* create_type(TypeId type_id) = 0;
+        virtual ChiType* create_type(TypeKind kind) = 0;
     };
 
     struct SystemTypes {
@@ -38,7 +38,7 @@ namespace cx {
         SystemTypes system_types;
         array<ast::Node*> builtins;
         map<ChiType*, ChiType*> array_types;
-        map<ChiType*, ChiType*> pointer_types[(int) TypeId::__COUNT];
+        map<ChiType*, ChiType*> pointer_types[(int) TypeKind::__COUNT];
 
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };
@@ -69,11 +69,11 @@ namespace cx {
 
         void unset_tmod(ast::Node* iden) { m_tmods.unset(iden->data.identifier.decl); }
 
-        ChiType* create_type(TypeId type_id);
+        ChiType* create_type(TypeKind kind);
 
         ChiType* create_type_symbol(optional<string> name, ChiType* type);
 
-        ChiType* create_pointer_type(ChiType* elem, TypeId type_id);
+        ChiType* create_pointer_type(ChiType* elem, TypeKind kind);
 
         ChiType* create_int_type(int bit_count, bool is_unsigned);
 
@@ -144,7 +144,7 @@ namespace cx {
 
         SystemTypes* get_system_types() { return &m_ctx->system_types; }
 
-        ChiType* get_system_type(TypeId type_id);
+        ChiType* get_system_type(TypeKind kind);
 
         ChiType* node_get_type(ast::Node* node);
 
@@ -154,18 +154,18 @@ namespace cx {
 
         ChiType* get_subtype(ChiType* generic, TypeList* type_args);
 
-        ChiType* get_pointer_type(ChiType* elem, TypeId type_id = TypeId::Pointer);
+        ChiType* get_pointer_type(ChiType* elem, TypeKind kind = TypeKind::Pointer);
 
         ChiType* get_array_type(ChiType* elem);
 
-        ChiType* get_wrapped_type(ChiType* elem, TypeId wrapper_type);
+        ChiType* get_wrapped_type(ChiType* elem, TypeKind kind);
 
         ChiType* resolve_subtype(ChiType* subtype);
 
         void resolve(ast::Package* package);
 
         bool type_is_int(ChiType* type) {
-            return type->id == TypeId::Int || type->id == TypeId::Bool || type->id == TypeId::Pointer;
+            return type->kind == TypeKind::Int || type->kind == TypeKind::Bool || type->kind == TypeKind::Pointer;
         }
 
         ChiType* type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs);

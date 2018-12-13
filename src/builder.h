@@ -65,7 +65,7 @@ namespace cx {
 
         Node* create_node(NodeType type);
 
-        ChiType* create_type(TypeId type_id);
+        ChiType* create_type(TypeKind kind);
 
         void set_debug_mode(bool value) { m_debug_mode = value; }
 

@@ -206,15 +206,15 @@ jit_type_t Compiler::compile_type(ChiType* type) {
 }
 
 jit_type_t Compiler::_compile_type(ChiType* type) {
-    switch (type->id) {
-        case TypeId::Bool:
+    switch (type->kind) {
+        case TypeKind::Bool:
             return jit_type_sbyte;
-        case TypeId::Int: {
+        case TypeKind::Int: {
             return to_jit_int_type(type);
         }
-        case TypeId::Void:
+        case TypeKind::Void:
             return jit_type_void;
-        case TypeId::Fn: {
+        case TypeKind::Fn: {
             array<jit_type_t> params;
             auto& fn = type->data.fn;
             if (fn.container) {
@@ -231,7 +231,7 @@ jit_type_t Compiler::_compile_type(ChiType* type) {
             return jit_type_create_signature
                     (jit_abi_cdecl, return_type, params.items, uint32_t(params.size), 1);
         }
-        case TypeId::Struct: {
+        case TypeKind::Struct: {
             auto& struct_ = type->data.struct_;
             if (struct_.kind == ContainerKind::Trait) {
                 return trait_internal_struct;
@@ -245,31 +245,31 @@ jit_type_t Compiler::_compile_type(ChiType* type) {
             }
             return jit_type_create_struct(fields.items, uint32_t(fields.size), 1);
         }
-        case TypeId::Subtype: {
+        case TypeKind::Subtype: {
             return compile_type(eval_type(type));
         }
-        case TypeId::String: {
+        case TypeKind::String: {
             return string_internal_struct;
         }
-        case TypeId::Pointer: {
+        case TypeKind::Pointer: {
             return jit_type_nint;
         }
-        case TypeId::Array: {
+        case TypeKind::Array: {
             return compile_type(type->data.array.internal);
         }
-        case TypeId::Any: {
+        case TypeKind::Any: {
             return any_internal_struct;
         }
-        case TypeId::Optional: {
+        case TypeKind::Optional: {
             jit_type_t fields[] = {compile_type(type->get_elem()), jit_type_sbyte};
             return jit_type_create_struct(fields, 2, 1);
         }
-        case TypeId::Box: {
+        case TypeKind::Box: {
             static jit_type_t fields[] = {jit_type_nint};
             return jit_type_create_struct(fields, 1, 1);
         }
         default:
-            panic("unhandled {}", PRINT_ENUM(type->id));
+            panic("unhandled {}", PRINT_ENUM(type->kind));
             return {};
     }
 }
@@ -396,11 +396,6 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
             if (fn_expr->type == ast::NodeType::Identifier) {
                 auto& iden = fn_expr->data.identifier;
                 fn_ref = iden.decl;
-                if (fn_ref->data.fn_def.builtin_id == ast::BuiltinId::Debug) {
-                    static jit_type_t debug_params[] = {jit_type_nint};
-                    static auto debug_sig = jit_type_create_signature(jit_abi_cdecl, jit_type_void, debug_params, 1, 1);
-                    return fn->insn_call_native("_cx_debug", (void*) cx_debug, debug_sig, nullptr, 0);
-                }
             } else if (fn_expr->type == ast::NodeType::DotExpr) {
                 auto& dot_expr = fn_expr->data.dot_expr;
                 auto dot = compile_dot_expr(fn, fn_expr);
@@ -465,7 +460,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 }
             }
             auto& val = m_ctx->values[data.decl];
-            if (expr->orig_type && expr->orig_type->id == TypeId::Optional) {
+            if (expr->orig_type && expr->orig_type->kind == TypeKind::Optional) {
                 auto addr = fn->insn_address_of(val);
                 return fn->insn_load_relative(addr, 0, compile_type(expr->resolved_type));
             }
@@ -584,7 +579,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
         case ast::NodeType::DotExpr: {
             auto& data = expr->data.dot_expr;
             auto ctn_type = get_chitype(data.expr);
-            if (ctn_type->id == TypeId::TypeSymbol) {
+            if (ctn_type->kind == TypeKind::TypeSymbol) {
                 auto enum_node = data.resolved_member->node;
                 auto value = enum_node->data.enum_member.resolved_value;
                 return fn->new_constant((jit_int) value);
@@ -624,8 +619,8 @@ jit_value Compiler::compile_assignment_to_type(Function* fn, ast::Node* expr, Ch
 
 jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
                                        ChiType* from_type, ChiType* to_type) {
-    switch (to_type->id) {
-        case TypeId::Struct: {
+    switch (to_type->kind) {
+        case TypeKind::Struct: {
             if (ChiTypeStruct::is_trait(to_type)) {
                 assert(from_type->is_raw_pointer());
                 auto& struct_ = from_type->get_elem()->data.struct_;
@@ -640,19 +635,19 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             }
             break;
         }
-        case TypeId::String: {
+        case TypeKind::String: {
             auto src_data = value;
-            if (from_type->id == TypeId::String) {
+            if (from_type->kind == TypeKind::String) {
                 auto addr = fn->insn_address_of(value);
                 src_data = fn->insn_load_relative(addr, STRING_DATA_FIELD_OFFSET, jit_type_nint);
             }
             return compile_string_alloc(fn, src_data);
         }
-        case TypeId::Any: {
-            if (from_type->id != TypeId::Any) {
+        case TypeKind::Any: {
+            if (from_type->kind != TypeKind::Any) {
                 auto temp = fn->new_value(any_internal_struct);
                 auto addr = fn->insn_address_of(temp);
-                auto typ = fn->new_constant(jit_int(from_type->id));
+                auto typ = fn->new_constant(jit_int(from_type->kind));
                 fn->insn_store_relative(addr, TRAIT_TYPE_FIELD_OFFSET, typ);
                 auto val = value;
                 if (get_resolver()->type_is_int(from_type)) {
@@ -663,7 +658,7 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             }
             return value;
         }
-        case TypeId::Optional: {
+        case TypeKind::Optional: {
             auto val = value;
             jit_value flag;
             bool skip_check = false;
@@ -689,8 +684,8 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             fn->insn_label(skip_data);
             return temp;
         }
-        case TypeId::Box: {
-            assert(from_type->id == TypeId::Box);
+        case TypeKind::Box: {
+            assert(from_type->kind == TypeKind::Box);
             auto box = compile_wrapped_type(to_type);
             auto elem_type = to_type->get_elem();
             auto addr = fn->insn_address_of(value);
@@ -704,15 +699,15 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             fn->insn_store_relative(ptr, 0, val);
             return temp;
         }
-        case TypeId::Array: {
-            assert(from_type->id == TypeId::Array);
+        case TypeKind::Array: {
+            assert(from_type->kind == TypeKind::Array);
             auto addr = fn->insn_address_of(value);
             return compile_array_loop(fn, addr, to_type, ArrayOp::Copy);
         }
-        case TypeId::Bool: {
-            if (from_type->id == TypeId::Bool) {
+        case TypeKind::Bool: {
+            if (from_type->kind == TypeKind::Bool) {
                 return value;
-            } else if (from_type->id == TypeId::Optional) {
+            } else if (from_type->kind == TypeKind::Optional) {
                 auto addr = fn->insn_address_of(value);
                 auto opt = compile_wrapped_type(from_type);
                 return fn->insn_load_relative(addr, opt.get_opt_flag_offset(), jit_type_sbyte);
@@ -722,7 +717,7 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
         default:
             break;
     }
-    if (from_type->id != to_type->id || to_type->id == TypeId::Int) {
+    if (from_type->kind != to_type->kind || to_type->kind == TypeKind::Int) {
         return fn->insn_convert(value, compile_type(to_type), 0);
     }
     return value;
@@ -833,7 +828,7 @@ void Compiler::compile_struct(ast::Node* node) {
     if (m_ctx->structs.get(struct_type)) {
         return;
     }
-    if (struct_type->id != TypeId::Struct) {
+    if (struct_type->kind != TypeKind::Struct) {
         return;
     }
     if (!ChiTypeStruct::is_generic(struct_type)) {
@@ -851,7 +846,7 @@ void Compiler::compile_struct(ast::Node* node) {
 
 void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
     ChiTypeSubtype* subtype = nullptr;
-    if (struct_type->id == TypeId::Subtype) {
+    if (struct_type->kind == TypeKind::Subtype) {
         subtype = &struct_type->data.subtype;
         struct_type = subtype->resolved_struct;
     }
@@ -877,7 +872,7 @@ void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
             auto& var = member->node->data.var_decl;
             auto var_type = member->resolved_type;
             // compile dependencies
-            if (var_type->id == TypeId::Struct) {
+            if (var_type->kind == TypeKind::Struct) {
                 auto struct_decl = var_type->data.struct_.node;
                 if (struct_decl && !m_ctx->structs.get(var_type)) {
                     compile_struct(struct_decl);
@@ -965,14 +960,14 @@ Function* Compiler::get_fn(ast::Node* node) {
 }
 
 void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* type, ast::Node* expr) {
-    if (type->id == TypeId::Array) {
+    if (type->kind == TypeKind::Array) {
         return compile_array_construction(fn, dest);
-    } else if (type->id == TypeId::String) {
+    } else if (type->kind == TypeKind::String) {
         return compile_string_construction(fn, dest, {});
-    } else if (type->id == TypeId::Optional) {
+    } else if (type->kind == TypeKind::Optional) {
         auto opt = compile_wrapped_type(type);
         return fn->insn_store_relative(dest, opt.get_opt_flag_offset(), fn->new_constant(jit_sbyte(0)));
-    } else if (type->id == TypeId::Box) {
+    } else if (type->kind == TypeKind::Box) {
         auto box = compile_wrapped_type(type);
         auto ptr = compile_mem_alloc(fn, fn->new_constant(box.elem_size));
         fn->insn_store_relative(dest, 0, ptr);
@@ -1019,29 +1014,29 @@ void Compiler::compile_field_mem_free(Function* fn, jit_value& arr, jit_nuint of
 }
 
 void Compiler::compile_destruction_for_type(Function* fn, jit_value& address, ChiType* type) {
-    switch (type->id) {
-        case TypeId::String:
+    switch (type->kind) {
+        case TypeKind::String:
             compile_field_mem_free(fn, address, 0);
             break;
 
-        case TypeId::Array: {
+        case TypeKind::Array: {
             compile_array_loop(fn, address, type, ArrayOp::Destroy);
             compile_field_mem_free(fn, address, 0);
             break;
         }
 
-        case TypeId::Box: {
+        case TypeKind::Box: {
             auto data = fn->insn_load_relative(address, 0, jit_type_nint);
             compile_destruction_for_type(fn, data, type->get_elem());
             compile_field_mem_free(fn, address, 0);
             break;
         }
 
-        case TypeId::Optional:
+        case TypeKind::Optional:
             compile_destruction_for_type(fn, address, type->get_elem());
             break;
 
-        case TypeId::Struct: {
+        case TypeKind::Struct: {
             auto struct_ = get_struct(type);
             jit_value_t args[] = {address.raw()};
             fn->insn_call(struct_.data->destructor.get(), args, 1);
@@ -1099,14 +1094,14 @@ bool Compiler::should_destroy(ast::Node* node) {
 }
 
 bool Compiler::should_destroy_for_type(ChiType* type) {
-    switch (type->id) {
-        case TypeId::Array:
-        case TypeId::String:
-        case TypeId::Box:
+    switch (type->kind) {
+        case TypeKind::Array:
+        case TypeKind::String:
+        case TypeKind::Box:
             return true;
-        case TypeId::Struct:
+        case TypeKind::Struct:
             return type->data.struct_.kind == ContainerKind::Struct;
-        case TypeId::Optional:
+        case TypeKind::Optional:
             return should_destroy_for_type(type->get_elem());
         default:
             return false;
@@ -1128,7 +1123,7 @@ ChiType* Compiler::eval_type(ChiType* type) {
     if (type->is_placeholder && m_fn && m_fn->container_subtype) {
         type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
     }
-    if (type->id == TypeId::Subtype) {
+    if (type->kind == TypeKind::Subtype) {
         return type->data.subtype.resolved_struct;
     }
     return type;
@@ -1215,7 +1210,7 @@ jit_value Compiler::compile_arithmetic_op(Function* fn, ChiType* value_type,
                                           TokenType op_type, const jit_value& op1, const jit_value& op2) {
     switch (op_type) {
         case TokenType::ADD: {
-            if (value_type->id == TypeId::String) {
+            if (value_type->kind == TypeKind::String) {
                 return compile_string_concat(fn, op1, op2);
             }
             return fn->insn_add(op1, op2);

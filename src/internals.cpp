@@ -28,14 +28,14 @@ void cx_string_concat(CxString* dest, CxString s1, CxString s2) {
 
 static std::string to_string(const CxAny& v) {
     switch (v.type) {
-        case TypeId::String: {
+        case TypeKind::String: {
             auto s = (CxString*) &v.data;
             return fmt::format(s->data);
         }
-        case TypeId::Bool:
+        case TypeKind::Bool:
             return fmt::format("{}", *(bool*) &v.data);
-        case TypeId::Int:
-        case TypeId::Pointer:
+        case TypeKind::Int:
+        case TypeKind::Pointer:
             return fmt::format("{}", *(int64_t*) &v.data);
 
         default:

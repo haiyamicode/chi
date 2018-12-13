@@ -98,8 +98,8 @@ Node* Builder::create_node(NodeType type) {
     return m_ast_nodes.emplace(new Node(type))->get();
 }
 
-ChiType* Builder::create_type(TypeId type) {
-    return m_types.emplace(new ChiType(type))->get();
+ChiType* Builder::create_type(TypeKind kind) {
+    return m_types.emplace(new ChiType(kind))->get();
 }
 
 void Builder::set_build_mode(BuildMode value) {
@@ -220,6 +220,7 @@ void Builder::build_binary(jit::Compiler* compiler) {
         fn->compile();
         fn->build_end();
         ctx.symbol_names[(int64_t) fn->closure()] = fn->get_asm_name();
+//        jit_dump_function(stdout, fn->raw(), fn->get_jit_name());
     }
 
     // add native functions to dict
