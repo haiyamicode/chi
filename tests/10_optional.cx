@@ -19,4 +19,5 @@ int main() {
     f(&a, false);
     f(&a, true);
     f({}, false);
+    return 0;
 }

@@ -18,7 +18,7 @@ struct CxString {
 };
 
 struct CxAny {
-    TypeKind type;
+    TypeInfo* type;
     struct {
         void* a;
         void* b;
@@ -45,7 +45,9 @@ void cx_array_reserve(CxArray* dest, uint32_t elem_size, uint32_t new_cap);
 
 void* cx_array_add(CxArray* dest, uint32_t elem_size);
 
-void cx_debug(const char* s);
+void cx_debug(CxString message);
+
+void cx_panic(const char* s);
 
 #ifdef __cplusplus
 }

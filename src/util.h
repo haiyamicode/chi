@@ -189,10 +189,10 @@ namespace cx {
         Map data;
 
         template<typename... Args>
-        void emplace(const K& key, Args&& ... args) {
-            data.emplace(std::piecewise_construct,
-                         std::forward_as_tuple(key),
-                         std::forward_as_tuple(std::forward<Args>(args)...));
+        V* emplace(const K& key, Args&& ... args) {
+            return &data.emplace(std::piecewise_construct,
+                                 std::forward_as_tuple(key),
+                                 std::forward_as_tuple(std::forward<Args>(args)...)).first->second;
         }
 
         V& operator[](const K& key) {

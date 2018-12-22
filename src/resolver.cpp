@@ -87,6 +87,7 @@ void Resolver::create_builtins() {
     // debug
     auto test_type = create_type(TypeKind::Fn);
     test_type->data.fn.return_type = create_type(TypeKind::Void);
+    test_type->data.fn.params.add(get_system_types()->string);
     add_builtin_fn("debug", test_type, ast::BuiltinId::Debug);
 }
 

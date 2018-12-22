@@ -60,7 +60,7 @@ namespace cx {
         ChiType* trait_type;
         ChiType* impl_type;
         ImplTable impl_table;
-        long id = -1;
+        long itable_index = -1;
     };
 
     MAKE_ENUM(ResolveStatus, None, MemberTypesKnown, EmbedsResolved, BodiesResolved, Done);
@@ -74,11 +74,11 @@ namespace cx {
         ast::Node* node;
         array<box<ChiStructMember>> members;
         array<ChiStructMember*> fields;
-        map<string, ChiStructMember*> members_table;
-        array<box<TraitImpl>> traits;
-        map<ChiType*, TraitImpl*> traits_table;
         array<ChiType*> type_params;
         array<ChiType*> subtypes;
+        array<box<TraitImpl>> traits;
+        map<string, ChiStructMember*> member_table;
+        map<ChiType*, TraitImpl*> trait_table;
         ResolveStatus resolve_status;
         int vtable_size = 0;
 
@@ -113,10 +113,13 @@ namespace cx {
         long index;
     };
 
+    typedef uint32_t TypeId;
+
     struct ChiType {
         TypeKind kind;
         optional<string> name;
         bool is_placeholder = false;
+        TypeId id;
 
         union Data {
             ChiTypeFn fn;
@@ -134,12 +137,9 @@ namespace cx {
             ~Data() {}
         } data;
 
-        union Meta {
-            ChiStructMember* struct_member;
-        } meta;
-
-        ChiType(TypeKind kind) {
+        ChiType(TypeKind kind, TypeId id) {
             this->kind = kind;
+            this->id = id;
             if (kind == TypeKind::Struct) {
                 new(&data.struct_) ChiTypeStruct();
             } else {
@@ -181,6 +181,16 @@ namespace cx {
 
     private:
         map<string, NodeList> symbols;
+    };
+
+    struct TypeInfo {
+        const char* name;
+        TypeKind kind;
+
+        TypeInfo(ChiType* type) {
+            kind = type->kind;
+            name = type->name ? type->name->c_str() : nullptr;
+        }
     };
 
     typedef int64_t const_int_t;

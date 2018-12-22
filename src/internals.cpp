@@ -27,7 +27,7 @@ void cx_string_concat(CxString* dest, CxString s1, CxString s2) {
 }
 
 static std::string to_string(const CxAny& v) {
-    switch (v.type) {
+    switch (v.type->kind) {
         case TypeKind::String: {
             auto s = (CxString*) &v.data;
             return fmt::format(s->data);
@@ -39,7 +39,7 @@ static std::string to_string(const CxAny& v) {
             return fmt::format("{}", *(int64_t*) &v.data);
 
         default:
-            return fmt::format("<{}>", PRINT_ENUM(v.type));
+            return fmt::format("<{}>", PRINT_ENUM(v.type->kind));
     }
 }
 
@@ -114,6 +114,11 @@ void* cx_array_add(CxArray* dest, uint32_t elem_size) {
     return ((char*) dest->data) + (dest->size - 1) * elem_size;
 }
 
-void cx_debug(const char* s) {
+void cx_debug(CxString message) {
+    fmt::print(message.data);
+}
+
+void cx_panic(const char* s) {
     fmt::print(s);
+    exit(1);
 }

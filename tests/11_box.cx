@@ -11,7 +11,7 @@ struct Data {
 };
 
 int main() {
-    array<box<Data>> a;
+    array<box<Data>> a = {};
     a.add({1});
     a.add({2});
     a.add({3});

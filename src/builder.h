@@ -24,6 +24,7 @@ namespace cx {
         map<int64_t, string> symbol_names;
         ZydisDecoder decoder;
         ZydisFormatter formatter;
+        jit::Compiler* compiler;
     };
 
     struct AssemblyState {

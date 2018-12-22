@@ -15,6 +15,10 @@
 
 using namespace cx;
 
+#define ASM_NINT_DT ".quad"
+#define ASM_CALL "callq"
+#define ASM_ADDR_SUFFIX "(%rip)"
+
 BuildContext::BuildContext(cx::Allocator* allocator) :
         resolve_ctx(new ResolveContext(allocator)),
         jit_ctx(new jit::CompileContext(resolve_ctx.get())) {
@@ -71,14 +75,14 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
     Parser parser(&pc);
     parser.parse();
 //    print_ast(pc.module->root);
-
     resolver.resolve(package);
+
     auto jitc = m_ctx.create_compiler();
     jitc.compile(module);
 
     switch (m_build_mode) {
         case BuildMode::Run: {
-            auto& main_fn = jitc.get_context()->fn_by_node[package->entry_fn];
+            auto& main_fn = jitc.get_context()->function_table[package->entry_fn];
             main_fn->apply(NULL, NULL);
             break;
         }
@@ -99,7 +103,7 @@ Node* Builder::create_node(NodeType type) {
 }
 
 ChiType* Builder::create_type(TypeKind kind) {
-    return m_types.emplace(new ChiType(kind))->get();
+    return m_types.emplace(new ChiType(kind, m_types.size + 1))->get();
 }
 
 void Builder::set_build_mode(BuildMode value) {
@@ -111,6 +115,7 @@ void Builder::set_build_mode(BuildMode value) {
 
 bool Builder::generate_insn_asm(AotCompilation* ctx, AotFunctionInput* input, AssemblyState* as, FILE* stream) {
     auto& insn = as->instruction;
+    auto jctx = ctx->compiler->get_context();
     if (insn.mnemonic == ZYDIS_MNEMONIC_MOV) {
         auto& dest = insn.operands[0];
         auto& src = insn.operands[1];
@@ -125,14 +130,19 @@ bool Builder::generate_insn_asm(AotCompilation* ctx, AotFunctionInput* input, As
             char buffer[256];
             ZydisFormatterFormatOperand(&ctx->formatter, &insn, 0, buffer, sizeof(buffer), 0);
             if (auto name = ctx->symbol_names.get(value)) {
-                fmt::print(stream, "\tleaq {}(%rip), {}\n", *name, buffer);
+                fmt::print(stream, "\tleaq {}{}, {}\n", *name, ASM_ADDR_SUFFIX, buffer);
                 return true;
             }
         }
 
-    } else if (insn.mnemonic == ZYDIS_MNEMONIC_MOVSXD) {
-        insn.mnemonic = ZYDIS_MNEMONIC_MOVSX;
-        return false;
+    } else if (insn.mnemonic == ZYDIS_MNEMONIC_MOVSXD || insn.mnemonic == ZYDIS_MNEMONIC_MOVSX) {
+        char buffer[256];
+        ZydisFormatterFormatInstruction(&ctx->formatter, &insn, buffer, sizeof(buffer), 0);
+        fmt::print(stream, "\t#{}\n", buffer);
+        for (int i = 0; i < insn.length; i++) {
+            fmt::print(stream, "\t.byte {}\n", input->instructions->at(as->offset + i));
+        }
+        return true;
 
     } else if (insn.meta.category == ZYDIS_CATEGORY_COND_BR || insn.mnemonic == ZYDIS_MNEMONIC_JMP) {
         auto rel = insn.operands[0].imm.value.s;
@@ -141,11 +151,22 @@ bool Builder::generate_insn_asm(AotCompilation* ctx, AotFunctionInput* input, As
         fmt::print(stream, "\t{} {}\n", ZydisMnemonicGetString(insn.mnemonic), label);
         return true;
 
-    } else if (insn.mnemonic == ZYDIS_MNEMONIC_CALL && as->fn_call) {
-        fmt::print(stream, "\tcallq {}\n", *as->fn_call);
-        return true;
+    } else if (insn.mnemonic == ZYDIS_MNEMONIC_CALL) {
+        auto& op1 = insn.operands[0];
+        if (as->fn_call) {
+            fmt::print(stream, "\t{} {}\n", ASM_CALL, *as->fn_call);
+            return true;
+        } else if (op1.type == ZYDIS_OPERAND_TYPE_IMMEDIATE && op1.imm.value.s < 0) {
+            auto fid = -op1.imm.value.s;
+            fmt::print(stream, "\t{} {}\n", ASM_CALL, jctx->fn_symbols[fid - 1]);
+            return true;
+        } else if (op1.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+            char buffer[256];
+            ZydisFormatterFormatOperand(&ctx->formatter, &insn, 0, buffer, sizeof(buffer), 0);
+            fmt::print(stream, "\t{} *{}\n", ASM_CALL, buffer);
+            return true;
+        }
     }
-
     return false;
 }
 
@@ -197,6 +218,7 @@ void Builder::build_binary(jit::Compiler* compiler) {
     static const auto exec_header = ".globl _main\n";
 
     AotCompilation ctx;
+    ctx.compiler = compiler;
     ZydisDecoderInit(&ctx.decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64);
     ZydisFormatterInit(&ctx.formatter, ZYDIS_FORMATTER_STYLE_ATT);
 
@@ -223,21 +245,54 @@ void Builder::build_binary(jit::Compiler* compiler) {
 //        jit_dump_function(stdout, fn->raw(), fn->get_jit_name());
     }
 
-    // add native functions to dict
-    int fid = 0;
-    for (auto& fn_name: jctx->fn_symbols) {
-        ctx.symbol_names[--fid] = fn_name;
-    }
+    // string literals
     int sid = 0;
     for (auto& str: jctx->string_literals) {
-        auto name = fmt::format("L_.str{}", ++sid);
-        ctx.symbol_names[(int64_t) str] = name;
-        fmt::print(asm_out, "{}:\n.asciz \"{}\"\n", name, get_strlit_repr(str));
+        auto label = fmt::format("L_.str{}", ++sid);
+        ctx.symbol_names[(int64_t) str] = label;
+        fmt::print(asm_out, "{}:\n.asciz \"{}\"\n", label, get_strlit_repr(str));
+    }
+
+    fmt::print(asm_out, "\t.section\t__DATA,__data\n");
+    // type info
+    for (auto& type: m_types) {
+        if (type->is_placeholder || type->kind == TypeKind::TypeSymbol) {
+            continue;
+        }
+        auto info = compiler->get_type_info(type.get());
+        string name_label;
+        if (type->name) {
+            name_label = fmt::format("L_.ty{}_name", type->id);
+            fmt::print(asm_out, "{}:\n.asciz \"{}\"\n", name_label, info->name);
+        }
+        auto info_label = fmt::format("L_.ty{}", type->id);
+        ctx.symbol_names[(int64_t) info] = info_label;
+        fmt::print(asm_out, "{}:\n", info_label);
+        fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, type->name ? name_label : "0x0");
+        fmt::print(asm_out, "{} {:#x} #{}\n", ASM_NINT_DT, (int32_t) type->kind, PRINT_ENUM(type->kind));
+    }
+
+    //vtable info
+    int iid = 0;
+    for (auto& impl: jctx->impls) {
+        auto impl_label = fmt::format("L_.impl{}", ++iid);
+        auto vtable_label = fmt::format("L_.vtable{}", iid);
+        fmt::print(asm_out, "{}:\n", vtable_label);
+        for (int32_t i = 0; i < impl->vtable_size; i++) {
+            auto fn = (jit::Function*) (impl->vtable[i]);
+            fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, fn->get_asm_name());
+        }
+        fmt::print(asm_out, "{}:\n", impl_label);
+        fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, ctx.symbol_names[int64_t(impl->type)]);
+        fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, vtable_label);
+        fmt::print(asm_out, ".word {:#x}\n", impl->vtable_size);
+        ctx.symbol_names[int64_t(impl.get())] = impl_label;
     }
 
     // output assembly
+    fmt::print(asm_out, "\t.section\t__TEXT,__text,regular,pure_instructions\n");
     array<ZyanU8> buf;
-    fid = 0;
+    int fid = 0;
     for (auto& fn: functions) {
         buf.size = 0;
         void* start;

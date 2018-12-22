@@ -64,7 +64,8 @@ namespace cx {
 
             jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
 
-            void insn_panic(const char* message);
+        private:
+            int64_t add_fn_symbol(const string& name);
         };
 
         struct StructField {
@@ -121,29 +122,36 @@ namespace cx {
             StructData* data;
         };
 
+        struct ImplInfo {
+            TypeInfo* type;
+            void** vtable;
+            int32_t vtable_size;
+        };
+
+        typedef array<void*> JumpTable;
+
         struct CompileContext {
-            array<box<Function>> functions;
-            array<string> fn_symbols;
-            array<const char*> string_literals;
-            map<ast::Node*, jit_value> values;
-            map<ChiType*, box<StructData>> structs;
-            map<ChiType*, jit_type_t> types;
             jit_context jit_ctx;
             CompileSettings settings;
             Resolver resolver;
-            map<ast::Node*, Function*> fn_by_node;
+
+            array<box<Function>> functions;
+            array<string> fn_symbols;
+            array<const char*> string_literals;
+            array<box<JumpTable>> jump_tables;
+            array<box<ImplInfo>> impls;
+
+            map<ast::Node*, jit_value> value_table;
+            map<ChiType*, box<StructData>> struct_table;
+            map<TypeId, jit_type_t> type_table;
+            map<TypeId, box<TypeInfo>> info_table;
+            map<ast::Node*, Function*> function_table;
 
             CompileContext(ResolveContext* rctx): resolver(rctx) {}
 
-            Function* add_fn(ast::Node* node, Function* fn);
-
-            int64_t add_fn_symbol(const string& name) {
-                    fn_symbols.add(name);
-                    return (int64_t)fn_symbols.size; 
-            }
-
             void enable_aot_compilation(bool value) { jit_context_set_enable_aot(jit_ctx.raw(), value); }
             bool is_aot_enabled() { return jit_ctx.is_aot_enabled(); }
+            Function* add_fn(ast::Node* node, Function* fn);
         };
 
         enum ArrayOp { Destroy, Copy };
@@ -164,8 +172,6 @@ namespace cx {
             jit_type_t _compile_type(ChiType* type);
 
             jit_type_t to_jit_int_type(ChiType* type);
-
-            jit_type_t compile_type(ChiType* type);
 
             WrappedType compile_wrapped_type(ChiType* type);
 
@@ -205,9 +211,13 @@ namespace cx {
 
             Function* add_fn(jit_type_t signature, ast::Node* node);
 
+            JumpTable* add_jump_table(long* table_index);
+
+            ImplInfo* get_impl_info(TraitImpl* impl);
+
             void fn_method(Function* fn, const string& fn_name, ChiType* struct_type, ChiTypeSubtype* subtype);
 
-            void add_value(ast::Node* node, const jit_value& value) { m_ctx->values[node] = value; }
+            void add_value(ast::Node* node, const jit_value& value) { m_ctx->value_table[node] = value; }
 
             jit_value compile_simple_value(Function* fn, ast::Node* expr);
 
@@ -225,36 +235,40 @@ namespace cx {
 
             jit_value compile_constant_value(Function *fn, const ConstantValue& value, ChiType* type);
 
-            void build_jump_table(TraitImpl* impl);
-
             jit_value compile_mem_alloc(Function* fn, const jit_value& size_value);
 
             jit_value compile_string_concat(Function* fn, const jit_value& s1, const jit_value& s2);
+
+            void compile_panic(Function* fn, const string& message);
+
+            void _compile_struct(ast::Node* node, ChiType* struct_type);
+
+            StructData* get_struct_data(ChiType* struct_type);
+
+            jit_value create_string_constant(Function* fn, const string& str);
+
+            void compile_stmt(Function* fn, ast::Node* stmt);
+
+            void compile_block(Function* fn, ast::Node* parent, ast::Node* block);
+
+            void compile_struct(ast::Node* node);
+
+            Struct get_struct(ChiType* struct_type);
 
         public:
             Compiler(CompileContext* ctx, Function* fn = nullptr);
 
             CompileContext* get_context() { return m_ctx; }
 
-            jit_value create_string_constant(Function* fn, const string& str);
-
-            void compile_stmt(Function* fn, ast::Node* stmt);
-
-            void compile_fn_body(Function* fn);
-
-            Function* compile_fn(ast::Node* node);
+            TypeInfo* get_type_info(ChiType* type);
 
             void compile(ast::Module* module);
 
-            void compile_block(Function* fn, ast::Node* parent, ast::Node* block);
+            Function* compile_fn(ast::Node* node);
 
-            void compile_struct(ast::Node* node);
+            void compile_fn_body(Function* fn);
 
-            void _compile_struct(ast::Node* node, ChiType* struct_type);
-
-            StructData* get_struct_data(ChiType* struct_type);
-
-            Struct get_struct(ChiType* struct_type);
+            jit_type_t compile_type(ChiType* type);
 
             bool is_aot_enabled() { return m_ctx->is_aot_enabled(); }
         };

@@ -31,7 +31,7 @@ struct LinkedList<any T> {
 }
 
 int main() {
-    LinkedList<int> list;
+    LinkedList<int> list = {};
     list.add(1);
     print("list.size: {}\n", list.size);
     list.add(2);

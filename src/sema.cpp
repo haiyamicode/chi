@@ -20,12 +20,12 @@ ChiStructMember* ChiTypeStruct::add_member(const string& name, ast::Node* node, 
         member->field_index = fields.size;
         fields.add(member);
     }
-    members_table[name] = member;
+    member_table[name] = member;
     return member;
 }
 
 ChiStructMember* ChiTypeStruct::find_member(const string& name) {
-    auto found = members_table.get(name);
+    auto found = member_table.get(name);
     return found ? *found : nullptr;
 }
 
@@ -33,7 +33,7 @@ TraitImpl* ChiTypeStruct::add_trait(ChiType* trait, ChiType* impl) {
     auto entry = traits.emplace(new TraitImpl())->get();
     entry->trait_type = trait;
     entry->impl_type = impl;
-    traits_table[trait] = entry;
+    trait_table[trait] = entry;
     return entry;
 }
 

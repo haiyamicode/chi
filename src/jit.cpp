@@ -21,6 +21,8 @@ const auto TRAIT_TYPE_FIELD_OFFSET = 0;
 const auto TRAIT_DATA_FIELD_OFFSET = PTR_SIZE;
 const auto STRING_DATA_FIELD_OFFSET = 0;
 const auto STRING_SIZE_FIELD_OFFSET = PTR_SIZE;
+const auto IMPL_VTABLE_FIELD_OFFSET = PTR_SIZE;
+static const string OPTIONAL_UNWRAP_PANIC = "panic: unwrapping null optional value\n";
 
 static auto str_lit_type = jit_type_create_pointer(jit_type_sys_char, 1);
 
@@ -44,29 +46,11 @@ static auto free_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_v
 static jit_type_t trait_internal_fields[] = {jit_type_nint, jit_type_nint};
 static auto trait_internal_struct = jit_type_create_struct(trait_internal_fields, 2, 1);
 
-static jit_type_t any_internal_fields[] = {jit_type_int, jit_type_nint, jit_type_nint};
+static jit_type_t any_internal_fields[] = {jit_type_nint, jit_type_nint, jit_type_nint};
 static auto any_internal_struct = jit_type_create_struct(any_internal_fields, 3, 1);
 
 static jit_type_t array_internal_fields[] = {jit_type_nint, jit_type_uint, jit_type_uint};
 static auto array_internal_struct = jit_type_create_struct(array_internal_fields, 3, 1);
-
-typedef array<void*> FunctionTable;
-static array<box<FunctionTable>> jump_tables;
-
-FunctionTable* add_jump_table(long* table_index) {
-    *table_index = jump_tables.size;
-    return jump_tables.emplace(new FunctionTable())->get();
-}
-
-void* get_vtable_fn(void* impl_ptr, int32_t fn_index) {
-    auto impl = (TraitImpl*) impl_ptr;
-    auto& table = jump_tables[impl->id];
-    return table->at(size_t(fn_index));
-}
-
-static jit_type_t get_vtable_fn_params[] = {jit_type_nint, jit_type_int};
-static auto get_vtable_fn_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_nint, get_vtable_fn_params, 2,
-                                                                1);
 
 static jit_type_t string_internal_fields[] = {jit_type_nint, jit_type_uint};
 static auto string_internal_struct = jit_type_create_struct(string_internal_fields, 2, 1);
@@ -101,9 +85,14 @@ void Function::build() {
     compiler.compile_fn_body(this);
 }
 
+int64_t Function::add_fn_symbol(const string& name) {
+    ctx->fn_symbols.add(name);
+    return (int64_t) ctx->fn_symbols.size;
+}
+
 jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args) {
     if (ctx->jit_ctx.is_aot_enabled()) {
-        auto fid = ctx->add_fn_symbol(fn_ref->get_asm_name());
+        auto fid = add_fn_symbol(fn_ref->get_asm_name());
         return jit_function::insn_call_native(fn_ref->get_jit_name(), (void*) (-fid), fn_ref->signature(), args,
                                               (uint32_t) num_args);
     }
@@ -114,19 +103,10 @@ jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args
 jit_value Function::insn_call_native(const char* name, void* native_func, jit_type_t signature,
                                      jit_value_t* args, unsigned int num_args, int flags) {
     if (ctx->jit_ctx.is_aot_enabled()) {
-        return jit_function::insn_call_native(name, (void*) (-ctx->add_fn_symbol(name)),
+        return jit_function::insn_call_native(name, (void*) (-add_fn_symbol(name)),
                                               signature, args, num_args, flags);
     }
     return jit_function::insn_call_native(name, native_func, signature, args, num_args, flags);
-}
-
-void Function::insn_panic(const char* message) {
-    static jit_type_t params[] = {jit_type_nint};
-    static auto signature = jit_type_create_signature(jit_abi_cdecl,
-                                                      jit_type_void, params, 1, 1);
-    jit_value_t args[] = {jit_value_create_nint_constant(raw(), str_lit_type, (jit_nint) message)};
-    insn_call_native("_printf", (void*) printf, signature, args, 1);
-    insn_throw(get_null_constant());
 }
 
 jit_value Function::get_null_constant() {
@@ -135,7 +115,7 @@ jit_value Function::get_null_constant() {
 
 Function* CompileContext::add_fn(ast::Node* node, Function* fn) {
     functions.emplace(fn)->get();
-    fn_by_node[node] = fn;
+    function_table[node] = fn;
     return fn;
 }
 
@@ -196,12 +176,12 @@ jit_type_t Compiler::to_jit_int_type(ChiType* type) {
 
 jit_type_t Compiler::compile_type(ChiType* type) {
     type = eval_type(type);
-    auto cached = m_ctx->types.get(type);
+    auto cached = m_ctx->type_table.get(type->id);
     if (cached) {
         return *cached;
     }
     auto result = _compile_type(type);
-    m_ctx->types[type] = result;
+    m_ctx->type_table[type->id] = result;
     return result;
 }
 
@@ -287,6 +267,12 @@ void Compiler::compile_fn_body(Function* fn) {
         if (fn_def.builtin_id == ast::BuiltinId::Printf) {
             jit_value_t args[] = {fn->get_param(0).raw(), fn->get_param(1).raw()};
             fn->insn_call_native("_cx_printf", (void*) cx_printf, printf_signature, args, 2);
+        } else if (fn_def.builtin_id == ast::BuiltinId::Debug) {
+            static jit_type_t debug_params[] = {string_internal_struct};
+            static auto debug_signature = jit_type_create_signature(jit_abi_cdecl,
+                                                                    jit_type_void, debug_params, 1, 1);
+            jit_value_t args[] = {fn->get_param(0).raw()};
+            fn->insn_call_native("_cx_debug", (void*) cx_debug, debug_signature, args, 1);
         }
     } else {
         auto& proto = fn_def.fn_proto->data.fn_proto;
@@ -297,7 +283,9 @@ void Compiler::compile_fn_body(Function* fn) {
         auto fn_type = get_chitype(fn->node);
         auto& fn_end = fn->push_return_scope()->emplace_back();
         fn->return_value = fn->new_value(compile_type(fn_type->data.fn.return_type));
-        compile_block(fn, fn->node, fn_def.body);
+        if (fn_def.body) {
+            compile_block(fn, fn->node, fn_def.body);
+        }
         fn->insn_label(fn_end.label);
         fn->pop_return_scope();
         fn->insn_return(fn->return_value);
@@ -459,7 +447,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                     return compile_constant_value(fn, var.resolved_value, get_chitype(data.decl));
                 }
             }
-            auto& val = m_ctx->values[data.decl];
+            auto& val = m_ctx->value_table[data.decl];
             if (expr->orig_type && expr->orig_type->kind == TypeKind::Optional) {
                 auto addr = fn->insn_address_of(val);
                 return fn->insn_load_relative(addr, 0, compile_type(expr->resolved_type));
@@ -532,7 +520,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                         auto flag = fn->insn_load_relative(ref.address, opt.get_opt_flag_offset(), jit_type_sbyte);
                         jit_label if_ok;
                         fn->insn_branch_if(flag, if_ok);
-                        fn->insn_panic("panic: unwrapping null optional value\n");
+                        compile_panic(fn, OPTIONAL_UNWRAP_PANIC);
                         fn->insn_label(if_ok);
                         return fn->insn_load_relative(ref.address, 0, opt.elem);
                     } else {
@@ -624,12 +612,10 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             if (ChiTypeStruct::is_trait(to_type)) {
                 assert(from_type->is_raw_pointer());
                 auto& struct_ = from_type->get_elem()->data.struct_;
-                auto impl = struct_.traits_table[to_type];
-                build_jump_table(impl);
+                auto impl = get_impl_info(struct_.trait_table[to_type]);
                 auto temp = fn->new_value(trait_internal_struct);
                 auto addr = fn->insn_address_of(temp);
-                auto impl_ptr = jit_nint((void*) impl);
-                fn->insn_store_relative(addr, TRAIT_TYPE_FIELD_OFFSET, fn->new_constant(impl_ptr));
+                fn->insn_store_relative(addr, TRAIT_TYPE_FIELD_OFFSET, fn->new_constant(jit_nint((void*) impl)));
                 fn->insn_store_relative(addr, TRAIT_DATA_FIELD_OFFSET, value);
                 return temp;
             }
@@ -647,7 +633,7 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
             if (from_type->kind != TypeKind::Any) {
                 auto temp = fn->new_value(any_internal_struct);
                 auto addr = fn->insn_address_of(temp);
-                auto typ = fn->new_constant(jit_int(from_type->kind));
+                auto typ = fn->new_constant((jit_nint) get_type_info(from_type));
                 fn->insn_store_relative(addr, TRAIT_TYPE_FIELD_OFFSET, typ);
                 auto val = value;
                 if (get_resolver()->type_is_int(from_type)) {
@@ -812,7 +798,7 @@ void Compiler::compile_block(Function* fn, ast::Node* parent, ast::Node* block) 
                 fn->insn_label(ret_scope->back().label);
                 ret_scope->pop_back();
             }
-            auto address = fn->insn_address_of(m_ctx->values[var]);
+            auto address = fn->insn_address_of(m_ctx->value_table[var]);
             compile_destruction(fn, address, var);
         }
     }
@@ -825,7 +811,7 @@ void Compiler::compile_block(Function* fn, ast::Node* parent, ast::Node* block) 
 
 void Compiler::compile_struct(ast::Node* node) {
     auto struct_type = get_resolver()->to_value_type(get_chitype(node));
-    if (m_ctx->structs.get(struct_type)) {
+    if (m_ctx->struct_table.get(struct_type)) {
         return;
     }
     if (struct_type->kind != TypeKind::Struct) {
@@ -874,7 +860,7 @@ void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
             // compile dependencies
             if (var_type->kind == TypeKind::Struct) {
                 auto struct_decl = var_type->data.struct_.node;
-                if (struct_decl && !m_ctx->structs.get(var_type)) {
+                if (struct_decl && !m_ctx->struct_table.get(var_type)) {
                     compile_struct(struct_decl);
                 }
             }
@@ -944,18 +930,17 @@ DotValue Compiler::compile_dot_expr(Function* fn, ast::Node* expr) {
         if (ChiTypeStruct::is_trait(dot.ctn_type)) {
             auto trait_ref = dot.ctn_address;
             dot.ctn_address = fn->insn_load_relative(trait_ref, TRAIT_DATA_FIELD_OFFSET, jit_type_nint);
-            auto impl_ref = fn->insn_load_relative(trait_ref, TRAIT_TYPE_FIELD_OFFSET, jit_type_nint);
+            auto impl_info = fn->insn_load_relative(trait_ref, TRAIT_TYPE_FIELD_OFFSET, jit_type_nint);
             auto method_index = fn->new_constant(jit_int(member->method_index));
-            jit_value_t args[] = {impl_ref.raw(), method_index.raw()};
-            dot.vtable_fn = fn->insn_call_native("_get_vtable_fn", (void*) get_vtable_fn,
-                                                 get_vtable_fn_signature, args, 2);
+            auto vtable = fn->insn_load_relative(impl_info, IMPL_VTABLE_FIELD_OFFSET, jit_type_nint);
+            dot.vtable_fn = fn->insn_load_elem(vtable, method_index.raw(), jit_type_nint);
         }
     }
     return dot;
 }
 
 Function* Compiler::get_fn(ast::Node* node) {
-    auto iter = m_ctx->fn_by_node.get(node);
+    auto iter = m_ctx->function_table.get(node);
     return iter ? *iter : nullptr;
 }
 
@@ -995,11 +980,11 @@ void Compiler::compile_construction(Function* fn, jit_value_t dest, ChiType* typ
 }
 
 StructData* Compiler::get_struct_data(ChiType* struct_type) {
-    if (auto data = m_ctx->structs.get(struct_type)) {
+    if (auto data = m_ctx->struct_table.get(struct_type)) {
         return data->get();
     }
-    m_ctx->structs.emplace(struct_type, new StructData());
-    return m_ctx->structs[struct_type].get();
+    m_ctx->struct_table.emplace(struct_type, new StructData());
+    return m_ctx->struct_table[struct_type].get();
 }
 
 Struct Compiler::get_struct(cx::ChiType* struct_type) {
@@ -1108,15 +1093,26 @@ bool Compiler::should_destroy_for_type(ChiType* type) {
     }
 }
 
-void Compiler::build_jump_table(TraitImpl* impl) {
-    if (impl->id < 0) {
-        auto vtable = add_jump_table(&impl->id);
+JumpTable* Compiler::add_jump_table(long* table_index) {
+    *table_index = m_ctx->jump_tables.size;
+    return m_ctx->jump_tables.emplace(new JumpTable())->get();
+}
+
+ImplInfo* Compiler::get_impl_info(TraitImpl* impl) {
+    if (impl->itable_index < 0) {
+        auto info = m_ctx->impls.emplace(new ImplInfo())->get();
+        info->type = get_type_info(impl->impl_type);
+        auto vtable = add_jump_table(&impl->itable_index);
         for (auto member: impl->impl_table) {
             auto fn = compile_fn(member->node);
-            auto fn_ptr = jit_function_to_vtable_pointer(fn->raw());
+            auto fn_ptr = is_aot_enabled() ? (void*) fn : jit_function_to_vtable_pointer(fn->raw());
             vtable->add(fn_ptr);
         }
+        info->vtable = vtable->items;
+        info->vtable_size = vtable->size;
+        return info;
     }
+    return m_ctx->impls[impl->itable_index].get();
 }
 
 ChiType* Compiler::eval_type(ChiType* type) {
@@ -1304,4 +1300,19 @@ jit_value Compiler::compile_array_loop(Function* fn, jit_value& address, cx::Chi
     fn->insn_branch(loop_start);
     fn->insn_label(loop_end);
     return temp;
+}
+
+TypeInfo* Compiler::get_type_info(ChiType* type) {
+    if (auto cached = m_ctx->info_table.get(type->id)) {
+        return cached->get();
+    }
+    return m_ctx->info_table.emplace(type->id, new TypeInfo(type))->get();
+}
+
+void Compiler::compile_panic(Function* fn, const string& message) {
+    static jit_type_t panic_params[] = {jit_type_nint};
+    static auto panic_signature = jit_type_create_signature(jit_abi_cdecl,
+                                                            jit_type_void, panic_params, 1, 1);
+    jit_value_t args[] = {create_string_constant(fn, message).raw()};
+    fn->insn_call_native("_cx_panic", (void*) cx_panic, panic_signature, args, 1);
 }
