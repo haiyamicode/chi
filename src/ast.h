@@ -82,7 +82,6 @@ namespace cx {
             Node* body;
             BuiltinId builtin_id;
             FnKind fn_kind;
-            Node* container;
 
             bool is_instance_method() {
                 return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;

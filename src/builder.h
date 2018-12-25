@@ -21,10 +21,14 @@ namespace cx {
     };
 
     struct AotCompilation {
-        map<int64_t, string> symbol_names;
+        jit::Compiler* compiler;
+        jit::Function* entry_fn;
+
         ZydisDecoder decoder;
         ZydisFormatter formatter;
-        jit::Compiler* compiler;
+        map<int64_t, string> symbol_names;
+
+        void add_symbol_name(void* symbol, const string& name) { symbol_names[(int64_t) symbol] = name; }
     };
 
     struct AssemblyState {
@@ -87,7 +91,9 @@ namespace cx {
 
         string get_tmp_file_path(const string& filename);
 
-        void build_binary(jit::Compiler* compiler);
+        void build_fn_asm(AotCompilation* ctx, FILE* stream, int fid, jit_function_t fn);
+
+        void build_binary(AotCompilation* ctx);
     };
 
 }

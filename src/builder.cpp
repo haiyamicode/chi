@@ -79,15 +79,19 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
 
     auto jitc = m_ctx.create_compiler();
     jitc.compile(module);
+    auto entry_fn = jitc.get_context()->function_table[package->entry_fn];
 
     switch (m_build_mode) {
         case BuildMode::Run: {
-            auto& main_fn = jitc.get_context()->function_table[package->entry_fn];
+            auto& main_fn = entry_fn;
             main_fn->apply(NULL, NULL);
             break;
         }
         case BuildMode::Executable: {
-            build_binary(&jitc);
+            AotCompilation ctx;
+            ctx.compiler = &jitc;
+            ctx.entry_fn = entry_fn;
+            build_binary(&ctx);
             break;
         }
     }
@@ -214,13 +218,11 @@ void Builder::generate_fn_asm(AotCompilation* ctx, AotFunctionInput* fn, FILE* s
     }
 }
 
-void Builder::build_binary(jit::Compiler* compiler) {
-    static const auto exec_header = ".globl _main\n";
+void Builder::build_binary(AotCompilation* ctx) {
+    static const auto exec_header = ".globl main\n";
 
-    AotCompilation ctx;
-    ctx.compiler = compiler;
-    ZydisDecoderInit(&ctx.decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64);
-    ZydisFormatterInit(&ctx.formatter, ZYDIS_FORMATTER_STYLE_ATT);
+    ZydisDecoderInit(&ctx->decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64);
+    ZydisFormatterInit(&ctx->formatter, ZYDIS_FORMATTER_STYLE_ATT);
 
     string build_name = "chi_build";
     auto asm_path = get_tmp_file_path(build_name + ".s");
@@ -231,7 +233,7 @@ void Builder::build_binary(jit::Compiler* compiler) {
     fflush(asm_out);
     fmt::print(asm_out, exec_header);
 
-    auto jctx = compiler->get_context();
+    auto jctx = ctx->compiler->get_context();
     // compile functions
     auto& functions = jctx->functions;
     auto max_opt = jit_function_get_max_optimization_level();
@@ -241,15 +243,22 @@ void Builder::build_binary(jit::Compiler* compiler) {
         fn->build();
         fn->compile();
         fn->build_end();
-        ctx.symbol_names[(int64_t) fn->closure()] = fn->get_asm_name();
+        ctx->symbol_names[(int64_t) fn->closure()] = fn->get_asm_name();
 //        jit_dump_function(stdout, fn->raw(), fn->get_jit_name());
     }
 
+    jit_function entry_fn(jctx->jit_ctx, jit_type_create_signature(jit_abi_cdecl, jit_type_sys_int, nullptr, 0, 1));
+    entry_fn.build_start();
+    entry_fn.insn_call("main", ctx->entry_fn->raw(), ctx->entry_fn->signature(), nullptr, 0);
+    entry_fn.insn_return(entry_fn.new_constant(0));
+    entry_fn.compile();
+    entry_fn.build_end();
+
     // string literals
     int sid = 0;
-    for (auto& str: jctx->string_literals) {
+    for (auto str: jctx->string_literals) {
         auto label = fmt::format("L_.str{}", ++sid);
-        ctx.symbol_names[(int64_t) str] = label;
+        ctx->add_symbol_name((void*) str, label);
         fmt::print(asm_out, "{}:\n.asciz \"{}\"\n", label, get_strlit_repr(str));
     }
 
@@ -259,14 +268,14 @@ void Builder::build_binary(jit::Compiler* compiler) {
         if (type->is_placeholder || type->kind == TypeKind::TypeSymbol) {
             continue;
         }
-        auto info = compiler->get_type_info(type.get());
+        auto info = ctx->compiler->get_type_info(type.get());
         string name_label;
         if (type->name) {
             name_label = fmt::format("L_.ty{}_name", type->id);
             fmt::print(asm_out, "{}:\n.asciz \"{}\"\n", name_label, info->name);
         }
         auto info_label = fmt::format("L_.ty{}", type->id);
-        ctx.symbol_names[(int64_t) info] = info_label;
+        ctx->add_symbol_name(info, info_label);
         fmt::print(asm_out, "{}:\n", info_label);
         fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, type->name ? name_label : "0x0");
         fmt::print(asm_out, "{} {:#x} #{}\n", ASM_NINT_DT, (int32_t) type->kind, PRINT_ENUM(type->kind));
@@ -283,10 +292,10 @@ void Builder::build_binary(jit::Compiler* compiler) {
             fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, fn->get_asm_name());
         }
         fmt::print(asm_out, "{}:\n", impl_label);
-        fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, ctx.symbol_names[int64_t(impl->type)]);
+        fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, ctx->symbol_names[int64_t(impl->type)]);
         fmt::print(asm_out, "{} {}\n", ASM_NINT_DT, vtable_label);
         fmt::print(asm_out, ".word {:#x}\n", impl->vtable_size);
-        ctx.symbol_names[int64_t(impl.get())] = impl_label;
+        ctx->add_symbol_name(impl.get(), impl_label);
     }
 
     // output assembly
@@ -294,27 +303,17 @@ void Builder::build_binary(jit::Compiler* compiler) {
     array<ZyanU8> buf;
     int fid = 0;
     for (auto& fn: functions) {
-        buf.size = 0;
-        void* start;
-        void* end;
-        jit_dump_get_function_entry(fn->raw(), &start, &end);
-        auto pc = (unsigned char*) start;
-        while (pc < (unsigned char*) end) {
-            buf.add((ZyanU8) (*pc));
-            ++pc;
-        }
         fmt::print(asm_out, "{}:\n", fn->get_asm_name());
-        AotFunctionInput input;
-        input.instructions = &buf;
-        input.fid = ++fid;
-        generate_fn_asm(&ctx, &input, asm_out);
+        build_fn_asm(ctx, asm_out, ++fid, fn->raw());
     }
+    fmt::print(asm_out, "main:\n");
+    build_fn_asm(ctx, asm_out, 0, entry_fn.raw());
 
     // build the final executable
     fclose(asm_out);
     auto as_cmd = fmt::format("as {} -o {}.o", asm_path, asm_path);
     system(as_cmd.c_str());
-    auto gcc_cmd = fmt::format("g++ -o {} -lchrt -lfmt {}.o", m_output_file_name, asm_path);
+    auto gcc_cmd = fmt::format("g++ -o {} -lchrt -lfmt {}.o -Wl,-e,main", m_output_file_name, asm_path);
     system(gcc_cmd.c_str());
 }
 
@@ -333,4 +332,21 @@ string Builder::get_tmp_file_path(const string& filename) {
 #else
     return fmt::format("/tmp/{}", filename);
 #endif
+}
+
+void Builder::build_fn_asm(AotCompilation* ctx, FILE* stream, int fid, jit_function_t fn) {
+    array<ZyanU8> buf;
+    buf.size = 0;
+    void* start;
+    void* end;
+    jit_dump_get_function_entry(fn, &start, &end);
+    auto pc = (unsigned char*) start;
+    while (pc < (unsigned char*) end) {
+        buf.add((ZyanU8) (*pc));
+        ++pc;
+    }
+    AotFunctionInput input;
+    input.instructions = &buf;
+    input.fid = fid;
+    generate_fn_asm(ctx, &input, stream);
 }

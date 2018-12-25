@@ -333,7 +333,7 @@ Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind, bool re
     auto proto = parse_fn_proto(return_type, iden);
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
-    fn->data.fn_def.container = get_scope()->owner;
+//    fn->data.fn_def.container = get_scope()->owner;
     proto->data.fn_proto.fn_def_node = fn;
     if (kind == FnKind::TopLevel) {
         save_block_pos(fn);
