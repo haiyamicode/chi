@@ -264,11 +264,11 @@ namespace cx {
 
             TypeInfo* get_type_info(ChiType* type);
 
-            void init_compilation();
+            void compile_internals();
 
             void compile_module(ast::Module* module);
 
-            Function* compile_fn(ast::Node* node);
+            Function* add_fn_node(ast::Node* node);
 
             void compile_fn_body(Function* fn);
 

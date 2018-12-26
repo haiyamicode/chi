@@ -128,17 +128,14 @@ void Compiler::compile_module(ast::Module* module) {
     auto& root = module->root->data.root;
     for (auto decl: root.top_level_decls) {
         if (decl->type == ast::NodeType::FnDef) {
-            compile_fn(decl);
+            add_fn_node(decl);
         } else if (decl->type == ast::NodeType::StructDecl) {
             compile_struct(decl);
         }
     }
 }
 
-Function* Compiler::compile_fn(ast::Node* node) {
-    if (auto fn = get_fn(node)) {
-        return fn;
-    }
+Function* Compiler::add_fn_node(ast::Node* node) {
     auto type = compile_type_of(node);
     return add_fn(type, node);
 }
@@ -284,6 +281,20 @@ void Compiler::compile_fn_body(Function* fn) {
                 auto array_ = compile_wrapped_type(array_type);
                 auto ret = compile_array_add(fn, fn->get_param(0), (jit_uint) array_.elem_size, fn->get_param(1));
                 fn->insn_return(ret);
+                break;
+            }
+            case ast::BuiltinId::ArrayDelete: {
+                auto array_type = get_chitype(fn->node)->data.fn.container;
+                auto addr = fn->get_param(0);
+                compile_array_loop(fn, addr, array_type, ArrayOp::Destroy);
+                compile_field_mem_free(fn, addr, 0);
+                break;
+            }
+            case ast::BuiltinId::ArrayCopy: {
+                auto array_type = get_chitype(fn->node)->data.fn.container;
+                auto addr = fn->get_param(0);
+                auto copy = compile_array_loop(fn, addr, array_type, ArrayOp::Copy);
+                fn->insn_return(copy);
                 break;
             }
             default:
@@ -696,8 +707,11 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
         }
         case TypeKind::Array: {
             assert(from_type->kind == TypeKind::Array);
-            auto addr = fn->insn_address_of(value);
-            return compile_array_loop(fn, addr, to_type, ArrayOp::Copy);
+            auto internal = from_type->data.array.internal;
+            auto copy_fn = get_fn(internal->data.struct_.find_member("copy")->node);
+            assert(copy_fn);
+            jit_value_t args[] = {fn->insn_address_of(value).raw()};
+            return fn->insn_call(copy_fn, args, 1);
         }
         case TypeKind::Bool: {
             if (from_type->kind == TypeKind::Bool) {
@@ -861,7 +875,7 @@ void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
     for (auto& member: struct_.members) {
         auto node_type = member->node->type;
         if (node_type == ast::NodeType::FnDef) {
-            auto method = compile_fn(member->node);
+            auto method = add_fn_node(member->node);
             init_method_fn(method, member->get_name(), struct_type, subtype);
         } else if (node_type == ast::NodeType::VarDecl) {
             auto& var = member->node->data.var_decl;
@@ -954,10 +968,7 @@ Function* Compiler::get_fn(ast::Node* node) {
 }
 
 Function* Compiler::add_internal_method_fn(ChiType* type, ast::Node* method) {
-    if (auto fn = get_fn(method)) {
-        return fn;
-    }
-    auto fn = compile_fn(method);
+    auto fn = add_fn_node(method);
     init_method_fn(fn, method->name, type, nullptr);
     return fn;
 }
@@ -1023,8 +1034,11 @@ void Compiler::compile_destruction_for_type(Function* fn, jit_value& address, Ch
             break;
 
         case TypeKind::Array: {
-            compile_array_loop(fn, address, type, ArrayOp::Destroy);
-            compile_field_mem_free(fn, address, 0);
+            auto internal = type->data.array.internal;
+            auto del_fn = get_fn(internal->data.struct_.find_member("delete")->node);
+            assert(del_fn);
+            jit_value_t args[] = {address.raw()};
+            fn->insn_call(del_fn, args, 1);
             break;
         }
 
@@ -1335,7 +1349,7 @@ void Compiler::compile_panic(Function* fn, const string& message) {
     fn->insn_call_native("_cx_panic", (void*) cx_panic, panic_signature, args, 1);
 }
 
-void Compiler::init_compilation() {
+void Compiler::compile_internals() {
     auto rctx = m_ctx->resolver.get_context();
     for (auto method: rctx->internal_methods) {
         add_internal_method_fn(method->resolved_type->data.fn.container, method);

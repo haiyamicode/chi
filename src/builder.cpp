@@ -34,7 +34,7 @@ Builder::Builder() : m_ctx(this) {
     auto jitc = m_ctx.create_compiler();
     for (auto node: resolver.get_context()->builtins) {
         if (node->type == NodeType::FnDef) {
-            jitc.compile_fn(node);
+            jitc.add_fn_node(node);
         }
     }
 }
@@ -78,7 +78,7 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
     resolver.resolve(package);
 
     auto jitc = m_ctx.create_compiler();
-    jitc.init_compilation();
+    jitc.compile_internals();
     jitc.compile_module(module);
     auto entry_fn = jitc.get_context()->function_table[package->entry_fn];
 

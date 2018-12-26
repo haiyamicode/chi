@@ -901,8 +901,30 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
     add_fn_type->data.fn.params.add(elem);
     add_fn_type->data.fn.container = type;
     add_fn->resolved_type = add_fn_type;
-    internal_struct.add_member("add", add_fn, add_fn_type);
+    internal_struct.add_member(add_fn->name, add_fn, add_fn_type);
     m_ctx->internal_methods.add(add_fn);
+
+    auto del_fn = create_node(NodeType::FnDef);
+    del_fn->name = "delete";
+    del_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayDelete;
+    del_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
+    auto del_fn_type = create_type(TypeKind::Fn);
+    del_fn_type->data.fn.return_type = get_system_types()->void_;
+    del_fn_type->data.fn.container = type;
+    del_fn->resolved_type = del_fn_type;
+    internal_struct.add_member(del_fn->name, del_fn, del_fn_type);
+    m_ctx->internal_methods.add(del_fn);
+
+    auto copy_fn = create_node(NodeType::FnDef);
+    copy_fn->name = "copy";
+    copy_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayCopy;
+    copy_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
+    auto copy_fn_type = create_type(TypeKind::Fn);
+    copy_fn_type->data.fn.return_type = type;
+    copy_fn_type->data.fn.container = type;
+    copy_fn->resolved_type = copy_fn_type;
+    internal_struct.add_member("copy", copy_fn, copy_fn_type);
+    m_ctx->internal_methods.add(copy_fn);
 
     type->data.array.internal = internal_type;
     m_ctx->array_of[elem] = type;

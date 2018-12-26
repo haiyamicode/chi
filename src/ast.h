@@ -75,7 +75,7 @@ namespace cx {
         };
 
         MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
-        MAKE_ENUM(BuiltinId, Invalid, Printf, ArrayAdd, Debug);
+        MAKE_ENUM(BuiltinId, Invalid, Printf, ArrayAdd, ArrayDelete, ArrayCopy, Debug);
 
         struct FnDef {
             Node* fn_proto;
