@@ -75,7 +75,7 @@ namespace cx {
         };
 
         MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
-        MAKE_ENUM(BuiltinId, Invalid, Printf, ArrayAdd, Debug)
+        MAKE_ENUM(BuiltinId, Invalid, Printf, ArrayAdd, Debug);
 
         struct FnDef {
             Node* fn_proto;
@@ -85,6 +85,10 @@ namespace cx {
 
             bool is_instance_method() {
                 return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
+            }
+
+            bool is_built_in() {
+                return builtin_id != BuiltinId::Invalid;
             }
         };
 

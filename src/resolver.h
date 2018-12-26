@@ -35,10 +35,11 @@ namespace cx {
 
     struct ResolveContext {
         Allocator* allocator;
-        SystemTypes system_types;
         array<ast::Node*> builtins;
-        map<ChiType*, ChiType*> array_types;
-        map<ChiType*, ChiType*> pointer_types[(int) TypeKind::__COUNT];
+        SystemTypes system_types;
+        array<ast::Node*> internal_methods;
+        map<ChiType*, ChiType*> array_of;
+        map<ChiType*, ChiType*> pointer_of[(int) TypeKind::__COUNT];
 
         ResolveContext(Allocator* allocator) { this->allocator = allocator; }
     };

@@ -666,6 +666,10 @@ string Resolver::to_string(ChiType* type) {
             return "string";
         case TypeKind::Pointer:
             return to_string(type->get_elem()) + "*";
+        case TypeKind::Array:
+        case TypeKind::Optional:
+        case TypeKind::Box:
+            return fmt::format("{}<{}>", to_string(get_system_type(type->kind)), to_string(type->get_elem()));
         default:
             break;
     }
@@ -860,7 +864,7 @@ ChiType* Resolver::create_pointer_type(ChiType* elem, TypeKind kind) {
 }
 
 ChiType* Resolver::get_pointer_type(ChiType* elem, TypeKind kind) {
-    auto& m = m_ctx->pointer_types[(int) kind];
+    auto& m = m_ctx->pointer_of[(int) kind];
     if (auto cached = m.get(elem)) {
         return *cached;
     }
@@ -871,7 +875,7 @@ ChiType* Resolver::get_pointer_type(ChiType* elem, TypeKind kind) {
 
 ChiType* Resolver::get_array_type(ChiType* elem) {
     static ChiType* size_type = get_system_types()->int_;
-    if (auto cached = m_ctx->array_types.get(elem)) {
+    if (auto cached = m_ctx->array_of.get(elem)) {
         return *cached;
     }
     auto type = create_type(TypeKind::Array);
@@ -889,16 +893,19 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
     internal_struct.add_member("size", size_field_node, size_type);
 
     auto add_fn = create_node(NodeType::FnDef);
+    add_fn->name = "add";
     add_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayAdd;
     add_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
     auto add_fn_type = create_type(TypeKind::Fn);
     add_fn_type->data.fn.return_type = get_pointer_type(elem);
     add_fn_type->data.fn.params.add(elem);
+    add_fn_type->data.fn.container = type;
     add_fn->resolved_type = add_fn_type;
     internal_struct.add_member("add", add_fn, add_fn_type);
+    m_ctx->internal_methods.add(add_fn);
 
     type->data.array.internal = internal_type;
-    m_ctx->array_types[elem] = type;
+    m_ctx->array_of[elem] = type;
     type->is_placeholder = elem->is_placeholder;
     return type;
 }

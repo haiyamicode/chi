@@ -78,7 +78,8 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
     resolver.resolve(package);
 
     auto jitc = m_ctx.create_compiler();
-    jitc.compile(module);
+    jitc.init_compilation();
+    jitc.compile_module(module);
     auto entry_fn = jitc.get_context()->function_table[package->entry_fn];
 
     switch (m_build_mode) {

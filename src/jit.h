@@ -207,6 +207,8 @@ namespace cx {
 
             Function* get_fn(ast::Node* node);
 
+            Function* add_internal_method_fn(ChiType* type, ast::Node* method);
+
             Function* new_fn(jit_type_t signature, ast::Node* node);
 
             Function* add_fn(jit_type_t signature, ast::Node* node);
@@ -215,7 +217,7 @@ namespace cx {
 
             ImplInfo* get_impl_info(TraitImpl* impl);
 
-            void fn_method(Function* fn, const string& fn_name, ChiType* struct_type, ChiTypeSubtype* subtype);
+            void init_method_fn(Function* fn, const string& fn_name, ChiType* struct_type, ChiTypeSubtype* subtype);
 
             void add_value(ast::Node* node, const jit_value& value) { m_ctx->value_table[node] = value; }
 
@@ -262,7 +264,9 @@ namespace cx {
 
             TypeInfo* get_type_info(ChiType* type);
 
-            void compile(ast::Module* module);
+            void init_compilation();
+
+            void compile_module(ast::Module* module);
 
             Function* compile_fn(ast::Node* node);
 
