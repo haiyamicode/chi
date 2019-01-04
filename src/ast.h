@@ -70,7 +70,7 @@ namespace cx {
 
         struct FnProto {
             array<Node*> params;
-            Node* return_type;
+            Node* return_type = nullptr;
             Node* fn_def_node;
         };
 

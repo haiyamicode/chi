@@ -1,7 +1,7 @@
 struct Node<any T> {
     T data;
     Node<T>* next = 0;
-    void new(T data) {
+    func new(T data) {
         this.data = data;
     }
 };
@@ -11,7 +11,7 @@ struct LinkedList<any T> {
     Node<T>* tail = 0;
     int size = 0;
 
-    Node<T>* add(T value) {
+    func add(T value) Node<T>* {
         this.tail = new {value};
         if (!this.head) {
             this.head = this.tail;
@@ -30,7 +30,7 @@ struct LinkedList<any T> {
     }
 }
 
-int main() {
+func main() {
     LinkedList<int> list = {};
     list.add(1);
     print("list.size: {}\n", list.size);
@@ -40,5 +40,4 @@ int main() {
     for (let node=list.head; node; node = node.next) {
         print("item value: {}\n", node.data);
     }
-    return 0;
 }

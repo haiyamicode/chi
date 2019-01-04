@@ -1,21 +1,20 @@
-int main() {
+func main() {
     Fib fib = {12};
     print("fib: {}\n", fib.calculate());
-    return 0;
 }
 
 struct Fib {
     int n;
 
-    void new(int n) {
+    func new(int n) {
         this.n = n;
     }
 
-    int calculate() {
+    func calculate() int {
         return this.fib(this.n);
     }
 
-    int fib(int n) {
+    func fib(int n) int {
         int x;
         if (n < 2) {
             return n;

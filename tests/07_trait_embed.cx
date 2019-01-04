@@ -1,11 +1,11 @@
 struct Sheep {
     AnimalBase animal...;
 
-    void new(int id) {
+    func new(int id) {
         this.animal = {id};
     }
 
-    void talk() {
+    func talk() {
         print("baaaaahh {}\n", this.get_id());
     }
 };
@@ -13,15 +13,15 @@ struct Sheep {
 struct Dog {
     AnimalBase animal...;
 
-    void new(int id) {
+    func new(int id) {
         this.animal = {id};
     }
 
-    int get_id() {
+    func get_id() int {
         return -this.animal.id;
     }
 
-    void talk() {
+    func talk() {
         print("wuff wuff {}\n", this.get_id());
     }
 };
@@ -29,34 +29,34 @@ struct Dog {
 struct Cat {
     Animal animal...;
 
-    int get_id() {
+    func get_id() int {
         return 0;
     }
 
-    void talk() {
+    func talk() {
         print("meeoooww {}\n", this.get_id());
     }
 };
 
 trait Animal {
-        int get_id();
-        void talk() {}
+    func get_id() int;
+    func talk() {}
 }
 
 struct AnimalBase {
     Animal animal...;
     int id;
 
-    void new(int id) {
+    func new(int id) {
         this.id = id;
     }
 
-    int get_id() {
+    func get_id() int {
         return this.id;
     }
 };
 
-int main() {
+func main() {
     Cat cat = {};
     Animal animal = &cat;
     animal.talk();
@@ -71,5 +71,4 @@ int main() {
     Dog dog = {3};
     animal = &dog;
     animal.talk();
-    return 0;
 }

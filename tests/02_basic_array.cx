@@ -1,4 +1,4 @@
-int main() {
+func main() {
     array<int> a = {};
     a.add(1);
     a.add(1);

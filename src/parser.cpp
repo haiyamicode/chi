@@ -222,7 +222,7 @@ Node* Parser::parse_top_level_decl() {
     }
 }
 
-optional<FnKind> Parser::parse_decl_identifier(Token** iden) {
+FnKind Parser::parse_fn_identifier(Token** iden) {
     FnKind fn_kind = FnKind::TopLevel;
     auto parent = get_scope()->owner;
     if (parent && parent->type == NodeType::StructDecl) {
@@ -242,22 +242,14 @@ optional<FnKind> Parser::parse_decl_identifier(Token** iden) {
     } else {
         *iden = expect(TokenType::IDEN);
     }
-    if (get()->type != TokenType::LPAREN) {
-        return {};
-    }
     return fn_kind;
 }
 
 Node* Parser::parse_var_or_fn_decl(bool requires_body) {
-    auto type_expr = parse_type_expr();
-    Token* iden = nullptr;
-    auto fn_kind = parse_decl_identifier(&iden);
-    if (fn_kind) {
-        return parse_fn_decl(type_expr, iden, *fn_kind, requires_body);
-    } else {
-        unread();
-        return parse_var_decl(type_expr);
+    if (next_is(TokenType::KW_FUNC)) {
+        return parse_fn_decl(requires_body);
     }
+    return parse_var_decl(next_is(TokenType::KW_LET) ? nullptr : parse_type_expr());
 }
 
 IdentifierKind Parser::get_identifier_kind(Node* node) {
@@ -326,11 +318,13 @@ Node* Parser::parse_type_expr() {
     return node;
 }
 
-Node* Parser::parse_fn_decl(Node* return_type, Token* iden, FnKind kind, bool requires_body) {
-    expect(TokenType::LPAREN);
+Node* Parser::parse_fn_decl(bool requires_body) {
+    expect(TokenType::KW_FUNC);
+    Token* iden;
+    auto kind = parse_fn_identifier(&iden);
     auto fn = create_node(NodeType::FnDef, iden);
     fn->name = iden->str;
-    auto proto = parse_fn_proto(return_type, iden);
+    auto proto = parse_fn_proto(iden);
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
     proto->data.fn_proto.fn_def_node = fn;
@@ -399,11 +393,15 @@ Node* Parser::parse_var_decl(Node* type_expr) {
     return node;
 }
 
-Node* Parser::parse_fn_proto(Node* return_type, Token* iden) {
+Node* Parser::parse_fn_proto(Token* iden) {
+    expect(TokenType::LPAREN);
     auto proto = create_node(NodeType::FnProto, iden);
     proto->name = iden->str;
-    proto->data.fn_proto.return_type = return_type;
     parse_fn_params(&proto->data.fn_proto.params);
+    expect(TokenType::RPAREN);
+    if (!next_is(TokenType::LBRACE)) {
+        proto->data.fn_proto.return_type = parse_type_expr();
+    }
     return proto;
 }
 
@@ -421,7 +419,6 @@ void Parser::parse_fn_params(NodeList* params) {
         }
         consume();
     }
-    expect(TokenType::RPAREN);
 }
 
 Node* Parser::parse_fn_param() {

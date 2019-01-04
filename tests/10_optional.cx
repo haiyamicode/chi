@@ -1,9 +1,9 @@
 struct Node {
     int id;
-    void new(int id) { this.id = id; }
+    func new(int id) { this.id = id; }
 };
 
-void f(optional<Node*> node, bool force) {
+func f(optional<Node*> node, bool force) {
     if (node) {
         print("has value: node.id == {}\n", node.id);
     } else {
@@ -14,10 +14,9 @@ void f(optional<Node*> node, bool force) {
     }
 }
 
-int main() {
+func main() {
     Node a = {1};
     f(&a, false);
     f(&a, true);
     f({}, false);
-    return 0;
 }

@@ -6,11 +6,11 @@ struct Bar {
     Foo foo;
 };
 
-void inc(int* ref) {
+func inc(int* ref) {
     (*ref)++;
 }
 
-int main() {
+func main() {
     int b = -2019;
     print("b: {}\n", b);
     inc(&b);
@@ -25,5 +25,4 @@ int main() {
     Foo foo_cpy = *(Foo*)p;
     print("foo_cpy.a: {}\n", foo_cpy.a);
     print("*(int*)p: {}\n", *(int*)p);
-    return 0;
 }

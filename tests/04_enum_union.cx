@@ -26,7 +26,7 @@ struct KeyStroke {
     KeyStrokeData data;
 };
 
-void print_key(Key key) {
+func print_key(Key key) {
     if (key == Key.Enter) {
         print("Enter ({})", key);
     }
@@ -37,7 +37,7 @@ void print_key(Key key) {
     }
 }
 
-void print_keystroke(KeyStroke ks) {
+func print_keystroke(KeyStroke ks) {
     if (ks.type == KeyStrokeType.Single) {
         print("single: ", 0);
         print_key(ks.data.single);
@@ -52,7 +52,7 @@ void print_keystroke(KeyStroke ks) {
     print("\n", 0);
 }
 
-int main() {
+func main() {
     print("enter_key_value: {}\n", Key.Enter);
     print("space_key_value: {}\n", Key.Space);
     Key key = 12;
@@ -74,5 +74,4 @@ int main() {
     ks2.type = KeyStrokeType.Combination;
     print_keystroke(ks2);
     print_key(Key.Alt);
-    return 0;
 }

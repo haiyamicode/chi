@@ -1,7 +1,7 @@
 struct Bar {
     int id = 0;
-    void new(int id) { this.id = id; }
-    void delete() {
+    func new(int id) { this.id = id; }
+    func delete() {
         print("delete bar {}\n", this.id);
     }
 };
@@ -10,17 +10,17 @@ struct Foo {
     int id;
     Bar bar1;
     Bar bar2;
-    void new(int id) {
+    func new(int id) {
         this.id = id;
         this.bar1.id = id * 10 + 1;
         this.bar2.id = id * 10 + 2;
     }
-    void delete() {
+    func delete() {
         print("delete foo {}\n", this.id);
     }
 };
 
-int main() {
+func main() {
     array<Bar> arr = {};
     arr.add({-1});
     arr.add({-2});
@@ -29,8 +29,7 @@ int main() {
     Foo foo1 = {1};
     if (1 == 1) {
         Foo foo2 = {2};
-        return 0;
+        return;
     }
     Foo foo3 = {3};
-    return 0;
 }

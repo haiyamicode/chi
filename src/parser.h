@@ -99,7 +99,7 @@ namespace cx {
 
         Node* parse_top_level_decl();
 
-        optional<FnKind> parse_decl_identifier(Token** iden);
+        FnKind parse_fn_identifier(Token** iden);
 
         Node* parse_var_or_fn_decl(bool requires_body = true);
 
@@ -109,7 +109,7 @@ namespace cx {
 
         Node* parse_type_expr();
 
-        Node* parse_fn_decl(Node* return_type, Token* iden, FnKind kind, bool requires_body);
+        Node* parse_fn_decl(bool requires_body);
 
         void parse_fn_block(Node* fn);
 
@@ -117,7 +117,7 @@ namespace cx {
 
         Node* parse_var_decl(Node* type_expr);
 
-        Node* parse_fn_proto(Node* return_type, Token* iden);
+        Node* parse_fn_proto(Token* iden);
 
         void parse_fn_params(NodeList* params);
 

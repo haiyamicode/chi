@@ -1,16 +1,16 @@
 struct Data {
     int id;
 
-    void new(int id) {
+    func new(int id) {
         this.id = id;
     }
 
-    void delete() {
+    func delete() {
         print("destroy data id={}\n", this.id);
     }
 };
 
-int main() {
+func main() {
     array<box<Data>> a = {};
     a.add({1});
     a.add({2});
@@ -26,5 +26,4 @@ int main() {
     print("b[0]: id={}\n", b[0].id);
     print("b[1]: id={}\n", b[1].id);
     print("b[2]: id={}\n", b[2].id);
-    return 0;
 }

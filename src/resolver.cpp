@@ -260,7 +260,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::FnProto: {
             auto& data = node->data.fn_proto;
             auto type = create_type(TypeKind::Fn);
-            auto return_type = resolve_value(data.return_type, scope);
+            auto return_type = data.return_type ? resolve_value(data.return_type, scope) : void_type;
             type->data.fn.return_type = return_type;
             type->is_placeholder = return_type->is_placeholder;
             for (auto param: data.params) {

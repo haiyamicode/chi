@@ -1,12 +1,11 @@
-int main() {
+func main() {
     int N;
     N = 10; // Should return 55
     let value = fib(N);
     print("fib: {}\n", value);
-    return 0;
 }
 
-int fib(int n) {
+func fib(int n) int {
     if (n < 2) {
         return n;
     }

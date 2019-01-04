@@ -44,11 +44,14 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::FnProto: {
             auto& data = node->data.fn_proto;
-            print("[@func] ");
-            print_node(data.return_type);
-            print(" {}(", node->name);
+            print("func {}(", node->name);
             print_node_list(&data.params);
-            print(")");
+            print(") ");
+            if (data.return_type) {
+                print_node(data.return_type);
+            } else {
+                print(" void");
+            }
             break;
         }
         case NodeType::Identifier: {
