@@ -18,10 +18,7 @@ run: build
 debug: build
 	$(CHI) -d $(TEST_DIR)/test.cx
 
-test: test_jit test_aot
+test: test_jit
 
 test_jit: build
 	(cd tests; make test)
-
-test_aot: build
-	(cd tests; make test CHI_AOT=1)

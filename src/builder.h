@@ -15,29 +15,6 @@
 #include "jit.h"
 
 namespace cx {
-    struct AotFunctionInput {
-        int32_t fid;
-        array<ZyanU8>* instructions;
-    };
-
-    struct AotCompilation {
-        jit::Compiler* compiler;
-        jit::Function* entry_fn;
-
-        ZydisDecoder decoder;
-        ZydisFormatter formatter;
-        map<int64_t, string> symbol_names;
-
-        void add_symbol_name(void* symbol, const string& name) { symbol_names[(int64_t) symbol] = name; }
-    };
-
-    struct AssemblyState {
-        ZydisDecodedInstruction instruction;
-        string* fn_call = nullptr;
-        ZyanUSize offset = 0;
-        map<ZyanUSize, string> labels;
-    };
-
     struct BuildContext {
         box<ResolveContext> resolve_ctx;
         box<jit::CompileContext> jit_ctx;
@@ -85,15 +62,7 @@ namespace cx {
         void build_program(const string& entry_file_name);
 
     private:
-        bool generate_insn_asm(AotCompilation* ctx, AotFunctionInput* fn, AssemblyState* as, FILE* stream);
-
-        void generate_fn_asm(AotCompilation* ctx, AotFunctionInput* fn, FILE* stream);
-
         string get_tmp_file_path(const string& filename);
-
-        void build_fn_asm(AotCompilation* ctx, FILE* stream, int fid, jit_function_t fn);
-
-        void build_binary(AotCompilation* ctx);
     };
 
 }

@@ -47,8 +47,6 @@ namespace cx {
 
             const char* get_jit_name() const { return qualified_name.c_str(); }
 
-            string get_asm_name() const { return asm_name ? *asm_name : qualified_name; }
-
             jit_value get_null_constant();
 
             jit_label* get_return_label() { return &return_labels.back().back().label; }
@@ -63,9 +61,6 @@ namespace cx {
                                        jit_value_t *args, unsigned int num_args, int flags=0);
 
             jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
-
-        private:
-            int64_t add_fn_symbol(const string& name);
         };
 
         struct StructField {
@@ -136,8 +131,6 @@ namespace cx {
             Resolver resolver;
 
             array<box<Function>> functions;
-            array<string> fn_symbols;
-            array<const char*> string_literals;
             array<box<JumpTable>> jump_tables;
             array<box<ImplInfo>> impls;
 
@@ -149,7 +142,6 @@ namespace cx {
 
             CompileContext(ResolveContext* rctx): resolver(rctx) {}
 
-            void enable_aot_compilation(bool value) { jit_context_set_enable_aot(jit_ctx.raw(), value); }
             bool is_aot_enabled() { return jit_ctx.is_aot_enabled(); }
             Function* add_fn(ast::Node* node, Function* fn);
         };

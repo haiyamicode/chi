@@ -85,27 +85,13 @@ void Function::build() {
     compiler.compile_fn_body(this);
 }
 
-int64_t Function::add_fn_symbol(const string& name) {
-    ctx->fn_symbols.add(name);
-    return (int64_t) ctx->fn_symbols.size;
-}
-
 jit_value Function::insn_call(Function* fn_ref, jit_value_t* args, long num_args) {
-    if (ctx->jit_ctx.is_aot_enabled()) {
-        auto fid = add_fn_symbol(fn_ref->get_asm_name());
-        return jit_function::insn_call_native(fn_ref->get_jit_name(), (void*) (-fid), fn_ref->signature(), args,
-                                              (uint32_t) num_args);
-    }
     return jit_function::insn_call(fn_ref->get_jit_name(), fn_ref->raw(), fn_ref->signature(), args,
                                    (uint32_t) num_args);
 }
 
 jit_value Function::insn_call_native(const char* name, void* native_func, jit_type_t signature,
                                      jit_value_t* args, unsigned int num_args, int flags) {
-    if (ctx->jit_ctx.is_aot_enabled()) {
-        return jit_function::insn_call_native(name, (void*) (-add_fn_symbol(name)),
-                                              signature, args, num_args, flags);
-    }
     return jit_function::insn_call_native(name, native_func, signature, args, num_args, flags);
 }
 
@@ -778,9 +764,6 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
 }
 
 jit_value Compiler::create_string_constant(Function* fn, const string& str) {
-    if (is_aot_enabled()) {
-        m_ctx->string_literals.add(str.c_str());
-    }
     return jit_value_create_nint_constant(fn->raw(), str_lit_type, (jit_nint) str.c_str());
 }
 
