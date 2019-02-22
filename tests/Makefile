@@ -14,13 +14,13 @@ TESTS = 00_fib.test \
 CHI = ../cmake-build-debug/src/chi
 TMP = /tmp/chitests
 
-%.test: %.expect %.cx
+%.test: %.expect %.chi
 	@echo Test: $*...
 	@if [ "${CHI_AOT}" == "" ]; \
 	then \
-		$(CHI) $*.cx 2>&1 >$*.output; \
+		$(CHI) $*.chi 2>&1 >$*.output; \
 	else \
-        $(CHI) -o $(TMP).$* $*.cx && $(TMP).$* 2>&1 >$*.output; \
+        $(CHI) -o $(TMP).$* $*.chi && $(TMP).$* 2>&1 >$*.output; \
 	fi
 	@if [ "x`diff -qbu $*.expect $*.output`" != "x" ]; \
 	then \
