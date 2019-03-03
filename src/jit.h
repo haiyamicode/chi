@@ -15,7 +15,7 @@
 
 namespace cx {
     namespace jit {
-        struct CompileContext;
+        struct CompilationContext;
 
         struct VarLabel {
             jit_label label;
@@ -33,7 +33,7 @@ namespace cx {
             string qualified_name;
             optional<string> asm_name;
             ast::Node* node;
-            CompileContext* ctx;
+            CompilationContext* ctx;
 
             jit_value is_returning;
             jit_value return_value;
@@ -41,7 +41,7 @@ namespace cx {
             std::list<LoopLabels> loop_labels;
             ChiTypeSubtype* container_subtype;
 
-            Function(jit_type_t signature, CompileContext* _ctx, ast::Node* _node);
+            Function(jit_type_t signature, CompilationContext* _ctx, ast::Node* _node);
 
             virtual void build();
 
@@ -102,8 +102,8 @@ namespace cx {
             jit_nuint get_opt_flag_offset() { return elem_size; }
         };
 
-        struct CompileSettings {
-            bool enable_asm_print = false;
+        struct CompilationSettings {
+            bool enable_jit_dump = false;
         };
 
         struct StructData {
@@ -125,9 +125,9 @@ namespace cx {
 
         typedef array<void*> JumpTable;
 
-        struct CompileContext {
+        struct CompilationContext {
             jit_context jit_ctx;
-            CompileSettings settings;
+            CompilationSettings settings;
             Resolver resolver;
 
             array<box<Function>> functions;
@@ -140,16 +140,15 @@ namespace cx {
             map<TypeId, box<TypeInfo>> info_table;
             map<ast::Node*, Function*> function_table;
 
-            CompileContext(ResolveContext* rctx): resolver(rctx) {}
+            CompilationContext(ResolveContext* rctx): resolver(rctx) {}
 
-            bool is_aot_enabled() { return jit_ctx.is_aot_enabled(); }
             Function* add_fn(ast::Node* node, Function* fn);
         };
 
         enum ArrayOp { Destroy, Copy };
 
         class Compiler {
-            CompileContext* m_ctx;
+            CompilationContext* m_ctx;
             Function* m_fn = nullptr;
 
             jit_context& get_jit_context() { return m_ctx->jit_ctx; }
@@ -250,9 +249,9 @@ namespace cx {
             Struct get_struct(ChiType* struct_type);
 
         public:
-            Compiler(CompileContext* ctx, Function* fn = nullptr);
+            Compiler(CompilationContext* ctx, Function* fn = nullptr);
 
-            CompileContext* get_context() { return m_ctx; }
+            CompilationContext* get_context() { return m_ctx; }
 
             TypeInfo* get_type_info(ChiType* type);
 
@@ -265,8 +264,6 @@ namespace cx {
             void compile_fn_body(Function* fn);
 
             jit_type_t compile_type(ChiType* type);
-
-            bool is_aot_enabled() { return m_ctx->is_aot_enabled(); }
         };
     }
 }

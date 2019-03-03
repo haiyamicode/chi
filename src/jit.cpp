@@ -56,16 +56,12 @@ static jit_type_t printf_params[] = {string_internal_struct, array_internal_stru
 static auto printf_signature = jit_type_create_signature(jit_abi_cdecl,
                                                          jit_type_void, printf_params, 2, 1);
 
-Function::Function(jit_type_t signature, CompileContext* _ctx, ast::Node* _node) : jit_function(
+Function::Function(jit_type_t signature, CompilationContext* _ctx, ast::Node* _node) : jit_function(
         _ctx->jit_ctx, signature), ctx(_ctx), node(_node) {
     if (node) {
         qualified_name = node->name;
     }
-    if (_ctx->is_aot_enabled()) {
-        asm_name = "_" + qualified_name;
-    } else {
-        set_recompilable();
-    }
+    set_recompilable();
     is_returning = this->new_value(jit_type_sys_bool);
 }
 
@@ -88,13 +84,13 @@ jit_value Function::get_null_constant() {
     return new_constant(jit_nint(NULL));
 }
 
-Function* CompileContext::add_fn(ast::Node* node, Function* fn) {
+Function* CompilationContext::add_fn(ast::Node* node, Function* fn) {
     functions.emplace(fn)->get();
     function_table[node] = fn;
     return fn;
 }
 
-Compiler::Compiler(CompileContext* ctx, Function* fn) {
+Compiler::Compiler(CompilationContext* ctx, Function* fn) {
     m_ctx = ctx;
     m_fn = fn;
 }
@@ -291,7 +287,7 @@ void Compiler::compile_fn_body(Function* fn) {
         fn->pop_return_scope();
         fn->insn_return(fn->return_value);
     }
-    if (m_ctx->settings.enable_asm_print) {
+    if (m_ctx->settings.enable_jit_dump) {
         jit_dump_function(stdout, fn->raw(), fn->get_jit_name());
     }
 }
@@ -888,7 +884,7 @@ void Compiler::_compile_struct(ast::Node* node, ChiType* struct_type) {
         }
     }
 
-    if (m_ctx->settings.enable_asm_print) {
+    if (m_ctx->settings.enable_jit_dump) {
         jit_dump_function(stdout, constructor->raw(), constructor->get_jit_name());
         jit_dump_function(stdout, destructor->raw(), destructor->get_jit_name());
     }
@@ -1056,25 +1052,6 @@ Function* Compiler::add_fn(jit_type_t signature, ast::Node* node) {
 void Compiler::init_method_fn(Function* fn, const string& fn_name, ChiType* struct_type, ChiTypeSubtype* subtype) {
     auto ctn_name = get_resolver()->to_string(struct_type);
     fn->qualified_name = fmt::format("{}::{}", ctn_name, fn_name);
-    if (is_aot_enabled()) {
-        stringstream ss;
-        for (auto c: ctn_name) {
-            switch (c) {
-                case '<':
-                    ss << ".I.";
-                    break;
-                case '>':
-                    ss << ".I";
-                    break;
-                case ',':
-                    ss << ".V.";
-                    break;
-                default:
-                    ss.put(c);
-            }
-        }
-        fn->asm_name = fmt::format("_{}._{}", ss.str(), fn_name);
-    }
     fn->container_subtype = subtype;
 }
 
@@ -1109,8 +1086,8 @@ ImplInfo* Compiler::get_impl_info(TraitImpl* impl) {
         auto vtable = add_jump_table(&impl->itable_index);
         for (auto member: impl->impl_table) {
             auto fn = get_fn(member->node);
-            auto fn_ptr = is_aot_enabled() ? (void*) fn : jit_function_to_vtable_pointer(fn->raw());
-            vtable->add(fn_ptr);
+            auto fp = jit_function_to_vtable_pointer(fn->raw());
+            vtable->add(fp);
         }
         info->vtable = vtable->items;
         info->vtable_size = vtable->size;

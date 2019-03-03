@@ -17,7 +17,7 @@ using namespace cx;
 
 BuildContext::BuildContext(cx::Allocator* allocator) :
         resolve_ctx(new ResolveContext(allocator)),
-        jit_ctx(new jit::CompileContext(resolve_ctx.get())) {
+        jit_ctx(new jit::CompilationContext(resolve_ctx.get())) {
 }
 
 jit::Compiler BuildContext::create_compiler() {

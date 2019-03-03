@@ -17,7 +17,7 @@
 namespace cx {
     struct BuildContext {
         box<ResolveContext> resolve_ctx;
-        box<jit::CompileContext> jit_ctx;
+        box<jit::CompilationContext> jit_ctx;
 
         BuildContext(Allocator* allocator);
 
@@ -51,7 +51,7 @@ namespace cx {
 
         void set_debug_mode(bool value) { m_debug_mode = value; }
 
-        void set_assembly_mode(bool value) { m_ctx.jit_ctx->settings.enable_asm_print = value; }
+        void set_assembly_mode(bool value) { m_ctx.jit_ctx->settings.enable_jit_dump = value; }
 
         void set_build_mode(BuildMode value);
 
