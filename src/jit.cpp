@@ -26,19 +26,8 @@ static const string OPTIONAL_UNWRAP_PANIC = "panic: unwrapping null optional val
 
 static auto str_lit_type = jit_type_create_pointer(jit_type_sys_char, 1);
 
-static jit_type_t realloc_params[] = {jit_type_nint, jit_type_nuint};
-static auto realloc_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_nint, realloc_params, 2, 1);
-
-void* sys_realloc(void* dest, size_t size) {
-    return realloc(dest, size);
-}
-
 static jit_type_t malloc_params[] = {jit_type_nuint};
 static auto malloc_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_nint, malloc_params, 1, 1);
-
-void* sys_malloc(size_t size) {
-    return malloc(size);
-}
 
 static jit_type_t free_params[] = {jit_type_nint};
 static auto free_signature = jit_type_create_signature(jit_abi_cdecl, jit_type_void, free_params, 1, 1);
@@ -1146,7 +1135,7 @@ ChiType* Compiler::get_chitype(ast::Node* node) {
 
 jit_value Compiler::compile_mem_alloc(Function* fn, const jit_value& size_value) {
     jit_value_t args[] = {size_value.raw()};
-    return fn->insn_call_native("_malloc", (void*) sys_malloc, malloc_signature, args, 1);
+    return fn->insn_call_native("_malloc", (void*) jit_malloc, malloc_signature, args, 1);
 }
 
 void Compiler::compile_array_construction(Function* fn, const jit_value& dest) {
