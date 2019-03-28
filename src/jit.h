@@ -158,7 +158,7 @@ namespace cx {
 
             jit_type_t _compile_type(ChiType* type);
 
-            jit_type_t to_jit_int_type(ChiType* type);
+            jit_type_t convert_int_type(ChiType* type);
 
             WrappedType compile_wrapped_type(ChiType* type);
 

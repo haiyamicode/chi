@@ -109,7 +109,7 @@ Function* Compiler::add_fn_node(ast::Node* node) {
     return add_fn(type, node);
 }
 
-jit_type_t Compiler::to_jit_int_type(ChiType* type) {
+jit_type_t Compiler::convert_int_type(ChiType* type) {
     auto& data = type->data.int_;
     if (data.is_unsigned) {
         switch (data.bit_count) {
@@ -157,7 +157,7 @@ jit_type_t Compiler::_compile_type(ChiType* type) {
         case TypeKind::Bool:
             return jit_type_sbyte;
         case TypeKind::Int: {
-            return to_jit_int_type(type);
+            return convert_int_type(type);
         }
         case TypeKind::Void:
             return jit_type_void;
