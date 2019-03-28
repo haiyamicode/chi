@@ -43,7 +43,7 @@ static std::string to_string(const CxAny& v) {
     }
 }
 
-static string format_cstr(CxString format, const CxArray& values) {
+static string format_cstr(CxString format, const CxSlice& values) {
     int val_i = 0;
     int state = 0;
     std::stringstream ss;
@@ -80,13 +80,13 @@ static string format_cstr(CxString format, const CxArray& values) {
     return ss.str();
 }
 
-void cx_string_format(CxString* dest, CxString format, CxArray values) {
+void cx_string_format(CxString* dest, CxString format, CxSlice values) {
     auto str = format_cstr(format, values);
     dest->data = str.data();
     dest->size = (uint32_t) str.size();
 }
 
-void cx_printf(CxString format, CxArray values) {
+void cx_printf(CxString format, CxSlice values) {
     printf("%s", format_cstr(format, values).c_str());
 }
 

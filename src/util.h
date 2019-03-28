@@ -199,6 +199,10 @@ namespace cx {
             return data.operator[](key);
         }
 
+        V& at(const K& key) {
+            return data.at(key);
+        }
+
         bool is_empty() {
             return data.empty();
         }

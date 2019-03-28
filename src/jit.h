@@ -31,7 +31,6 @@ namespace cx {
 
         struct Function : public jit_function {
             string qualified_name;
-            optional<string> asm_name;
             ast::Node* node;
             CompilationContext* ctx;
 
@@ -57,10 +56,7 @@ namespace cx {
             void pop_loop() { loop_labels.pop_back(); }
             LoopLabels* get_loop() { return &loop_labels.back(); }
 
-            jit_value insn_call_native(const char *name, void *native_func, jit_type_t signature,
-                                       jit_value_t *args, unsigned int num_args, int flags=0);
-
-            jit_value insn_call(Function* fn_ref, jit_value_t* args, long num_args);
+            jit_value insn_call(Function* fn, jit_value_t* args, long num_args);
         };
 
         struct StructField {
@@ -213,6 +209,8 @@ namespace cx {
             void add_value(ast::Node* node, const jit_value& value) { m_ctx->value_table[node] = value; }
 
             jit_value compile_simple_value(Function* fn, ast::Node* expr);
+
+            jit_value compile_fn_call(Function* fn, ast::Node* fn_call);
 
             jit_value compile_arithmetic_op(Function* fn, ChiType* value_type, TokenType op_type, const jit_value& op1, const jit_value& op2);
 

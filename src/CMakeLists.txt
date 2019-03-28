@@ -4,16 +4,16 @@ set(HEADER_FILES builder.h util.h sema.h resolver.h lexer.h parser.h include/enu
 set(SOURCE_FILES builder.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast_printer.cpp jit.cpp internals.cpp)
 set(LIBS fmt jit)
 
-add_library(chmt SHARED ${HEADER_FILES} ${SOURCE_FILES})
-add_library(chrt STATIC ${HEADER_FILES} internals.cpp)
+#add_library(chmt SHARED ${HEADER_FILES} ${SOURCE_FILES})
+#add_library(chrt STATIC ${HEADER_FILES} internals.cpp)
 add_executable(chi chc.cpp ${HEADER_FILES} ${SOURCE_FILES})
 
-target_link_libraries(chmt ${LIBS})
+#target_link_libraries(chmt ${LIBS})
 
 set(ASAN_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
 set_target_properties(chi PROPERTIES COMPILE_FLAGS_DEBUG "${ASAN_FLAGS}>")
 target_link_libraries(chi ${LIBS} "$<$<CONFIG:DEBUG>:${ASAN_FLAGS}>")
 
-install(TARGETS chmt DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-install(TARGETS chrt DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+#install(TARGETS chmt DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+#install(TARGETS chrt DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 
