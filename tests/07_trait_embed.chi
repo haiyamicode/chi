@@ -6,7 +6,7 @@ struct Sheep {
     }
 
     func talk() {
-        print("baaaaahh {}\n", this.get_id());
+        printf("baaaaahh {}\n", this.get_id());
     }
 };
 
@@ -22,7 +22,7 @@ struct Dog {
     }
 
     func talk() {
-        print("wuff wuff {}\n", this.get_id());
+        printf("wuff wuff {}\n", this.get_id());
     }
 };
 
@@ -34,7 +34,7 @@ struct Cat {
     }
 
     func talk() {
-        print("meeoooww {}\n", this.get_id());
+        printf("meeoooww {}\n", this.get_id());
     }
 };
 

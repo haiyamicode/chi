@@ -82,7 +82,7 @@ void Resolver::create_builtins() {
     printf_params.add(get_system_types()->string);
     printf_params.add(get_system_types()->any);
     printf_type->data.fn.is_variadic = true;
-    add_builtin_fn("print", printf_type, ast::BuiltinId::Printf);
+    add_builtin_fn("printf", printf_type, ast::BuiltinId::Printf);
 
     // debug
     auto test_type = create_type(TypeKind::Fn);

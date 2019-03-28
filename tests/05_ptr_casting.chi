@@ -12,17 +12,17 @@ func inc(int* ref) {
 
 func main() {
     int b = -2019;
-    print("b: {}\n", b);
+    printf("b: {}\n", b);
     inc(&b);
-    print("b after inc: {}\n", b);
-    print("b after inc == -2018: {}\n", b == -2018);
-    print("(int)((int8)b + 1): {}\n", (int8)b + 1);
+    printf("b after inc: {}\n", b);
+    printf("b after inc == -2018: {}\n", b == -2018);
+    printf("(int)((int8)b + 1): {}\n", (int8)b + 1);
 
     void* p = 0;
     Bar bar1;
     bar1.foo.a = b;
     p = &bar1.foo;
     Foo foo_cpy = *(Foo*)p;
-    print("foo_cpy.a: {}\n", foo_cpy.a);
-    print("*(int*)p: {}\n", *(int*)p);
+    printf("foo_cpy.a: {}\n", foo_cpy.a);
+    printf("*(int*)p: {}\n", *(int*)p);
 }

@@ -6,7 +6,7 @@ struct Data {
     }
 
     func delete() {
-        print("destroy data id={}\n", this.id);
+        printf("destroy data id={}\n", this.id);
     }
 };
 
@@ -16,14 +16,14 @@ func main() {
     a.add({2});
     a.add({3});
     let v = a[1];
-    print("a[0]: id={}\n", a[0].id);
-    print("a[1]: id={}\n", a[1].id);
-    print("a[2]: id={}\n", a[2].id);
+    printf("a[0]: id={}\n", a[0].id);
+    printf("a[1]: id={}\n", a[1].id);
+    printf("a[2]: id={}\n", a[2].id);
     let b = a;
     a.add({4});
-    print("a[3]: id={}\n", a[3].id);
-    print("a.size={}, b.size={}\n", a.size, b.size);
-    print("b[0]: id={}\n", b[0].id);
-    print("b[1]: id={}\n", b[1].id);
-    print("b[2]: id={}\n", b[2].id);
+    printf("a[3]: id={}\n", a[3].id);
+    printf("a.size={}, b.size={}\n", a.size, b.size);
+    printf("b[0]: id={}\n", b[0].id);
+    printf("b[1]: id={}\n", b[1].id);
+    printf("b[2]: id={}\n", b[2].id);
 }

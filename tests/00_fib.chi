@@ -2,7 +2,7 @@ func main() {
     int N;
     N = 10; // Should return 55
     let value = fib(N);
-    print("fib: {}\n", value);
+    printf("fib: {}\n", value);
 }
 
 func fib(int n) int {

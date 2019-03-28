@@ -33,11 +33,11 @@ struct LinkedList<any T> {
 func main() {
     LinkedList<int> list = {};
     list.add(1);
-    print("list.size: {}\n", list.size);
+    printf("list.size: {}\n", list.size);
     list.add(2);
     list.add(3);
-    print("list.size: {}\n", list.size);
+    printf("list.size: {}\n", list.size);
     for (let node=list.head; node; node = node.next) {
-        print("item value: {}\n", node.data);
+        printf("item value: {}\n", node.data);
     }
 }

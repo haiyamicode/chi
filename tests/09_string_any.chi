@@ -8,10 +8,10 @@ func world() string {
 }
 
 func main() {
-    print("hello {} {}\n", "the", world());
+    printf("hello {} {}\n", "the", world());
     any id = world();
-    print("hello {}\n", id);
-    print("hello {}\n", ID1);
+    printf("hello {}\n", id);
+    printf("hello {}\n", ID1);
     id = ID2;
-    print("hello {}, {}, {}\n", ID1, id, ID3);
+    printf("hello {}, {}, {}\n", ID1, id, ID3);
 }

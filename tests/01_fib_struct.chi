@@ -1,6 +1,6 @@
 func main() {
     Fib fib = {12};
-    print("fib: {}\n", fib.calculate());
+    printf("fib: {}\n", fib.calculate());
 }
 
 struct Fib {

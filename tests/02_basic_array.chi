@@ -3,7 +3,7 @@ func main() {
     a.add(1);
     a.add(1);
     a[1] = 2;
-    print("a.size: {}\n", a.size);
-    print("a[0]: {}\n", a[0]);
-    print("a[1]: {}\n", a[1]);
+    printf("a.size: {}\n", a.size);
+    printf("a[0]: {}\n", a[0]);
+    printf("a[1]: {}\n", a[1]);
 }

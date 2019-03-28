@@ -2,7 +2,7 @@ struct Bar {
     int id = 0;
     func new(int id) { this.id = id; }
     func delete() {
-        print("delete bar {}\n", this.id);
+        printf("delete bar {}\n", this.id);
     }
 };
 
@@ -16,7 +16,7 @@ struct Foo {
         this.bar2.id = id * 10 + 2;
     }
     func delete() {
-        print("delete foo {}\n", this.id);
+        printf("delete foo {}\n", this.id);
     }
 };
 

@@ -5,12 +5,12 @@ struct Node {
 
 func f(optional<Node*> node, bool force) {
     if (node) {
-        print("has value: node.id == {}\n", node.id);
+        printf("has value: node.id == {}\n", node.id);
     } else {
-        print("has no value, !node == {}\n", !node);
+        printf("has no value, !node == {}\n", !node);
     }
     if (force) {
-        print("forced print: node!.id == {}\n", node!.id);
+        printf("forced print: node!.id == {}\n", node!.id);
     }
 }
 
