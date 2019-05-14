@@ -16,7 +16,7 @@ namespace cx {
     struct ChiType;
 
     MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String,
-              Struct, Pointer, Array, Enum, Any, Subtype, Placeholder, Optional, Box)
+              Struct, Pointer, Reference, Array, Enum, Any, Subtype, Placeholder, Optional, Box)
 
     struct ChiTypeTypeSymbol {
         ChiType* giving_type;
@@ -90,6 +90,8 @@ namespace cx {
 
         static bool is_trait(ChiType* type);
 
+        static bool is_pointer_type(ChiType* type);
+
         static bool is_generic(ChiType* type);
     };
 
@@ -162,7 +164,7 @@ namespace cx {
 
         bool is_raw_pointer() { return kind == TypeKind::Pointer; }
 
-        bool is_pointer() { return is_raw_pointer() || kind == TypeKind::Box; }
+        bool is_pointer() { return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::Box; }
     };
 
     struct Scope {
@@ -184,13 +186,13 @@ namespace cx {
     };
 
     struct TypeInfo {
-        const char* name;
-        TypeKind kind;
-
-        TypeInfo(ChiType* type) {
-            kind = type->kind;
-            name = type->name ? type->name->c_str() : nullptr;
-        }
+        ChiType* itype;
+        int32_t size;
+        union {
+            struct {
+                TypeInfo* elem;
+            } ptr;
+        } data;
     };
 
     typedef int64_t const_int_t;

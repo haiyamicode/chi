@@ -32,7 +32,7 @@ void Lexer::setup_keywords() {
     if (!s_keywords.is_empty()) {
         return;
     }
-    s_keywords["let"] = TokenType::KW_LET;
+    s_keywords["var"] = TokenType::KW_VAR;
     s_keywords["break"] = TokenType::KW_BREAK;
     s_keywords["case"] = TokenType::KW_CASE;
     s_keywords["const"] = TokenType::KW_CONST;
@@ -238,6 +238,9 @@ void Lexer::next() {
 
     } else if (c == '~') {
         m_tok.type = TokenType::NOT;
+
+    } else if (c == '@') {
+        m_tok.type = TokenType::AT;
 
     } else {
         auto& t = m_tok.type;
@@ -823,6 +826,8 @@ string cx::get_token_symbol(TokenType token_type) {
             return "~";
         case TokenType::QUES:
             return "?";
+        case TokenType::AT:
+            return "@";
         default:
             return PRINT_ENUM(token_type);
     }

@@ -9,7 +9,7 @@ func world() string {
 
 func main() {
     printf("hello {} {}\n", "the", world());
-    any id = world();
+    var id any = world();
     printf("hello {}\n", id);
     printf("hello {}\n", ID1);
     id = ID2;

@@ -1,43 +1,44 @@
-struct Node<any T> {
-    T data;
-    Node<T>* next = 0;
-    func new(T data) {
+struct Node<T> {
+    data T;
+    next *Node<T> = 0;
+
+    func new(data T) {
         this.data = data;
     }
-};
+}
 
-struct LinkedList<any T> {
-    Node<T>* head = 0;
-    Node<T>* tail = 0;
-    int size = 0;
+struct LinkedList<T> {
+    head *Node<T> = 0;
+    tail *Node<T> = 0;
+    size int = 0;
 
-    func add(T value) Node<T>* {
+    func add(value T) &T {
         this.tail = new {value};
-        if (!this.head) {
+        if !this.head {
             this.head = this.tail;
         } else {
-            let node = this.head;
-            for (;;) {
-                if (!node.next) {
+            var node = this.head;
+            for {
+                if !node.next {
                     break;
                 }
                 node = node.next;
             }
             node.next = this.tail;
         }
-        ++this.size;
-        return this.tail;
+        this.size++;
+        return &this.tail.data;
     }
 }
 
 func main() {
-    LinkedList<int> list = {};
-    list.add(1);
+    var list LinkedList<int> = {};
+    printf("add item: {}\n", list.add(1));
     printf("list.size: {}\n", list.size);
-    list.add(2);
-    list.add(3);
+    printf("add item: {}\n", list.add(2));
+    printf("add item: {}\n", list.add(3));
     printf("list.size: {}\n", list.size);
-    for (let node=list.head; node; node = node.next) {
+    for var node = list.head; node; node = node.next {
         printf("item value: {}\n", node.data);
     }
 }

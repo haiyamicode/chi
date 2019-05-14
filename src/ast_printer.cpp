@@ -10,6 +10,22 @@
 using namespace cx;
 using namespace cx::ast;
 
+string get_sigil_symbol(SigilKind sigil) {
+    switch (sigil) {
+        case SigilKind::Pointer:
+            return "*";
+        case SigilKind::Optional:
+            return "?";
+        case SigilKind::Reference:
+            return "&";
+        case SigilKind::Box:
+            return "^";
+        default:
+            panic("unknown sigil {}", PRINT_ENUM(sigil));
+            return "";
+    }
+}
+
 void cx::print_ast(Node* root) {
     AstPrinter printer(root);
     return printer.print_ast();
@@ -24,7 +40,7 @@ void AstPrinter::print_node(Node* node) {
         case NodeType::Root: {
             for (auto decl: m_root->data.root.top_level_decls) {
                 print_node(decl);
-                if (decl->type != NodeType::FnDef) {
+                if (decl->type == NodeType::VarDecl) {
                     print(";");
                 }
                 print("\n");
@@ -49,8 +65,6 @@ void AstPrinter::print_node(Node* node) {
             print(") ");
             if (data.return_type) {
                 print_node(data.return_type);
-            } else {
-                print(" void");
             }
             break;
         }
@@ -61,11 +75,9 @@ void AstPrinter::print_node(Node* node) {
         case NodeType::TypeParam:
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
+            print(node->name);
+            print(" ");
             print_node(data.type);
-            if (!node->name.empty()) {
-                print(" ");
-                print(node->name);
-            }
             break;
         }
         case NodeType::Block: {
@@ -86,14 +98,15 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::VarDecl: {
             auto& data = node->data.var_decl;
-            print("[@var] ");
-            if (data.type) {
-                print_node(data.type);
-            } else {
-                print(data.is_const ? "const" : "let");
+            if (!data.is_field) {
+                print(data.is_const ? "const" : "var");
             }
             print(" ");
-            print_node(data.identifier);
+            print(node->name);
+            if (data.type) {
+                print(" ");
+                print_node(data.type);
+            }
             if (data.is_embed) {
                 print("...");
             }
@@ -226,23 +239,17 @@ void AstPrinter::print_node(Node* node) {
             break;
         }
         case NodeType::TypeSigil: {
-            auto& data = node->data.type_sigil;
+            auto& data = node->data.sigil_type;
+            print("{}", get_sigil_symbol(data.sigil));
             print_node(data.type);
-            switch (data.sigil) {
-                case SigilKind::Pointer:
-                    print("*");
-                    break;
-                default:
-                    panic("unhandled {}", PRINT_ENUM(data.sigil));
-            }
             break;
         }
         case NodeType::TypedefDecl: {
             auto& data = node->data.typedef_decl;
             print("typedef ");
+            print(data.identifier->str);
+            print(" = ");
             print_node(data.type);
-            print(" ");
-            print_node(data.identifier);
             break;
         }
         case NodeType::EnumMember: {
@@ -251,16 +258,6 @@ void AstPrinter::print_node(Node* node) {
             if (data.value) {
                 print(" = ");
                 print_node(data.value);
-            }
-            break;
-        }
-        case NodeType::VarIdentifier: {
-            auto& data = node->data.var_identifier;
-            print(node->name);
-            if (data.size_expr) {
-                print("[");
-                print_node(data.size_expr);
-                print("]");
             }
             break;
         }
@@ -277,10 +274,11 @@ void AstPrinter::print_node(Node* node) {
         }
         case NodeType::CastExpr: {
             auto& data = node->data.cast_expr;
+            print_node(data.expr);
+            print(".");
             print("(");
             print_node(data.dest_type);
             print(")");
-            print_node(data.expr);
             break;
         }
         case NodeType::ForStmt: {

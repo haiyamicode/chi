@@ -94,6 +94,8 @@ namespace cx {
 
         bool is_same_type(ChiType* a, ChiType* b);
 
+        TypeKind get_sigil_type_kind(ast::SigilKind sigil);
+
         void check_assignment(ast::Node* value, ChiType* from_type, ChiType* to_type);
 
         void check_binary_op(ast::Node* node, TokenType op_type, ChiType* type);
@@ -106,9 +108,9 @@ namespace cx {
 
         ChiStructMember* resolve_struct_member(ChiType* struct_type, ast::Node* node, ResolveScope& scope);
 
-        void resolve_struct_embed(ChiType* struct_type, ast::Node* node, ResolveScope& parent_scope);
+        void resolve_struct_embed(ChiType* struct_type, ast::Node* base_node, ResolveScope& parent_scope);
 
-        void resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::Node* embed_node);
+        void resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::Node* base_node);
 
         void resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* fn, NodeList* args);
 

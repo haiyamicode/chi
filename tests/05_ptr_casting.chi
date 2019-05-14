@@ -1,28 +1,28 @@
 struct Foo {
-    int a;
-};
+    a int;
+}
 
 struct Bar {
-    Foo foo;
-};
+    foo Foo;
+}
 
-func inc(int* ref) {
-    (*ref)++;
+func inc(ref *int) {
+    ref!++;
 }
 
 func main() {
-    int b = -2019;
+    var b int = -2019;
     printf("b: {}\n", b);
-    inc(&b);
+    inc(*b);
     printf("b after inc: {}\n", b);
     printf("b after inc == -2018: {}\n", b == -2018);
-    printf("(int)((int8)b + 1): {}\n", (int8)b + 1);
+    printf("(b.(int8) + 1).(int): {}\n", (b.(int8) + 1).(int));
 
-    void* p = 0;
-    Bar bar1;
+    var p *void = 0;
+    var bar1 Bar;
     bar1.foo.a = b;
-    p = &bar1.foo;
-    Foo foo_cpy = *(Foo*)p;
+    p = *bar1.foo;
+    var foo_cpy Foo = p.(*Foo)!;
     printf("foo_cpy.a: {}\n", foo_cpy.a);
-    printf("*(int*)p: {}\n", *(int*)p);
+    printf("p.(*int)!: {}\n", p.(*int)!);
 }

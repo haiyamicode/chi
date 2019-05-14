@@ -135,39 +135,40 @@ void Resolver::resolve(ast::Module* module) {
 bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
     static auto int_type = get_system_types()->int_;
     static auto str_lit_type = get_system_types()->str_lit;
+    if (is_same_type(from_type, to_type)) {
+        return true;
+    }
     switch (to_type->kind) {
         case TypeKind::Void:
             return from_type->kind == TypeKind::Void;
         case TypeKind::String:
             return from_type->kind == TypeKind::String || from_type == str_lit_type;
         case TypeKind::Pointer:
-            return from_type->kind == TypeKind::Pointer || can_assign(from_type, int_type);
-        case TypeKind::Int:
-            return type_is_int(from_type);
-        case TypeKind::Any:
-            return from_type->kind != TypeKind::Struct || ChiTypeStruct::is_trait(from_type);
-        case TypeKind::Struct: {
-            auto& dest = to_type->data.struct_;
-            if (dest.kind == ContainerKind::Trait) {
-                if (from_type->kind != TypeKind::Pointer) {
+        case TypeKind::Reference: {
+            auto tt = to_type->get_elem();
+            if (ChiTypeStruct::is_trait(tt) && ChiTypeStruct::is_pointer_type(from_type)) {
+                auto ft = from_type->get_elem();
+                if (ft->kind != TypeKind::Struct) {
                     return false;
                 }
-                auto sty = from_type->get_elem();
-                if (sty->kind != TypeKind::Struct) {
-                    return false;
-                }
-                auto& src = sty->data.struct_;
-                if (src.kind == ContainerKind::Struct) {
-                    for (auto& impl: src.traits) {
-                        if (impl->trait_type == to_type) {
+                auto& ss = ft->data.struct_;
+                if (ss.kind == ContainerKind::Struct) {
+                    for (auto& impl: ss.traits) {
+                        if (is_same_type(impl->trait_type, tt)) {
                             return true;
                         }
                     }
                     return false;
                 }
             }
-            return from_type == to_type;
+            return from_type->kind == TypeKind::Pointer || can_assign(from_type, int_type);
         }
+        case TypeKind::Int:
+            return type_is_int(from_type);
+        case TypeKind::Any:
+            return from_type->kind != TypeKind::Struct || ChiTypeStruct::is_trait(from_type);
+        case TypeKind::Struct:
+            return from_type == to_type;
         case TypeKind::Bool:
             return type_is_int(from_type) || from_type->kind == TypeKind::Optional;
         case TypeKind::Optional:
@@ -175,7 +176,7 @@ bool Resolver::can_assign(ChiType* from_type, ChiType* to_type) {
         default:
             break;
     }
-    return from_type == to_type;
+    return false;
 }
 
 ChiType* Resolver::to_value_type(ChiType* type) {
@@ -275,7 +276,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::Identifier: {
             auto& data = node->data.identifier;
             if (data.kind == ast::IdentifierKind::This) {
-                return get_pointer_type(scope.parent_struct);
+                return get_pointer_type(scope.parent_struct, TypeKind::Reference);
             }
             if (data.kind == ast::IdentifierKind::Value && !m_tmods.is_empty()) {
                 if (auto replacement = m_tmods.get(data.decl)) {
@@ -287,9 +288,9 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             return type;
         }
         case NodeType::TypeSigil: {
-            auto& data = node->data.type_sigil;
+            auto& data = node->data.sigil_type;
             auto type = resolve_value(data.type, scope);
-            return create_type_symbol({}, get_pointer_type(type));
+            return create_type_symbol({}, get_pointer_type(type, get_sigil_type_kind(data.sigil)));
         }
         case NodeType::ParamDecl: {
             auto& data = node->data.param_decl;
@@ -343,7 +344,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         case NodeType::UnaryOpExpr: {
             auto& data = node->data.unary_op_expr;
             auto t = resolve(data.op1, scope);
-            switch (data.op_type) {
+            switch (auto tt = data.op_type) {
                 case TokenType::SUB:
                 case TokenType::ADD:
                 case TokenType::INC:
@@ -352,7 +353,9 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     return t->kind == TypeKind::Bool ? int_type : t;
                 case TokenType::LNOT: {
                     if (data.is_suffix) {
-                        if (t->kind == TypeKind::Optional) {
+                        if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
+                            return t->get_elem();
+                        } else if (t->kind == TypeKind::Optional) {
                             return t->get_elem();
                         } else if (t->kind == TypeKind::Box) {
                             return get_pointer_type(t->get_elem());
@@ -365,16 +368,16 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     break;
                 }
                 case TokenType::MUL: {
-                    if (!t->is_pointer() || t->get_elem()->kind == TypeKind::Void) {
-                        goto invalid;
+                    if (!is_addressable(data.op1)) {
+                        error(node, errors::CANNOT_GET_POINTER_UNADDRESSABLE);
                     }
-                    return t->get_elem();
+                    return get_pointer_type(t);
                 }
                 case TokenType::AND: {
                     if (!is_addressable(data.op1)) {
-                        error(node, errors::CANNOT_TAKE_ADDRESS_UNADDRESSABLE);
+                        error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
                     }
-                    return get_pointer_type(t);
+                    return get_pointer_type(t, TypeKind::Reference);
                 }
                 default:
                     unreachable();
@@ -494,7 +497,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
         }
         case NodeType::StructDecl: {
             auto& data = node->data.struct_decl;
-            ChiType* sym;
+            ChiType* type_sym;
             ChiType* struct_type;
             ChiTypeStruct* struct_;
             if (!node->resolved_type) {
@@ -509,14 +512,14 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                     struct_->type_params.add(resolve(param, scope));
                 }
                 struct_->resolve_status = ResolveStatus::None;
-                sym = create_type_symbol(node->name, struct_type);
+                type_sym = create_type_symbol(node->name, struct_type);
                 if (data.kind == ContainerKind::Enum) {
-                    sym->data.type_symbol.giving_type = int_type;
+                    type_sym->data.type_symbol.giving_type = int_type;
                 }
-                return sym;
+                return type_sym;
             }
-            sym = node->resolved_type;
-            struct_type = sym->data.type_symbol.underlying_type;
+            type_sym = node->resolved_type;
+            struct_type = type_sym->data.type_symbol.underlying_type;
             struct_ = &struct_type->data.struct_;
             auto struct_scope = scope.set_parent_struct(struct_type);
             if (struct_->resolve_status == ResolveStatus::None) {
@@ -533,6 +536,13 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                         resolve_struct_embed(struct_type, member, scope);
                     }
                 }
+                for (auto implement: data.implements) {
+                    auto impl_trait = resolve_value(implement, scope);
+                    if (!ChiTypeStruct::is_trait(impl_trait)) {
+                        error(implement, errors::NON_TRAIT_IMPL_TYPE, to_string(impl_trait));
+                    }
+                    resolve_vtable(impl_trait, struct_type, implement);
+                }
                 struct_->resolve_status = ResolveStatus::EmbedsResolved;
             } else {
                 // fourth pass
@@ -547,7 +557,7 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
                 }
                 struct_->resolve_status = ResolveStatus::Done;
             }
-            return sym;
+            return type_sym;
         }
         case NodeType::SubtypeExpr: {
             auto& data = node->data.subtype_expr;
@@ -621,7 +631,9 @@ ChiType* Resolver::_resolve(ast::Node* node, ResolveScope& scope) {
             auto& data = node->data.type_param;
             auto phty = create_type(TypeKind::Placeholder);
             phty->name = node->name;
-            phty->data.placeholder.trait = to_value_type(resolve(data.type, scope));
+            if (data.type) {
+                phty->data.placeholder.trait = to_value_type(resolve(data.type, scope));
+            }
             phty->data.placeholder.index = data.index;
             phty->is_placeholder = true;
             return create_type_symbol(node->name, phty);
@@ -665,10 +677,14 @@ string Resolver::to_string(ChiType* type) {
         case TypeKind::String:
             return "string";
         case TypeKind::Pointer:
-            return to_string(type->get_elem()) + "*";
-        case TypeKind::Array:
+            return "*" + to_string(type->get_elem());
+        case TypeKind::Reference:
+            return "&" + to_string(type->get_elem());
         case TypeKind::Optional:
+            return "()" + to_string(type->get_elem());
         case TypeKind::Box:
+            return "@" + to_string(type->get_elem());
+        case TypeKind::Array:
             return fmt::format("{}<{}>", to_string(get_system_type(type->kind)), to_string(type->get_elem()));
         default:
             break;
@@ -694,7 +710,7 @@ bool Resolver::is_addressable(ast::Node* node) {
 
         case NodeType::UnaryOpExpr: {
             auto& data = node->data.unary_op_expr;
-            return data.op_type == TokenType::MUL || (data.is_suffix && data.op_type == TokenType::LNOT);
+            return data.is_suffix && data.op_type == TokenType::LNOT;
         }
 
         default:
@@ -726,7 +742,7 @@ ChiStructMember* Resolver::resolve_struct_member(ChiType* struct_type, ast::Node
     return member;
 }
 
-void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::Node* embed_node) {
+void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::Node* base_node) {
     auto& base = base_type->data.struct_;
     auto& derived = derived_type->data.struct_;
     TraitImpl* trait_impl = nullptr;
@@ -743,7 +759,7 @@ void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::No
                     method->orig_parent = base_type;
                 }
             } else if (!method) {
-                error(embed_node, errors::METHOD_NOT_IMPLEMENTED, node->name);
+                error(base_node, errors::METHOD_NOT_IMPLEMENTED, node->name);
                 break;
             }
             if (trait_impl) {
@@ -753,26 +769,29 @@ void Resolver::resolve_vtable(ChiType* base_type, ChiType* derived_type, ast::No
         }
     }
     for (auto& impl: base.traits) {
-        resolve_vtable(impl->trait_type, derived_type, embed_node);
+        resolve_vtable(impl->trait_type, derived_type, base_node);
     }
 }
 
-void Resolver::resolve_struct_embed(ChiType* struct_type, ast::Node* node, ResolveScope& parent_scope) {
-    auto& container = struct_type->data.struct_;
-    auto base_type = node_get_type(node);
-    if (base_type->kind != TypeKind::Struct) {
-        error(node, errors::INVALID_EMBED);
+void Resolver::resolve_struct_embed(ChiType* struct_type, ast::Node* base_node, ResolveScope& parent_scope) {
+    auto& current = struct_type->data.struct_;
+    auto em_type = node_get_type(base_node);
+    if (em_type->kind != TypeKind::Struct) {
+        error(base_node, errors::INVALID_EMBED);
         return;
     }
-    auto& base = base_type->data.struct_;
+    auto& base = em_type->data.struct_;
     if (base.kind != ContainerKind::Struct && base.kind != ContainerKind::Trait) {
-        error(node, errors::INVALID_EMBED);
+        error(base_node, errors::INVALID_EMBED);
         return;
+    }
+    if (current.kind != base.kind) {
+        error(base_node, errors::CANNOT_EMBED_INTO, to_string(em_type), to_string(struct_type));
     }
     if (base.resolve_status < ResolveStatus::Done) {
         _resolve(base.node, parent_scope);
     }
-    resolve_vtable(base_type, struct_type, node);
+    resolve_vtable(em_type, struct_type, base_node);
 }
 
 bool Resolver::should_resolve_fn_body(ResolveScope& scope) {
@@ -796,6 +815,7 @@ ChiType* Resolver::type_placeholders_sub(ChiType* type, ChiTypeSubtype* subs) {
             return subs->args[type->data.placeholder.index];
         case TypeKind::Array:
         case TypeKind::Pointer:
+        case TypeKind::Reference:
         case TypeKind::Optional:
         case TypeKind::Box:
             return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->kind);
@@ -857,10 +877,10 @@ void Resolver::resolve_fn_call(ast::Node* node, ResolveScope& scope, ChiTypeFn* 
 }
 
 ChiType* Resolver::create_pointer_type(ChiType* elem, TypeKind kind) {
-    auto ptr_type = create_type(kind);
-    ptr_type->data.pointer.elem = elem;
-    ptr_type->is_placeholder = elem->is_placeholder;
-    return ptr_type;
+    auto pt = create_type(kind);
+    pt->data.pointer.elem = elem;
+    pt->is_placeholder = elem->is_placeholder;
+    return pt;
 }
 
 ChiType* Resolver::get_pointer_type(ChiType* elem, TypeKind kind) {
@@ -868,9 +888,9 @@ ChiType* Resolver::get_pointer_type(ChiType* elem, TypeKind kind) {
     if (auto cached = m.get(elem)) {
         return *cached;
     }
-    auto ptr_type = create_pointer_type(elem, kind);
-    m[elem] = ptr_type;
-    return ptr_type;
+    auto pt = create_pointer_type(elem, kind);
+    m[elem] = pt;
+    return pt;
 }
 
 ChiType* Resolver::get_array_type(ChiType* elem) {
@@ -897,7 +917,7 @@ ChiType* Resolver::get_array_type(ChiType* elem) {
     add_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayAdd;
     add_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
     auto add_fn_type = create_type(TypeKind::Fn);
-    add_fn_type->data.fn.return_type = get_pointer_type(elem);
+    add_fn_type->data.fn.return_type = get_pointer_type(elem, TypeKind::Reference);
     add_fn_type->data.fn.params.add(elem);
     add_fn_type->data.fn.container = type;
     add_fn->resolved_type = add_fn_type;
@@ -1135,16 +1155,31 @@ ChiType* Resolver::get_system_type(TypeKind kind) {
 ChiType* Resolver::get_wrapped_type(ChiType* elem, TypeKind kind) {
     switch (kind) {
         case TypeKind::Pointer:
-            return get_pointer_type(elem);
+        case TypeKind::Reference:
+        case TypeKind::Optional:
+        case TypeKind::Box:
+            return get_pointer_type(elem, kind);
         case TypeKind::Array:
             return get_array_type(elem);
-        case TypeKind::Optional:
-            return get_pointer_type(elem, TypeKind::Optional);
-        case TypeKind::Box:
-            return get_pointer_type(elem, TypeKind::Box);
         default:
             unreachable();
-            return nullptr;
+            return {};
+    }
+}
+
+TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
+    switch (sigil) {
+        case ast::SigilKind::Pointer:
+            return TypeKind::Pointer;
+        case ast::SigilKind::Reference:
+            return TypeKind::Reference;
+        case ast::SigilKind::Optional:
+            return TypeKind::Optional;
+        case ast::SigilKind::Box:
+            return TypeKind::Box;
+        default:
+            unreachable();
+            return {};
     }
 }
 

@@ -1,5 +1,5 @@
 func main() {
-    array<int> a = {};
+    var a array<int> = {};
     a.add(1);
     a.add(1);
     a[1] = 2;

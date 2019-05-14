@@ -25,11 +25,13 @@ namespace cx {
         constexpr auto CANNOT_SUBSCRIPT = "cannot perform array subscript on type {}";
         constexpr auto INVALID_OPERATOR = "invalid operator {} on type {}";
         constexpr auto STMT_NOT_WITHIN_LOOP = "{} statement not within a loop";
-        constexpr auto TRAIT_FIELD_NOT_ALLOWED = "member field declaration is not allowed within a trait";
         constexpr auto INVALID_EMBED = "invalid embed, can only embed a trait or struct";
+        constexpr auto CANNOT_EMBED_INTO = "cannot embed '{}' into '{}'";
         constexpr auto METHOD_NOT_IMPLEMENTED = "trait method '{}' has not been implemented";
         constexpr auto MISSING_TYPE_ARGUMENTS = "type arguments are required for generic type '{}'";
-        constexpr auto CANNOT_TAKE_ADDRESS_UNADDRESSABLE = "cannot take address of unaddressable value";
+        constexpr auto CANNOT_GET_POINTER_UNADDRESSABLE = "cannot get pointer of unaddressable value";
+        constexpr auto CANNOT_GET_REFERENCE_UNADDRESSABLE = "cannot take reference of unaddressable value";
         constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant expression";
+        constexpr auto NON_TRAIT_IMPL_TYPE = "cannot use non-trait type '{}' in struct implements list";
     }
 }

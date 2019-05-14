@@ -1,35 +1,38 @@
 struct Bar {
-    int id = 0;
-    func new(int id) { this.id = id; }
+    id int = 0;
+    func new(id int) { this.id = id; }
     func delete() {
         printf("delete bar {}\n", this.id);
     }
-};
+}
 
 struct Foo {
-    int id;
-    Bar bar1;
-    Bar bar2;
-    func new(int id) {
+    id int;
+    bar1 Bar;
+    bar2 Bar;
+
+    func new(id int) {
         this.id = id;
         this.bar1.id = id * 10 + 1;
         this.bar2.id = id * 10 + 2;
     }
+
     func delete() {
         printf("delete foo {}\n", this.id);
     }
-};
+}
 
 func main() {
-    array<Bar> arr = {};
+    var arr array<Bar> = {};
     arr.add({-1});
     arr.add({-2});
     arr.add({-3});
     arr.add({-4});
-    Foo foo1 = {1};
-    if (1 == 1) {
-        Foo foo2 = {2};
+
+    var foo1 Foo = {1};
+    if 1 == 1 {
+        var foo2 Foo = {2};
         return;
     }
-    Foo foo3 = {3};
+    var foo3 Foo = {3};
 }

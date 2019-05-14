@@ -1,53 +1,50 @@
 struct Sheep {
-    AnimalBase animal...;
+    base ...AnimalBase;
 
-    func new(int id) {
-        this.animal = {id};
+    func new(id int) {
+        this.base = {id};
     }
 
-    func talk() {
+    func make_sound() {
         printf("baaaaahh {}\n", this.get_id());
     }
 };
 
 struct Dog {
-    AnimalBase animal...;
+    base ...AnimalBase;
 
-    func new(int id) {
-        this.animal = {id};
+    func new(id int) {
+        this.base = {id};
     }
 
     func get_id() int {
-        return -this.animal.id;
+        return -this.base.id;
     }
 
-    func talk() {
+    func make_sound() {
         printf("wuff wuff {}\n", this.get_id());
     }
 };
 
-struct Cat {
-    Animal animal...;
-
+struct Cat: Animal {
     func get_id() int {
         return 0;
     }
 
-    func talk() {
+    func make_sound() {
         printf("meeoooww {}\n", this.get_id());
     }
 };
 
 trait Animal {
     func get_id() int;
-    func talk() {}
+    func make_sound() {}
 }
 
-struct AnimalBase {
-    Animal animal...;
-    int id;
+struct AnimalBase: Animal {
+    id int;
 
-    func new(int id) {
+    func new(id int) {
         this.id = id;
     }
 
@@ -57,18 +54,19 @@ struct AnimalBase {
 };
 
 func main() {
-    Cat cat = {};
-    Animal animal = &cat;
-    animal.talk();
+    var cat Cat = {};
+    var animal &Animal;
+    animal = &cat;
+    animal.make_sound();
 
-    Sheep sheep = {1};
-    Sheep sheep2 = {2};
+    var sheep Sheep = {1};
+    var sheep2 Sheep = {2};
     animal = &sheep;
-    animal.talk();
+    animal.make_sound();
     animal = &sheep2;
-    animal.talk();
+    animal.make_sound();
 
-    Dog dog = {3};
+    var dog Dog = {3};
     animal = &dog;
-    animal.talk();
+    animal.make_sound();
 }

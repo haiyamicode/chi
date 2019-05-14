@@ -40,7 +40,6 @@ namespace cx {
                   TypedefDecl,
                   TypeSigil,
                   EnumMember,
-                  VarIdentifier,
                   CastExpr,
                   ForStmt,
                   BranchStmt,
@@ -111,10 +110,11 @@ namespace cx {
         };
 
         struct VarDecl {
-            Node* identifier;
+            Token* identifier;
             Node* type;
             Node* expr;
             bool is_const;
+            bool is_field;
             bool is_embed;
             ChiStructMember* resolved_field = nullptr;
             ConstantValue resolved_value;
@@ -148,6 +148,7 @@ namespace cx {
             array<Node*> members;
             ContainerKind kind;
             array<Node*> type_params;
+            array<Node*> implements;
         };
 
         // composite literal
@@ -159,7 +160,7 @@ namespace cx {
 
         struct TypedefDecl {
             Node* type;
-            Node* identifier;
+            Token* identifier;
         };
 
         struct DotExpr {
@@ -213,11 +214,12 @@ namespace cx {
                   Short
         );
 
-        MAKE_ENUM(SigilKind, Pointer)
+        MAKE_ENUM(SigilKind, Pointer, Reference, Optional, Box)
 
         struct TypeSigil {
             Node* type;
             SigilKind sigil;
+            Node* etype;
         };
 
         struct EnumMember {
@@ -253,7 +255,7 @@ namespace cx {
                 SubtypeExpr subtype_expr;
                 IndexExpr index_expr;
                 TypedefDecl typedef_decl;
-                TypeSigil type_sigil;
+                TypeSigil sigil_type;
                 EnumMember enum_member;
                 VarIdentifier var_identifier;
                 CastExpr cast_expr;
@@ -272,17 +274,17 @@ namespace cx {
                 memset(&data, 0, sizeof(data));
             }
 
-#define AST_CASE_DESTROY_FIELD(field, type) case NodeType::type: data.field.~type(); break;
+#define _AST_CASE_DESTROY_FIELD(field, type) case NodeType::type: data.field.~type(); break;
 
             ~Node() {
                 switch (type) {
-                    AST_CASE_DESTROY_FIELD(root, Root)
-                    AST_CASE_DESTROY_FIELD(fn_proto, FnProto)
-                    AST_CASE_DESTROY_FIELD(block, Block)
-                    AST_CASE_DESTROY_FIELD(fn_call_expr, FnCallExpr)
-                    AST_CASE_DESTROY_FIELD(struct_decl, StructDecl)
-                    AST_CASE_DESTROY_FIELD(typedef_decl, TypedefDecl)
-                    AST_CASE_DESTROY_FIELD(enum_member, EnumMember)
+                    _AST_CASE_DESTROY_FIELD(root, Root)
+                    _AST_CASE_DESTROY_FIELD(fn_proto, FnProto)
+                    _AST_CASE_DESTROY_FIELD(block, Block)
+                    _AST_CASE_DESTROY_FIELD(fn_call_expr, FnCallExpr)
+                    _AST_CASE_DESTROY_FIELD(struct_decl, StructDecl)
+                    _AST_CASE_DESTROY_FIELD(typedef_decl, TypedefDecl)
+                    _AST_CASE_DESTROY_FIELD(enum_member, EnumMember)
                     default:
                         break;
                 }

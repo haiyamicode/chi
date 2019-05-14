@@ -18,7 +18,7 @@ namespace cx {
     // keywords
               KW_BREAK,
               KW_CASE,
-              KW_LET,
+              KW_VAR,
               KW_CONST,
               KW_CONTINUE,
               KW_DEFAULT,
@@ -106,7 +106,8 @@ namespace cx {
               SEMICOLON, // ;
               ELLIPSIS,  // ...
               QUES,      // ?
-              TILDE      // ~
+              TILDE,      // ~
+              AT         // @
     )
 
     struct Pos {

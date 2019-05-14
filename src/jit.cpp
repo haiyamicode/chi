@@ -9,6 +9,7 @@
 
 #include "jit.h"
 #include "internals.h"
+#include "sema.h"
 
 using namespace cx;
 using namespace cx::jit;
@@ -199,6 +200,9 @@ jit_type_t Compiler::_compile_type(ChiType* type) {
             return string_internal_struct;
         }
         case TypeKind::Pointer: {
+            return jit_type_nint;
+        }
+        case TypeKind::Reference: {
             return jit_type_nint;
         }
         case TypeKind::Array: {
@@ -489,6 +493,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
         case ast::NodeType::UnaryOpExpr: {
             auto& data = expr->data.unary_op_expr;
             switch (data.op_type) {
+                case TokenType::MUL:
                 case TokenType::AND: {
                     auto temp = fn->new_value(jit_type_nint);
                     fn->store(temp, compile_value_ref(fn, data.op1).address);
@@ -508,14 +513,17 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                 }
                 case TokenType::LNOT: {
                     if (data.is_suffix) {
-                        auto ref = compile_value_ref(fn, data.op1);
-                        auto opt = compile_wrapped_type(get_chitype(data.op1));
-                        auto flag = fn->insn_load_relative(ref.address, opt.get_opt_flag_offset(), jit_type_sbyte);
-                        jit_label if_ok;
-                        fn->insn_branch_if(flag, if_ok);
-                        compile_panic(fn, OPTIONAL_UNWRAP_PANIC);
-                        fn->insn_label(if_ok);
-                        return fn->insn_load_relative(ref.address, 0, opt.elem);
+                        auto vt = get_chitype(data.op1);
+                        if (vt->kind == TypeKind::Optional) {
+                            auto ref = compile_value_ref(fn, data.op1);
+                            auto opt = compile_wrapped_type(vt);
+                            auto flag = fn->insn_load_relative(ref.address, opt.get_opt_flag_offset(), jit_type_sbyte);
+                            jit_label if_ok;
+                            fn->insn_branch_if(flag, if_ok);
+                            compile_panic(fn, OPTIONAL_UNWRAP_PANIC);
+                            fn->insn_label(if_ok);
+                            return fn->insn_load_relative(ref.address, 0, opt.elem);
+                        }
                     } else {
                         return fn->insn_to_not_bool(
                                 compile_assignment_to_type(fn, data.op1, get_system_types()->bool_));
@@ -532,7 +540,7 @@ jit_value Compiler::compile_simple_value(Function* fn, ast::Node* expr) {
                     return value;
                 case TokenType::NOT:
                     return fn->insn_not(value);
-                case TokenType::MUL:
+                case TokenType::LNOT:
                     return fn->insn_load_relative(value, 0, compile_type_of(expr));
                 default:
                     unreachable();
@@ -601,18 +609,19 @@ jit_value Compiler::compile_assignment_to_type(Function* fn, ast::Node* expr, Ch
 jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
                                        ChiType* from_type, ChiType* to_type) {
     switch (to_type->kind) {
-        case TypeKind::Struct: {
-            if (ChiTypeStruct::is_trait(to_type)) {
-                assert(from_type->is_raw_pointer());
-                auto& struct_ = from_type->get_elem()->data.struct_;
-                auto impl = get_impl_info(struct_.trait_table[to_type]);
+        case TypeKind::Reference:
+        case TypeKind::Pointer: {
+            if (ChiTypeStruct::is_trait(to_type->get_elem())) {
+                auto ft = from_type->get_elem();
+                auto tt = to_type->get_elem();
+                auto impl = get_impl_info(ft->data.struct_.trait_table[tt]);
                 auto temp = fn->new_value(trait_internal_struct);
                 auto addr = fn->insn_address_of(temp);
                 fn->insn_store_relative(addr, TRAIT_TYPE_FIELD_OFFSET, fn->new_constant(jit_nint((void*) impl)));
                 fn->insn_store_relative(addr, TRAIT_DATA_FIELD_OFFSET, value);
-                return temp;
+                return addr;
             }
-            break;
+            return fn->insn_convert(value, compile_type(to_type));
         }
         case TypeKind::String: {
             auto src_data = value;
@@ -628,11 +637,7 @@ jit_value Compiler::compile_conversion(Function* fn, const jit_value& value,
                 auto addr = fn->insn_address_of(temp);
                 auto typ = fn->new_constant((jit_nint) get_type_info(from_type));
                 fn->insn_store_relative(addr, TRAIT_TYPE_FIELD_OFFSET, typ);
-                auto val = value;
-                if (get_resolver()->type_is_int(from_type)) {
-                    val = fn->insn_convert(value, jit_type_nint);
-                }
-                fn->insn_store_relative(addr, TRAIT_DATA_FIELD_OFFSET, val);
+                fn->insn_store_relative(addr, TRAIT_DATA_FIELD_OFFSET, value);
                 return temp;
             }
             return value;
@@ -732,12 +737,16 @@ ValueRef Compiler::compile_value_ref(Function* fn, ast::Node* expr) {
         case ast::NodeType::UnaryOpExpr: {
             auto& data = expr->data.unary_op_expr;
             switch (data.op_type) {
-                case TokenType::MUL:
-                    return {compile_simple_value(fn, data.op1), compile_type_of(expr)};
                 case TokenType::LNOT: {
-                    auto ref = compile_value_ref(fn, data.op1);
-                    auto elem_type = get_chitype(data.op1)->get_elem();
-                    return {ref.address, compile_type(elem_type)};
+                    auto vt = get_chitype(data.op1);
+                    if (vt->kind == TypeKind::Pointer) {
+                        return {compile_simple_value(fn, data.op1), compile_type(vt->get_elem())};
+                    } else if (vt->kind == TypeKind::Optional) {
+                        auto ref = compile_value_ref(fn, data.op1);
+                        return {ref.address, compile_type(vt)};
+                    } else {
+                        unreachable();
+                    }
                 }
                 default:
                     break;
@@ -1285,7 +1294,18 @@ TypeInfo* Compiler::get_type_info(ChiType* type) {
     if (auto cached = m_ctx->info_table.get(type->id)) {
         return cached->get();
     }
-    return m_ctx->info_table.emplace(type->id, new TypeInfo(type))->get();
+
+    auto info = new TypeInfo;
+    info->itype = type;
+    info->size = jit_type_get_size(compile_type(type));
+    switch (type->kind) {
+        case TypeKind::Reference:
+        case TypeKind::Pointer:
+            info->data.ptr.elem = get_type_info(type->get_elem());
+        default:
+            break;
+    }
+    return m_ctx->info_table.emplace(type->id, info)->get();
 }
 
 void Compiler::compile_panic(Function* fn, const string& message) {

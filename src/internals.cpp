@@ -5,6 +5,7 @@
 #include <sstream>
 
 #include "internals.h"
+#include "sema.h"
 
 using namespace cx;
 
@@ -26,8 +27,30 @@ void cx_string_concat(CxString* dest, CxString s1, CxString s2) {
     strncat(dest->data, s2.data, s2.size);
 }
 
-static std::string to_string(const CxAny& v) {
-    switch (v.type->kind) {
+static std::string istringf(const CxAny& v) {
+    auto& spec = v.type->itype->data.int_;
+
+#define _FORMAT_INT(T, v) fmt::format("{}", *(T*) &v.data)
+    if (!spec.is_unsigned) {
+        switch (spec.bit_count) {
+            case 8:
+                return _FORMAT_INT(int8_t, v);
+            case 16:
+                return _FORMAT_INT(int16_t, v);
+            case 32:
+                return _FORMAT_INT(int32_t, v);
+            case 64:
+                return _FORMAT_INT(int64_t, v);
+            default:
+                break;
+        }
+    }
+    panic("unhandled");
+    return "";
+}
+
+static std::string stringf(const CxAny& v) {
+    switch (v.type->itype->kind) {
         case TypeKind::String: {
             auto s = (CxString*) &v.data;
             return fmt::format(s->data);
@@ -35,11 +58,16 @@ static std::string to_string(const CxAny& v) {
         case TypeKind::Bool:
             return fmt::format("{}", *(bool*) &v.data);
         case TypeKind::Int:
+            return istringf(v);
         case TypeKind::Pointer:
-            return fmt::format("{}", *(int64_t*) &v.data);
-
+            return fmt::format("{:#x}", *(intptr_t*) &v.data);
+        case TypeKind::Reference:
+            CxAny a;
+            a.type = v.type->data.ptr.elem;
+            memcpy(&a.data, v.data.a, (size_t) a.type->size);
+            return stringf(a);
         default:
-            return fmt::format("<{}>", PRINT_ENUM(v.type->kind));
+            return fmt::format("<{}>", PRINT_ENUM(v.type->itype->kind));
     }
 }
 
@@ -61,7 +89,7 @@ static string format_cstr(CxString format, const CxSlice& values) {
             case '}':
                 if (state == 1) {
                     if (val_i < values.size) {
-                        ss << to_string(((CxAny*) values.data)[val_i++]);
+                        ss << stringf(((CxAny*) values.data)[val_i++]);
                     }
                     state = 0;
                 } else if (state == 2) {

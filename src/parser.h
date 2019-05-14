@@ -25,7 +25,7 @@ namespace cx {
 
     class Parser {
         ParseContext* m_ctx;
-        long m_toki = 0;
+        size_t m_toki = 0;
         Token m_eof_token;
         map<Node*, size_t> m_block_pos;
 
@@ -71,8 +71,6 @@ namespace cx {
 
         ContainerKind get_container_kind(TokenType keyword);
 
-        Node* create_type_sigil_node(Node* type, SigilKind sigil);
-
         Node* create_error_node();
 
         void unexpected(Token* token);
@@ -80,8 +78,6 @@ namespace cx {
         bool at_comma(TokenType end_token);
 
         int get_op_precedence(TokenType op_type);
-
-        bool next_is_type_expr();
 
         bool next_is(TokenType token_type);
 
@@ -101,8 +97,6 @@ namespace cx {
 
         FnKind parse_fn_identifier(Token** iden);
 
-        Node* parse_var_or_fn_decl(bool requires_body = true);
-
         Node* parse_identifier();
 
         IdentifierKind get_identifier_kind(Node* node);
@@ -115,7 +109,9 @@ namespace cx {
 
         Node* parse_var_identifier();
 
-        Node* parse_var_decl(Node* type_expr);
+        optional<SigilKind> get_sigil_kind(TokenType token_type);
+
+        Node* parse_var_decl(bool as_field);
 
         Node* parse_fn_proto(Token* iden);
 
@@ -143,7 +139,7 @@ namespace cx {
 
         Node* parse_fn_call_expr(Node* fn_expr, bool lhs, Node* parent);
 
-        Node* parse_simple_stmt(bool semicolon = true);
+        Node* parse_simple_stmt();
 
         Node* parse_return_stmt();
 

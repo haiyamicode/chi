@@ -1,21 +1,21 @@
 struct Node {
-    int id;
-    func new(int id) { this.id = id; }
+    id int;
+    func new(id int) { this.id = id; }
 };
 
-func f(optional<Node*> node, bool force) {
-    if (node) {
+func f(node ()&Node, force bool) {
+    if node {
         printf("has value: node.id == {}\n", node.id);
     } else {
         printf("has no value, !node == {}\n", !node);
     }
-    if (force) {
+    if force {
         printf("forced print: node!.id == {}\n", node!.id);
     }
 }
 
 func main() {
-    Node a = {1};
+    var a Node = {1};
     f(&a, false);
     f(&a, true);
     f({}, false);

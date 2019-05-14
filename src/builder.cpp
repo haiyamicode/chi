@@ -85,6 +85,7 @@ void Builder::process_file(ast::Package* package, const string& file_name) {
             break;
         }
         case BuildMode::Executable: {
+            print("build mode currently not supported\n");
             break;
         }
     }

@@ -1,7 +1,7 @@
 struct Data {
-    int id;
+    id int;
 
-    func new(int id) {
+    func new(id int) {
         this.id = id;
     }
 
@@ -11,15 +11,15 @@ struct Data {
 };
 
 func main() {
-    array<box<Data>> a = {};
+    var a array<@Data> = {};
     a.add({1});
     a.add({2});
     a.add({3});
-    let v = a[1];
+    var v = a[1];
     printf("a[0]: id={}\n", a[0].id);
     printf("a[1]: id={}\n", a[1].id);
     printf("a[2]: id={}\n", a[2].id);
-    let b = a;
+    var b = a;
     a.add({4});
     printf("a[3]: id={}\n", a[3].id);
     printf("a.size={}, b.size={}\n", a.size, b.size);

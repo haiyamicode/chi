@@ -1,4 +1,7 @@
+add item: 1
 list.size: 1
+add item: 2
+add item: 3
 list.size: 3
 item value: 1
 item value: 2

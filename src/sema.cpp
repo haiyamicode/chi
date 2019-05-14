@@ -45,6 +45,10 @@ bool ChiTypeStruct::is_generic(ChiType* type) {
     return type->kind == TypeKind::Struct && type->data.struct_.type_params.size > 0;
 }
 
+bool ChiTypeStruct::is_pointer_type(ChiType* type) {
+    return type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference;
+}
+
 string ChiStructMember::get_name() { return node->name; }
 
 ast::Node* Scope::find_one(const string& symbol) {
@@ -74,6 +78,7 @@ ChiType* ChiType::get_elem() {
     switch (kind) {
         case TypeKind::Pointer:
         case TypeKind::Optional:
+        case TypeKind::Reference:
         case TypeKind::Box:
             return data.pointer.elem;
         case TypeKind::Array:
