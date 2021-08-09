@@ -246,8 +246,12 @@ class Compiler {
     jit_value compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type);
 
     jit_value compile_mem_alloc(Function *fn, const jit_value &size_value);
-
     void compile_mem_free(Function *fn, const jit_value &ptr);
+
+    jit_value compile_refc_construction(Function *fn, const jit_value &dest,
+                                        const jit_value &size_value);
+    void compile_refc_incref(Function *fn, jit_value &address);
+    void compile_refc_decref(Function *fn, jit_value &address, ChiType *elem_type);
 
     jit_value compile_string_concat(Function *fn, const jit_value &s1, const jit_value &s2);
 
@@ -268,6 +272,7 @@ class Compiler {
     Struct get_struct(ChiType *struct_type);
 
     void compile_cprintf(Function *fn, const char *s);
+    void compile_debug_i(Function *fn, const char *prefix, const jit_value &v);
 
   public:
     Compiler(CompilationContext *ctx, Function *fn = nullptr);

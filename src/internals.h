@@ -32,6 +32,11 @@ struct CxArray {
     uint8_t flags;
 };
 
+struct CxRefc {
+    void *data;
+    int32_t *refcnt;
+};
+
 typedef CxArray CxSlice;
 
 void cx_string_set_data(CxString *dest, const char *data);
@@ -50,7 +55,11 @@ void *cx_array_add(CxArray *dest, uint32_t elem_size);
 
 void cx_debug(CxString message);
 
+void cx_debug_i(const char *prefix, int value);
+
 void cx_panic(const char *s);
+
+void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
 #ifdef __cplusplus
 }

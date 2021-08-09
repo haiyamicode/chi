@@ -146,7 +146,16 @@ void *cx_array_add(CxArray *dest, uint32_t elem_size) {
 
 void cx_debug(CxString message) { fmt::print(message.data); }
 
+void cx_debug_i(const char *prefix, int value) { fmt::print("{}: {}\n", prefix, value); }
+
 void cx_panic(const char *s) {
     fmt::print(s);
     exit(1);
+}
+
+void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
+    dest->data = malloc(size);
+    dest->refcnt = (int32_t *)malloc(sizeof(int32_t));
+    *dest->refcnt = 1;
+    return dest->data;
 }

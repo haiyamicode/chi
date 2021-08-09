@@ -25,6 +25,8 @@ const auto TRAIT_DATA_FIELD_OFFSET = PTR_SIZE;
 const auto STRING_DATA_FIELD_OFFSET = 0;
 const auto STRING_SIZE_FIELD_OFFSET = PTR_SIZE;
 const auto IMPL_VTABLE_FIELD_OFFSET = PTR_SIZE;
+const auto REFC_COUNT_FIELD_OFFSET = offsetof(CxRefc, refcnt);
+
 static const string OPTIONAL_UNWRAP_PANIC = "panic: unwrapping null optional value\n";
 
 static auto str_lit_type = jit_type_create_pointer(jit_type_sys_char, 1);
@@ -44,7 +46,10 @@ static auto free_signature =
 static jit_type_t trait_internal_fields[] = {jit_type_nint, jit_type_nint};
 static auto trait_internal_struct = jit_type_create_struct(trait_internal_fields, 2, 1);
 
-static jit_type_t any_internal_fields[] = {jit_type_nint, jit_type_nint, jit_type_nint};
+static jit_type_t box_internal_fields[] = {jit_type_nint, jit_type_nint};
+static auto box_internal_struct = jit_type_create_struct(box_internal_fields, 2, 1);
+
+static jit_type_t any_internal_fields[] = {jit_type_nint, jit_type_nint, jit_type_long};
 static auto any_internal_struct = jit_type_create_struct(any_internal_fields, 3, 1);
 
 static jit_type_t array_internal_fields[] = {jit_type_nint, jit_type_uint, jit_type_uint,
@@ -74,6 +79,14 @@ static auto debug_signature =
 static jit_type_t cprintf_params[] = {jit_type_nint};
 static auto cprintf_signature =
     jit_type_create_signature(jit_abi_cdecl, jit_type_void, cprintf_params, 1, 1);
+
+static jit_type_t debug_i_params[] = {jit_type_nint, jit_type_int};
+static auto debug_i_signature =
+    jit_type_create_signature(jit_abi_cdecl, jit_type_void, debug_i_params, 2, 1);
+
+static jit_type_t refc_alloc_params[] = {jit_type_nint, jit_type_uint};
+static auto refc_alloc_signature =
+    jit_type_create_signature(jit_abi_cdecl, jit_type_nint, refc_alloc_params, 2, 1);
 
 CompilationContext::~CompilationContext() {
     for (int i = 0; i < types.size; i++) {
@@ -235,8 +248,7 @@ jit_type_t Compiler::_compile_type(ChiType *type) {
         return add_type(jit_type_create_struct(fields, 2, 1));
     }
     case TypeKind::Box: {
-        static jit_type_t fields[] = {jit_type_nint};
-        return add_type(jit_type_create_struct(fields, 1, 1));
+        return box_internal_struct;
     }
     default:
         panic("unhandled {}", PRINT_ENUM(type->kind));
@@ -561,16 +573,21 @@ jit_value Compiler::compile_simple_value(Function *fn, ast::Node *expr) {
         case TokenType::LNOT: {
             if (data.is_suffix) {
                 auto vt = get_chitype(data.op1);
+                auto wt = compile_wrapped_type(vt);
                 if (vt->kind == TypeKind::Optional) {
                     auto ref = compile_value_ref(fn, data.op1);
-                    auto opt = compile_wrapped_type(vt);
-                    auto flag = fn->insn_load_relative(ref.address, opt.get_opt_flag_offset(),
+                    auto flag = fn->insn_load_relative(ref.address, wt.get_opt_flag_offset(),
                                                        jit_type_sbyte);
                     jit_label if_ok;
                     fn->insn_branch_if(flag, if_ok);
                     compile_panic(fn, OPTIONAL_UNWRAP_PANIC);
+
                     fn->insn_label(if_ok);
-                    return fn->insn_load_relative(ref.address, 0, opt.elem);
+                    return fn->insn_load_relative(ref.address, 0, wt.elem);
+                } else if (vt->kind == TypeKind::Box) {
+                    auto ref = compile_value_ref(fn, data.op1);
+                    auto ptr = fn->insn_load_relative(ref.address, 0, jit_type_nint);
+                    return fn->insn_load_relative(ptr, 0, wt.elem);
                 }
             } else {
                 return fn->insn_to_not_bool(
@@ -736,18 +753,9 @@ jit_value Compiler::compile_conversion(Function *fn, const jit_value &value, Chi
     }
     case TypeKind::Box: {
         assert(from_type->kind == TypeKind::Box);
-        auto box = compile_wrapped_type(to_type);
-        auto elem_type = to_type->get_elem();
         auto addr = fn->insn_address_of(value);
-        auto data = fn->insn_load_relative(addr, 0, jit_type_nint);
-        auto val = fn->insn_load_relative(data, 0, box.elem);
-        val = compile_value_copy(fn, val, elem_type);
-        auto temp = fn->new_value(box.type);
-        auto dest = fn->insn_address_of(temp);
-        auto ptr = compile_mem_alloc(fn, fn->new_constant(box.elem_size));
-        fn->insn_store_relative(dest, 0, ptr);
-        fn->insn_store_relative(ptr, 0, val);
-        return temp;
+        compile_refc_incref(fn, addr);
+        return value;
     }
     case TypeKind::Array: {
         assert(from_type->kind == TypeKind::Array);
@@ -790,6 +798,7 @@ ValueRef Compiler::compile_value_ref(Function *fn, ast::Node *expr) {
         auto &data = expr->data.index_expr;
         auto arr = compile_array_ref(fn, data.expr);
         auto index = compile_simple_value(fn, data.subscript);
+
         auto address = fn->insn_load_elem_address(arr.data, index, arr.elem);
         return {address, arr.elem};
     }
@@ -805,11 +814,15 @@ ValueRef Compiler::compile_value_ref(Function *fn, ast::Node *expr) {
         switch (data.op_type) {
         case TokenType::LNOT: {
             auto vt = get_chitype(data.op1);
-            if (vt->kind == TypeKind::Pointer) {
+            if (vt->kind == TypeKind::Pointer || vt->kind == TypeKind::Reference) {
                 return {compile_simple_value(fn, data.op1), compile_type(vt->get_elem())};
             } else if (vt->kind == TypeKind::Optional) {
                 auto ref = compile_value_ref(fn, data.op1);
                 return {ref.address, compile_type(vt)};
+            } else if (vt->kind == TypeKind::Box) {
+                auto ref = compile_value_ref(fn, data.op1);
+                auto ptr = fn->insn_load_relative(ref.address, 0, jit_type_nint);
+                return {ptr, compile_type(vt->get_elem())};
             } else {
                 unreachable();
             }
@@ -959,7 +972,11 @@ DotValue Compiler::compile_dot_expr(Function *fn, ast::Node *expr) {
     auto member_type = get_chitype(expr);
     DotValue dot;
     dot.ctn_type = get_chitype(data.expr);
-    if (dot.ctn_type->is_pointer()) {
+    if (dot.ctn_type->kind == TypeKind::Box) {
+        auto ref = compile_value_ref(fn, data.expr);
+        dot.ctn_address = fn->insn_load_relative(ref.address, 0, jit_type_nint);
+        dot.ctn_type = dot.ctn_type->get_elem();
+    } else if (dot.ctn_type->is_pointer()) {
         dot.ctn_address = compile_simple_value(fn, data.expr);
         dot.ctn_type = dot.ctn_type->get_elem();
     } else {
@@ -1017,8 +1034,7 @@ void Compiler::compile_construction(Function *fn, jit_value_t dest, ChiType *typ
                                        fn->new_constant(jit_sbyte(0)));
     } else if (type->kind == TypeKind::Box) {
         auto box = compile_wrapped_type(type);
-        auto ptr = compile_mem_alloc(fn, fn->new_constant(box.elem_size));
-        fn->insn_store_relative(dest, 0, ptr);
+        auto ptr = compile_refc_construction(fn, dest, fn->new_constant(box.elem_size));
         return compile_construction(fn, ptr.raw(), type->get_elem(), expr);
     }
     auto struct_ = get_struct(type);
@@ -1066,6 +1082,13 @@ void Compiler::compile_cprintf(Function *fn, const char *s) {
     fn->insn_call_native("_cprintf", (void *)printf, cprintf_signature, args, 1);
 }
 
+void Compiler::compile_debug_i(Function *fn, const char *prefix, const jit_value &v) {
+    // auto cv = fn->insn_convert(v, jit_type_long);
+    auto s = create_string_constant(fn, prefix);
+    jit_value_t args[] = {s.raw(), v.raw()};
+    fn->insn_call_native("_cx_debug_i", (void *)cx_debug_i, debug_i_signature, args, 2);
+}
+
 void Compiler::compile_destruction_for_type(Function *fn, jit_value &address, ChiType *type) {
     switch (type->kind) {
     case TypeKind::String: {
@@ -1082,9 +1105,7 @@ void Compiler::compile_destruction_for_type(Function *fn, jit_value &address, Ch
     }
 
     case TypeKind::Box: {
-        auto data = fn->insn_load_relative(address, 0, jit_type_nint);
-        compile_destruction_for_type(fn, data, type->get_elem());
-        compile_field_mem_free(fn, address, 0);
+        compile_refc_decref(fn, address, type->get_elem());
         break;
     }
 
@@ -1188,6 +1209,36 @@ jit_value Compiler::compile_mem_alloc(Function *fn, const jit_value &size_value)
 void Compiler::compile_mem_free(Function *fn, const jit_value &ptr) {
     jit_value_t free_args[] = {ptr.raw()};
     fn->insn_call_native("_free", (void *)free, free_signature, free_args, 1);
+}
+
+jit_value Compiler::compile_refc_construction(Function *fn, const jit_value &dest,
+                                              const jit_value &size_value) {
+    jit_value_t args[] = {dest.raw(), size_value.raw()};
+    return fn->insn_call_native("_cx_refc_alloc", (void *)cx_refc_alloc, refc_alloc_signature, args,
+                                2);
+}
+
+void Compiler::compile_refc_incref(Function *fn, jit_value &address) {
+    auto p = fn->insn_load_relative(address, REFC_COUNT_FIELD_OFFSET, jit_type_nint);
+    auto count = fn->insn_load_relative(p, 0, jit_type_int);
+    count = fn->insn_add(count, fn->new_constant(1));
+    fn->insn_store_relative(p, 0, count);
+    // compile_debug_i(fn, "incref", fn->insn_load_relative(p, 0, jit_type_int));
+}
+
+void Compiler::compile_refc_decref(Function *fn, jit_value &address, ChiType *elem_type) {
+    auto p = fn->insn_load_relative(address, REFC_COUNT_FIELD_OFFSET, jit_type_nint);
+    auto count = fn->insn_load_relative(p, 0, jit_type_int);
+    count = fn->insn_add(count, fn->new_constant(-1));
+    fn->insn_store_relative(p, 0, count);
+    // compile_debug_i(fn, "decref", fn->insn_load_relative(p, 0, jit_type_int));
+    jit_label end;
+    fn->insn_branch_if(fn->insn_gt(count, fn->new_constant(0)), end); // if (count > 0) return
+    auto data = fn->insn_load_relative(address, 0, jit_type_nint);
+    compile_destruction_for_type(fn, data, elem_type);
+    compile_field_mem_free(fn, address, 0);
+    compile_field_mem_free(fn, address, REFC_COUNT_FIELD_OFFSET);
+    fn->insn_label(end);
 }
 
 void Compiler::compile_array_construction(Function *fn, const jit_value &dest) {

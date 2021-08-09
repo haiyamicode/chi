@@ -363,7 +363,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
                 } else if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
                 } else if (t->kind == TypeKind::Box) {
-                    return get_pointer_type(t->get_elem());
+                    return t->get_elem();
                 }
                 goto invalid;
             } else {
