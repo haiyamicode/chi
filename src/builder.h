@@ -7,31 +7,33 @@
 
 #pragma once
 
-#include <Zydis/Zydis.h>
-
 #include "sema.h"
 #include "resolver.h"
 #include "parser.h"
 #include "jit.h"
 
-namespace cx {
-    struct BuildContext {
+namespace cx
+{
+    struct BuildContext
+    {
         box<ResolveContext> resolve_ctx;
         box<jit::CompilationContext> jit_ctx;
 
-        BuildContext(Allocator* allocator);
+        BuildContext(Allocator *allocator);
 
         Resolver create_resolver() { return {resolve_ctx.get()}; }
 
         jit::Compiler create_compiler();
     };
 
-    enum class BuildMode {
+    enum class BuildMode
+    {
         Run,
         Executable
     };
 
-    class Builder : Allocator {
+    class Builder : Allocator
+    {
         bool m_debug_mode = false;
         BuildMode m_build_mode = BuildMode::Run;
         string m_output_file_name;
@@ -43,11 +45,11 @@ namespace cx {
     public:
         Builder();
 
-        ast::Package* add_package() { return m_packages.emplace(); }
+        ast::Package *add_package() { return m_packages.emplace(); }
 
-        Node* create_node(NodeType type);
+        Node *create_node(NodeType type);
 
-        ChiType* create_type(TypeKind kind);
+        ChiType *create_type(TypeKind kind);
 
         void set_debug_mode(bool value) { m_debug_mode = value; }
 
@@ -55,14 +57,14 @@ namespace cx {
 
         void set_build_mode(BuildMode value);
 
-        void set_output_file_name(const string& value) { m_output_file_name = value; }
+        void set_output_file_name(const string &value) { m_output_file_name = value; }
 
-        void process_file(ast::Package* package, const string& file_name);
+        void process_file(ast::Package *package, const string &file_name);
 
-        void build_program(const string& entry_file_name);
+        void build_program(const string &entry_file_name);
 
     private:
-        string get_tmp_file_path(const string& filename);
+        string get_tmp_file_path(const string &filename);
     };
 
 }

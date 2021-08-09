@@ -1,3 +1,7 @@
+delete bar -1
+delete bar -2
+delete bar -3
+delete bar -4
 delete bar 22
 delete bar 21
 delete foo 2

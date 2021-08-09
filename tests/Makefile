@@ -1,3 +1,6 @@
+SHELL=/bin/bash 
+BASE=..
+BUILD_DIR=$(BASE)/build
 TESTS = 00_fib.test \
     01_fib_struct.test \
     02_basic_array.test \
@@ -11,7 +14,7 @@ TESTS = 00_fib.test \
     10_optional.test \
     11_box.test
 
-CHI = ../cmake-build-debug/src/chi
+CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
 
 %.test: %.expect %.chi

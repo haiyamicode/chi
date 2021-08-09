@@ -13,46 +13,44 @@ extern "C" {
 #endif
 
 struct CxString {
-    char* data;
+    char *data;
     uint32_t size;
 };
 
 struct CxAny {
-    TypeInfo* type;
+    TypeInfo *type;
     struct {
-        void* a;
-        void* b;
+        void *a;
+        void *b;
     } data;
 };
 
-struct CxSlice {
-    void* data;
-    uint32_t size;
-};
-
 struct CxArray {
-    void* data;
+    void *data;
     uint32_t size;
     uint32_t capacity;
+    uint8_t flags;
 };
 
-void cx_string_set_data(CxString* dest, const char* data);
+typedef CxArray CxSlice;
 
-void cx_string_concat(CxString* dest, CxString s1, CxString s2);
+void cx_string_set_data(CxString *dest, const char *data);
 
-void cx_string_format(CxString* dest, CxString format, CxSlice values);
+void cx_string_concat(CxString *dest, CxString s1, CxString s2);
+
+void cx_string_format(CxString *dest, CxString format, CxSlice values);
 
 void cx_printf(CxString format, CxSlice values);
 
-void cx_array_construct(CxArray* dest);
+void cx_array_construct(CxArray *dest);
 
-void cx_array_reserve(CxArray* dest, uint32_t elem_size, uint32_t new_cap);
+void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap);
 
-void* cx_array_add(CxArray* dest, uint32_t elem_size);
+void *cx_array_add(CxArray *dest, uint32_t elem_size);
 
 void cx_debug(CxString message);
 
-void cx_panic(const char* s);
+void cx_panic(const char *s);
 
 #ifdef __cplusplus
 }

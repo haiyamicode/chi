@@ -11,7 +11,7 @@ struct Data {
 };
 
 func main() {
-    var a array<@Data> = {};
+    var a array<^Data> = {};
     a.add({1});
     a.add({2});
     a.add({3});

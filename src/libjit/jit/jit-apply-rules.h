@@ -3,38 +3,38 @@
 #ifndef _JIT_APPLY_RULES_H
 #define _JIT_APPLY_RULES_H
 
-#define JIT_APPLY_NUM_WORD_REGS 8
-#define JIT_APPLY_NUM_FLOAT_REGS 13
-#define JIT_APPLY_NUM_DOUBLE_REGS 0
+#define JIT_APPLY_NUM_WORD_REGS 6
+#define JIT_APPLY_NUM_FLOAT_REGS 8
+#define JIT_APPLY_NUM_DOUBLE_REGS 8
 #define JIT_APPLY_NUM_NFLOAT_REGS 0
 #define JIT_APPLY_PASS_STACK_FLOAT_AS_DOUBLE 0
 #define JIT_APPLY_PASS_STACK_FLOAT_AS_NFLOAT 0
 #define JIT_APPLY_PASS_STACK_DOUBLE_AS_NFLOAT 0
-#define JIT_APPLY_PASS_STACK_NFLOAT_AS_DOUBLE 1
-#define JIT_APPLY_PASS_REG_FLOAT_AS_DOUBLE 1
+#define JIT_APPLY_PASS_STACK_NFLOAT_AS_DOUBLE 0
+#define JIT_APPLY_PASS_REG_FLOAT_AS_DOUBLE 0
 #define JIT_APPLY_PASS_REG_FLOAT_AS_NFLOAT 0
 #define JIT_APPLY_PASS_REG_DOUBLE_AS_NFLOAT 0
-#define JIT_APPLY_PASS_REG_NFLOAT_AS_DOUBLE 1
-#define JIT_APPLY_RETURN_FLOAT_AS_DOUBLE 1
+#define JIT_APPLY_PASS_REG_NFLOAT_AS_DOUBLE 0
+#define JIT_APPLY_RETURN_FLOAT_AS_DOUBLE 0
 #define JIT_APPLY_RETURN_FLOAT_AS_NFLOAT 0
 #define JIT_APPLY_RETURN_DOUBLE_AS_NFLOAT 0
-#define JIT_APPLY_RETURN_NFLOAT_AS_DOUBLE 1
+#define JIT_APPLY_RETURN_NFLOAT_AS_DOUBLE 0
 #define JIT_APPLY_FLOATS_IN_WORD_REGS 0
 #define JIT_APPLY_DOUBLES_IN_WORD_REGS 0
 #define JIT_APPLY_NFLOATS_IN_WORD_REGS 0
-#define JIT_APPLY_RETURN_FLOATS_AFTER 8
-#define JIT_APPLY_RETURN_DOUBLES_AFTER 0
-#define JIT_APPLY_RETURN_NFLOATS_AFTER 0
+#define JIT_APPLY_RETURN_FLOATS_AFTER 16
+#define JIT_APPLY_RETURN_DOUBLES_AFTER 16
+#define JIT_APPLY_RETURN_NFLOATS_AFTER 32
 #define JIT_APPLY_VARARGS_ON_STACK 0
 #define JIT_APPLY_STRUCT_RETURN_SPECIAL_REG 0
 #define JIT_APPLY_STRUCT_REG_OVERLAPS_WORD_REG 0
-#define JIT_APPLY_ALIGN_LONG_REGS 1
-#define JIT_APPLY_ALIGN_LONG_STACK 1
+#define JIT_APPLY_ALIGN_LONG_REGS 0
+#define JIT_APPLY_ALIGN_LONG_STACK 0
 #define JIT_APPLY_CAN_SPLIT_LONG 0
 #define JIT_APPLY_STRUCT_RETURN_IN_REG_INIT \
-	{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
-#define JIT_APPLY_MAX_STRUCT_IN_REG 0
-#define JIT_APPLY_MAX_APPLY_SIZE 184
+	{0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+#define JIT_APPLY_MAX_STRUCT_IN_REG 16
+#define JIT_APPLY_MAX_APPLY_SIZE 192
 #define JIT_APPLY_X86_FASTCALL 0
 #define JIT_APPLY_PARENT_FRAME_OFFSET 0
 #define JIT_APPLY_RETURN_ADDRESS_OFFSET 0
@@ -48,9 +48,10 @@ typedef union
 	jit_nuint uint_value;
 	jit_long long_value;
 	jit_ulong ulong_value;
-	struct { jit_ubyte pad[8]; double f_value; } float_value;
-	struct { double f_value; } double_value;
-	struct { double f_value; } nfloat_value;
+	struct { jit_ubyte pad[16]; float f_value; } float_value;
+	struct { jit_ubyte pad[16]; double f_value; } double_value;
+	struct { jit_ubyte pad[32]; jit_nfloat f_value; } nfloat_value;
+	jit_ubyte small_struct_value[16];
 
 } jit_apply_return;
 
@@ -102,26 +103,29 @@ typedef union
 #define jit_apply_return_set_ulong(result,value)	\
 	(((result)->ulong_value) = ((jit_ulong)(value)))
 #define jit_apply_return_set_float32(result,value)	\
-	(((result)->float_value.f_value) = ((double)(value)))
+	(((result)->float_value.f_value) = ((float)(value)))
 #define jit_apply_return_set_float64(result,value)	\
 	(((result)->double_value.f_value) = ((double)(value)))
 #define jit_apply_return_set_nfloat(result,value)	\
-	(((result)->nfloat_value.f_value) = ((double)(value)))
+	(((result)->nfloat_value.f_value) = ((jit_nfloat)(value)))
 
-typedef jit_float64 jit_reg_float;
+typedef jit_float32 jit_reg_float;
+
+typedef jit_float64 jit_reg_double;
 
 typedef union
 {
 	jit_reg_float float_value;
+	jit_reg_double double_value;
 	char __pad[16];
 } jit_reg_float_struct;
 
 typedef struct
 {
 	unsigned char *stack_args;
-	jit_nint word_regs[8];
+	jit_nint word_regs[6];
 	jit_nint pad[1];
-	jit_reg_float_struct float_regs[13];
+	jit_reg_float_struct float_regs[8];
 
 } jit_apply_struct;
 
@@ -149,7 +153,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 #define jit_apply_builder_init(builder,type)	\
 	do { \
 		(builder)->apply_args = (jit_apply_struct *)alloca(sizeof(jit_apply_struct)); \
-		jit_memset((builder)->apply_args, 0, 184); \
+		jit_memset((builder)->apply_args, 0, 192); \
 		(builder)->apply_args->stack_args = (unsigned char *)alloca(jit_type_get_max_arg_size((type))); \
 		(builder)->stack_used = 0; \
 		(builder)->word_used = 0; \
@@ -168,7 +172,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 
 #define jit_apply_builder_add_word(builder,value) \
 	do { \
-		if((builder)->word_used < 8) \
+		if((builder)->word_used < 6) \
 		{ \
 			(builder)->apply_args->word_regs[(builder)->word_used] = (jit_nint)(value); \
 			++((builder)->word_used); \
@@ -182,7 +186,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 
 #define jit_apply_parser_get_word(builder,type,value) \
 	do { \
-		if((builder)->word_used < 8) \
+		if((builder)->word_used < 6) \
 		{ \
 			(value) = (type)((builder)->apply_args->word_regs[(builder)->word_used]); \
 			++((builder)->word_used); \
@@ -198,43 +202,31 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 	do { \
 		if((align) > sizeof(jit_nint) && (num_words) > 1) \
 		{ \
-			if(((builder)->word_used % 2) == 1) \
+			if((6 - (builder)->word_used) < (num_words)) \
 			{ \
-				++((builder)->word_used); \
-			} \
-			if((8 - (builder)->word_used) < (num_words)) \
-			{ \
-				(builder)->word_used = 8; \
+				(builder)->word_used = 6; \
 			} \
 		} \
 	} while (0)
 
 #define jit_apply_builder_align_stack(builder,num_words,align) \
-	do { \
-		if((align) > sizeof(jit_nint) && (num_words) > 1) \
-		{ \
-			if(((builder)->stack_used % 2) == 1) \
-			{ \
-				++((builder)->stack_used); \
-			} \
-		} \
-	} while (0)
+	do { ; } while (0)
 
 #define jit_apply_builder_add_large_inner(builder,ptr,size,align) \
 	do { \
 		unsigned int __num_words = ((size) + sizeof(jit_nint) - 1) / sizeof(jit_nint); \
 		jit_apply_builder_align_regs((builder), __num_words, (align)); \
-		if((8 - (builder)->word_used) >= __num_words) \
+		if((6 - (builder)->word_used) >= __num_words) \
 		{ \
 			jit_memcpy((builder)->apply_args->word_regs + (builder)->word_used, (ptr), (size)); \
 			(builder)->word_used += __num_words; \
 		} \
-		else if((builder)->word_used < 8) \
+		else if((builder)->word_used < 6) \
 		{ \
-			unsigned int __split = (8 - (builder)->word_used); \
+			unsigned int __split = (6 - (builder)->word_used); \
 			jit_memcpy((builder)->apply_args->word_regs + (builder)->word_used, (ptr), __split * sizeof(jit_nint)); \
 			jit_memcpy((builder)->apply_args->stack_args, ((jit_nint *)(ptr)) + __split, (size) - __split * sizeof(jit_nint)); \
-			(builder)->word_used = 8; \
+			(builder)->word_used = 6; \
 			(builder)->stack_used = __num_words - __split; \
 		} \
 		else \
@@ -242,7 +234,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 			jit_apply_builder_align_stack((builder), __num_words, (align)); \
 			jit_memcpy((builder)->apply_args->stack_args + (builder)->stack_used, (ptr), (size)); \
 			(builder)->stack_used += __num_words * sizeof(jit_nint); \
-			(builder)->word_used = 8; \
+			(builder)->word_used = 6; \
 		} \
 	} while (0)
 
@@ -257,17 +249,17 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 		type __temp; \
 		unsigned int __num_words = (sizeof(__temp) + sizeof(jit_nint) - 1) / sizeof(jit_nint); \
 		jit_apply_builder_align_regs((builder), __num_words, sizeof(type)); \
-		if((8 - (builder)->word_used) >= __num_words) \
+		if((6 - (builder)->word_used) >= __num_words) \
 		{ \
 			jit_memcpy(&__temp, (builder)->apply_args->word_regs + (builder)->word_used, sizeof(__temp)); \
 			(builder)->word_used += __num_words; \
 		} \
-		else if((builder)->word_used < 8) \
+		else if((builder)->word_used < 6) \
 		{ \
-			unsigned int __split = (8 - (builder)->word_used); \
+			unsigned int __split = (6 - (builder)->word_used); \
 			jit_memcpy(&__temp, (builder)->apply_args->word_regs + (builder)->word_used, __split * sizeof(jit_nint)); \
 			jit_memcpy(((jit_nint *)&__temp) + __split, (builder)->apply_args->stack_args, (__num_words - __split) * sizeof(jit_nint)); \
-			(builder)->word_used = 8; \
+			(builder)->word_used = 6; \
 			(builder)->stack_used = __num_words - __split; \
 		} \
 		else \
@@ -275,7 +267,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 			jit_apply_builder_align_stack((builder), __num_words, sizeof(type)); \
 			jit_memcpy(&__temp, (builder)->apply_args->stack_args + (builder)->stack_used, sizeof(__temp)); \
 			(builder)->stack_used += __num_words * sizeof(jit_nint); \
-			(builder)->word_used = 8; \
+			(builder)->word_used = 6; \
 		} \
 		(value) = (finaltype)(__temp); \
 	} while (0)
@@ -360,7 +352,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 	jit_apply_builder_add_word((builder), (jit_nuint)(value));
 #define jit_apply_builder_add_float32(builder,value) \
 	do { \
-		if((builder)->float_used < 13) \
+		if((builder)->float_used < 8) \
 		{ \
 			(builder)->apply_args->float_regs[(builder)->float_used].float_value = (jit_reg_float)(value); \
 			++((builder)->float_used); \
@@ -373,9 +365,21 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 		} \
 	} while (0)
 #define jit_apply_builder_add_float64(builder,value) \
-	jit_apply_builder_add_large_stack((builder), jit_float64, (value));
+	do { \
+		if((builder)->float_used < 8) \
+		{ \
+			(builder)->apply_args->float_regs[(builder)->float_used].double_value = (jit_reg_double)(value); \
+			++((builder)->float_used); \
+		} \
+		else \
+		{ \
+			jit_float64 __temp = (jit_float64)(value); \
+			jit_memcpy((builder)->apply_args->stack_args + (builder)->stack_used, &__temp, sizeof(__temp)); \
+			(builder)->stack_used += (sizeof(jit_float64) + sizeof(jit_nint) - 1) & ~(sizeof(jit_nint) - 1); \
+		} \
+	} while (0)
 #define jit_apply_builder_add_nfloat(builder,value) \
-	jit_apply_builder_add_large_stack((builder), jit_float64, (value));
+	jit_apply_builder_add_large_stack((builder), jit_nfloat, (value));
 #define jit_apply_builder_add_struct(builder,value,size,align) \
 	do { \
 		unsigned int __size = (size); \
@@ -406,7 +410,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 	jit_apply_parser_get_word((builder), jit_ulong, (value));
 #define jit_apply_parser_get_float32(builder,value) \
 	do { \
-		if((builder)->float_used < 13) \
+		if((builder)->float_used < 8) \
 		{ \
 			(value) = (jit_float32)((builder)->apply_args->float_regs[(builder)->float_used].float_value); \
 			++((builder)->float_used); \
@@ -420,16 +424,29 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 		} \
 	} while (0)
 #define jit_apply_parser_get_float64(builder,value) \
-	jit_apply_parser_get_large_stack((builder), jit_float64, jit_float64, (value));
+	do { \
+		if((builder)->float_used < 8) \
+		{ \
+			(value) = (jit_float64)((builder)->apply_args->float_regs[(builder)->float_used].double_value); \
+			++((builder)->float_used); \
+		} \
+		else \
+		{ \
+			jit_float64 __temp; \
+			jit_memcpy(&__temp, (builder)->apply_args->stack_args + (builder)->stack_used, sizeof(__temp)); \
+			(builder)->stack_used += (sizeof(jit_float64) + sizeof(jit_nint) - 1) & ~(sizeof(jit_nint) - 1); \
+			(value) = (jit_float64)__temp; \
+		} \
+	} while (0)
 #define jit_apply_parser_get_nfloat(builder,value) \
-	jit_apply_parser_get_large_stack((builder), jit_float64, jit_nfloat, (value));
+	jit_apply_parser_get_large_stack((builder), jit_nfloat, jit_nfloat, (value));
 #define jit_apply_parser_get_struct_return(builder,value) \
 	jit_apply_parser_get_word((builder), void *, (value));
 #define jit_apply_parser_get_struct(builder,size,align,value) \
 	do { \
 		unsigned int __size = (size); \
 		unsigned int __num_words = (__size + sizeof(jit_nint) - 1) / sizeof(jit_nint); \
-		if((8 - (builder)->word_used) >= __num_words) \
+		if((6 - (builder)->word_used) >= __num_words) \
 		{ \
 			jit_memcpy((value), (builder)->apply_args->word_regs + (builder)->word_used, __size); \
 			(builder)->word_used += __num_words; \
@@ -438,7 +455,7 @@ _jit_builtin_apply_get_struct_return(jit_apply_builder *builder, void *return_va
 		{ \
 			jit_memcpy((value), (builder)->apply_args->stack_args + (builder)->stack_used, __size); \
 			(builder)->stack_used += __num_words * sizeof(jit_nint); \
-			(builder)->word_used = 8; \
+			(builder)->word_used = 6; \
 		} \
 	} while (0)
 

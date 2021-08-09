@@ -8,8 +8,9 @@ func world() string {
 }
 
 func main() {
-    printf("hello {} {}\n", "the", world());
-    var id any = world();
+    var w = world();
+    printf("hello {} {}\n", "the", w);
+    var id any = w;
     printf("hello {}\n", id);
     printf("hello {}\n", ID1);
     id = ID2;

@@ -1,7 +1,7 @@
 func main() {
-    var n int = 10;
-    var value = fib(n);
-    printf("fib: {}\n", value);
+	var n int = 10;
+	var value = fib(n);
+	printf("fib: {}\n", value);
 }
 
 func fib(n int) int {

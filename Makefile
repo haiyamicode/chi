@@ -1,14 +1,19 @@
-BUILD_DIR=cmake-build-debug
+BUILD_DIR=build
+BASE=$(shell pwd)
 TEST_DIR=$(BUILD_DIR)
-CHI = $(BUILD_DIR)/src/chi
-TEST_FILE=$(TEST_DIR)/test.chi
+CHI = $(BUILD_DIR)/src/bin/chi
+TEST_FILE ?= $(TEST_DIR)/test.chi
+BUILD_MODE ?= Debug
 
 all: debug
 
 .PHONY: build
 
+dep:
+	cd build && conan install $(BASE) -s compiler.libcxx=libstdc++11
+
 build:
-	cd cmake-build-debug && cmake .. && $(MAKE)
+	cd $(BUILD_DIR) && cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=${BUILD_MODE} .. && $(MAKE)
 
 asm: build
 	$(CHI) -s $(TEST_FILE) 

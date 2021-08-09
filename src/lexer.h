@@ -9,13 +9,14 @@
 
 #include "util.h"
 
-namespace cx {
+namespace cx
+{
 
     MAKE_ENUM(TokenType,
               END,
               IDEN,
 
-    // keywords
+              // keywords
               KW_BREAK,
               KW_CASE,
               KW_VAR,
@@ -47,14 +48,14 @@ namespace cx {
               KW_UNION,
               KW_TEMPLATE,
 
-    // literals
-              BOOL, // true / false
+              // literals
+              BOOL,   // true / false
               INT,    // 322, 0322, 0xBadFace
               FLOAT,  // 322.0
               CHAR,   // '海'
               STRING, // "Hải"
 
-    // operators
+              // operators
               ADD,    // +
               SUB,    // -
               MUL,    // *
@@ -76,7 +77,7 @@ namespace cx {
               EQ,     // ==
               NE,     // !=
 
-    // assignment
+              // assignment
               ASS,        // =
               ADD_ASS,    // +=
               SUB_ASS,    // -=
@@ -89,11 +90,11 @@ namespace cx {
               OR_ASS,     // |=
               XOR_ASS,    // ^=
 
-    // increment / decrement
+              // increment / decrement
               INC, // ++
               DEC, // --
 
-    // delimiters
+              // delimiters
               LPAREN,    // (
               RPAREN,    // )
               LBRACK,    // [
@@ -106,14 +107,16 @@ namespace cx {
               SEMICOLON, // ;
               ELLIPSIS,  // ...
               QUES,      // ?
-              TILDE,      // ~
+              TILDE,     // ~
               AT         // @
     )
 
-    struct Pos {
+    struct Pos
+    {
         long line, col, offset;
 
-        Pos() {
+        Pos()
+        {
             line = -1;
             col = -1;
             offset = -1;
@@ -122,11 +125,13 @@ namespace cx {
         bool is_valid() { return offset >= 0; }
     };
 
-    struct Token {
-        union Value {
-            bool b; // bool value
-            double d;   // floating point value
-            int64_t i;  // integer value
+    struct Token
+    {
+        union Value
+        {
+            bool b;    // bool value
+            double d;  // floating point value
+            int64_t i; // integer value
         } val;
         string str;
         TokenType type;
@@ -143,16 +148,18 @@ namespace cx {
     const long BUF_LEN = 4;
     const uint32_t UTF8_MAX = U'\U0010FFFF';
 
-    struct Tokenization {
-        array<Token> tokens;
+    struct Tokenization
+    {
+        array<box<Token>> tokens;
         optional<string> error;
         Pos error_pos;
     };
 
-    class Lexer {
+    class Lexer
+    {
         static KeywordMap s_keywords;
-        io::Buffer* m_src;
-        Tokenization* m_result;
+        io::Buffer *m_src;
+        Tokenization *m_result;
 
         char m_buf[BUF_LEN];
         Pos m_pbuf[BUF_LEN];
@@ -163,7 +170,7 @@ namespace cx {
 
         Token m_tok;
 
-        string& new_buf(size_t reserve = 5);
+        string &new_buf(size_t reserve = 5);
 
         char read();
 
@@ -187,8 +194,7 @@ namespace cx {
 
         TokenType read_rep(char expect, TokenType t_if, TokenType t_else);
 
-
-        bool read_char(char quote, char* c);
+        bool read_char(char quote, char *c);
 
         uint32_t read_unicode_char(long n);
 
@@ -199,7 +205,7 @@ namespace cx {
         Pos pos() { return m_pbuf[m_bufi]; }
 
     public:
-        Lexer(io::Buffer* src, Tokenization* result);
+        Lexer(io::Buffer *src, Tokenization *result);
 
         void tokenize();
 
@@ -207,7 +213,7 @@ namespace cx {
 
         void error(string error, Pos pos);
 
-        void next(Token* tok);
+        void next(Token *tok);
 
         Token get();
 
@@ -216,7 +222,7 @@ namespace cx {
 
     string get_token_symbol(TokenType token_type);
 
-    string get_strlit_repr(const string& str);
+    string get_strlit_repr(const string &str);
 
     TokenType get_assignment_op(TokenType token_type);
 

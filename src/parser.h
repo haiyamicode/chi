@@ -9,162 +9,163 @@
 
 #include <deque>
 
-#include "lexer.h"
 #include "ast.h"
+#include "lexer.h"
 #include "resolver.h"
 
 using namespace cx::ast;
 
 namespace cx {
-    struct ParseContext {
-        Module* module;
-        array<Token>* tokens;
-        Allocator* allocator;
-        ScopeResolver* resolver;
-    };
+struct ParseContext {
+    Module *module;
+    array<box<Token>> *tokens;
+    Allocator *allocator;
+    ScopeResolver *resolver;
+};
 
-    class Parser {
-        ParseContext* m_ctx;
-        size_t m_toki = 0;
-        Token m_eof_token;
-        map<Node*, size_t> m_block_pos;
+class Parser {
+    ParseContext *m_ctx;
+    size_t m_toki = 0;
+    Token m_eof_token;
+    map<Node *, size_t> m_block_pos;
 
-        Token* next();
+    Token *next();
 
-        Token* read();
+    Token *read();
 
-        Token* get();
+    Token *get();
 
-        Token* lookahead(int n);
+    Token *lookahead(int n);
 
-        void jump_to(size_t pos);
+    void jump_to(size_t pos);
 
-        void unread();
+    void unread();
 
-        Token* expect(TokenType expected);
+    Token *expect(TokenType expected);
 
-        void expected_got(TokenType expected, Token* token);
+    void expected_got(TokenType expected, Token *token);
 
-        void save_block_pos(Node* node) { m_block_pos[node] = m_toki; }
+    void save_block_pos(Node *node) { m_block_pos[node] = m_toki; }
 
-        void consume() { read(); }
+    void consume() { read(); }
 
-        bool is_c_header() { return m_ctx->module->kind == ModuleKind::HEADER; }
+    bool is_c_header() { return m_ctx->module->kind == ModuleKind::HEADER; }
 
-        template<typename... Args>
-        void error(Token* token, const char* format, const Args& ...args) {
-            print("{}:{}:{}: error: {}\n", m_ctx->module->path, token->pos.line + 1,
-                  token->pos.col + 1, fmt::format(format, args...));
-            exit(0);
-        }
+    template <typename... Args> void error(Token *token, const char *format, const Args &...args) {
+        print("{}:{}:{}: error: {}\n", m_ctx->module->path, token->pos.line + 1, token->pos.col + 1,
+              fmt::format(format, args...));
+        exit(0);
+    }
 
-    public:
-        Parser(ParseContext* ctx);
+  public:
+    Parser(ParseContext *ctx);
 
-        Node* create_node(NodeType type, Token* token);
+    Node *create_node(NodeType type, Token *token);
 
-        Node* create_struct_node(Token* keyword, const string& name);
+    Node *create_struct_node(Token *keyword, const string &name);
 
-        Node* create_identifier_node(Token* iden, Node* decl);
+    Node *create_identifier_node(Token *iden, Node *decl);
 
-        Node* create_unary_expr_node(Token* token);
+    Node *create_unary_expr_node(Token *token);
 
-        ContainerKind get_container_kind(TokenType keyword);
+    ContainerKind get_container_kind(TokenType keyword);
 
-        Node* create_error_node();
+    Node *create_error_node();
 
-        void unexpected(Token* token);
+    void unexpected(Token *token);
 
-        bool at_comma(TokenType end_token);
+    bool at_comma(TokenType end_token);
 
-        int get_op_precedence(TokenType op_type);
+    int get_op_precedence(TokenType op_type);
 
-        bool next_is(TokenType token_type);
+    bool next_is(TokenType token_type);
 
-        void add_to_scope(Node* node);
+    void add_to_scope(Node *node);
 
-        void add_to_scope(Node* node, const string& name);
+    void add_to_scope(Node *node, const string &name);
 
-        Scope* get_scope() { return m_ctx->resolver->get_scope(); }
+    Scope *get_scope() { return m_ctx->resolver->get_scope(); }
 
-        void parse();
+    void parse();
 
-        Node* parse_root();
+    Node *parse_root();
 
-        void parse_top_level_decls(NodeList* decls);
+    void parse_top_level_decls(NodeList *decls);
 
-        Node* parse_top_level_decl();
+    Node *parse_top_level_decl();
 
-        FnKind parse_fn_identifier(Token** iden);
+    FnKind parse_fn_identifier(Token **iden);
 
-        Node* parse_identifier();
+    Node *parse_identifier();
 
-        IdentifierKind get_identifier_kind(Node* node);
+    IdentifierKind get_identifier_kind(Node *node);
 
-        Node* parse_type_expr();
+    Node *parse_type_expr();
 
-        Node* parse_fn_decl(bool requires_body);
+    Node *parse_fn_decl(bool requires_body);
 
-        void parse_fn_block(Node* fn);
+    void parse_fn_block(Node *fn);
 
-        Node* parse_var_identifier();
+    Node *parse_var_identifier();
 
-        optional<SigilKind> get_sigil_kind(TokenType token_type);
+    optional<SigilKind> get_sigil_kind(TokenType token_type);
 
-        Node* parse_var_decl(bool as_field);
+    Node *parse_var_decl(bool as_field);
 
-        Node* parse_fn_proto(Token* iden);
+    Node *parse_fn_proto(Token *iden);
 
-        void parse_fn_params(NodeList* params);
+    void parse_fn_params(NodeList *params);
 
-        Node* parse_fn_param();
+    Node *parse_fn_param();
 
-        Node* parse_block();
+    Node *parse_block();
 
-        Node* parse_stmt();
+    Node *parse_stmt();
 
-        Node* parse_expr();
+    Node *parse_expr();
 
-        Node* parse_expr_clause(bool lhs);
+    Node *parse_expr_clause(bool lhs);
 
-        Node* parse_binary_expr(bool lhs, Node* parent, int prec);
+    Node *parse_binary_expr(bool lhs, Node *parent, int prec);
 
-        Node* parse_child_expr(bool lhs, Node* parent);
+    Node *parse_child_expr(bool lhs, Node *parent);
 
-        Node* parse_unary_expr(bool lhs, Node* parent);
+    Node *parse_unary_expr(bool lhs, Node *parent);
 
-        Node* parse_primary_expr(bool lhs, Node* parent);
+    Node *parse_primary_expr(bool lhs, Node *parent);
 
-        Node* parse_operand(bool lhs, Node* parent);
+    Node *parse_operand(bool lhs, Node *parent);
 
-        Node* parse_fn_call_expr(Node* fn_expr, bool lhs, Node* parent);
+    Node *parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent);
 
-        Node* parse_simple_stmt();
+    Node *parse_simple_stmt();
 
-        Node* parse_return_stmt();
+    Node *parse_return_stmt();
 
-        Node* parse_branch_stmt();
+    Node *parse_branch_stmt();
 
-        Node* parse_if_stmt();
+    Node *parse_if_stmt();
 
-        Node* parse_for_stmt();
+    Node *parse_for_stmt();
 
-        void skip_block();
+    void skip_block();
 
-        Node* parse_struct_member(ContainerKind container_kind);
+    Node *parse_struct_member(ContainerKind container_kind);
 
-        void parse_struct_block(Node* node);
+    void parse_struct_block(Node *node);
 
-        Node* parse_struct_decl(TokenType keyword);
+    Node *parse_struct_decl(TokenType keyword);
 
-        Node* parse_construct_expr();
+    Node *parse_construct_expr();
 
-        Node* parse_dot_expr(Node* expr);
+    Node *parse_prefix_expr();
 
-        Node* parse_index_expr(Node* expr);
+    Node *parse_dot_expr(Node *expr);
 
-        Node* parse_typedef();
+    Node *parse_index_expr(Node *expr);
 
-        Node* parse_enum_member();
-    };
-}
+    Node *parse_typedef();
+
+    Node *parse_enum_member();
+};
+} // namespace cx

@@ -85,9 +85,9 @@ ENDIF ()
 # Check computed goto
 #######################################################################################
 
-MESSAGE("+++++  Checking computed goto")
-TRY_COMPILE(HAVE_COMPUTED_GOTO ${AUX_DIR} ${AUX_DIR}/cgoto.c)
-TRY_COMPILE(HAVE_PIC_COMPUTED_GOTO ${AUX_DIR} ${AUX_DIR}/cgoto_pic.c)
+#MESSAGE("+++++  Checking computed goto")
+#TRY_COMPILE(HAVE_COMPUTED_GOTO ${AUX_DIR} ${AUX_DIR}/cgoto.c)
+#TRY_COMPILE(HAVE_PIC_COMPUTED_GOTO ${AUX_DIR} ${AUX_DIR}/cgoto_pic.c)
 
 #######################################################################################
 # Others

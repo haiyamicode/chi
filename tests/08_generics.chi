@@ -29,6 +29,18 @@ struct LinkedList<T> {
         this.size++;
         return &this.tail.data;
     }
+
+    func delete() {
+        var node = this.head;
+        for {
+            var next = node.next;
+            delete node;
+            if !next {
+                break;
+            }
+            node = next;
+        }
+    }
 }
 
 func main() {

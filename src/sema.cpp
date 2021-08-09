@@ -10,7 +10,8 @@
 
 using namespace cx;
 
-ChiStructMember* ChiTypeStruct::add_member(const string& name, ast::Node* node, ChiType* resolved_type) {
+ChiStructMember *ChiTypeStruct::add_member(const string &name, ast::Node *node,
+                                           ChiType *resolved_type) {
     auto member = members.emplace(new ChiStructMember())->get();
     member->node = node;
     member->resolved_type = resolved_type;
@@ -24,12 +25,12 @@ ChiStructMember* ChiTypeStruct::add_member(const string& name, ast::Node* node, 
     return member;
 }
 
-ChiStructMember* ChiTypeStruct::find_member(const string& name) {
+ChiStructMember *ChiTypeStruct::find_member(const string &name) {
     auto found = member_table.get(name);
     return found ? *found : nullptr;
 }
 
-TraitImpl* ChiTypeStruct::add_trait(ChiType* trait, ChiType* impl) {
+TraitImpl *ChiTypeStruct::add_trait(ChiType *trait, ChiType *impl) {
     auto entry = traits.emplace(new TraitImpl())->get();
     entry->trait_type = trait;
     entry->impl_type = impl;
@@ -37,54 +38,55 @@ TraitImpl* ChiTypeStruct::add_trait(ChiType* trait, ChiType* impl) {
     return entry;
 }
 
-bool ChiTypeStruct::is_trait(ChiType* type) {
+bool ChiTypeStruct::is_trait(ChiType *type) {
     return type->kind == TypeKind::Struct && type->data.struct_.kind == ContainerKind::Trait;
 }
 
-bool ChiTypeStruct::is_generic(ChiType* type) {
+bool ChiTypeStruct::is_generic(ChiType *type) {
     return type->kind == TypeKind::Struct && type->data.struct_.type_params.size > 0;
 }
 
-bool ChiTypeStruct::is_pointer_type(ChiType* type) {
+bool ChiTypeStruct::is_pointer_type(ChiType *type) {
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference;
 }
 
 string ChiStructMember::get_name() { return node->name; }
 
-ast::Node* Scope::find_one(const string& symbol) {
+ast::Node *Scope::find_one(const string &symbol) {
     if (auto val = symbols.get(symbol)) {
         return val->at(0);
     }
     return nullptr;
 }
 
-Scope::NodeList* Scope::find_all(const string& symbol) {
+Scope::NodeList *Scope::find_all(const string &symbol) {
     if (auto list = symbols.get(symbol)) {
         return list;
     }
     return nullptr;
 }
 
-void Scope::put(const string& name, ast::Node* node) {
+void Scope::put(const string &name, ast::Node *node) {
     symbols[name];
     symbols[name].add(node);
 }
 
-ChiType* ChiTypeFn::get_param_at(size_t index) {
-    return index < params.size ? params[index] : params.last();
+ChiType *ChiTypeFn::get_param_at(size_t index) {
+    auto va_start = params.size - (int)is_variadic;
+    return index < va_start ? params[index] : params.last()->get_elem();
 }
 
-ChiType* ChiType::get_elem() {
+ChiType *ChiType::get_elem() {
     switch (kind) {
-        case TypeKind::Pointer:
-        case TypeKind::Optional:
-        case TypeKind::Reference:
-        case TypeKind::Box:
-            return data.pointer.elem;
-        case TypeKind::Array:
-            return data.array.elem;
-        default:
-            unreachable();
-            return nullptr;
+    case TypeKind::Pointer:
+    case TypeKind::Optional:
+    case TypeKind::Reference:
+    case TypeKind::Box:
+        return data.pointer.elem;
+    case TypeKind::Array:
+        return data.array.elem;
+    default:
+        unreachable();
+        return nullptr;
     }
 }

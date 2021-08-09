@@ -1,8 +1,13 @@
+include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
+conan_basic_setup(TARGETS)
+
 add_subdirectory(libjit)
+
+include_directories(libjit/include)
 
 set(HEADER_FILES builder.h util.h sema.h resolver.h lexer.h parser.h include/enum.h ast.h errors.h ast_printer.h jit.h internals.h include/optional.h include/variant.h)
 set(SOURCE_FILES builder.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast_printer.cpp jit.cpp internals.cpp)
-set(LIBS fmt jit)
+set(LIBS jit CONAN_PKG::fmt pthread dl)
 
 #add_library(chmt SHARED ${HEADER_FILES} ${SOURCE_FILES})
 #add_library(chrt STATIC ${HEADER_FILES} internals.cpp)

@@ -7,269 +7,250 @@
 
 #pragma once
 
-#include <unordered_map>
-#include <functional>
+#include <cassert>
+#include <climits>
 #include <fstream>
+#include <functional>
 #include <sstream>
+#include <unordered_map>
+#include <utility>
+
 #include <fmt/format.h>
 
-#include "include/optional.h"
 #include "include/enum.h"
+#include "include/optional.h"
 #include "include/variant.h"
 
 namespace cx {
-    using fmt::print;
-    template<typename T> using func = std::function<T>;
-    template<typename T> using box = std::unique_ptr<T>;
-    using std::string;
-    using stx::optional;
-    using namespace mpark;
-    using std::stringstream;
+using fmt::print;
+template <typename T> using func = std::function<T>;
+template <typename T> using box = std::unique_ptr<T>;
+using std::string;
+using stx::optional;
+using namespace mpark;
+using std::stringstream;
 
-#define VARIANT_TRY(value, type, output) const auto output (get_if<type>(&value)); output
+#define VARIANT_TRY(value, type, output)                                                           \
+    const auto output(get_if<type>(&value));                                                       \
+    output
 
-    template<typename... Args>
-    static inline void panic(const char* format, const Args& ...args) {
-        fmt::print(format, args...);
-        fmt::print("\n");
-        abort();
-    }
-
-    template<typename T>
-    static inline T* reallocate_nonzero(T* old, size_t old_count, size_t new_count) {
-        T* ptr = reinterpret_cast<T*>(realloc(old, new_count * sizeof(T)));
-        if (!ptr)
-            panic("allocation failed");
-        return ptr;
-    }
-
-    static inline void unreachable() {
-        panic("unreachable");
-    }
-
-    static inline std::vector<string> string_split(string str, string sep) {
-        char* cstr = const_cast<char*>(str.c_str());
-        char* current;
-        std::vector<string> arr;
-        current = strtok(cstr, sep.c_str());
-        while (current != NULL) {
-            arr.push_back(current);
-            current = strtok(NULL, sep.c_str());
-        }
-        return arr;
-    }
-
-    static inline std::string string_replace(std::string subject,
-                                             const std::string& search, const std::string& replace) {
-        size_t pos = 0;
-        while ((pos = subject.find(search, pos)) != std::string::npos) {
-            subject.replace(pos, search.length(), replace);
-            pos += replace.length();
-        }
-        return subject;
-    }
-
-    // part of this is from zig by Andrew Kelley
-    // http://opensource.org/licenses/MIT
-    template<typename T>
-    struct array {
-        size_t size = 0;
-        size_t capacity = 0;
-        T* items = nullptr;
-
-        ~array() {
-            free(items);
-        }
-
-        array() {}
-
-        array(const array<T>& other) = delete;
-
-        array(array<T>&& other) = delete;
-
-//        array(const array<T>& other) {
-//            size = 0;
-//            reserve(other.size);
-//            for (auto item: other) {
-//                add(item);
-//            }
-//        }
-
-        array(std::initializer_list<T> values) {
-            reserve(values.size());
-            for (auto& value: values) {
-                add(std::move(value));
-            }
-        }
-
-        template<typename... Args>
-        T* emplace(Args&& ... args) {
-            resize(size + 1);
-            return new(&last()) T(std::forward<Args>(args)...);
-        }
-
-        T* add(T&& item) {
-            resize(size + 1);
-            last() = item;
-            return &last();
-        }
-
-        T* add(const T& item) {
-            resize(size + 1);
-            last() = item;
-            return &last();
-        }
-
-        T& operator[](size_t index) {
-            return at(index);
-        }
-
-        const T& operator[](size_t index) const {
-            return at(index);
-        }
-
-        T* begin() { return items; }
-
-        T* end() { return items + size; }
-
-        const T& at(size_t index) const {
-            assert(index != SIZE_MAX);
-            assert(index < size);
-            return items[index];
-        }
-
-        T& at(size_t index) {
-            assert(index != SIZE_MAX);
-            assert(index < size);
-            return items[index];
-        }
-
-        T pop() {
-            assert(size >= 1);
-            return items[--size];
-        }
-
-        const T& last() const {
-            assert(size >= 1);
-            return items[size - 1];
-        }
-
-        T& last() {
-            assert(size >= 1);
-            return items[size - 1];
-        }
-
-        void resize(size_t new_length) {
-            assert(new_length != SIZE_MAX);
-            reserve(new_length);
-            size = new_length;
-        }
-
-        void clear() {
-            size = 0;
-        }
-
-        void reserve(size_t new_capacity) {
-            if (capacity >= new_capacity)
-                return;
-
-            size_t better_capacity = capacity;
-            do {
-                better_capacity = better_capacity * 5 / 2 + 8;
-            } while (better_capacity < new_capacity);
-
-            items = reallocate_nonzero(items, capacity, better_capacity);
-            capacity = better_capacity;
-        }
-    };
-
-    template<typename K, typename V>
-    struct map {
-        typedef std::unordered_map<K, V> Map;
-        Map data;
-
-        template<typename... Args>
-        V* emplace(const K& key, Args&& ... args) {
-            return &data.emplace(std::piecewise_construct,
-                                 std::forward_as_tuple(key),
-                                 std::forward_as_tuple(std::forward<Args>(args)...)).first->second;
-        }
-
-        V& operator[](const K& key) {
-            return data.operator[](key);
-        }
-
-        V& at(const K& key) {
-            return data.at(key);
-        }
-
-        bool is_empty() {
-            return data.empty();
-        }
-
-        bool has_key(const K& key) {
-            return data.find(key) != data.end();
-        }
-
-        bool unset(const K& key) {
-            return data.erase(key);
-        }
-
-        V* get(const K& key) {
-            auto iter = data.find(key);
-            if (iter != data.end()) {
-                return &iter->second;
-            } else {
-                return nullptr;
-            }
-        }
-    };
-
-    namespace io {
-        enum class Error : int {
-            unknown,
-            eof
-        };
-
-        static constexpr Error eof = Error::eof;
-
-        class Buffer {
-            box<std::istream> m_stream;
-
-            Buffer(std::istream* stream) {
-                m_stream.reset(stream);
-            }
-
-        public:
-            static Buffer from_file(string file_name) {
-                auto stream = new std::fstream(file_name);
-                if (stream->fail()) {
-                    print("unable to open file '{}'", file_name);
-                    exit(2);
-                }
-                return {stream};
-            }
-
-            static Buffer from_string(string str) {
-                return {new std::stringstream(str)};
-            }
-
-            void reset() {
-                m_stream->clear();
-            }
-
-            optional<Error> read(char* ch) {
-                m_stream->get(*ch);
-                if (m_stream->fail()) {
-                    if (m_stream->eof()) {
-                        return eof;
-                    }
-                    return Error::unknown;
-                }
-                return {};
-            };
-
-
-        };
-    }
+template <typename... Args> static inline void panic(const char *format, const Args &...args) {
+    fmt::print(format, args...);
+    fmt::print("\n");
+    abort();
 }
+
+template <typename T>
+static inline T *reallocate_nonzero(T *old, size_t old_count, size_t new_count) {
+    T *ptr = reinterpret_cast<T *>(realloc(old, new_count * sizeof(T)));
+    if (!ptr)
+        panic("allocation failed");
+    return ptr;
+}
+
+static inline void unreachable() { panic("unreachable"); }
+
+static inline std::vector<string> string_split(string str, string sep) {
+    char *cstr = const_cast<char *>(str.c_str());
+    char *current;
+    std::vector<string> arr;
+    current = strtok(cstr, sep.c_str());
+    while (current != NULL) {
+        arr.push_back(current);
+        current = strtok(NULL, sep.c_str());
+    }
+    return arr;
+}
+
+static inline std::string string_replace(std::string subject, const std::string &search,
+                                         const std::string &replace) {
+    size_t pos = 0;
+    while ((pos = subject.find(search, pos)) != std::string::npos) {
+        subject.replace(pos, search.length(), replace);
+        pos += replace.length();
+    }
+    return subject;
+}
+
+// part of this is from zig by Andrew Kelley
+// http://opensource.org/licenses/MIT
+template <typename T> struct array {
+    size_t size = 0;
+    size_t capacity = 0;
+    T *items = nullptr;
+
+    ~array() {
+        for (size_t i = 0; i < size; i++) {
+            items[i].~T();
+        }
+        free(items);
+    }
+
+    array() {}
+
+    array(const array<T> &other) = delete;
+
+    array(array<T> &&other) = delete;
+
+    array(std::initializer_list<T> values) {
+        reserve(values.size());
+        for (auto &value : values) {
+            add(std::move(value));
+        }
+    }
+
+    template <typename... Args> T *emplace(Args &&...args) {
+        resize(size + 1);
+        return new (&last()) T(std::forward<Args>(args)...);
+    }
+
+    T *add(T &&item) {
+        resize(size + 1);
+        last() = item;
+        return &last();
+    }
+
+    T *add(const T &item) {
+        resize(size + 1);
+        last() = item;
+        return &last();
+    }
+
+    T &operator[](size_t index) { return at(index); }
+
+    const T &operator[](size_t index) const { return at(index); }
+
+    T *begin() { return items; }
+
+    T *end() { return items + size; }
+
+    const T &at(size_t index) const {
+        assert(index != SIZE_MAX);
+        assert(index < size);
+        return items[index];
+    }
+
+    T &at(size_t index) {
+        assert(index != SIZE_MAX);
+        assert(index < size);
+        return items[index];
+    }
+
+    T pop() {
+        assert(size >= 1);
+        return items[--size];
+    }
+
+    const T &last() const {
+        assert(size >= 1);
+        return items[size - 1];
+    }
+
+    T &last() {
+        assert(size >= 1);
+        return items[size - 1];
+    }
+
+    void resize(size_t new_length) {
+        assert(new_length != SIZE_MAX);
+        reserve(new_length);
+        size = new_length;
+    }
+
+    void clear() { size = 0; }
+
+    void reserve(size_t new_capacity) {
+        if (capacity >= new_capacity)
+            return;
+
+        size_t better_capacity = capacity;
+        do {
+            better_capacity = better_capacity * 5 / 2 + 8;
+        } while (better_capacity < new_capacity);
+
+        items = reallocate_nonzero(items, capacity, better_capacity);
+        capacity = better_capacity;
+    }
+};
+
+template <typename K, typename V> struct map {
+    typedef std::unordered_map<K, V> Map;
+    Map data;
+
+    template <typename... Args> V *emplace(const K &key, Args &&...args) {
+        return &data.emplace(std::piecewise_construct, std::forward_as_tuple(key),
+                             std::forward_as_tuple(std::forward<Args>(args)...))
+                    .first->second;
+    }
+
+    V &operator[](const K &key) { return data.operator[](key); }
+
+    V &at(const K &key) { return data.at(key); }
+
+    bool is_empty() { return data.empty(); }
+
+    bool has_key(const K &key) { return data.find(key) != data.end(); }
+
+    bool unset(const K &key) { return data.erase(key); }
+
+    V *get(const K &key) {
+        auto iter = data.find(key);
+        if (iter != data.end()) {
+            return &iter->second;
+        } else {
+            return nullptr;
+        }
+    }
+};
+
+namespace io {
+enum class Error : int { unknown, eof };
+
+static constexpr Error eof = Error::eof;
+
+class Buffer {
+    box<std::istream> m_stream;
+
+    Buffer(std::istream *stream) { m_stream.reset(stream); }
+
+  public:
+    static Buffer from_file(string file_name) {
+        auto stream = new std::fstream(file_name);
+        if (stream->fail()) {
+            print("unable to open file '{}'", file_name);
+            exit(2);
+        }
+        return {stream};
+    }
+
+    static Buffer from_string(string str) { return {new std::stringstream(str)}; }
+
+    void reset() { m_stream->clear(); }
+
+    optional<Error> read(char *ch) {
+        m_stream->get(*ch);
+        if (m_stream->fail()) {
+            if (m_stream->eof()) {
+                return eof;
+            }
+            return Error::unknown;
+        }
+        return {};
+    };
+};
+
+struct CharBuf : public array<char> {
+    char *write(const string &s) {
+        if (s.empty())
+            return 0;
+        auto old_size = size;
+        for (char ch : s) {
+            add(ch);
+        }
+        add(0);
+        return &items[old_size];
+    }
+};
+
+} // namespace io
+} // namespace cx
