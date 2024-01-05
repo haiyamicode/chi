@@ -8,95 +8,94 @@
 #pragma once
 
 #include <fmt/ostream.h>
-#include <jit/jit-plus.h>
 #include <list>
 
 #include "internals.h"
 #include "resolver.h"
 
 namespace cx {
-namespace jit {
+namespace codegen {
 struct CompilationContext;
+typedef void *unknown_t;
 
 struct VarLabel {
-    jit_label label;
+    unknown_t label;
     ast::Node *var = nullptr;
 };
 
 struct LoopLabels {
-    jit_label start;
-    jit_label end;
+    unknown_t start;
+    unknown_t end;
 };
 
 typedef std::list<VarLabel> VarLabels;
 
-struct Function : public jit_function {
+struct Function {
     string qualified_name;
     ast::Node *node;
     CompilationContext *ctx;
 
-    jit_value is_returning;
-    jit_value return_value;
+    unknown_t is_returning;
+    unknown_t return_value;
     std::list<VarLabels> return_labels; // state value
     std::list<LoopLabels> loop_labels;
     ChiTypeSubtype *container_subtype;
 
-    Function(jit_type_t signature, CompilationContext *_ctx, ast::Node *_node);
+    Function(unknown_t signature, CompilationContext *_ctx, ast::Node *_node);
+    virtual ~Function() {}
 
     virtual void build();
 
     const char *get_jit_name() const { return qualified_name.c_str(); }
 
-    jit_value get_null_constant();
+    unknown_t get_null_constant();
 
-    jit_label *get_return_label() { return &return_labels.back().back().label; }
+    unknown_t *get_return_label() { return &return_labels.back().back().label; }
     VarLabels *push_return_scope() { return &return_labels.emplace_back(); }
     void pop_return_scope() { return_labels.pop_back(); }
 
     LoopLabels *push_loop() { return &loop_labels.emplace_back(); }
     void pop_loop() { loop_labels.pop_back(); }
     LoopLabels *get_loop() { return &loop_labels.back(); }
-
-    jit_value insn_call(Function *fn, jit_value_t *args, long num_args);
 };
 
 struct StructField {
-    jit_type_t type;
+    unknown_t type;
     long offset;
 };
 
 struct DotValue {
     ChiType *ctn_type;
-    jit_value ctn_address;
+    unknown_t ctn_address;
     optional<StructField> field;
     optional<ast::Node *> method;
-    optional<jit_value> vtable_fn;
+    optional<unknown_t> vtable_fn;
 };
 
 struct Array {
     ChiType *array_type;
     ChiType *elem_type;
-    jit_value ptr;
-    jit_value size;
-    jit_value data;
-    jit_type_t elem;
-    jit_nuint elem_size;
+    unknown_t ptr;
+    unknown_t size;
+    unknown_t data;
+    unknown_t elem;
+    unknown_t elem_size;
 };
 
 struct ValueRef {
-    jit_value address;
-    jit_type_t type;
+    unknown_t address;
+    unknown_t type;
     Function *fn_ref = nullptr;
-    ValueRef(const jit_value &_address, jit_type_t _type) : address(_address), type(_type) {}
+    ValueRef(const unknown_t &_address, unknown_t _type) : address(_address), type(_type) {}
     ValueRef() {}
 };
 
 struct WrappedType {
-    jit_type_t type;
-    jit_type_t elem;
-    jit_nuint elem_size;
+    unknown_t type;
+    unknown_t elem;
+    unknown_t elem_size;
 
-    jit_nuint get_opt_flag_offset() { return elem_size; }
+    unknown_t get_opt_flag_offset() { return elem_size; }
 };
 
 struct CompilationSettings {
@@ -123,19 +122,19 @@ struct ImplInfo {
 typedef array<void *> JumpTable;
 
 struct CompilationContext {
-    jit_context jit_ctx;
+    unknown_t jit_ctx;
     CompilationSettings settings;
     Resolver resolver;
 
     array<box<Function>> functions;
     array<box<JumpTable>> jump_tables;
     array<box<ImplInfo>> impls;
-    array<jit_type_t> types;
+    array<unknown_t> types;
     array<box<string>> strings;
 
-    map<ast::Node *, jit_value> value_table;
+    map<ast::Node *, unknown_t> value_table;
     map<ChiType *, box<StructData>> struct_table;
-    map<TypeId, jit_type_t> type_table;
+    map<TypeId, unknown_t> type_table;
     map<TypeId, box<TypeInfo>> info_table;
     map<ast::Node *, Function *> function_table;
 
@@ -152,9 +151,9 @@ class Compiler {
     CompilationContext *m_ctx;
     Function *m_fn = nullptr;
 
-    jit_context &get_jit_context() { return m_ctx->jit_ctx; }
+    unknown_t &get_unknown_t() { return m_ctx->jit_ctx; }
 
-    jit_type_t add_type(jit_type_t type) { return *m_ctx->types.add(type); }
+    unknown_t add_type(unknown_t type) { return *m_ctx->types.add(type); }
     const char *add_string(const string &str) {
         return m_ctx->strings.emplace(new string(str))->get()->c_str();
     }
@@ -166,53 +165,53 @@ class Compiler {
     ChiType *eval_type(ChiType *type);
     ChiType *get_chitype(ast::Node *node);
 
-    jit_type_t _compile_type(ChiType *type);
+    unknown_t _compile_type(ChiType *type);
 
-    jit_type_t convert_int_type(ChiType *type);
+    unknown_t convert_int_type(ChiType *type);
 
     WrappedType compile_wrapped_type(ChiType *type);
 
-    inline jit_type_t compile_type_of(ast::Node *node);
+    inline unknown_t compile_type_of(ast::Node *node);
 
     Array compile_array_ref(Function *fn, ast::Node *expr);
 
-    void compile_field_mem_free(Function *fn, jit_value &arr, jit_nuint offset);
+    void compile_field_mem_free(Function *fn, unknown_t &arr, unknown_t offset);
 
-    jit_value compile_array_add(Function *fn, const jit_value &dest, jit_uint elem_size,
-                                const jit_value &value);
+    unknown_t compile_array_add(Function *fn, const unknown_t &dest, unknown_t elem_size,
+                                const unknown_t &value);
 
-    jit_value compile_array_loop(Function *fn, jit_value &address, ChiType *type, ArrayOp op);
+    unknown_t compile_array_loop(Function *fn, unknown_t &address, ChiType *type, ArrayOp op);
 
     bool should_destroy(ast::Node *node);
 
     bool should_destroy_for_type(ChiType *type);
 
-    void compile_destruction_for_type(Function *fn, jit_value &address, ChiType *type);
+    void compile_destruction_for_type(Function *fn, unknown_t &address, ChiType *type);
 
-    void compile_destruction(Function *fn, jit_value &address, ast::Node *node);
+    void compile_destruction(Function *fn, unknown_t &address, ast::Node *node);
 
     DotValue compile_dot_expr(Function *fn, ast::Node *expr);
 
-    void compile_array_construction(Function *fn, const jit_value &dest);
+    void compile_array_construction(Function *fn, const unknown_t &dest);
 
-    void compile_array_reserve(Function *fn, const jit_value &dest, jit_uint elem_size,
-                               const jit_value &size);
+    void compile_array_reserve(Function *fn, const unknown_t &dest, unknown_t elem_size,
+                               const unknown_t &size);
 
-    void compile_construction(Function *fn, jit_value_t dest, ChiType *type, ast::Node *expr);
+    void compile_construction(Function *fn, unknown_t dest, ChiType *type, ast::Node *expr);
 
-    jit_value compile_string_alloc(Function *fn, const jit_value &data);
+    unknown_t compile_string_alloc(Function *fn, const unknown_t &data);
 
-    void compile_string_construction(Function *fn, const jit_value &dest, optional<jit_value> data);
+    void compile_string_construction(Function *fn, const unknown_t &dest, optional<unknown_t> data);
 
-    jit_value compile_string_literal(Function *fn, string str);
+    unknown_t compile_string_literal(Function *fn, string str);
 
     Function *get_fn(ast::Node *node);
 
     Function *add_internal_method_fn(ChiType *type, ast::Node *method);
 
-    Function *new_fn(jit_type_t signature, ast::Node *node);
+    Function *new_fn(unknown_t signature, ast::Node *node);
 
-    Function *add_fn(jit_type_t signature, ast::Node *node);
+    Function *add_fn(unknown_t signature, ast::Node *node);
 
     JumpTable *add_jump_table(long *table_index);
 
@@ -221,39 +220,39 @@ class Compiler {
     void init_method_fn(Function *fn, const string &fn_name, ChiType *struct_type,
                         ChiTypeSubtype *subtype);
 
-    void add_value(ast::Node *node, const jit_value &value) { m_ctx->value_table[node] = value; }
+    void add_value(ast::Node *node, const unknown_t &value) { m_ctx->value_table[node] = value; }
 
-    jit_value &get_value(ast::Node *node) { return m_ctx->value_table.at(node); }
+    unknown_t &get_value(ast::Node *node) { return m_ctx->value_table.at(node); }
 
-    jit_value compile_simple_value(Function *fn, ast::Node *expr);
+    unknown_t compile_simple_value(Function *fn, ast::Node *expr);
 
-    jit_value compile_fn_call(Function *fn, ast::Node *fn_call);
+    unknown_t compile_fn_call(Function *fn, ast::Node *fn_call);
 
-    jit_value compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
-                                    const jit_value &op1, const jit_value &op2);
+    unknown_t compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
+                                    const unknown_t &op1, const unknown_t &op2);
 
-    jit_value compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
+    unknown_t compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 
-    jit_value compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
+    unknown_t compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
 
-    jit_value compile_conversion(Function *fn, const jit_value &value, ChiType *from_type,
+    unknown_t compile_conversion(Function *fn, const unknown_t &value, ChiType *from_type,
                                  ChiType *to_type);
 
-    jit_value compile_value_copy(Function *fn, const jit_value &value, ChiType *type);
+    unknown_t compile_value_copy(Function *fn, const unknown_t &value, ChiType *type);
 
     ValueRef compile_value_ref(Function *fn, ast::Node *expr);
 
-    jit_value compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type);
+    unknown_t compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type);
 
-    jit_value compile_mem_alloc(Function *fn, const jit_value &size_value);
-    void compile_mem_free(Function *fn, const jit_value &ptr);
+    unknown_t compile_mem_alloc(Function *fn, const unknown_t &size_value);
+    void compile_mem_free(Function *fn, const unknown_t &ptr);
 
-    jit_value compile_refc_construction(Function *fn, const jit_value &dest,
-                                        const jit_value &size_value);
-    void compile_refc_incref(Function *fn, jit_value &address);
-    void compile_refc_decref(Function *fn, jit_value &address, ChiType *elem_type);
+    unknown_t compile_refc_construction(Function *fn, const unknown_t &dest,
+                                        const unknown_t &size_value);
+    void compile_refc_incref(Function *fn, unknown_t &address);
+    void compile_refc_decref(Function *fn, unknown_t &address, ChiType *elem_type);
 
-    jit_value compile_string_concat(Function *fn, const jit_value &s1, const jit_value &s2);
+    unknown_t compile_string_concat(Function *fn, const unknown_t &s1, const unknown_t &s2);
 
     void compile_panic(Function *fn, const string &message);
 
@@ -261,7 +260,7 @@ class Compiler {
 
     StructData *get_struct_data(ChiType *struct_type);
 
-    jit_value create_string_constant(Function *fn, const char *str);
+    unknown_t create_string_constant(Function *fn, const char *str);
 
     void compile_stmt(Function *fn, ast::Node *stmt);
 
@@ -272,10 +271,10 @@ class Compiler {
     Struct get_struct(ChiType *struct_type);
 
     void compile_cprintf(Function *fn, const char *s);
-    void compile_debug_i(Function *fn, const char *prefix, const jit_value &v);
+    void compile_debug_i(Function *fn, const char *prefix, const unknown_t &v);
 
   public:
-    Compiler(CompilationContext *ctx, Function *fn = nullptr);
+    Compiler(CompilationContext *ctx);
 
     CompilationContext *get_context() { return m_ctx; }
 
@@ -287,11 +286,11 @@ class Compiler {
 
     void compile_fn_body(Function *fn);
 
-    jit_type_t compile_type(ChiType *type);
+    unknown_t compile_type(ChiType *type);
 
     void compile_internals();
 
     Function *compile_end_fn();
 };
-} // namespace jit
+} // namespace codegen
 } // namespace cx

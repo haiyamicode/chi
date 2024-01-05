@@ -1,3 +1,4 @@
+set(CONAN_DISABLE_CHECK_COMPILER True CACHE BOOL "" FORCE )
 cmake_minimum_required(VERSION 3.12)
 project(chi)
 

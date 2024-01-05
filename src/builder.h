@@ -7,64 +7,57 @@
 
 #pragma once
 
-#include "sema.h"
-#include "resolver.h"
+#include "codegen.h"
 #include "parser.h"
-#include "jit.h"
+#include "resolver.h"
+#include "sema.h"
 
-namespace cx
-{
-    struct BuildContext
-    {
-        box<ResolveContext> resolve_ctx;
-        box<jit::CompilationContext> jit_ctx;
+namespace cx {
+struct BuildContext {
+    box<ResolveContext> resolve_ctx;
+    box<codegen::CompilationContext> codegen_ctx;
 
-        BuildContext(Allocator *allocator);
+    BuildContext(Allocator *allocator);
 
-        Resolver create_resolver() { return {resolve_ctx.get()}; }
+    Resolver create_resolver() { return {resolve_ctx.get()}; }
 
-        jit::Compiler create_compiler();
-    };
+    codegen::Compiler create_compiler();
+};
 
-    enum class BuildMode
-    {
-        Run,
-        Executable
-    };
+enum class BuildMode { Run, Executable };
 
-    class Builder : Allocator
-    {
-        bool m_debug_mode = false;
-        BuildMode m_build_mode = BuildMode::Run;
-        string m_output_file_name;
-        array<ast::Package> m_packages;
-        array<box<ast::Node>> m_ast_nodes;
-        array<box<ChiType>> m_types;
-        BuildContext m_ctx;
+class Builder : Allocator {
+    bool m_debug_mode = false;
+    BuildMode m_build_mode = BuildMode::Run;
+    string m_output_file_name;
+    array<ast::Package> m_packages;
+    array<box<ast::Node>> m_ast_nodes;
+    array<box<ChiType>> m_types;
+    BuildContext m_ctx;
 
-    public:
-        Builder();
+  public:
+    Builder();
 
-        ast::Package *add_package() { return m_packages.emplace(); }
+    ast::Package *add_package() { return m_packages.emplace(); }
 
-        Node *create_node(NodeType type);
+    Node *create_node(NodeType type);
 
-        ChiType *create_type(TypeKind kind);
+    ChiType *create_type(TypeKind kind);
 
-        void set_debug_mode(bool value) { m_debug_mode = value; }
+    void set_debug_mode(bool value) { m_debug_mode = value; }
 
-        void set_assembly_mode(bool value) { m_ctx.jit_ctx->settings.enable_jit_dump = value; }
+    void set_assembly_mode(bool value) {}
 
-        void set_build_mode(BuildMode value);
+    void set_build_mode(BuildMode value);
 
-        void set_output_file_name(const string &value) { m_output_file_name = value; }
+    void set_output_file_name(const string &value) { m_output_file_name = value; }
 
-        void process_file(ast::Package *package, const string &file_name);
+    void process_file(ast::Package *package, const string &file_name);
 
-        void build_program(const string &entry_file_name);
+    void build_program(const string &entry_file_name);
 
-    private:
-        string get_tmp_file_path(const string &filename);
-    };
+  private:
+    string get_tmp_file_path(const string &filename);
+};
 
-}
+} // namespace cx
