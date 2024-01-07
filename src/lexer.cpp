@@ -43,7 +43,7 @@ void Lexer::setup_keywords() {
     s_keywords["goto"] = TokenType::KW_GOTO;
     s_keywords["while"] = TokenType::KW_WHILE;
     s_keywords["if"] = TokenType::KW_IF;
-    s_keywords["public"] = TokenType::KW_PUBLIC;
+    s_keywords["export"] = TokenType::KW_EXPORT;
     s_keywords["private"] = TokenType::KW_PRIVATE;
     s_keywords["return"] = TokenType::KW_RETURN;
     s_keywords["static"] = TokenType::KW_STATIC;

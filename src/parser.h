@@ -21,6 +21,7 @@ struct ParseContext {
     array<box<Token>> *tokens;
     Allocator *allocator;
     ScopeResolver *resolver;
+    bool debug_mode = false;
 };
 
 class Parser {
@@ -54,7 +55,11 @@ class Parser {
     template <typename... Args> void error(Token *token, const char *format, const Args &...args) {
         print("{}:{}:{}: error: {}\n", m_ctx->module->path, token->pos.line + 1, token->pos.col + 1,
               fmt::format(format, args...));
-        exit(0);
+        if (m_ctx->debug_mode) {
+            panic("parser error");
+        } else {
+            exit(0);
+        }
     }
 
   public:
@@ -92,7 +97,9 @@ class Parser {
 
     void parse_top_level_decls(NodeList *decls);
 
-    Node *parse_top_level_decl();
+    DeclSpec parse_decl_spec(DeclSpec spec = {});
+
+    Node *parse_top_level_decl(DeclSpec decl_spec = {});
 
     FnKind parse_fn_identifier(Token **iden);
 
@@ -102,7 +109,7 @@ class Parser {
 
     Node *parse_type_expr();
 
-    Node *parse_fn_decl(bool requires_body);
+    Node *parse_fn_decl(FnBodyMode body_mode, DeclSpec decl_spec = {});
 
     void parse_fn_block(Node *fn);
 
@@ -154,7 +161,7 @@ class Parser {
 
     void parse_struct_block(Node *node);
 
-    Node *parse_struct_decl(TokenType keyword);
+    Node *parse_struct_decl(TokenType keyword, DeclSpec decl_spec = {});
 
     Node *parse_construct_expr();
 
@@ -167,5 +174,7 @@ class Parser {
     Node *parse_typedef();
 
     Node *parse_enum_member();
+
+    Node *parse_extern_decl();
 };
 } // namespace cx

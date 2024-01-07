@@ -176,12 +176,24 @@ void Parser::parse_top_level_decls(NodeList *decls) {
         if (token->type == TokenType::END) {
             break;
         }
-        if (token->type == TokenType::KW_EXTERN || token->type == TokenType::KW_INLINE ||
-            token->type == TokenType::KW_STATIC) {
+        if (token->type == TokenType::KW_INLINE || token->type == TokenType::KW_STATIC) {
             consume();
         }
-        decls->add(parse_top_level_decl());
+        auto decl = parse_top_level_decl();
+        decls->add(decl);
+
+        // add export if exported
+        if (decl->type == NodeType::FnDef) {
+            if (decl->data.fn_def.decl_spec.flags & DECL_EXPORTED) {
+                m_ctx->module->exports.add(decl);
+            }
+        } else if (decl->type == NodeType::StructDecl) {
+            if (decl->data.struct_decl.decl_spec.flags & DECL_EXPORTED) {
+                m_ctx->module->exports.add(decl);
+            }
+        }
     }
+
     // second pass, parse function and struct blocks
     for (auto decl : *decls) {
         if (decl->type == NodeType::FnDef) {
@@ -194,21 +206,40 @@ void Parser::parse_top_level_decls(NodeList *decls) {
     }
 }
 
-Node *Parser::parse_top_level_decl() {
+DeclSpec Parser::parse_decl_spec(DeclSpec spec) {
     auto token = get();
     switch (token->type) {
+    case TokenType::KW_EXPORT:
+        consume();
+        spec.flags |= DECL_EXPORTED;
+        break;
+    default:
+        break;
+    }
+    return spec;
+}
+
+Node *Parser::parse_top_level_decl(DeclSpec decl_spec) {
+    auto token = get();
+    switch (token->type) {
+    case TokenType::KW_EXPORT:
+        return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
     case TokenType::KW_ENUM:
-    case TokenType::KW_TRAIT:
-        return parse_struct_decl(token->type);
+    case TokenType::KW_TRAIT: {
+        return parse_struct_decl(token->type, decl_spec);
+    }
     case TokenType::KW_TYPEDEF:
         return parse_typedef();
     case TokenType::KW_VAR:
     case TokenType::KW_CONST:
         return parse_var_decl(false);
-    case TokenType::KW_FUNC:
-        return parse_fn_decl(true);
+    case TokenType::KW_FUNC: {
+        return parse_fn_decl(FnBodyMode::Required, decl_spec);
+    }
+    case TokenType::KW_EXTERN:
+        return parse_extern_decl();
     default:
         unexpected(token);
         return create_error_node();
@@ -325,7 +356,8 @@ Node *Parser::parse_type_expr() {
     return node;
 }
 
-Node *Parser::parse_fn_decl(bool requires_body) {
+Node *Parser::parse_fn_decl(FnBodyMode body_mode, DeclSpec decl_spec) {
+    decl_spec = parse_decl_spec(decl_spec);
     expect(TokenType::KW_FUNC);
     Token *iden;
     auto kind = parse_fn_identifier(&iden);
@@ -334,15 +366,31 @@ Node *Parser::parse_fn_decl(bool requires_body) {
     auto proto = parse_fn_proto(iden);
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
+    fn->data.fn_def.decl_spec = decl_spec;
     proto->data.fn_proto.fn_def_node = fn;
+    if (body_mode == FnBodyMode::None) {
+        expect(TokenType::SEMICOLON);
+        add_to_scope(fn);
+        return fn;
+    }
+
     if (kind == FnKind::TopLevel) {
         save_block_pos(fn);
         skip_block();
     } else {
-        if (!requires_body && next_is(TokenType::SEMICOLON)) {
-            consume();
-        } else {
+        switch (body_mode) {
+        case FnBodyMode::Required:
             parse_fn_block(fn);
+            break;
+        case FnBodyMode::Optional:
+            if (next_is(TokenType::LBRACE)) {
+                parse_fn_block(fn);
+            } else {
+                expect(TokenType::SEMICOLON);
+            }
+            break;
+        default:
+            panic("unreachable");
         }
     }
     add_to_scope(fn);
@@ -400,7 +448,7 @@ Node *Parser::parse_fn_proto(Token *iden) {
     proto->name = iden->str;
     parse_fn_params(&proto->data.fn_proto.params);
     expect(TokenType::RPAREN);
-    if (!next_is(TokenType::LBRACE)) {
+    if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON)) {
         proto->data.fn_proto.return_type = parse_type_expr();
     }
     return proto;
@@ -816,10 +864,12 @@ Node *Parser::create_struct_node(Token *keyword, const string &name) {
     return node;
 }
 
-Node *Parser::parse_struct_decl(TokenType keyword) {
+Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec decl_spec) {
+    decl_spec = parse_decl_spec(decl_spec);
     auto kw = expect(keyword);
     auto iden = expect(TokenType::IDEN);
     Node *node = create_struct_node(kw, iden->str);
+    node->data.struct_decl.decl_spec = decl_spec;
     auto &params = node->data.struct_decl.type_params;
     if (next_is(TokenType::LT)) {
         expect(TokenType::LT);
@@ -865,11 +915,11 @@ Node *Parser::parse_struct_member(ContainerKind container_kind) {
     case ContainerKind::Enum:
         return parse_enum_member();
     case ContainerKind::Trait: {
-        return parse_fn_decl(false);
+        return parse_fn_decl(FnBodyMode::Optional);
     }
     default:
         if (next_is(TokenType::KW_FUNC)) {
-            return parse_fn_decl(true);
+            return parse_fn_decl(FnBodyMode::Required);
         }
         return parse_var_decl(true);
     }
@@ -984,6 +1034,35 @@ Node *Parser::parse_enum_member() {
     }
     if (!next_is(TokenType::RBRACE)) {
         expect(TokenType::COMMA);
+    }
+    return node;
+}
+
+Node *Parser::parse_extern_decl() {
+    auto kw = expect(TokenType::KW_EXTERN);
+    auto type = expect(TokenType::STRING);
+
+    auto node = create_node(NodeType::ExternDecl, kw);
+    node->data.extern_decl.type = type;
+
+    auto &members = node->data.extern_decl.members;
+    expect(TokenType::LBRACE);
+    Token *token;
+    for (;;) {
+        token = get();
+        if (token->type == TokenType::RBRACE) {
+            consume();
+            break;
+        }
+
+        auto fn = parse_fn_decl(FnBodyMode::None);
+        fn->data.fn_def.decl_spec.flags |= DECL_EXTERN;
+        members.add(fn);
+
+        // add export if exported
+        if (fn->data.fn_def.decl_spec.flags & DECL_EXPORTED) {
+            m_ctx->module->exports.add(fn);
+        }
     }
     return node;
 }

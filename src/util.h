@@ -7,15 +7,15 @@
 
 #pragma once
 
+// #include <backward.hpp>
 #include <cassert>
 #include <climits>
+#include <fmt/format.h>
 #include <fstream>
 #include <functional>
 #include <sstream>
 #include <unordered_map>
 #include <utility>
-
-#include <fmt/format.h>
 
 #include "include/enum.h"
 #include "include/optional.h"
@@ -34,10 +34,18 @@ using std::stringstream;
     const auto output(get_if<type>(&value));                                                       \
     output
 
+static inline void trace() {
+    // backward::StackTrace st;
+    // st.load_here(32);
+    // backward::Printer p;
+    // p.print(st);
+}
+
 template <typename... Args> static inline void panic(const char *format, const Args &...args) {
     fmt::print(format, args...);
     fmt::print("\n");
-    abort();
+    trace();
+    exit(1);
 }
 
 template <typename T>

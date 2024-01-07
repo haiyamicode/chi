@@ -12,303 +12,315 @@ using namespace cx::ast;
 
 string get_sigil_symbol(SigilKind sigil) {
     switch (sigil) {
-        case SigilKind::Pointer:
-            return "*";
-        case SigilKind::Optional:
-            return "?";
-        case SigilKind::Reference:
-            return "&";
-        case SigilKind::Box:
-            return "^";
-        default:
-            panic("unknown sigil {}", PRINT_ENUM(sigil));
-            return "";
+    case SigilKind::Pointer:
+        return "*";
+    case SigilKind::Optional:
+        return "?";
+    case SigilKind::Reference:
+        return "&";
+    case SigilKind::Box:
+        return "^";
+    default:
+        panic("unknown sigil {}", PRINT_ENUM(sigil));
+        return "";
     }
 }
 
-void cx::print_ast(Node* root) {
+void cx::print_ast(Node *root) {
     AstPrinter printer(root);
     return printer.print_ast();
 }
 
-void AstPrinter::print_ast() {
-    print_node(m_root);
-}
+void AstPrinter::print_ast() { print_node(m_root); }
 
-void AstPrinter::print_node(Node* node) {
+void AstPrinter::print_node(Node *node) {
     switch (node->type) {
-        case NodeType::Root: {
-            for (auto decl: m_root->data.root.top_level_decls) {
-                print_node(decl);
-                if (decl->type == NodeType::VarDecl) {
-                    print(";");
-                }
-                print("\n");
-            }
-            break;
-        }
-        case NodeType::FnDef: {
-            auto& data = node->data.fn_def;
-            print_node(data.fn_proto);
-            if (data.body) {
-                print(" ");
-                print_node(data.body);
-            } else {
+    case NodeType::Root: {
+        for (auto decl : m_root->data.root.top_level_decls) {
+            print_node(decl);
+            if (decl->type == NodeType::VarDecl) {
                 print(";");
             }
-            break;
-        }
-        case NodeType::FnProto: {
-            auto& data = node->data.fn_proto;
-            print("func {}(", node->name);
-            print_node_list(&data.params);
-            print(") ");
-            if (data.return_type) {
-                print_node(data.return_type);
-            }
-            break;
-        }
-        case NodeType::Identifier: {
-            print("{}", node->name);
-            break;
-        }
-        case NodeType::TypeParam:
-        case NodeType::ParamDecl: {
-            auto& data = node->data.param_decl;
-            print(node->name);
-            print(" ");
-            print_node(data.type);
-            break;
-        }
-        case NodeType::Block: {
-            auto& data = node->data.block;
-            print("{{\n");
-            m_indent++;
-            for (auto stmt: data.statements) {
-                print_indent(m_indent);
-                print_node(stmt);
-                if (stmt->type != NodeType::IfStmt && stmt->type != NodeType::ForStmt) {
-                    print(";\n");
-                }
-            }
-            m_indent--;
-            print_indent(m_indent);
-            print("}}");
-            break;
-        }
-        case NodeType::VarDecl: {
-            auto& data = node->data.var_decl;
-            if (!data.is_field) {
-                print(data.is_const ? "const" : "var");
-            }
-            print(" ");
-            print(node->name);
-            if (data.type) {
-                print(" ");
-                print_node(data.type);
-            }
-            if (data.is_embed) {
-                print("...");
-            }
-            if (data.expr) {
-                print(" = ");
-                print_node(data.expr);
-            }
-            break;
-        }
-        case NodeType::StructDecl: {
-            auto& data = node->data.struct_decl;
-            print("{} ", node->token->str);
-            if (!node->name.empty()) {
-                print("{}", node->name);
-            }
-            if (data.type_params.size) {
-                print("<");
-                print_node_list(&data.type_params);
-                print(">");
-            }
-            print(" {{");
-            if (data.members.size) {
-                print("\n");
-                m_indent++;
-                size_t i = 0;
-                for (auto member: data.members) {
-                    print_indent(m_indent);
-                    if (member->type == NodeType::FnDef) {
-                        auto kind = member->data.fn_def.fn_kind;
-                        print("[@{}] ", PRINT_ENUM(kind));
-                    }
-                    print_node(member);
-                    if (member->type == NodeType::VarDecl) {
-                        print(";\n");
-                    } else if (member->type == NodeType::FnDef) {
-                        print("\n");
-                    } else if (member->type == NodeType::EnumMember) {
-                        if (i != data.members.size - 1) {
-                            print(",\n");
-                        } else {
-                            print("\n");
-                        }
-                    }
-                    i++;
-                }
-                m_indent--;
-            }
-            print("}}");
-            break;
-        }
-        case NodeType::DotExpr: {
-            auto& data = node->data.dot_expr;
-            print_node(data.expr);
-            print(".{}", data.field->str);
-            break;
-        }
-        case NodeType::ConstructExpr: {
-            auto& data = node->data.construct_expr;
-            if (data.type) {
-                print("+");
-                print_node(data.type);
-            }
-            print("{{");
-            print_node_list(&data.items);
-            print("}}");
-            break;
-        }
-        case NodeType::BinOpExpr: {
-            auto& data = node->data.bin_op_expr;
-            print_node(data.op1);
-            print(" {} ", get_token_symbol(data.op_type));
-            print_node(data.op2);
-            break;
-        }
-        case NodeType::LiteralExpr: {
-            print("{}", node->token->to_string());
-            break;
-        }
-        case NodeType::ReturnStmt: {
-            auto& data = node->data.return_stmt;
-            print("return");
-            if (data.expr) {
-                print(" ");
-                print_node(data.expr);
-            }
-            break;
-        }
-        case NodeType::ParenExpr: {
-            auto& child = node->data.child_expr;
-            print("(");
-            print_node(child);
-            print(")");
-            break;
-        }
-        case NodeType::IfStmt: {
-            auto& data = node->data.if_stmt;
-            print("if ");
-            print_node(data.condition);
-            print(" ");
-            print_node(data.then_block);
-            if (data.else_node) {
-                print(" else ");
-                print_node(data.else_node);
-            }
             print("\n");
-            break;
         }
-        case NodeType::FnCallExpr: {
-            auto& data = node->data.fn_call_expr;
-            print_node(data.fn_ref_expr);
-            print("(");
-            print_node_list(&data.args);
-            print(")");
-            break;
-        }
-        case NodeType::SubtypeExpr: {
-            auto& data = node->data.subtype_expr;
-            print_node(data.type);
-            print("<");
-            print_node_list(&data.args);
-            print(">");
-            break;
-        }
-        case NodeType::IndexExpr: {
-            auto& data = node->data.index_expr;
-            print_node(data.expr);
-            print("[");
-            print_node(data.subscript);
-            print("]");
-            break;
-        }
-        case NodeType::TypeSigil: {
-            auto& data = node->data.sigil_type;
-            print("{}", get_sigil_symbol(data.sigil));
-            print_node(data.type);
-            break;
-        }
-        case NodeType::TypedefDecl: {
-            auto& data = node->data.typedef_decl;
-            print("typedef ");
-            print(data.identifier->str);
-            print(" = ");
-            print_node(data.type);
-            break;
-        }
-        case NodeType::EnumMember: {
-            auto& data = node->data.enum_member;
-            print("{}", node->name);
-            if (data.value) {
-                print(" = ");
-                print_node(data.value);
-            }
-            break;
-        }
-        case NodeType::UnaryOpExpr: {
-            auto& data = node->data.unary_op_expr;
-            if (!data.is_suffix) {
-                print("{}", get_token_symbol(data.op_type));
-                print_node(data.op1);
-            } else {
-                print_node(data.op1);
-                print("{}", get_token_symbol(data.op_type));
-            }
-            break;
-        }
-        case NodeType::CastExpr: {
-            auto& data = node->data.cast_expr;
-            print_node(data.expr);
-            print(".");
-            print("(");
-            print_node(data.dest_type);
-            print(")");
-            break;
-        }
-        case NodeType::ForStmt: {
-            auto& data = node->data.for_stmt;
-            print("for (");
-            if (data.init) {
-                print_node(data.init);
-            }
-            print(";");
-            if (data.condition) {
-                print(" ");
-                print_node(data.condition);
-            }
-            print(";");
-            if (data.post) {
-                print(" ");
-                print_node(data.post);
-            }
-            print(") ");
+        break;
+    }
+    case NodeType::FnDef: {
+        auto &data = node->data.fn_def;
+        print_declspec(&data.decl_spec);
+        print_node(data.fn_proto);
+        if (data.body) {
+            print(" ");
             print_node(data.body);
             print("\n");
-            break;
+        } else {
+            print(";");
         }
-        case NodeType::BranchStmt: {
-            print("{}", node->token->to_string());
-            break;
+        break;
+    }
+    case NodeType::FnProto: {
+        auto &data = node->data.fn_proto;
+        print("func {}(", node->name);
+        print_node_list(&data.params);
+        print(")");
+        if (data.return_type) {
+            print_node(data.return_type);
         }
-        default:
+        break;
+    }
+    case NodeType::Identifier: {
+        print("{}", node->name);
+        break;
+    }
+    case NodeType::TypeParam:
+    case NodeType::ParamDecl: {
+        auto &data = node->data.param_decl;
+        print(node->name);
+        print(" ");
+        print_node(data.type);
+        break;
+    }
+    case NodeType::Block: {
+        auto &data = node->data.block;
+        print("{{\n");
+        m_indent++;
+        for (auto stmt : data.statements) {
+            print_indent(m_indent);
+            print_node(stmt);
+            if (stmt->type != NodeType::IfStmt && stmt->type != NodeType::ForStmt) {
+                print(";\n");
+            }
+        }
+        m_indent--;
+        print_indent(m_indent);
+        print("}}");
+        break;
+    }
+    case NodeType::VarDecl: {
+        auto &data = node->data.var_decl;
+        if (!data.is_field) {
+            print(data.is_const ? "const" : "var");
+        }
+        print(" ");
+        print(node->name);
+        if (data.type) {
+            print(" ");
+            print_node(data.type);
+        }
+        if (data.is_embed) {
+            print("...");
+        }
+        if (data.expr) {
+            print(" = ");
+            print_node(data.expr);
+        }
+        break;
+    }
+    case NodeType::StructDecl: {
+        auto &data = node->data.struct_decl;
+        print("{} ", node->token->str);
+        if (!node->name.empty()) {
+            print("{}", node->name);
+        }
+        if (data.type_params.size) {
+            print("<");
+            print_node_list(&data.type_params);
+            print(">");
+        }
+        print(" {{");
+        if (data.members.size) {
             print("\n");
-            panic("unhandled {}", PRINT_ENUM(node->type));
+            m_indent++;
+            size_t i = 0;
+            for (auto member : data.members) {
+                print_indent(m_indent);
+                if (member->type == NodeType::FnDef) {
+                    auto kind = member->data.fn_def.fn_kind;
+                    print("[@{}] ", PRINT_ENUM(kind));
+                }
+                print_node(member);
+                if (member->type == NodeType::VarDecl) {
+                    print(";\n");
+                } else if (member->type == NodeType::FnDef) {
+                    print("\n");
+                } else if (member->type == NodeType::EnumMember) {
+                    if (i != data.members.size - 1) {
+                        print(",\n");
+                    } else {
+                        print("\n");
+                    }
+                }
+                i++;
+            }
+            m_indent--;
+        }
+        print("}}");
+        break;
+    }
+    case NodeType::DotExpr: {
+        auto &data = node->data.dot_expr;
+        print_node(data.expr);
+        print(".{}", data.field->str);
+        break;
+    }
+    case NodeType::ConstructExpr: {
+        auto &data = node->data.construct_expr;
+        if (data.type) {
+            print("+");
+            print_node(data.type);
+        }
+        print("{{");
+        print_node_list(&data.items);
+        print("}}");
+        break;
+    }
+    case NodeType::BinOpExpr: {
+        auto &data = node->data.bin_op_expr;
+        print_node(data.op1);
+        print(" {} ", get_token_symbol(data.op_type));
+        print_node(data.op2);
+        break;
+    }
+    case NodeType::LiteralExpr: {
+        print("{}", node->token->to_string());
+        break;
+    }
+    case NodeType::ReturnStmt: {
+        auto &data = node->data.return_stmt;
+        print("return");
+        if (data.expr) {
+            print(" ");
+            print_node(data.expr);
+        }
+        break;
+    }
+    case NodeType::ParenExpr: {
+        auto &child = node->data.child_expr;
+        print("(");
+        print_node(child);
+        print(")");
+        break;
+    }
+    case NodeType::IfStmt: {
+        auto &data = node->data.if_stmt;
+        print("if ");
+        print_node(data.condition);
+        print(" ");
+        print_node(data.then_block);
+        if (data.else_node) {
+            print(" else ");
+            print_node(data.else_node);
+        }
+        print("\n");
+        break;
+    }
+    case NodeType::FnCallExpr: {
+        auto &data = node->data.fn_call_expr;
+        print_node(data.fn_ref_expr);
+        print("(");
+        print_node_list(&data.args);
+        print(")");
+        break;
+    }
+    case NodeType::SubtypeExpr: {
+        auto &data = node->data.subtype_expr;
+        print_node(data.type);
+        print("<");
+        print_node_list(&data.args);
+        print(">");
+        break;
+    }
+    case NodeType::IndexExpr: {
+        auto &data = node->data.index_expr;
+        print_node(data.expr);
+        print("[");
+        print_node(data.subscript);
+        print("]");
+        break;
+    }
+    case NodeType::TypeSigil: {
+        auto &data = node->data.sigil_type;
+        print("{}", get_sigil_symbol(data.sigil));
+        print_node(data.type);
+        break;
+    }
+    case NodeType::TypedefDecl: {
+        auto &data = node->data.typedef_decl;
+        print("typedef ");
+        print(data.identifier->str);
+        print(" = ");
+        print_node(data.type);
+        break;
+    }
+    case NodeType::EnumMember: {
+        auto &data = node->data.enum_member;
+        print("{}", node->name);
+        if (data.value) {
+            print(" = ");
+            print_node(data.value);
+        }
+        break;
+    }
+    case NodeType::UnaryOpExpr: {
+        auto &data = node->data.unary_op_expr;
+        if (!data.is_suffix) {
+            print("{}", get_token_symbol(data.op_type));
+            print_node(data.op1);
+        } else {
+            print_node(data.op1);
+            print("{}", get_token_symbol(data.op_type));
+        }
+        break;
+    }
+    case NodeType::CastExpr: {
+        auto &data = node->data.cast_expr;
+        print_node(data.expr);
+        print(".");
+        print("(");
+        print_node(data.dest_type);
+        print(")");
+        break;
+    }
+    case NodeType::ForStmt: {
+        auto &data = node->data.for_stmt;
+        print("for (");
+        if (data.init) {
+            print_node(data.init);
+        }
+        print(";");
+        if (data.condition) {
+            print(" ");
+            print_node(data.condition);
+        }
+        print(";");
+        if (data.post) {
+            print(" ");
+            print_node(data.post);
+        }
+        print(") ");
+        print_node(data.body);
+        print("\n");
+        break;
+    }
+    case NodeType::BranchStmt: {
+        print("{}", node->token->to_string());
+        break;
+    }
+    case NodeType::ExternDecl: {
+        auto &data = node->data.extern_decl;
+        print("extern {} ", data.type->to_string());
+        print("{{\n");
+        for (auto member : data.members) {
+            print_indent(m_indent + 1);
+            print_node(member);
+            print("\n");
+        }
+        print("}}\n");
+        break;
+    }
+    default:
+        print("\n");
+        panic("unhandled {}", PRINT_ENUM(node->type));
     }
 }
 
@@ -318,11 +330,18 @@ void AstPrinter::print_indent(int level) {
     }
 }
 
-void AstPrinter::print_node_list(array<Node*>* list) {
+void AstPrinter::print_node_list(array<Node *> *list) {
     for (int i = 0; i < list->size; i++) {
         print_node(list->at(i));
         if (i < list->size - 1) {
             print(", ");
         }
+    }
+}
+
+void AstPrinter::print_declspec(DeclSpec *declspec) {
+    auto flags = declspec->flags;
+    if (flags & DECL_EXPORTED) {
+        print("export ");
     }
 }

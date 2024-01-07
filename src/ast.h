@@ -17,27 +17,43 @@ struct Package;
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
-          TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr);
+          TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl);
 
 MAKE_ENUM(ModuleKind, CX, CHX, HEADER)
+MAKE_ENUM(FnBodyMode, Optional, Required, None);
+
+enum DeclFlag : uint32_t {
+    DECL_NONE = 0,
+    DECL_EXPORTED = 1 << 0,
+    DECL_PRIVATE = 1 << 1,
+    DECL_EXTERN = 1 << 2,
+};
 
 struct Module {
     ModuleKind kind;
     Node *root;
     Package *package;
     string path;
-    array<Node *> imports;
+    array<Node *> imports = {};
+    array<Node *> exports = {};
 };
+
+enum class PackageKind { BUILTIN, DEFAULT };
 
 struct Package {
     array<Module> modules;
     Node *entry_fn = nullptr;
     string root_src_dir;
     string root_src_path;
+    PackageKind kind = PackageKind::DEFAULT;
 };
 
 struct Root {
     array<Node *> top_level_decls;
+};
+
+struct DeclSpec {
+    uint32_t flags = DECL_NONE;
 };
 
 struct FnProto {
@@ -47,19 +63,16 @@ struct FnProto {
 };
 
 MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
-MAKE_ENUM(BuiltinId, Invalid, Printf, ArrayAdd, ArrayDelete, ArrayCopy, Debug);
 
 struct FnDef {
     Node *fn_proto;
     Node *body;
-    BuiltinId builtin_id;
     FnKind fn_kind;
+    DeclSpec decl_spec;
 
     bool is_instance_method() {
         return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
     }
-
-    bool is_built_in() { return builtin_id != BuiltinId::Invalid; }
 };
 
 struct ParamDecl {
@@ -120,6 +133,12 @@ struct StructDecl {
     ContainerKind kind;
     array<Node *> type_params;
     array<Node *> implements;
+    DeclSpec decl_spec;
+};
+
+struct ExternDecl {
+    Token *type;
+    array<Node *> members;
 };
 
 // composite literal
@@ -229,6 +248,7 @@ struct Node {
         ForStmt for_stmt;
         TypeParam type_param;
         PrefixExpr prefix_expr;
+        ExternDecl extern_decl;
 
         NodeData() {}
 
@@ -258,6 +278,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(enum_member, EnumMember)
             _AST_CASE_DESTROY_FIELD(construct_expr, ConstructExpr)
             _AST_CASE_DESTROY_FIELD(subtype_expr, SubtypeExpr)
+            _AST_CASE_DESTROY_FIELD(extern_decl, ExternDecl)
         default:
             break;
         }

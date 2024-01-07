@@ -7,10 +7,10 @@
 
 #pragma once
 
-#include <fmt/ostream.h>
 #include <list>
 
 #include "internals.h"
+#include "llvm.h"
 #include "resolver.h"
 
 namespace cx {
@@ -34,19 +34,18 @@ struct Function {
     string qualified_name;
     ast::Node *node;
     CompilationContext *ctx;
+    llvm::Function *llvm_fn;
 
-    unknown_t is_returning;
-    unknown_t return_value;
+    llvm::Value *is_returning;
+    llvm::Value *return_value;
     std::list<VarLabels> return_labels; // state value
     std::list<LoopLabels> loop_labels;
     ChiTypeSubtype *container_subtype;
 
-    Function(unknown_t signature, CompilationContext *_ctx, ast::Node *_node);
-    virtual ~Function() {}
+    Function(CompilationContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
+    ~Function() {}
 
-    virtual void build();
-
-    const char *get_jit_name() const { return qualified_name.c_str(); }
+    const char *get_llvm_name() const { return qualified_name.c_str(); }
 
     unknown_t get_null_constant();
 
@@ -99,7 +98,8 @@ struct WrappedType {
 };
 
 struct CompilationSettings {
-    bool enable_jit_dump = false;
+    string output_obj_to_file;
+    string output_ir_to_file;
 };
 
 struct StructData {
@@ -122,24 +122,30 @@ struct ImplInfo {
 typedef array<void *> JumpTable;
 
 struct CompilationContext {
-    unknown_t jit_ctx;
     CompilationSettings settings;
     Resolver resolver;
 
     array<box<Function>> functions;
     array<box<JumpTable>> jump_tables;
     array<box<ImplInfo>> impls;
-    array<unknown_t> types;
+    array<llvm::Type *> types;
     array<box<string>> strings;
 
-    map<ast::Node *, unknown_t> value_table;
-    map<ChiType *, box<StructData>> struct_table;
-    map<TypeId, unknown_t> type_table;
-    map<TypeId, box<TypeInfo>> info_table;
-    map<ast::Node *, Function *> function_table;
+    map<ast::Node *, llvm::Value *> value_table = {};
+    map<ChiType *, box<StructData>> struct_table = {};
+    map<TypeId, llvm::Type *> type_table = {};
+    map<TypeId, box<TypeInfo>> info_table = {};
+    map<ast::Node *, Function *> function_table = {};
 
-    CompilationContext(ResolveContext *rctx) : resolver(rctx) {}
+    // llvm
+    box<llvm::LLVMContext> llvm_ctx;
+    box<llvm::Module> llvm_module;
+    box<llvm::IRBuilder<>> llvm_builder;
+
+    CompilationContext(ResolveContext *rctx);
     ~CompilationContext();
+
+    void init_llvm();
 
     Function *add_fn(ast::Node *node, Function *fn);
 };
@@ -151,9 +157,8 @@ class Compiler {
     CompilationContext *m_ctx;
     Function *m_fn = nullptr;
 
-    unknown_t &get_unknown_t() { return m_ctx->jit_ctx; }
+    llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
 
-    unknown_t add_type(unknown_t type) { return *m_ctx->types.add(type); }
     const char *add_string(const string &str) {
         return m_ctx->strings.emplace(new string(str))->get()->c_str();
     }
@@ -165,13 +170,13 @@ class Compiler {
     ChiType *eval_type(ChiType *type);
     ChiType *get_chitype(ast::Node *node);
 
-    unknown_t _compile_type(ChiType *type);
+    llvm::Type *_compile_type(ChiType *type);
 
     unknown_t convert_int_type(ChiType *type);
 
     WrappedType compile_wrapped_type(ChiType *type);
 
-    inline unknown_t compile_type_of(ast::Node *node);
+    inline llvm::Type *compile_type_of(ast::Node *node);
 
     Array compile_array_ref(Function *fn, ast::Node *expr);
 
@@ -203,15 +208,13 @@ class Compiler {
 
     void compile_string_construction(Function *fn, const unknown_t &dest, optional<unknown_t> data);
 
-    unknown_t compile_string_literal(Function *fn, string str);
+    llvm::Value *compile_string_literal(Function *fn, const string &str);
 
     Function *get_fn(ast::Node *node);
 
     Function *add_internal_method_fn(ChiType *type, ast::Node *method);
 
-    Function *new_fn(unknown_t signature, ast::Node *node);
-
-    Function *add_fn(unknown_t signature, ast::Node *node);
+    Function *add_fn(llvm::Function *llvm_fn, ast::Node *node);
 
     JumpTable *add_jump_table(long *table_index);
 
@@ -220,13 +223,13 @@ class Compiler {
     void init_method_fn(Function *fn, const string &fn_name, ChiType *struct_type,
                         ChiTypeSubtype *subtype);
 
-    void add_value(ast::Node *node, const unknown_t &value) { m_ctx->value_table[node] = value; }
+    void add_value(ast::Node *node, llvm::Value *value) { m_ctx->value_table[node] = value; }
 
-    unknown_t &get_value(ast::Node *node) { return m_ctx->value_table.at(node); }
+    llvm::Value *&get_value(ast::Node *node) { return m_ctx->value_table.at(node); }
 
-    unknown_t compile_simple_value(Function *fn, ast::Node *expr);
+    llvm::Value *compile_expr(Function *fn, ast::Node *expr);
 
-    unknown_t compile_fn_call(Function *fn, ast::Node *fn_call);
+    llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call);
 
     unknown_t compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
                                     const unknown_t &op1, const unknown_t &op2);
@@ -242,7 +245,7 @@ class Compiler {
 
     ValueRef compile_value_ref(Function *fn, ast::Node *expr);
 
-    unknown_t compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type);
+    llvm::Value *compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type);
 
     unknown_t compile_mem_alloc(Function *fn, const unknown_t &size_value);
     void compile_mem_free(Function *fn, const unknown_t &ptr);
@@ -268,6 +271,11 @@ class Compiler {
 
     void compile_struct(ast::Node *node);
 
+    void compile_extern(ast::Node *node);
+
+    Function *compile_fn_proto(ast::Node *node, ast::Node *fn);
+    void compile_fn_def(ast::Node *node);
+
     Struct get_struct(ChiType *struct_type);
 
     void compile_cprintf(Function *fn, const char *s);
@@ -282,15 +290,11 @@ class Compiler {
 
     void compile_module(ast::Module *module);
 
-    Function *add_fn_node(ast::Node *node);
-
-    void compile_fn_body(Function *fn);
-
-    unknown_t compile_type(ChiType *type);
-
-    void compile_internals();
+    llvm::Type *compile_type(ChiType *type);
 
     Function *compile_end_fn();
+
+    void emit_output();
 };
 } // namespace codegen
 } // namespace cx

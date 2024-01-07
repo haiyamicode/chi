@@ -119,6 +119,11 @@ void cx_printf(CxString format, CxSlice values) {
     printf("%s", format_cstr(format, values).c_str());
 }
 
+void cx_print(CxString str) {
+    string s(str.data, str.size);
+    printf("%s", s.c_str());
+}
+
 void cx_array_construct(CxArray *dest) {
     dest->size = 0;
     dest->capacity = 0;

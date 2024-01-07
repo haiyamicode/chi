@@ -2,8 +2,8 @@ struct Node<T> {
     data T;
     next *Node<T> = 0;
 
-    func new(data T) {
-        this.data = data;
+    static func new(data T): Node<T> {
+        return Node<T>{data};
     }
 }
 
@@ -12,8 +12,8 @@ struct LinkedList<T> {
     tail *Node<T> = 0;
     size int = 0;
 
-    func add(value T) &T {
-        this.tail = new {value};
+    func add(value T) *T {
+        this.tail = new {data};
         if !this.head {
             this.head = this.tail;
         } else {

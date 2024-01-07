@@ -47,6 +47,8 @@ void cx_string_format(CxString *dest, CxString format, CxSlice values);
 
 void cx_printf(CxString format, CxSlice values);
 
+void cx_print(CxString str);
+
 void cx_array_construct(CxArray *dest);
 
 void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap);

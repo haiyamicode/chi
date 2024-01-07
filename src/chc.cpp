@@ -6,10 +6,12 @@
  */
 
 #include "builder.h"
+#include "util.h"
 
 using namespace cx;
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
+    // backward::SignalHandling sh;
     Builder bld;
     string file_name;
     array<int> z;
@@ -26,10 +28,20 @@ int main(int argc, char* argv[]) {
             } else if (flag == 'o') {
                 bld.set_build_mode(BuildMode::Executable);
                 state = 1;
+            } else if (flag == 'a') {
+                bld.set_build_mode(BuildMode::AST);
+            } else if (flag == 'w') {
+                state = 2;
+            } else {
+                print("unknown flag: %c\n", flag);
+                return 1;
             }
         } else {
             if (state == 1) {
                 bld.set_output_file_name(arg);
+                state = 0;
+            } else if (state == 2) {
+                bld.set_working_dir(arg);
                 state = 0;
             } else {
                 file_name = arg;

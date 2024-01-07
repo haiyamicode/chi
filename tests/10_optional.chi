@@ -3,7 +3,7 @@ struct Node {
     func new(id int) { this.id = id; }
 };
 
-func f(node ()&Node, force bool) {
+func f(node ?(&Node), force bool) {
     if node {
         printf("has value: node.id == {}\n", node.id);
     } else {

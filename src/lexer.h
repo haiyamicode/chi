@@ -9,222 +9,187 @@
 
 #include "util.h"
 
-namespace cx
-{
+namespace cx {
 
-    MAKE_ENUM(TokenType,
-              END,
-              IDEN,
+MAKE_ENUM(TokenType, END, IDEN,
 
-              // keywords
-              KW_BREAK,
-              KW_CASE,
-              KW_VAR,
-              KW_CONST,
-              KW_CONTINUE,
-              KW_DEFAULT,
-              KW_ELSE,
-              KW_ENUM,
-              KW_FOR,
-              KW_FUNC,
-              KW_GOTO,
-              KW_WHILE,
-              KW_IF,
-              KW_PUBLIC,
-              KW_PRIVATE,
-              KW_RETURN,
-              KW_SELECT,
-              KW_STATIC,
-              KW_STRUCT,
-              KW_TRAIT,
-              KW_SWITCH,
-              KW_TYPEDEF,
-              KW_TYPEOF,
-              KW_NEW,
-              KW_DELETE,
-              KW_THIS,
-              KW_EXTERN,
-              KW_INLINE,
-              KW_UNION,
-              KW_TEMPLATE,
+          // keywords
+          KW_BREAK, KW_CASE, KW_VAR, KW_CONST, KW_CONTINUE, KW_DEFAULT, KW_ELSE, KW_ENUM, KW_FOR,
+          KW_FUNC, KW_GOTO, KW_WHILE, KW_IF, KW_EXPORT, KW_PRIVATE, KW_RETURN, KW_SELECT, KW_STATIC,
+          KW_STRUCT, KW_TRAIT, KW_SWITCH, KW_TYPEDEF, KW_TYPEOF, KW_NEW, KW_DELETE, KW_THIS,
+          KW_EXTERN, KW_INLINE, KW_UNION, KW_TEMPLATE,
 
-              // literals
-              BOOL,   // true / false
-              INT,    // 322, 0322, 0xBadFace
-              FLOAT,  // 322.0
-              CHAR,   // '海'
-              STRING, // "Hải"
+          // literals
+          BOOL,   // true / false
+          INT,    // 322, 0322, 0xBadFace
+          FLOAT,  // 322.0
+          CHAR,   // '海'
+          STRING, // "Hải"
 
-              // operators
-              ADD,    // +
-              SUB,    // -
-              MUL,    // *
-              DIV,    // /
-              MOD,    // %
-              LSHIFT, // <<
-              RSHIFT, // >>
-              AND,    // &
-              OR,     // |
-              XOR,    // ^
-              NOT,    // ~
-              LOR,    // ||
-              LAND,   // &&
-              LNOT,   // !
-              LT,     // <
-              LE,     // <=
-              GT,     // >
-              GE,     // >=
-              EQ,     // ==
-              NE,     // !=
+          // operators
+          ADD,    // +
+          SUB,    // -
+          MUL,    // *
+          DIV,    // /
+          MOD,    // %
+          LSHIFT, // <<
+          RSHIFT, // >>
+          AND,    // &
+          OR,     // |
+          XOR,    // ^
+          NOT,    // ~
+          LOR,    // ||
+          LAND,   // &&
+          LNOT,   // !
+          LT,     // <
+          LE,     // <=
+          GT,     // >
+          GE,     // >=
+          EQ,     // ==
+          NE,     // !=
 
-              // assignment
-              ASS,        // =
-              ADD_ASS,    // +=
-              SUB_ASS,    // -=
-              MUL_ASS,    // *=
-              DIV_ASS,    // /=
-              MOD_ASS,    // %=
-              LSHIFT_ASS, // <<=
-              RSHIFT_ASS, // >>=
-              AND_ASS,    // &=
-              OR_ASS,     // |=
-              XOR_ASS,    // ^=
+          // assignment
+          ASS,        // =
+          ADD_ASS,    // +=
+          SUB_ASS,    // -=
+          MUL_ASS,    // *=
+          DIV_ASS,    // /=
+          MOD_ASS,    // %=
+          LSHIFT_ASS, // <<=
+          RSHIFT_ASS, // >>=
+          AND_ASS,    // &=
+          OR_ASS,     // |=
+          XOR_ASS,    // ^=
 
-              // increment / decrement
-              INC, // ++
-              DEC, // --
+          // increment / decrement
+          INC, // ++
+          DEC, // --
 
-              // delimiters
-              LPAREN,    // (
-              RPAREN,    // )
-              LBRACK,    // [
-              RBRACK,    // ]
-              LBRACE,    // {
-              RBRACE,    // }
-              COMMA,     // ,
-              DOT,       // .
-              COLON,     // :
-              SEMICOLON, // ;
-              ELLIPSIS,  // ...
-              QUES,      // ?
-              TILDE,     // ~
-              AT         // @
-    )
+          // delimiters
+          LPAREN,    // (
+          RPAREN,    // )
+          LBRACK,    // [
+          RBRACK,    // ]
+          LBRACE,    // {
+          RBRACE,    // }
+          COMMA,     // ,
+          DOT,       // .
+          COLON,     // :
+          SEMICOLON, // ;
+          ELLIPSIS,  // ...
+          QUES,      // ?
+          TILDE,     // ~
+          AT         // @
+)
 
-    struct Pos
-    {
-        long line, col, offset;
+struct Pos {
+    long line, col, offset;
 
-        Pos()
-        {
-            line = -1;
-            col = -1;
-            offset = -1;
-        }
+    Pos() {
+        line = -1;
+        col = -1;
+        offset = -1;
+    }
 
-        bool is_valid() { return offset >= 0; }
-    };
+    bool is_valid() { return offset >= 0; }
+};
 
-    struct Token
-    {
-        union Value
-        {
-            bool b;    // bool value
-            double d;  // floating point value
-            int64_t i; // integer value
-        } val;
-        string str;
-        TokenType type;
-        Pos pos;
+struct Token {
+    union Value {
+        bool b;    // bool value
+        double d;  // floating point value
+        int64_t i; // integer value
+    } val;
+    string str;
+    TokenType type;
+    Pos pos;
 
-        string to_string() const;
+    string to_string() const;
 
-        Token(TokenType type = TokenType::END) { this->type = type; }
-    };
+    Token(TokenType type = TokenType::END) { this->type = type; }
+};
 
-    typedef func<void(string, Pos)> ErrorFunc;
-    typedef map<string, TokenType> KeywordMap;
+typedef func<void(string, Pos)> ErrorFunc;
+typedef map<string, TokenType> KeywordMap;
 
-    const long BUF_LEN = 4;
-    const uint32_t UTF8_MAX = U'\U0010FFFF';
+const long BUF_LEN = 4;
+const uint32_t UTF8_MAX = U'\U0010FFFF';
 
-    struct Tokenization
-    {
-        array<box<Token>> tokens;
-        optional<string> error;
-        Pos error_pos;
-    };
+struct Tokenization {
+    array<box<Token>> tokens;
+    optional<string> error;
+    Pos error_pos;
+};
 
-    class Lexer
-    {
-        static KeywordMap s_keywords;
-        io::Buffer *m_src;
-        Tokenization *m_result;
+class Lexer {
+    static KeywordMap s_keywords;
+    io::Buffer *m_src;
+    Tokenization *m_result;
 
-        char m_buf[BUF_LEN];
-        Pos m_pbuf[BUF_LEN];
-        long m_bufn, m_bufi;
+    char m_buf[BUF_LEN];
+    Pos m_pbuf[BUF_LEN];
+    long m_bufn, m_bufi;
 
-        string m_cbuf;
-        bool m_eof;
+    string m_cbuf;
+    bool m_eof;
 
-        Token m_tok;
+    Token m_tok;
 
-        string &new_buf(size_t reserve = 5);
+    string &new_buf(size_t reserve = 5);
 
-        char read();
+    char read();
 
-        void unread();
+    void unread();
 
-        char peek();
+    char peek();
 
-        void next();
+    void next();
 
-        void read_iden(char c);
+    void read_iden(char c);
 
-        void read_number(char c);
+    void read_number(char c);
 
-        void read_string();
+    void read_string();
 
-        void read_raw_string();
+    void read_raw_string();
 
-        void read_rune();
+    void read_rune();
 
-        bool read_expect(char expect);
+    bool read_expect(char expect);
 
-        TokenType read_rep(char expect, TokenType t_if, TokenType t_else);
+    TokenType read_rep(char expect, TokenType t_if, TokenType t_else);
 
-        bool read_char(char quote, char *c);
+    bool read_char(char quote, char *c);
 
-        uint32_t read_unicode_char(long n);
+    uint32_t read_unicode_char(long n);
 
-        uint32_t read_hex_char(long n);
+    uint32_t read_hex_char(long n);
 
-        void setup_keywords();
+    void setup_keywords();
 
-        Pos pos() { return m_pbuf[m_bufi]; }
+    Pos pos() { return m_pbuf[m_bufi]; }
 
-    public:
-        Lexer(io::Buffer *src, Tokenization *result);
+  public:
+    Lexer(io::Buffer *src, Tokenization *result);
 
-        void tokenize();
+    void tokenize();
 
-        void reset();
+    void reset();
 
-        void error(string error, Pos pos);
+    void error(string error, Pos pos);
 
-        void next(Token *tok);
+    void next(Token *tok);
 
-        Token get();
+    Token get();
 
-        bool is_eof() const { return m_eof; }
-    };
+    bool is_eof() const { return m_eof; }
+};
 
-    string get_token_symbol(TokenType token_type);
+string get_token_symbol(TokenType token_type);
 
-    string get_strlit_repr(const string &str);
+string get_strlit_repr(const string &str);
 
-    TokenType get_assignment_op(TokenType token_type);
+TokenType get_assignment_op(TokenType token_type);
 
-    bool is_assignment_op(TokenType token_type);
-}
+bool is_assignment_op(TokenType token_type);
+} // namespace cx

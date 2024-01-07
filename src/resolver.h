@@ -85,12 +85,6 @@ class Resolver {
 
     ast::Node *add_primitive(const string &name, ChiType *type);
 
-    void add_builtin_fn(const string &name, ChiType *type, ast::BuiltinId builtin_id);
-
-    void create_primitives();
-
-    void create_builtins();
-
     bool can_assign(ChiType *from_type, ChiType *to_type);
 
     bool is_same_type(ChiType *a, ChiType *b);
@@ -129,8 +123,6 @@ class Resolver {
 
     ChiType *_resolve(ast::Node *node, ResolveScope &scope);
 
-    ConstantValue resolve_constant_value(ast::Node *node);
-
     template <typename... Args>
     void error(ast::Node *node, const char *format, const Args &...args) {
         auto pos = node->token->pos;
@@ -144,7 +136,8 @@ class Resolver {
 
     ResolveContext *get_context() { return m_ctx; }
 
-    void context_init_builtins();
+    void context_init_primitives();
+    void context_init_builtins(ast::Module *builtin_module);
 
     ast::Node *get_builtin(const string &name);
 
@@ -167,6 +160,8 @@ class Resolver {
     ChiType *get_wrapped_type(ChiType *elem, TypeKind kind);
 
     ChiType *resolve_subtype(ChiType *subtype);
+
+    ConstantValue resolve_constant_value(ast::Node *node);
 
     void resolve(ast::Package *package);
 

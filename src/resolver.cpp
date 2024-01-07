@@ -25,7 +25,7 @@ ast::Node *Resolver::add_primitive(const string &name, ChiType *type) {
     return node;
 }
 
-void Resolver::create_primitives() {
+void Resolver::context_init_primitives() {
     auto &system_types = m_ctx->system_types;
     system_types.any = create_type(TypeKind::Any);
     system_types.char_ = create_int_type(8, false);
@@ -63,31 +63,6 @@ void Resolver::create_primitives() {
     add_primitive("uint16", create_int_type(16, true));
     add_primitive("uint32", create_int_type(32, true));
     add_primitive("uint64", create_int_type(64, true));
-}
-
-void Resolver::add_builtin_fn(const std::string &name, ChiType *type, ast::BuiltinId builtin_id) {
-    auto fn = create_node(ast::NodeType::FnDef);
-    fn->name = name;
-    fn->data.fn_def.builtin_id = builtin_id;
-    m_ctx->builtins.add(fn);
-    fn->resolved_type = type;
-}
-
-void Resolver::create_builtins() {
-    // printf
-    auto printf_type = create_type(TypeKind::Fn);
-    printf_type->data.fn.return_type = create_type(TypeKind::Void);
-    auto &printf_params = printf_type->data.fn.params;
-    printf_params.add(get_system_types()->string);
-    printf_params.add(get_array_type(get_system_types()->any));
-    printf_type->data.fn.is_variadic = true;
-    add_builtin_fn("printf", printf_type, ast::BuiltinId::Printf);
-
-    // debug
-    auto test_type = create_type(TypeKind::Fn);
-    test_type->data.fn.return_type = create_type(TypeKind::Void);
-    test_type->data.fn.params.add(get_system_types()->string);
-    add_builtin_fn("debug", test_type, ast::BuiltinId::Debug);
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -652,6 +627,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         }
         return void_type;
     }
+    case NodeType::ExternDecl: {
+        auto &data = node->data.extern_decl;
+        if (!node->resolved_type) {
+            node->resolved_type = get_system_types()->void_;
+            for (auto member : data.members) {
+                resolve(member, scope);
+            }
+        }
+        return node->resolved_type;
+    }
     default:
         print("\n");
         panic("unhandled {}", PRINT_ENUM(node->type));
@@ -737,9 +722,11 @@ void Resolver::check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type
     check_assignment(value, from_type, to_type);
 }
 
-void Resolver::context_init_builtins() {
-    create_primitives();
-    create_builtins();
+void Resolver::context_init_builtins(ast::Module *builtin_module) {
+    context_init_primitives();
+    for (auto &decl : builtin_module->exports) {
+        m_ctx->builtins.add(decl);
+    }
 }
 
 ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node *node,
@@ -914,71 +901,8 @@ ChiType *Resolver::get_pointer_type(ChiType *elem, TypeKind kind) {
 }
 
 ChiType *Resolver::get_array_type(ChiType *elem) {
-    static ChiType *size_type = get_system_types()->int_;
-    if (auto cached = m_ctx->array_of.get(elem)) {
-        return *cached;
-    }
-    auto type = create_type(TypeKind::Array);
-    type->data.array.elem = elem;
-    auto internal_type = create_type(TypeKind::Struct);
-    auto &internal_struct = internal_type->data.struct_;
-
-    auto data_field_node = create_node(NodeType::VarDecl);
-    auto data_field_type = get_pointer_type(elem);
-    data_field_node->resolved_type = data_field_type;
-    internal_struct.add_member("data", data_field_node, data_field_type);
-
-    auto size_field_node = create_node(NodeType::VarDecl);
-    size_field_node->resolved_type = size_type;
-    internal_struct.add_member("size", size_field_node, size_type);
-
-    auto cap_field_node = create_node(NodeType::VarDecl);
-    cap_field_node->resolved_type = size_type;
-    internal_struct.add_member("capacity", cap_field_node, size_type);
-
-    auto flags_type = get_system_types()->uint8;
-    auto flags_field_node = create_node(NodeType::VarDecl);
-    flags_field_node->resolved_type = flags_type;
-    internal_struct.add_member("flags", flags_field_node, flags_type);
-
-    auto add_fn = create_node(NodeType::FnDef);
-    add_fn->name = "add";
-    add_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayAdd;
-    add_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
-    auto add_fn_type = create_type(TypeKind::Fn);
-    add_fn_type->data.fn.return_type = get_pointer_type(elem, TypeKind::Reference);
-    add_fn_type->data.fn.params.add(elem);
-    add_fn_type->data.fn.container = type;
-    add_fn->resolved_type = add_fn_type;
-    internal_struct.add_member(add_fn->name, add_fn, add_fn_type);
-    m_ctx->internal_methods.add(add_fn);
-
-    auto del_fn = create_node(NodeType::FnDef);
-    del_fn->name = "delete";
-    del_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayDelete;
-    del_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
-    auto del_fn_type = create_type(TypeKind::Fn);
-    del_fn_type->data.fn.return_type = get_system_types()->void_;
-    del_fn_type->data.fn.container = type;
-    del_fn->resolved_type = del_fn_type;
-    internal_struct.add_member(del_fn->name, del_fn, del_fn_type);
-    m_ctx->internal_methods.add(del_fn);
-
-    auto copy_fn = create_node(NodeType::FnDef);
-    copy_fn->name = "copy";
-    copy_fn->data.fn_def.builtin_id = ast::BuiltinId::ArrayCopy;
-    copy_fn->data.fn_def.fn_kind = ast::FnKind::InstanceMethod;
-    auto copy_fn_type = create_type(TypeKind::Fn);
-    copy_fn_type->data.fn.return_type = type;
-    copy_fn_type->data.fn.container = type;
-    copy_fn->resolved_type = copy_fn_type;
-    internal_struct.add_member("copy", copy_fn, copy_fn_type);
-    m_ctx->internal_methods.add(copy_fn);
-
-    type->data.array.internal = internal_type;
-    m_ctx->array_of[elem] = type;
-    type->is_placeholder = elem->is_placeholder;
-    return type;
+    panic("TODO");
+    return get_system_types()->void_;
 }
 
 ChiType *Resolver::create_int_type(int bit_count, bool is_unsigned) {

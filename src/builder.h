@@ -24,12 +24,13 @@ struct BuildContext {
     codegen::Compiler create_compiler();
 };
 
-enum class BuildMode { Run, Executable };
+enum class BuildMode { Run, Executable, AST };
 
 class Builder : Allocator {
     bool m_debug_mode = false;
     BuildMode m_build_mode = BuildMode::Run;
     string m_output_file_name;
+    string m_working_dir;
     array<ast::Package> m_packages;
     array<box<ast::Node>> m_ast_nodes;
     array<box<ChiType>> m_types;
@@ -51,8 +52,13 @@ class Builder : Allocator {
     void set_build_mode(BuildMode value);
 
     void set_output_file_name(const string &value) { m_output_file_name = value; }
+    void set_working_dir(const string &value) { m_working_dir = value; }
 
-    void process_file(ast::Package *package, const string &file_name);
+    ast::Module *process_source(ast::Package *package, io::Buffer *src, const string &file_name);
+    ast::Module *process_file(ast::Package *package, const string &file_name);
+
+    void build_runtime();
+    void build_single_file(ast::Package *package, const string &file_name);
 
     void build_program(const string &entry_file_name);
 
