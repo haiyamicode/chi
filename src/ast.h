@@ -19,7 +19,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl);
 
-MAKE_ENUM(ModuleKind, CX, CHX, HEADER)
+MAKE_ENUM(ModuleKind, XC, XM, HEADER)
 MAKE_ENUM(FnBodyMode, Optional, Required, None);
 
 enum DeclFlag : uint32_t {

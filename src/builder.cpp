@@ -27,7 +27,7 @@ Builder::Builder() : m_ctx(this) {}
 ast::Module *Builder::process_source(ast::Package *package, io::Buffer *src,
                                      const string &file_name) {
     auto parts = string_split(file_name, ".");
-    auto kind = ModuleKind::CX;
+    auto kind = ModuleKind::XC;
     if (!parts.empty()) {
         auto ext = parts[parts.size() - 1];
         if (ext == "h") {
