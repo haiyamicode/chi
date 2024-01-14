@@ -30,26 +30,27 @@ enum DeclFlag : uint32_t {
 };
 
 struct Module {
-    ModuleKind kind;
-    Node *root;
-    Package *package;
-    string path;
+    ModuleKind kind = ModuleKind::XC;
+    Node *root = nullptr;
+    Package *package = nullptr;
+    string path = "";
     array<Node *> imports = {};
     array<Node *> exports = {};
+    array<Error> errors = {};
 };
 
 enum class PackageKind { BUILTIN, DEFAULT };
 
 struct Package {
-    array<Module> modules;
+    array<Module> modules = {};
     Node *entry_fn = nullptr;
-    string root_src_dir;
-    string root_src_path;
+    string root_src_dir = "";
+    string root_src_path = "";
     PackageKind kind = PackageKind::DEFAULT;
 };
 
 struct Root {
-    array<Node *> top_level_decls;
+    array<Node *> top_level_decls = {};
 };
 
 struct DeclSpec {
@@ -57,18 +58,18 @@ struct DeclSpec {
 };
 
 struct FnProto {
-    array<Node *> params;
+    array<Node *> params = {};
     Node *return_type = nullptr;
-    Node *fn_def_node;
+    Node *fn_def_node = nullptr;
 };
 
 MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
 
 struct FnDef {
-    Node *fn_proto;
-    Node *body;
-    FnKind fn_kind;
-    DeclSpec decl_spec;
+    Node *fn_proto = nullptr;
+    Node *body = nullptr;
+    FnKind fn_kind = FnKind::TopLevel;
+    DeclSpec decl_spec = {};
 
     bool is_instance_method() {
         return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
@@ -76,17 +77,17 @@ struct FnDef {
 };
 
 struct ParamDecl {
-    Node *type;
-    bool is_variadic;
+    Node *type = nullptr;
+    bool is_variadic = false;
 };
 
 struct TypeParam {
-    Node *type;
-    long index;
+    Node *type = nullptr;
+    long index = 0;
 };
 
 struct Block {
-    array<Node *> statements;
+    array<Node *> statements = {};
 };
 
 struct ReturnStmt {
@@ -94,80 +95,80 @@ struct ReturnStmt {
 };
 
 struct VarDecl {
-    Token *identifier;
-    Node *type;
-    Node *expr;
-    bool is_const;
-    bool is_field;
-    bool is_embed;
+    Token *identifier = nullptr;
+    Node *type = nullptr;
+    Node *expr = nullptr;
+    bool is_const = false;
+    bool is_field = false;
+    bool is_embed = false;
     ChiStructMember *resolved_field = nullptr;
-    ConstantValue resolved_value;
+    ConstantValue resolved_value = {};
 };
 
 struct BinOpExpr {
-    TokenType op_type;
-    Node *op1;
-    Node *op2;
+    TokenType op_type = TokenType::ERROR;
+    Node *op1 = nullptr;
+    Node *op2 = nullptr;
 };
 
 struct UnaryOpExpr {
-    TokenType op_type;
-    Node *op1;
-    bool is_suffix;
+    TokenType op_type = TokenType::ERROR;
+    Node *op1 = nullptr;
+    bool is_suffix = false;
 };
 
 struct FnCallExpr {
-    Node *fn_ref_expr;
-    array<Node *> args;
-    bool is_builtin;
+    Node *fn_ref_expr = nullptr;
+    array<Node *> args = {};
+    bool is_builtin = false;
 };
 
 struct IfStmt {
-    Node *condition;
-    Node *then_block;
-    Node *else_node; // can be null, block node, or another if node
+    Node *condition = nullptr;
+    Node *then_block = nullptr;
+    Node *else_node = nullptr; // can be null, block node, or another if node
 };
 
 struct StructDecl {
-    array<Node *> members;
-    ContainerKind kind;
-    array<Node *> type_params;
-    array<Node *> implements;
-    DeclSpec decl_spec;
+    array<Node *> members = {};
+    ContainerKind kind = ContainerKind::Struct;
+    array<Node *> type_params = {};
+    array<Node *> implements = {};
+    DeclSpec decl_spec = {};
 };
 
 struct ExternDecl {
-    Token *type;
-    array<Node *> members;
+    Token *type = nullptr;
+    array<Node *> members = {};
 };
 
 // composite literal
 struct ConstructExpr {
-    bool is_new;
-    array<Node *> items;
-    Node *type;
+    bool is_new = false;
+    array<Node *> items = {};
+    Node *type = nullptr;
 };
 
 struct TypedefDecl {
-    Node *type;
-    Token *identifier;
+    Node *type = nullptr;
+    Token *identifier = nullptr;
 };
 
 struct DotExpr {
-    Node *expr;
-    Token *field;
-    ChiStructMember *resolved_member;
-    int64_t resolved_value;
+    Node *expr = nullptr;
+    Token *field = nullptr;
+    ChiStructMember *resolved_member = nullptr;
+    int64_t resolved_value = 0;
 };
 
 struct SubtypeExpr {
-    Node *type;
-    array<Node *> args;
+    Node *type = nullptr;
+    array<Node *> args = {};
 };
 
 struct IndexExpr {
-    Node *expr;
-    Node *subscript;
+    Node *expr = nullptr;
+    Node *subscript = nullptr;
 };
 
 MAKE_ENUM(IdentifierKind, Value, TypeName, This)
@@ -214,10 +215,10 @@ struct PrefixExpr {
 };
 
 struct Node {
-    NodeType type;
-    Token *token;
-    Module *module;
-    string name;
+    NodeType type = NodeType::Error;
+    Token *token = nullptr;
+    Module *module = nullptr;
+    string name = "";
     ChiType *resolved_type = nullptr;
     ChiType *orig_type = nullptr;
 
@@ -257,9 +258,30 @@ struct Node {
 
     Node(const Node &) = delete;
 
+#define _AST_CASE_INITIALIZE_FIELD(field, type)                                                    \
+    case NodeType::type:                                                                           \
+        new (&data.field) type();                                                                  \
+        break;
+
     explicit Node(NodeType type) {
         this->type = type;
         memset(&data, 0, sizeof(data));
+
+        switch (type) {
+            _AST_CASE_INITIALIZE_FIELD(root, Root)
+            _AST_CASE_INITIALIZE_FIELD(fn_proto, FnProto)
+            _AST_CASE_INITIALIZE_FIELD(fn_def, FnDef)
+            _AST_CASE_INITIALIZE_FIELD(block, Block)
+            _AST_CASE_INITIALIZE_FIELD(fn_call_expr, FnCallExpr)
+            _AST_CASE_INITIALIZE_FIELD(struct_decl, StructDecl)
+            _AST_CASE_INITIALIZE_FIELD(typedef_decl, TypedefDecl)
+            _AST_CASE_INITIALIZE_FIELD(enum_member, EnumMember)
+            _AST_CASE_INITIALIZE_FIELD(construct_expr, ConstructExpr)
+            _AST_CASE_INITIALIZE_FIELD(subtype_expr, SubtypeExpr)
+            _AST_CASE_INITIALIZE_FIELD(extern_decl, ExternDecl)
+        default:
+            break;
+        }
     }
 
 #define _AST_CASE_DESTROY_FIELD(field, type)                                                       \
@@ -271,6 +293,7 @@ struct Node {
         switch (type) {
             _AST_CASE_DESTROY_FIELD(root, Root)
             _AST_CASE_DESTROY_FIELD(fn_proto, FnProto)
+            _AST_CASE_DESTROY_FIELD(fn_def, FnDef)
             _AST_CASE_DESTROY_FIELD(block, Block)
             _AST_CASE_DESTROY_FIELD(fn_call_expr, FnCallExpr)
             _AST_CASE_DESTROY_FIELD(struct_decl, StructDecl)

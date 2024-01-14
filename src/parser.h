@@ -22,6 +22,7 @@ struct ParseContext {
     Allocator *allocator;
     ScopeResolver *resolver;
     bool debug_mode = false;
+    optional<ErrorHandler> error_handler = {};
 };
 
 class Parser {
@@ -53,12 +54,18 @@ class Parser {
     bool is_c_header() { return m_ctx->module->kind == ModuleKind::HEADER; }
 
     template <typename... Args> void error(Token *token, const char *format, const Args &...args) {
+        auto message = fmt::format(format, args...);
+        if (auto fn = m_ctx->error_handler) {
+            Error error{message, *token};
+            (*fn)(error);
+            return;
+        }
         print("{}:{}:{}: error: {}\n", m_ctx->module->path, token->pos.line + 1, token->pos.col + 1,
-              fmt::format(format, args...));
+              message);
         if (m_ctx->debug_mode) {
             panic("parser error");
         } else {
-            exit(0);
+            exit(1);
         }
     }
 

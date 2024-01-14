@@ -7,7 +7,13 @@
 #include "internals.h"
 #include "sema.h"
 
+extern "C" {
+#include "include/tgc/tgc.h"
+}
+
 using namespace cx;
+
+static tgc_t gc;
 
 void cx_string_set_data(CxString *dest, const char *data) {
     if (data) {
@@ -163,4 +169,12 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
     dest->refcnt = (int32_t *)malloc(sizeof(int32_t));
     *dest->refcnt = 1;
     return dest->data;
+}
+
+void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
+    auto p = tgc_alloc(&gc, size);
+    if (dtor) {
+        tgc_set_dtor(&gc, p, dtor);
+    }
+    return p;
 }

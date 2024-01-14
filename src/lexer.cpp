@@ -325,6 +325,7 @@ void Lexer::read_string() {
 
     m_tok.str = buf;
     m_tok.type = TokenType::STRING;
+    m_tok.val.i = 0;
 }
 
 bool Lexer::read_char(char quote, char *out) {
@@ -680,7 +681,6 @@ char Lexer::peek() {
 Token Lexer::get() { return m_tok; }
 
 void Lexer::tokenize() {
-    long i = 0;
     for (;;) {
         auto tok = m_result->tokens.emplace(new Token(TokenType::END))->get();
         next(tok);

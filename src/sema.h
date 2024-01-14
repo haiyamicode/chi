@@ -19,33 +19,33 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Poin
           Array, Enum, Any, Subtype, Placeholder, Optional, Box)
 
 struct ChiTypeTypeSymbol {
-    ChiType *giving_type;
-    ChiType *underlying_type;
-    bool is_placeholder; // is generic placeholder symbol
+    ChiType *giving_type = nullptr;
+    ChiType *underlying_type = nullptr;
+    bool is_placeholder = false; // is generic placeholder symbol
 };
 
 struct ChiTypeInt {
-    int bit_count;
-    bool is_unsigned;
+    int bit_count = 0;
+    bool is_unsigned = false;
 };
 
 struct ChiTypeFloat {
-    int bit_count;
+    int bit_count = 0;
 };
 
 struct ChiTypeFn {
-    ChiType *return_type;
-    array<ChiType *> params;
-    bool is_variadic;
+    ChiType *return_type = nullptr;
+    array<ChiType *> params = {};
+    bool is_variadic = false;
     ChiType *container = nullptr;
 
     ChiType *get_param_at(size_t index);
 };
 
 struct ChiStructMember {
-    ast::Node *node;
-    ChiType *orig_parent;
-    ChiType *resolved_type;
+    ast::Node *node = nullptr;
+    ChiType *orig_parent = nullptr;
+    ChiType *resolved_type = nullptr;
     long field_index = -1;
     long method_index = -1;
 
@@ -57,9 +57,9 @@ struct ChiStructMember {
 typedef array<ChiStructMember *> ImplTable;
 
 struct TraitImpl {
-    ChiType *trait_type;
-    ChiType *impl_type;
-    ImplTable impl_table;
+    ChiType *trait_type = nullptr;
+    ChiType *impl_type = nullptr;
+    ImplTable impl_table = {};
     long itable_index = -1;
 };
 
@@ -70,16 +70,16 @@ MAKE_ENUM(ContainerKind, Struct, Enum, Union, Trait)
 typedef array<ChiType *> TypeList;
 
 struct ChiTypeStruct {
-    ContainerKind kind;
-    ast::Node *node;
-    array<box<ChiStructMember>> members;
-    array<ChiStructMember *> fields;
-    array<ChiType *> type_params;
-    array<ChiType *> subtypes;
-    array<box<TraitImpl>> traits;
-    map<string, ChiStructMember *> member_table;
-    map<ChiType *, TraitImpl *> trait_table;
-    ResolveStatus resolve_status;
+    ContainerKind kind = ContainerKind::Struct;
+    ast::Node *node = nullptr;
+    array<box<ChiStructMember>> members = {};
+    array<ChiStructMember *> fields = {};
+    array<ChiType *> type_params = {};
+    array<ChiType *> subtypes = {};
+    array<box<TraitImpl>> traits = {};
+    map<string, ChiStructMember *> member_table = {};
+    map<ChiType *, TraitImpl *> trait_table = {};
+    ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
 
     ChiStructMember *add_member(const string &name, ast::Node *node, ChiType *resolved_type);
@@ -96,32 +96,32 @@ struct ChiTypeStruct {
 };
 
 struct ChiTypePointer {
-    ChiType *elem;
+    ChiType *elem = nullptr;
 };
 
 struct ChiTypeArray {
-    ChiType *elem;
-    ChiType *internal;
+    ChiType *elem = nullptr;
+    ChiType *internal = nullptr;
 };
 
 struct ChiTypeSubtype {
-    ChiType *generic;
-    array<ChiType *> args;
-    ChiType *resolved_struct;
+    ChiType *generic = nullptr;
+    array<ChiType *> args = {};
+    ChiType *resolved_struct = nullptr;
 };
 
 struct ChiTypePlaceholder {
-    ChiType *trait;
-    long index;
+    ChiType *trait = nullptr;
+    long index = 0;
 };
 
 typedef uint32_t TypeId;
 
 struct ChiType {
-    TypeKind kind;
-    optional<string> name;
+    TypeKind kind = TypeKind::Void;
+    optional<string> name = {};
     bool is_placeholder = false;
-    TypeId id;
+    TypeId id = 0;
 
     union Data {
         ChiTypeFn fn;
@@ -142,10 +142,25 @@ struct ChiType {
     ChiType(TypeKind kind, TypeId id) {
         this->kind = kind;
         this->id = id;
-        if (kind == TypeKind::Struct) {
-            new (&data.struct_) ChiTypeStruct();
-        } else {
-            memset(&data, 0, sizeof(data));
+        memset(&data, 0, sizeof(data));
+
+#define CHITYPE_CASE_INIT_FIELD(field, type, type_struct)                                          \
+    case TypeKind::type:                                                                           \
+        new (&data.field) type_struct();                                                           \
+        break;
+
+        switch (kind) {
+            CHITYPE_CASE_INIT_FIELD(fn, Fn, ChiTypeFn)
+            CHITYPE_CASE_INIT_FIELD(type_symbol, TypeSymbol, ChiTypeTypeSymbol)
+            CHITYPE_CASE_INIT_FIELD(struct_, Struct, ChiTypeStruct)
+            CHITYPE_CASE_INIT_FIELD(subtype, Subtype, ChiTypeSubtype)
+            CHITYPE_CASE_INIT_FIELD(array, Array, ChiTypeArray)
+            CHITYPE_CASE_INIT_FIELD(pointer, Pointer, ChiTypePointer)
+            CHITYPE_CASE_INIT_FIELD(int_, Int, ChiTypeInt)
+            CHITYPE_CASE_INIT_FIELD(float_, Float, ChiTypeFloat)
+            CHITYPE_CASE_INIT_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
+        default:
+            break;
         }
     }
 
@@ -154,10 +169,16 @@ struct ChiType {
     case TypeKind::type:                                                                           \
         data.field.~type_struct();                                                                 \
         break;
+
         switch (kind) {
             CHITYPE_CASE_DESTROY_FIELD(fn, Fn, ChiTypeFn)
             CHITYPE_CASE_DESTROY_FIELD(struct_, Struct, ChiTypeStruct)
             CHITYPE_CASE_DESTROY_FIELD(subtype, Subtype, ChiTypeSubtype)
+            CHITYPE_CASE_DESTROY_FIELD(array, Array, ChiTypeArray)
+            CHITYPE_CASE_DESTROY_FIELD(pointer, Pointer, ChiTypePointer)
+            CHITYPE_CASE_DESTROY_FIELD(int_, Int, ChiTypeInt)
+            CHITYPE_CASE_DESTROY_FIELD(float_, Float, ChiTypeFloat)
+            CHITYPE_CASE_DESTROY_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
         default:
             break;
         }
@@ -175,7 +196,7 @@ struct ChiType {
 struct Scope {
     typedef array<ast::Node *> NodeList;
 
-    Scope *parent;
+    Scope *parent = nullptr;
     ast::Node *owner = nullptr;
 
     explicit Scope(Scope *parent) { this->parent = parent; }
@@ -187,15 +208,15 @@ struct Scope {
     void put(const string &name, ast::Node *node);
 
   private:
-    map<string, NodeList> symbols;
+    map<string, NodeList> symbols = {};
 };
 
 struct TypeInfo {
-    ChiType *itype;
-    int32_t size;
+    ChiType *itype = nullptr;
+    int32_t size = 0;
     union {
         struct {
-            TypeInfo *elem;
+            TypeInfo *elem = nullptr;
         } ptr;
     } data;
 };

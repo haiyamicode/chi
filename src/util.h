@@ -7,7 +7,6 @@
 
 #pragma once
 
-// #include <backward.hpp>
 #include <cassert>
 #include <climits>
 #include <fmt/format.h>
@@ -17,6 +16,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "include/backward.hpp"
 #include "include/enum.h"
 #include "include/optional.h"
 #include "include/variant.h"
@@ -35,10 +35,10 @@ using std::stringstream;
     output
 
 static inline void trace() {
-    // backward::StackTrace st;
-    // st.load_here(32);
-    // backward::Printer p;
-    // p.print(st);
+    backward::StackTrace st;
+    st.load_here(32);
+    backward::Printer p;
+    p.print(st);
 }
 
 template <typename... Args> static inline void panic(const char *format, const Args &...args) {
@@ -96,9 +96,26 @@ template <typename T> struct array {
 
     array() {}
 
-    array(const array<T> &other) = delete;
+    array(const array<T> &other) {
+        reserve(other.size);
+        for (size_t i = 0; i < other.size; i++) {
+            add(other.items[i]);
+        }
+    }
 
-    array(array<T> &&other) = delete;
+    array(array<T> &&other) {
+        size = other.size;
+        capacity = other.capacity;
+        items = other.items;
+        other.items = nullptr;
+    }
+
+    void operator=(const array<T> &other) {
+        reserve(other.size);
+        for (size_t i = 0; i < other.size; i++) {
+            add(other.items[i]);
+        }
+    }
 
     array(std::initializer_list<T> values) {
         reserve(values.size());
@@ -114,12 +131,14 @@ template <typename T> struct array {
 
     T *add(T &&item) {
         resize(size + 1);
+        memset(&last(), 0, sizeof(T));
         last() = item;
         return &last();
     }
 
     T *add(const T &item) {
         resize(size + 1);
+        memset(&last(), 0, sizeof(T));
         last() = item;
         return &last();
     }

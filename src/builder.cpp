@@ -7,6 +7,7 @@
 
 #include <filesystem>
 
+#include "analyzer.h"
 #include "ast_printer.h"
 #include "builder.h"
 #include "parser.h"
@@ -82,13 +83,15 @@ void Builder::build_runtime() {
     package->kind = PackageKind::BUILTIN;
     auto rt_source = io::Buffer::from_string(runtime::source);
     auto module = process_source(package, &rt_source, "runtime.chi");
+    resolver.context_init_builtins(module);
+
     auto compiler = m_ctx.create_compiler();
     compiler.compile_module(module);
-    resolver.context_init_builtins(module);
 }
 
 void Builder::build_single_file(ast::Package *package, const string &file_name) {
     build_runtime();
+
     auto module = process_file(package, file_name);
     auto compiler = m_ctx.create_compiler();
     compiler.compile_module(module);

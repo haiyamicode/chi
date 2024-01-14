@@ -63,6 +63,8 @@ void cx_panic(const char *s);
 
 void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
+void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
+
 #ifdef __cplusplus
 }
 #endif

@@ -26,6 +26,10 @@ ast::Node *Resolver::add_primitive(const string &name, ChiType *type) {
 }
 
 void Resolver::context_init_primitives() {
+    if (m_ctx->system_types.any) {
+        panic("primitives already initialized");
+        return;
+    }
     auto &system_types = m_ctx->system_types;
     system_types.any = create_type(TypeKind::Any);
     system_types.char_ = create_int_type(8, false);
@@ -38,10 +42,9 @@ void Resolver::context_init_primitives() {
     system_types.bool_ = create_type(TypeKind::Bool);
     system_types.string = create_type(TypeKind::String);
     system_types.str_lit = create_pointer_type(system_types.char_, TypeKind::Pointer);
-    system_types.array = create_type(TypeKind::Array);
+    // system_types.array = create_type(TypeKind::Array);
     system_types.optional = create_type(TypeKind::Optional);
     system_types.box = create_type(TypeKind::Box);
-    system_types.array = create_type(TypeKind::Array);
 
     add_primitive("bool", system_types.bool_);
     add_primitive("string", system_types.string);
@@ -53,7 +56,7 @@ void Resolver::context_init_primitives() {
     add_primitive("float", system_types.float_);
     add_primitive("double", system_types.double_);
     add_primitive("optional", system_types.optional);
-    add_primitive("array", system_types.array);
+    // add_primitive("array", system_types.array);
     add_primitive("box", system_types.box);
     add_primitive("uint8", system_types.uint8);
     add_primitive("int8", create_int_type(8, false));
@@ -101,8 +104,6 @@ void Resolver::resolve(ast::Module *module) {
 }
 
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
-    static auto int_type = get_system_types()->int_;
-    static auto str_lit_type = get_system_types()->str_lit;
     if (is_same_type(from_type, to_type)) {
         return true;
     }
@@ -110,7 +111,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
     case TypeKind::Void:
         return from_type->kind == TypeKind::Void;
     case TypeKind::String:
-        return from_type->kind == TypeKind::String || from_type == str_lit_type;
+        return from_type->kind == TypeKind::String || from_type == get_system_types()->str_lit;
     case TypeKind::Pointer:
     case TypeKind::Reference: {
         auto tt = to_type->get_elem();
@@ -129,7 +130,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
                 return false;
             }
         }
-        return from_type->kind == TypeKind::Pointer || can_assign(from_type, int_type);
+        return from_type->kind == TypeKind::Pointer ||
+               can_assign(from_type, get_system_types()->int_);
     }
     case TypeKind::Int:
         return type_is_int(from_type);
@@ -163,11 +165,6 @@ ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
 }
 
 ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
-    static auto bool_type = get_system_types()->bool_;
-    static auto int_type = get_system_types()->int_;
-    static auto void_type = get_system_types()->void_;
-    static auto string_type = get_system_types()->string;
-
     switch (node->type) {
     case NodeType::Root: {
         auto &data = node->data.root;
@@ -220,7 +217,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         auto &data = node->data.fn_def;
         auto proto = resolve(data.fn_proto, scope);
         node->resolved_type = proto;
-        if (should_resolve_fn_body(scope)) {
+        if (data.body && should_resolve_fn_body(scope)) {
             auto fn_scope = scope.set_parent_fn(proto);
             resolve(data.body, fn_scope);
         }
@@ -229,7 +226,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
         auto type = create_type(TypeKind::Fn);
-        auto return_type = data.return_type ? resolve_value(data.return_type, scope) : void_type;
+        auto return_type =
+            data.return_type ? resolve_value(data.return_type, scope) : get_system_types()->void_;
         type->data.fn.return_type = return_type;
         type->is_placeholder = return_type->is_placeholder;
         for (int i = 0; i < data.params.size; i++) {
@@ -315,7 +313,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         case TokenType::LE:
         case TokenType::GT:
         case TokenType::GE:
-            return bool_type;
+            return get_system_types()->bool_;
         default:
             check_binary_op(node, data.op_type, t1);
             return t1;
@@ -329,8 +327,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         case TokenType::ADD:
         case TokenType::INC:
         case TokenType::DEC:
-            check_assignment(data.op1, t, int_type);
-            return t->kind == TypeKind::Bool ? int_type : t;
+            check_assignment(data.op1, t, get_system_types()->int_);
+            return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
         case TokenType::LNOT: {
             if (data.is_suffix) {
                 if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
@@ -342,8 +340,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
                 }
                 goto invalid;
             } else {
-                check_assignment(data.op1, t, bool_type);
-                return bool_type;
+                check_assignment(data.op1, t, get_system_types()->bool_);
+                return get_system_types()->bool_;
             }
             break;
         }
@@ -376,18 +374,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         auto token = node->token;
         switch (token->type) {
         case TokenType::BOOL:
-            return bool_type;
+            return get_system_types()->bool_;
         case TokenType::INT:
-            return int_type;
+            return get_system_types()->int_;
         case TokenType::STRING:
-            return string_type;
+            return get_system_types()->string;
+        case TokenType::FLOAT:
+            return get_system_types()->float_;
         default:
             unreachable();
         }
     }
     case NodeType::ReturnStmt: {
         auto &data = node->data.return_stmt;
-        auto expr_type = data.expr ? resolve(data.expr, scope) : void_type;
+        auto expr_type = data.expr ? resolve(data.expr, scope) : get_system_types()->void_;
         assert(scope.parent_fn);
         auto return_type = scope.parent_fn->data.fn.return_type;
         check_assignment(data.expr, expr_type, return_type);
@@ -458,7 +458,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             tmod_iden = data.condition;
             set_tmod(tmod_iden, cond_type->get_elem());
         }
-        check_assignment(data.condition, cond_type, bool_type);
+        check_assignment(data.condition, cond_type, get_system_types()->bool_);
         resolve(data.then_block, scope);
         if (tmod_iden) {
             unset_tmod(tmod_iden);
@@ -494,7 +494,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             struct_->resolve_status = ResolveStatus::None;
             type_sym = create_type_symbol(node->name, struct_type);
             if (data.kind == ContainerKind::Enum) {
-                type_sym->data.type_symbol.giving_type = int_type;
+                type_sym->data.type_symbol.giving_type = get_system_types()->int_;
             }
             return type_sym;
         }
@@ -571,20 +571,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             return nullptr;
         }
         auto subscript_type = resolve(data.subscript, scope);
-        check_assignment(data.subscript, subscript_type, int_type);
+        check_assignment(data.subscript, subscript_type, get_system_types()->int_);
         return expr_type->get_elem();
     }
     case NodeType::EnumMember: {
         auto &data = node->data.enum_member;
         if (data.value) {
             auto value_type = resolve(data.value, scope);
-            check_assignment(data.value, value_type, int_type);
+            check_assignment(data.value, value_type, get_system_types()->int_);
             data.resolved_value = get<int64_t>(resolve_constant_value(data.value));
             scope.next_enum_value = data.resolved_value + 1;
         } else {
             data.resolved_value = scope.next_enum_value++;
         }
-        return int_type;
+        return get_system_types()->int_;
     }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
@@ -593,7 +593,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         }
         if (data.condition) {
             auto cond_type = resolve(data.condition, scope);
-            check_assignment(data.condition, cond_type, bool_type);
+            check_assignment(data.condition, cond_type, get_system_types()->bool_);
         }
         if (data.post) {
             resolve(data.post, scope);
@@ -625,7 +625,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         if (!expr_type->is_raw_pointer()) {
             error(node, errors::INVALID_OPERATOR, data.prefix->to_string(), to_string(expr_type));
         }
-        return void_type;
+        return get_system_types()->void_;
     }
     case NodeType::ExternDecl: {
         auto &data = node->data.extern_decl;
@@ -637,11 +637,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
         }
         return node->resolved_type;
     }
+    case NodeType::Error: {
+        node->resolved_type = get_system_types()->void_;
+        return node->resolved_type;
+    }
     default:
         print("\n");
-        panic("unhandled {}", PRINT_ENUM(node->type));
+        panic("unhandled node {}", PRINT_ENUM(node->type));
     }
-
     return nullptr;
 }
 
@@ -656,6 +659,7 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope) {
 }
 
 string Resolver::to_string(ChiType *type) {
+    assert(type);
     if (type->name) {
         return *type->name;
     }
@@ -689,6 +693,7 @@ string Resolver::to_string(ChiType *type) {
     default:
         break;
     }
+    assert(type->kind < TypeKind::__COUNT);
     return PRINT_ENUM(type->kind);
 }
 
@@ -723,7 +728,6 @@ void Resolver::check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type
 }
 
 void Resolver::context_init_builtins(ast::Module *builtin_module) {
-    context_init_primitives();
     for (auto &decl : builtin_module->exports) {
         m_ctx->builtins.add(decl);
     }
@@ -872,7 +876,6 @@ void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *
     if (!ok) {
         error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, n_params, n_args);
     }
-    auto va_start = n_params - (int)fn->is_variadic;
     for (size_t i = 0; i < n_args; i++) {
         auto param_type = fn->get_param_at(i);
         auto arg = args->at(i);

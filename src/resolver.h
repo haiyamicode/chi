@@ -18,29 +18,30 @@ struct Allocator {
 };
 
 struct SystemTypes {
-    ChiType *int_;
-    ChiType *int64;
-    ChiType *uint8;
-    ChiType *float_;
-    ChiType *double_;
-    ChiType *void_;
-    ChiType *char_;
-    ChiType *str_lit;
-    ChiType *any;
-    ChiType *string;
-    ChiType *bool_;
-    ChiType *array;
-    ChiType *optional;
-    ChiType *box;
+    ChiType *int_ = nullptr;
+    ChiType *int64 = nullptr;
+    ChiType *uint8 = nullptr;
+    ChiType *float_ = nullptr;
+    ChiType *double_ = nullptr;
+    ChiType *void_ = nullptr;
+    ChiType *char_ = nullptr;
+    ChiType *str_lit = nullptr;
+    ChiType *any = nullptr;
+    ChiType *string = nullptr;
+    ChiType *bool_ = nullptr;
+    ChiType *array = nullptr;
+    ChiType *optional = nullptr;
+    ChiType *box = nullptr;
 };
 
 struct ResolveContext {
-    Allocator *allocator;
-    array<ast::Node *> builtins;
-    SystemTypes system_types;
-    array<ast::Node *> internal_methods;
-    map<ChiType *, ChiType *> array_of;
-    map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT];
+    Allocator *allocator = nullptr;
+    array<ast::Node *> builtins = {};
+    SystemTypes system_types = {};
+    array<ast::Node *> internal_methods = {};
+    map<ChiType *, ChiType *> array_of = {};
+    map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
+    optional<ErrorHandler> error_handler = {};
 
     ResolveContext(Allocator *allocator) { this->allocator = allocator; }
 };
@@ -63,8 +64,8 @@ struct ResolveScope {
 };
 
 class Resolver {
-    ResolveContext *m_ctx;
-    map<ast::Node *, ChiType *> m_tmods;
+    ResolveContext *m_ctx = nullptr;
+    map<ast::Node *, ChiType *> m_tmods = {};
     ast::Module *m_module = nullptr;
 
     void set_tmod(ast::Node *iden, ChiType *type) { m_tmods[iden->data.identifier.decl] = type; }
@@ -125,10 +126,15 @@ class Resolver {
 
     template <typename... Args>
     void error(ast::Node *node, const char *format, const Args &...args) {
+        auto message = fmt::format(format, args...);
+        if (auto fn = m_ctx->error_handler) {
+            (*fn)({message, *node->token});
+            return;
+        }
+
         auto pos = node->token->pos;
-        print("{}:{}:{}: error: {}\n", m_module->path, pos.line + 1, pos.col + 1,
-              fmt::format(format, args...));
-        exit(0);
+        print("{}:{}:{}: error: {}\n", m_module->path, pos.line + 1, pos.col + 1, message);
+        exit(1);
     }
 
   public:
@@ -174,8 +180,8 @@ class Resolver {
 };
 
 class ScopeResolver {
-    Resolver *m_resolver;
-    array<box<Scope>> m_scopes;
+    Resolver *m_resolver = nullptr;
+    array<box<Scope>> m_scopes = {};
     Scope *m_current_scope = nullptr;
 
   public:

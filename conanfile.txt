@@ -1,6 +1,5 @@
 [requires]
-fmt/10.0.0
-backward-cpp/1.6
+fmt/10.2.1
 
 [generators]
 cmake

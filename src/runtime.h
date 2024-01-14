@@ -2,9 +2,10 @@
 namespace cx {
 namespace runtime {
 
-const char *source = R""""(
+static const char *source = R""""(
 extern "C" {
   func cx_print(str string);
+  func cx_gc_alloc(size uint32, destructor *void) *void;
 }
 
 export func println(str string) {

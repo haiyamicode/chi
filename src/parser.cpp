@@ -99,6 +99,7 @@ void Parser::expected_got(TokenType expected, Token *token) {
 
 void Parser::unexpected(Token *token) {
     error(token, errors::TOKEN_UNEXPECTED, token->to_string());
+    consume();
 }
 
 Token *Parser::next() {
@@ -367,6 +368,7 @@ Node *Parser::parse_fn_decl(FnBodyMode body_mode, DeclSpec decl_spec) {
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
     fn->data.fn_def.decl_spec = decl_spec;
+    fn->data.fn_def.body = nullptr;
     proto->data.fn_proto.fn_def_node = fn;
     if (body_mode == FnBodyMode::None) {
         expect(TokenType::SEMICOLON);
@@ -489,6 +491,10 @@ Node *Parser::parse_block() {
     auto node = create_node(NodeType::Block, lb);
     for (;;) {
         auto token = get();
+        if (token->type == TokenType::END) {
+            error(token, errors::UNEXPECTED_EOF);
+            return node;
+        }
         if (token->type == TokenType::RBRACE) {
             consume();
             return node;
@@ -594,6 +600,10 @@ Node *Parser::parse_binary_expr(bool lhs, Node *parent, int prec) {
     auto op1 = parse_unary_expr(lhs, parent);
     for (;;) {
         auto op_token = get();
+        if (op_token->type == TokenType::END) {
+            error(op_token, errors::UNEXPECTED_EOF);
+            return op1;
+        }
         auto tok_type = op_token->type;
         if (op_token->type == TokenType::GT &&
             lookahead(1)->type == TokenType::GT) { // check RSHIFT >> operator
@@ -723,6 +733,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
 Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
     auto node = create_node(NodeType::FnCallExpr, fn_expr->token);
     node->data.fn_call_expr.fn_ref_expr = fn_expr;
+    assert(fn_expr && node->data.fn_call_expr.args.size == 0);
     expect(TokenType::LPAREN);
 
     for (;;) {
@@ -876,6 +887,10 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec decl_spec) {
         Token *token;
         for (;;) {
             token = get();
+            if (token->type == TokenType::END) {
+                error(token, errors::UNEXPECTED_EOF);
+                return node;
+            }
             if (token->type == TokenType::GT) {
                 break;
             }
@@ -930,6 +945,10 @@ void Parser::parse_struct_block(Node *node) {
         consume();
         for (;;) {
             auto token = get();
+            if (token->type == TokenType::END) {
+                error(token, errors::UNEXPECTED_EOF);
+                return;
+            }
             if (token->type == TokenType::LBRACE) {
                 break;
             }
@@ -967,6 +986,10 @@ Node *Parser::parse_construct_expr() {
     Token *token;
     for (;;) {
         token = get();
+        if (token->type == TokenType::END) {
+            error(token, errors::UNEXPECTED_EOF);
+            return node;
+        }
         if (token->type == TokenType::RBRACE) {
             break;
         }
@@ -1043,6 +1066,7 @@ Node *Parser::parse_extern_decl() {
     auto type = expect(TokenType::STRING);
 
     auto node = create_node(NodeType::ExternDecl, kw);
+    node->data.extern_decl = {};
     node->data.extern_decl.type = type;
 
     auto &members = node->data.extern_decl.members;
@@ -1050,6 +1074,10 @@ Node *Parser::parse_extern_decl() {
     Token *token;
     for (;;) {
         token = get();
+        if (token->type == TokenType::END) {
+            error(token, errors::UNEXPECTED_EOF);
+            return node;
+        }
         if (token->type == TokenType::RBRACE) {
             consume();
             break;

@@ -11,7 +11,7 @@
 
 namespace cx {
 
-MAKE_ENUM(TokenType, END, IDEN,
+MAKE_ENUM(TokenType, END, IDEN, ERROR,
 
           // keywords
           KW_BREAK, KW_CASE, KW_VAR, KW_CONST, KW_CONTINUE, KW_DEFAULT, KW_ELSE, KW_ENUM, KW_FOR,
@@ -83,13 +83,9 @@ MAKE_ENUM(TokenType, END, IDEN,
 )
 
 struct Pos {
-    long line, col, offset;
-
-    Pos() {
-        line = -1;
-        col = -1;
-        offset = -1;
-    }
+    long line = -1;
+    long col = -1;
+    long offset = -1;
 
     bool is_valid() { return offset >= 0; }
 };
@@ -100,13 +96,32 @@ struct Token {
         double d;  // floating point value
         int64_t i; // integer value
     } val;
-    string str;
-    TokenType type;
-    Pos pos;
+    string str = "";
+    TokenType type = TokenType::ERROR;
+    Pos pos = {};
 
     string to_string() const;
 
-    Token(TokenType type = TokenType::END) { this->type = type; }
+    Token(TokenType type = TokenType::END) {
+        this->type = type;
+        memset(&val, 0, sizeof(val));
+        switch (type) {
+        case TokenType::BOOL:
+            val.b = false;
+            break;
+        case TokenType::INT:
+            val.i = 0;
+            break;
+        case TokenType::FLOAT:
+            val.d = 0.0;
+            break;
+        case TokenType::CHAR:
+            val.i = 0;
+            break;
+        default:
+            break;
+        }
+    }
 };
 
 typedef func<void(string, Pos)> ErrorFunc;
@@ -114,6 +129,19 @@ typedef map<string, TokenType> KeywordMap;
 
 const long BUF_LEN = 4;
 const uint32_t UTF8_MAX = U'\U0010FFFF';
+
+struct Error {
+    string message = "";
+    Pos pos = {};
+    int range = 0;
+
+    Error(string message, Token token) : message(message), pos(token.pos) {
+        range = token.to_string().size();
+    }
+    Error(string message, Pos pos) : message(message), pos(pos) { range = 1; }
+};
+
+using ErrorHandler = std::function<void(Error)>;
 
 struct Tokenization {
     array<box<Token>> tokens;
@@ -123,8 +151,8 @@ struct Tokenization {
 
 class Lexer {
     static KeywordMap s_keywords;
-    io::Buffer *m_src;
-    Tokenization *m_result;
+    io::Buffer *m_src = nullptr;
+    Tokenization *m_result = nullptr;
 
     char m_buf[BUF_LEN];
     Pos m_pbuf[BUF_LEN];

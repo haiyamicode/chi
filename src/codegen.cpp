@@ -225,6 +225,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::String: {
         return llvm::StructType::create(
             {llvm::Type::getInt8PtrTy(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx)}, "CxString");
+    }
     case TypeKind::Fn: {
         auto &data = type->data.fn;
         auto ret_type = compile_type(data.return_type);
@@ -233,7 +234,6 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             param_types.push_back(compile_type(param));
         }
         return llvm::FunctionType::get(ret_type, param_types, data.is_variadic);
-    }
     }
     default:
         panic("not implemented");

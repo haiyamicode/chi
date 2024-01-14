@@ -2,7 +2,7 @@ BUILD_DIR=build
 BASE=$(shell pwd)
 LOCAL_DIR=local
 CHI = $(BUILD_DIR)/src/bin/chi
-TEST_FILE ?= $(LOCAL_DIR)/test.chi
+TEST_FILE ?= $(LOCAL_DIR)/test.xc
 BUILD_MODE ?= Debug
 
 all: debug

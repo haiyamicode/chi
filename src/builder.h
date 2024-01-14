@@ -24,7 +24,7 @@ struct BuildContext {
     codegen::Compiler create_compiler();
 };
 
-enum class BuildMode { Run, Executable, AST };
+enum class BuildMode { Run, Executable, AST, Fuzz };
 
 class Builder : Allocator {
     bool m_debug_mode = false;

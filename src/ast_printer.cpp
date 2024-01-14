@@ -318,9 +318,13 @@ void AstPrinter::print_node(Node *node) {
         print("}}\n");
         break;
     }
+    case NodeType::Error: {
+        print("{}", node->token->to_string());
+        break;
+    }
     default:
         print("\n");
-        panic("unhandled {}", PRINT_ENUM(node->type));
+        panic("unhandled node {}", PRINT_ENUM(node->type));
     }
 }
 
