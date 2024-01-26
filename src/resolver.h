@@ -13,8 +13,9 @@
 namespace cx {
 struct Allocator {
     virtual ast::Node *create_node(ast::NodeType type) = 0;
-
     virtual ChiType *create_type(TypeKind kind) = 0;
+    virtual Scope *create_scope(Scope *parent) = 0;
+    virtual Token *create_token() = 0;
 };
 
 struct SystemTypes {
@@ -53,6 +54,7 @@ struct ResolveScope {
     ChiType *value_type = nullptr;
     int64_t next_enum_value = 0;
     ast::Node *parent_loop = nullptr;
+    bool is_escaping = false;
 
     ResolveScope set_parent_fn(ChiType *fn) const;
 
@@ -61,6 +63,8 @@ struct ResolveScope {
     ResolveScope set_value_type(ChiType *value_type) const;
 
     ResolveScope set_parent_loop(ast::Node *loop) const;
+
+    ResolveScope set_is_escaping(bool is_escaping) const;
 };
 
 class Resolver {
@@ -71,6 +75,10 @@ class Resolver {
     void set_tmod(ast::Node *iden, ChiType *type) { m_tmods[iden->data.identifier.decl] = type; }
 
     void unset_tmod(ast::Node *iden) { m_tmods.unset(iden->data.identifier.decl); }
+
+    LANG_FLAG get_lang_flags() { return m_module->get_lang_flags(); }
+
+    bool is_managed() { return has_lang_flag(get_lang_flags(), LANG_FLAG_MANAGED); }
 
     ChiType *create_type(TypeKind kind);
 
@@ -173,15 +181,16 @@ class Resolver {
 
     bool type_is_int(ChiType *type) {
         return type->kind == TypeKind::Int || type->kind == TypeKind::Bool ||
-               type->kind == TypeKind::Pointer;
+               type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference;
     }
 
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);
+
+    ast::Node *find_root_decl(ast::Node *node);
 };
 
 class ScopeResolver {
     Resolver *m_resolver = nullptr;
-    array<box<Scope>> m_scopes = {};
     Scope *m_current_scope = nullptr;
 
   public:
@@ -196,5 +205,7 @@ class ScopeResolver {
     Scope *push_scope(ast::Node *owner);
 
     void pop_scope();
+
+    bool is_top_level() { return m_current_scope->parent == nullptr; }
 };
 } // namespace cx

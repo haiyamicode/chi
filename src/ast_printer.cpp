@@ -75,6 +75,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::TypeParam:
     case NodeType::ParamDecl: {
         auto &data = node->data.param_decl;
+        if (data.is_variadic) {
+            print("...");
+        }
         print(node->name);
         print(" ");
         print_node(data.type);
@@ -344,8 +347,7 @@ void AstPrinter::print_node_list(array<Node *> *list) {
 }
 
 void AstPrinter::print_declspec(DeclSpec *declspec) {
-    auto flags = declspec->flags;
-    if (flags & DECL_EXPORTED) {
+    if (declspec_has_flag(*declspec, DECL_EXPORTED)) {
         print("export ");
     }
 }

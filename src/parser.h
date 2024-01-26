@@ -18,17 +18,25 @@ using namespace cx::ast;
 namespace cx {
 struct ParseContext {
     Module *module;
-    array<box<Token>> *tokens;
     Allocator *allocator;
     ScopeResolver *resolver;
     bool debug_mode = false;
     optional<ErrorHandler> error_handler = {};
+    array<Token *> tokens;
+
+    void add_token_results(array<box<Token>> &token_results) {
+        for (auto &token : token_results) {
+            auto tok = allocator->create_token();
+            *tok = *token;
+            tokens.add(tok);
+        }
+    }
 };
 
 class Parser {
     ParseContext *m_ctx;
     size_t m_toki = 0;
-    Token m_eof_token;
+    Token *m_eof_token;
     map<Node *, size_t> m_block_pos;
 
     Token *next();
@@ -50,8 +58,6 @@ class Parser {
     void save_block_pos(Node *node) { m_block_pos[node] = m_toki; }
 
     void consume() { read(); }
-
-    bool is_c_header() { return m_ctx->module->kind == ModuleKind::HEADER; }
 
     template <typename... Args> void error(Token *token, const char *format, const Args &...args) {
         auto message = fmt::format(format, args...);

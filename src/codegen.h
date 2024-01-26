@@ -14,48 +14,65 @@
 #include "resolver.h"
 
 namespace cx {
-namespace codegen {
 struct CompilationContext;
+
+namespace codegen {
+struct CodegenContext;
 typedef void *unknown_t;
+typedef llvm::BasicBlock label_t;
 
 struct VarLabel {
-    unknown_t label;
+    label_t *label = nullptr;
     ast::Node *var = nullptr;
-};
-
-struct LoopLabels {
-    unknown_t start;
-    unknown_t end;
 };
 
 typedef std::list<VarLabel> VarLabels;
 
+struct LoopLabels {
+    label_t *start = nullptr;
+    label_t *end = nullptr;
+};
+
+struct BlockScope {
+    VarLabels vars = {};
+    bool returned = false;
+};
+
 struct Function {
-    string qualified_name;
-    ast::Node *node;
-    CompilationContext *ctx;
-    llvm::Function *llvm_fn;
+    string qualified_name = "";
+    ast::Node *node = nullptr;
+    CodegenContext *ctx = nullptr;
+    llvm::Function *llvm_fn = nullptr;
 
-    llvm::Value *is_returning;
-    llvm::Value *return_value;
-    std::list<VarLabels> return_labels; // state value
+    llvm::Value *is_returning = nullptr;
+    llvm::Value *return_value = nullptr;
+    label_t *return_label = nullptr;
+    ChiTypeSubtype *container_subtype = nullptr;
+
+    std::list<BlockScope> block_scopes;
+    std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
-    ChiTypeSubtype *container_subtype;
 
-    Function(CompilationContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
+    Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
 
     const char *get_llvm_name() const { return qualified_name.c_str(); }
 
     unknown_t get_null_constant();
-
-    unknown_t *get_return_label() { return &return_labels.back().back().label; }
-    VarLabels *push_return_scope() { return &return_labels.emplace_back(); }
-    void pop_return_scope() { return_labels.pop_back(); }
+    BlockScope *push_scope() {
+        auto scope = &block_scopes.emplace_back();
+        scope_stack.push_back(scope);
+        return scope;
+    }
+    void pop_scope() { scope_stack.pop_back(); }
+    BlockScope *get_scope() { return &block_scopes.back(); }
 
     LoopLabels *push_loop() { return &loop_labels.emplace_back(); }
     void pop_loop() { loop_labels.pop_back(); }
     LoopLabels *get_loop() { return &loop_labels.back(); }
+
+    label_t *new_label(const string &name = "", label_t *insert_before = nullptr);
+    void use_label(label_t *bb);
 };
 
 struct StructField {
@@ -81,25 +98,12 @@ struct Array {
     unknown_t elem_size;
 };
 
-struct ValueRef {
-    unknown_t address;
-    unknown_t type;
-    Function *fn_ref = nullptr;
-    ValueRef(const unknown_t &_address, unknown_t _type) : address(_address), type(_type) {}
-    ValueRef() {}
-};
-
 struct WrappedType {
     unknown_t type;
     unknown_t elem;
     unknown_t elem_size;
 
     unknown_t get_opt_flag_offset() { return elem_size; }
-};
-
-struct CompilationSettings {
-    string output_obj_to_file;
-    string output_ir_to_file;
 };
 
 struct StructData {
@@ -121,8 +125,15 @@ struct ImplInfo {
 
 typedef array<void *> JumpTable;
 
-struct CompilationContext {
+struct CompilationSettings {
+    string output_obj_to_file = "";
+    string output_ir_to_file = "";
+    uint32_t lang_flags = LANG_FLAG_NONE;
+};
+
+struct CodegenContext {
     CompilationSettings settings;
+    CompilationContext *compilation_ctx = nullptr;
     Resolver resolver;
 
     array<box<Function>> functions;
@@ -136,14 +147,16 @@ struct CompilationContext {
     map<TypeId, llvm::Type *> type_table = {};
     map<TypeId, box<TypeInfo>> info_table = {};
     map<ast::Node *, Function *> function_table = {};
+    map<string, Function *> system_functions = {};
+    map<ChiType *, llvm::Value *> typeinfo_table = {};
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx;
     box<llvm::Module> llvm_module;
     box<llvm::IRBuilder<>> llvm_builder;
 
-    CompilationContext(ResolveContext *rctx);
-    ~CompilationContext();
+    CodegenContext(CompilationContext *compilation_ctx);
+    ~CodegenContext();
 
     void init_llvm();
 
@@ -154,7 +167,7 @@ enum ArrayOp { Destroy, Copy };
 enum ArrayFlag { None, Static };
 
 class Compiler {
-    CompilationContext *m_ctx;
+    CodegenContext *m_ctx;
     Function *m_fn = nullptr;
 
     llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
@@ -164,7 +177,6 @@ class Compiler {
     }
 
     Resolver *get_resolver() { return &m_ctx->resolver; }
-
     SystemTypes *get_system_types() { return get_resolver()->get_system_types(); }
 
     ChiType *eval_type(ChiType *type);
@@ -229,21 +241,21 @@ class Compiler {
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
 
+    llvm::Value *compile_expr_ref(Function *fn, ast::Node *expr);
+
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call);
 
-    unknown_t compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
-                                    const unknown_t &op1, const unknown_t &op2);
+    llvm::Value *compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
+                                       llvm::Value *op1, llvm::Value *op2);
 
-    unknown_t compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
+    llvm::Value *compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 
-    unknown_t compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
+    llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
 
-    unknown_t compile_conversion(Function *fn, const unknown_t &value, ChiType *from_type,
-                                 ChiType *to_type);
+    llvm::Value *compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
+                                    ChiType *to_type);
 
-    unknown_t compile_value_copy(Function *fn, const unknown_t &value, ChiType *type);
-
-    ValueRef compile_value_ref(Function *fn, ast::Node *expr);
+    llvm::Value *compile_value_copy(Function *fn, const unknown_t &value, ChiType *type);
 
     llvm::Value *compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type);
 
@@ -265,6 +277,8 @@ class Compiler {
 
     unknown_t create_string_constant(Function *fn, const char *str);
 
+    llvm::Value *compile_alloc(Function *fn, ast::Node *decl);
+
     void compile_stmt(Function *fn, ast::Node *stmt);
 
     void compile_block(Function *fn, ast::Node *parent, ast::Node *block);
@@ -280,11 +294,15 @@ class Compiler {
 
     void compile_cprintf(Function *fn, const char *s);
     void compile_debug_i(Function *fn, const char *prefix, const unknown_t &v);
+    Function *get_system_fn(const string &name);
+    llvm::Value *compile_type_info(ChiType *type);
 
   public:
-    Compiler(CompilationContext *ctx);
+    Compiler(CodegenContext *ctx);
 
-    CompilationContext *get_context() { return m_ctx; }
+    CodegenContext *get_context() { return m_ctx; }
+    CompilationSettings *get_settings() { return &m_ctx->settings; }
+    bool is_managed() { return has_lang_flag(get_settings()->lang_flags, LANG_FLAG_MANAGED); }
 
     TypeInfo *get_type_info(ChiType *type);
 

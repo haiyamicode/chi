@@ -36,7 +36,10 @@ static string get_token_type_repr(TokenType token_type) {
     }
 }
 
-Parser::Parser(ParseContext *ctx) { m_ctx = ctx; }
+Parser::Parser(ParseContext *ctx) {
+    m_ctx = ctx;
+    m_eof_token = m_ctx->allocator->create_token();
+}
 
 void Parser::parse() { m_ctx->module->root = parse_root(); }
 
@@ -103,10 +106,10 @@ void Parser::unexpected(Token *token) {
 }
 
 Token *Parser::next() {
-    if (m_toki >= m_ctx->tokens->size) {
-        return &m_eof_token;
+    if (m_toki >= m_ctx->tokens.size) {
+        return m_eof_token;
     }
-    return m_ctx->tokens->at(m_toki++).get();
+    return m_ctx->tokens.at(m_toki++);
 }
 
 Token *Parser::read() { return next(); }
@@ -118,10 +121,10 @@ void Parser::unread() { m_toki--; }
 Token *Parser::get() { return lookahead(0); }
 
 Token *Parser::lookahead(int n) {
-    if (m_toki + n >= m_ctx->tokens->size) {
-        return &m_eof_token;
+    if (m_toki + n >= m_ctx->tokens.size) {
+        return m_eof_token;
     }
-    return m_ctx->tokens->at(m_toki + n).get();
+    return m_ctx->tokens.at(m_toki + n);
 }
 
 bool Parser::at_comma(TokenType end_token) {
@@ -185,7 +188,7 @@ void Parser::parse_top_level_decls(NodeList *decls) {
 
         // add export if exported
         if (decl->type == NodeType::FnDef) {
-            if (decl->data.fn_def.decl_spec.flags & DECL_EXPORTED) {
+            if (declspec_has_flag(decl->data.fn_def.decl_spec, DECL_EXPORTED)) {
                 m_ctx->module->exports.add(decl);
             }
         } else if (decl->type == NodeType::StructDecl) {
@@ -473,12 +476,12 @@ void Parser::parse_fn_params(NodeList *params) {
 }
 
 Node *Parser::parse_fn_param() {
-    auto iden = expect(TokenType::IDEN);
     bool is_variadic = false;
     if (next_is(TokenType::ELLIPSIS)) {
         consume();
         is_variadic = true;
     }
+    auto iden = expect(TokenType::IDEN);
     auto type = parse_type_expr();
     auto param = create_node(NodeType::ParamDecl, iden);
     param->data.param_decl.type = type;
@@ -1088,7 +1091,7 @@ Node *Parser::parse_extern_decl() {
         members.add(fn);
 
         // add export if exported
-        if (fn->data.fn_def.decl_spec.flags & DECL_EXPORTED) {
+        if (declspec_has_flag(fn->data.fn_def.decl_spec, DECL_EXPORTED)) {
             m_ctx->module->exports.add(fn);
         }
     }

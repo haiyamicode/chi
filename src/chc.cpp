@@ -17,6 +17,7 @@ int main(int argc, char *argv[]) {
     string file_name;
     array<int> z;
     string flag;
+    bld.build_mode = BuildMode::Executable;
     bool fuzz_mode = false;
 
     int state = 0;
@@ -25,14 +26,11 @@ int main(int argc, char *argv[]) {
         if (arg[0] == '-') {
             flag = arg.substr(1);
             if (flag == "d") {
-                bld.set_debug_mode(true);
-            } else if (flag == "s") {
-                bld.set_assembly_mode(true);
+                bld.debug_mode = true;
             } else if (flag == "o") {
-                bld.set_build_mode(BuildMode::Executable);
                 state = 1;
             } else if (flag == "a") {
-                bld.set_build_mode(BuildMode::AST);
+                bld.build_mode = BuildMode::AST;
             } else if (flag == "w") {
                 state = 2;
             } else if (flag == "fuzz") {
@@ -43,10 +41,10 @@ int main(int argc, char *argv[]) {
             }
         } else {
             if (state == 1) {
-                bld.set_output_file_name(arg);
+                bld.output_file_name = arg;
                 state = 0;
             } else if (state == 2) {
-                bld.set_working_dir(arg);
+                bld.working_dir = arg;
                 state = 0;
             } else {
                 file_name = arg;
@@ -59,7 +57,7 @@ int main(int argc, char *argv[]) {
     }
 
     if (fuzz_mode) {
-        auto N_TIMES = 1;
+        auto N_TIMES = std::getenv("TIMES") ? std::atoi(std::getenv("TIMES")) : 1000;
         print("runnning compilation {} times on {}...\n", N_TIMES, file_name);
         for (int i = 0; i < N_TIMES; i++) {
             Analyzer analyzer;
@@ -68,6 +66,12 @@ int main(int argc, char *argv[]) {
             analyzer.process_file(pkg, file_name);
         }
     } else {
+        if (bld.build_mode == BuildMode::Executable) {
+            if (bld.output_file_name.empty()) {
+                print("error: output file name is not specified\n");
+                return 1;
+            }
+        }
         bld.build_program(file_name);
     }
     return 0;

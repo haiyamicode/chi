@@ -17,12 +17,16 @@ struct CxString {
     uint32_t size;
 };
 
+struct Data64ab {
+    char a[8];
+    char b[8];
+};
+
 struct CxAny {
     TypeInfo *type;
-    struct {
-        void *a;
-        void *b;
-    } data;
+
+    // store 16 bytes of data
+    char data[16];
 };
 
 struct CxArray {
@@ -49,6 +53,10 @@ void cx_printf(CxString format, CxSlice values);
 
 void cx_print(CxString str);
 
+void cx_print_any(CxAny *value);
+
+void cx_print_number(uint64_t value);
+
 void cx_array_construct(CxArray *dest);
 
 void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap);
@@ -64,6 +72,9 @@ void cx_panic(const char *s);
 void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
+
+void cx_runtime_start(void *stack);
+void cx_runtime_stop();
 
 #ifdef __cplusplus
 }

@@ -40,6 +40,7 @@ struct ChiTypeFn {
     ChiType *container = nullptr;
 
     ChiType *get_param_at(size_t index);
+    int get_va_start();
 };
 
 struct ChiStructMember {
@@ -194,8 +195,6 @@ struct ChiType {
 };
 
 struct Scope {
-    typedef array<ast::Node *> NodeList;
-
     Scope *parent = nullptr;
     ast::Node *owner = nullptr;
 
@@ -203,23 +202,32 @@ struct Scope {
 
     ast::Node *find_one(const string &symbol);
 
-    NodeList *find_all(const string &symbol);
+    array<ast::Node *> get_all();
 
     void put(const string &name, ast::Node *node);
 
   private:
-    map<string, NodeList> symbols = {};
+    map<string, ast::Node *> symbols = {};
 };
 
 struct TypeInfo {
-    ChiType *itype = nullptr;
+    int32_t kind = 0;
     int32_t size = 0;
-    union {
-        struct {
-            TypeInfo *elem = nullptr;
-        } ptr;
-    } data;
+
+    // store 32 bytes of data
+    char data[32];
 };
+
+union TypeInfoData {
+    ChiTypeInt int_;
+};
+
+enum LANG_FLAG : uint32_t {
+    LANG_FLAG_NONE = 0,
+    LANG_FLAG_MANAGED = 1 << 0,
+};
+
+inline bool has_lang_flag(uint32_t flags, LANG_FLAG flag) { return (flags & flag) != 0; }
 
 typedef int64_t const_int_t;
 typedef double const_float_t;

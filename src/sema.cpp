@@ -54,27 +54,26 @@ string ChiStructMember::get_name() { return node->name; }
 
 ast::Node *Scope::find_one(const string &symbol) {
     if (auto val = symbols.get(symbol)) {
-        return val->at(0);
+        return *val;
     }
     return nullptr;
 }
 
-Scope::NodeList *Scope::find_all(const string &symbol) {
-    if (auto list = symbols.get(symbol)) {
-        return list;
+array<ast::Node *> Scope::get_all() {
+    array<ast::Node *> list = {};
+    for (auto entry : symbols.data) {
+        list.add(entry.second);
     }
-    return nullptr;
+    return list;
 }
 
-void Scope::put(const string &name, ast::Node *node) {
-    symbols[name];
-    symbols[name].add(node);
-}
+void Scope::put(const string &name, ast::Node *node) { symbols[name] = node; }
 
 ChiType *ChiTypeFn::get_param_at(size_t index) {
-    auto va_start = params.size - (int)is_variadic;
-    return index < va_start ? params[index] : params.last()->get_elem();
+    return index < get_va_start() ? params[index] : params.last()->get_elem();
 }
+
+int ChiTypeFn::get_va_start() { return params.size - (int)is_variadic; }
 
 ChiType *ChiType::get_elem() {
     switch (kind) {

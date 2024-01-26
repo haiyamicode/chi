@@ -35,7 +35,8 @@ void cx_string_concat(CxString *dest, CxString s1, CxString s2) {
 }
 
 static std::string istringf(const CxAny &v) {
-    auto &spec = v.type->itype->data.int_;
+    auto typedata = (TypeInfoData *)v.type->data;
+    auto &spec = typedata->int_;
 
 #define _FORMAT_INT(T, v) fmt::format("{}", *(T *)&v.data)
     if (!spec.is_unsigned) {
@@ -57,7 +58,7 @@ static std::string istringf(const CxAny &v) {
 }
 
 static std::string stringf(const CxAny &v) {
-    switch (v.type->itype->kind) {
+    switch ((TypeKind)v.type->kind) {
     case TypeKind::String: {
         auto s = (CxString *)&v.data;
         return fmt::format(s->data);
@@ -68,15 +69,14 @@ static std::string stringf(const CxAny &v) {
         return istringf(v);
     case TypeKind::Pointer:
         return fmt::format("{:#x}", *(intptr_t *)&v.data);
-    case TypeKind::Reference:
-        CxAny a;
-        a.type = v.type->data.ptr.elem;
-        memcpy(&a.data, v.data.a, (size_t)a.type->size);
-        return stringf(a);
     default:
-        return fmt::format("<{}>", PRINT_ENUM(v.type->itype->kind));
+        return fmt::format("<{}>", PRINT_ENUM(v.type->kind));
     }
 }
+
+void cx_print_any(CxAny *value) { fmt::print(stringf(*value)); }
+
+void cx_print_number(uint64_t value) { fmt::print("{}\n", value); }
 
 static string format_cstr(CxString format, const CxSlice &values) {
     int val_i = 0;
@@ -172,9 +172,14 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
 }
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
-    auto p = tgc_alloc(&gc, size);
-    if (dtor) {
-        tgc_set_dtor(&gc, p, dtor);
-    }
-    return p;
+    return malloc(size);
+    // auto p = tgc_alloc(&gc, size);
+    // if (dtor) {
+    //     tgc_set_dtor(&gc, p, dtor);
+    // }
+    // return p;
 }
+
+void cx_runtime_start(void *stack) { tgc_start(&gc, stack); }
+
+void cx_runtime_stop() { tgc_stop(&gc); }

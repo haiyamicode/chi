@@ -9,7 +9,7 @@ execute_process(COMMAND llvm-config --libfiles --link-shared OUTPUT_VARIABLE LLV
 message(STATUS "LLVM libs: " ${LLVM_LIBS})
 
 set(HEADER_FILES builder.h codegen.h util.h sema.h resolver.h lexer.h parser.h include/enum.h ast.h errors.h ast_printer.h internals.h include/optional.h include/variant.h include/backward.hpp include/tgc/tgc.h)
-set(SOURCE_FILES analyzer.cpp builder.cpp codegen.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast_printer.cpp internals.cpp include/tgc/tgc.c)
+set(SOURCE_FILES analyzer.cpp builder.cpp context.cpp codegen.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast_printer.cpp internals.cpp include/tgc/tgc.c)
 set(LIBS CONAN_PKG::fmt ${LLVM_LIBS} pthread dl)
 
 # Compiler executable

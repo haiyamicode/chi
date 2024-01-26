@@ -42,7 +42,7 @@ void Resolver::context_init_primitives() {
     system_types.bool_ = create_type(TypeKind::Bool);
     system_types.string = create_type(TypeKind::String);
     system_types.str_lit = create_pointer_type(system_types.char_, TypeKind::Pointer);
-    // system_types.array = create_type(TypeKind::Array);
+    system_types.array = create_type(TypeKind::Array);
     system_types.optional = create_type(TypeKind::Optional);
     system_types.box = create_type(TypeKind::Box);
 
@@ -56,7 +56,7 @@ void Resolver::context_init_primitives() {
     add_primitive("float", system_types.float_);
     add_primitive("double", system_types.double_);
     add_primitive("optional", system_types.optional);
-    // add_primitive("array", system_types.array);
+    add_primitive("array", system_types.array);
     add_primitive("box", system_types.box);
     add_primitive("uint8", system_types.uint8);
     add_primitive("int8", create_int_type(8, false));
@@ -93,7 +93,7 @@ ChiType *Resolver::node_get_type(ast::Node *node) { return node->resolved_type; 
 
 void Resolver::resolve(ast::Package *package) {
     for (auto &module : package->modules) {
-        resolve(&module);
+        resolve(module.get());
     }
 }
 
@@ -112,6 +112,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
         return from_type->kind == TypeKind::Void;
     case TypeKind::String:
         return from_type->kind == TypeKind::String || from_type == get_system_types()->str_lit;
+    case TypeKind::Array:
+        return from_type->kind == TypeKind::Array &&
+               can_assign(from_type->get_elem(), to_type->get_elem());
     case TypeKind::Pointer:
     case TypeKind::Reference: {
         auto tt = to_type->get_elem();
@@ -174,6 +177,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             resolve(decl, scope);
             if (decl->type == NodeType::FnDef && decl->name == "main") {
                 node->module->package->entry_fn = decl;
+                decl->data.fn_def.decl_spec.flags |= ast::DECL_IS_ENTRY;
             }
         }
 
@@ -242,6 +246,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             if (pdata.is_variadic) {
                 param_type = get_array_type(param_type);
                 param->resolved_type = param_type;
+                type->data.fn.is_variadic = true;
             }
             type->data.fn.params.add(param_type);
             if (param_type->is_placeholder) {
@@ -355,7 +360,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
-            return get_pointer_type(t, TypeKind::Reference);
+            if (scope.is_escaping) {
+                auto decl = find_root_decl(data.op1);
+                decl->escape.escaped = true;
+            }
+            return get_pointer_type(t, is_managed() ? TypeKind::Reference : TypeKind::Pointer);
         }
         default:
             unreachable();
@@ -387,7 +396,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
     }
     case NodeType::ReturnStmt: {
         auto &data = node->data.return_stmt;
-        auto expr_type = data.expr ? resolve(data.expr, scope) : get_system_types()->void_;
+        auto expr_scope = scope.set_is_escaping(true);
+        auto expr_type = data.expr ? resolve(data.expr, expr_scope) : get_system_types()->void_;
         assert(scope.parent_fn);
         auto return_type = scope.parent_fn->data.fn.return_type;
         check_assignment(data.expr, expr_type, return_type);
@@ -904,8 +914,13 @@ ChiType *Resolver::get_pointer_type(ChiType *elem, TypeKind kind) {
 }
 
 ChiType *Resolver::get_array_type(ChiType *elem) {
-    panic("TODO");
-    return get_system_types()->void_;
+    if (auto cached = m_ctx->array_of.get(elem)) {
+        return *cached;
+    }
+    auto type = create_type(TypeKind::Array);
+    type->data.array.elem = elem;
+    m_ctx->array_of[elem] = type;
+    return type;
 }
 
 ChiType *Resolver::create_int_type(int bit_count, bool is_unsigned) {
@@ -1136,8 +1151,23 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
     }
 }
 
+ast::Node *Resolver::find_root_decl(ast::Node *node) {
+    switch (node->type) {
+    case NodeType::Identifier:
+        return node->data.identifier.decl;
+    case NodeType::DotExpr:
+        return find_root_decl(node->data.dot_expr.expr);
+    case NodeType::ParenExpr:
+        return find_root_decl(node->data.child_expr);
+    default:
+        panic("unhandled find_root_decl {}", PRINT_ENUM(node->type));
+    }
+    return nullptr;
+}
+
 Scope *ScopeResolver::push_scope(ast::Node *owner) {
-    m_current_scope = m_scopes.emplace(std::make_unique<Scope>(m_current_scope))->get();
+    auto new_scope = m_resolver->get_context()->allocator->create_scope(m_current_scope);
+    m_current_scope = new_scope;
     m_current_scope->owner = owner;
     return m_current_scope;
 }
@@ -1193,4 +1223,8 @@ ResolveScope ResolveScope::set_value_type(ChiType *value_type) const {
 
 ResolveScope ResolveScope::set_parent_loop(ast::Node *loop) const {
     RS_SET_PROP_COPY(parent_loop, loop);
+}
+
+ResolveScope ResolveScope::set_is_escaping(bool is_escaping) const {
+    RS_SET_PROP_COPY(is_escaping, is_escaping);
 }

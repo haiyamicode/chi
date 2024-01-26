@@ -2,7 +2,7 @@ BUILD_DIR=build
 BASE=$(shell pwd)
 LOCAL_DIR=local
 CHI = $(BUILD_DIR)/src/bin/chi
-TEST_FILE ?= $(LOCAL_DIR)/test.xc
+INPUT_FILE ?= $(LOCAL_DIR)/test.xc
 BUILD_MODE ?= Debug
 
 all: debug
@@ -19,16 +19,16 @@ install:
 	cd $(BUILD_DIR) && $(MAKE) install
 
 asm: build
-	$(CHI) -s $(TEST_FILE) 
+	$(CHI) -s $(INPUT_FILE) 
 
 run: build
-	$(CHI) $(TEST_FILE) -w local/build
+	$(CHI) $(INPUT_FILE) -o local/test -w local/build
 
 debug: build
-	$(CHI) -d $(TEST_FILE) -w local/build
+	$(CHI) -d $(INPUT_FILE) -o local/test -w local/build
 
 ast: build
-	$(CHI) -a $(TEST_FILE)
+	$(CHI) -a $(INPUT_FILE)
 
 test: test_jit
 

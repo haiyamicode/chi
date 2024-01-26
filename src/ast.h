@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2018 Hai Thanh Nguyen
  *
@@ -13,13 +14,14 @@ namespace cx {
 namespace ast {
 struct Node;
 struct Package;
+struct Scope;
 
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl);
 
-MAKE_ENUM(ModuleKind, XC, XM, HEADER)
+MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(FnBodyMode, Optional, Required, None);
 
 enum DeclFlag : uint32_t {
@@ -27,6 +29,7 @@ enum DeclFlag : uint32_t {
     DECL_EXPORTED = 1 << 0,
     DECL_PRIVATE = 1 << 1,
     DECL_EXTERN = 1 << 2,
+    DECL_IS_ENTRY = 1 << 3,
 };
 
 struct Module {
@@ -34,19 +37,42 @@ struct Module {
     Node *root = nullptr;
     Package *package = nullptr;
     string path = "";
+    string name = "";
     array<Node *> imports = {};
     array<Node *> exports = {};
     array<Error> errors = {};
+    cx::Scope *scope = nullptr;
+
+    static ModuleKind kind_from_extension(const string &ext) {
+        if (ext == ".xc") {
+            return ModuleKind::XC;
+        } else if (ext == ".x") {
+            return ModuleKind::XM;
+        } else {
+            panic("unknown module extension: {}", ext);
+        }
+        return ModuleKind::XC;
+    }
+
+    LANG_FLAG get_lang_flags() const {
+        if (kind == ModuleKind::XM) {
+            return LANG_FLAG_MANAGED;
+        }
+        return LANG_FLAG_NONE;
+    }
 };
 
 enum class PackageKind { BUILTIN, DEFAULT };
 
 struct Package {
-    array<Module> modules = {};
+    array<box<Module>> modules = {};
     Node *entry_fn = nullptr;
     string root_src_dir = "";
     string root_src_path = "";
     PackageKind kind = PackageKind::DEFAULT;
+    string name = "";
+
+    Module *add_module() { return modules.emplace(new Module())->get(); }
 };
 
 struct Root {
@@ -56,6 +82,8 @@ struct Root {
 struct DeclSpec {
     uint32_t flags = DECL_NONE;
 };
+
+inline bool declspec_has_flag(DeclSpec &spec, DeclFlag flag) { return (spec.flags & flag) != 0; }
 
 struct FnProto {
     array<Node *> params = {};
@@ -214,6 +242,10 @@ struct PrefixExpr {
     Node *expr;
 };
 
+struct EscapeAnalysis {
+    bool escaped = false;
+};
+
 struct Node {
     NodeType type = NodeType::Error;
     Token *token = nullptr;
@@ -221,6 +253,7 @@ struct Node {
     string name = "";
     ChiType *resolved_type = nullptr;
     ChiType *orig_type = nullptr;
+    EscapeAnalysis escape = {};
 
     union NodeData {
         Root root;
@@ -306,6 +339,8 @@ struct Node {
             break;
         }
     }
+
+    bool is_heap_allocated() { return escape.escaped; }
 };
 } // namespace ast
 

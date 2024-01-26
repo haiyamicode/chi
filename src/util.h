@@ -45,7 +45,7 @@ template <typename... Args> static inline void panic(const char *format, const A
     fmt::print(format, args...);
     fmt::print("\n");
     trace();
-    exit(1);
+    abort();
 }
 
 template <typename T>
@@ -202,7 +202,7 @@ template <typename T> struct array {
 
 template <typename K, typename V> struct map {
     typedef std::unordered_map<K, V> Map;
-    Map data;
+    Map data = {};
 
     template <typename... Args> V *emplace(const K &key, Args &&...args) {
         return &data.emplace(std::piecewise_construct, std::forward_as_tuple(key),
@@ -228,6 +228,9 @@ template <typename K, typename V> struct map {
             return nullptr;
         }
     }
+
+    void clear() { data.clear(); }
+    size_t size() { return data.size(); }
 };
 
 namespace io {

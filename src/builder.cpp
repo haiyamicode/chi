@@ -17,29 +17,16 @@
 using namespace cx;
 namespace fs = std::filesystem;
 
-BuildContext::BuildContext(cx::Allocator *allocator)
-    : resolve_ctx(new ResolveContext(allocator)),
-      codegen_ctx(new codegen::CompilationContext(resolve_ctx.get())) {}
+codegen::Compiler Builder::create_codegen_compiler() { return {m_codegen_ctx.get()}; }
 
-codegen::Compiler BuildContext::create_compiler() { return {codegen_ctx.get()}; }
-
-Builder::Builder() : m_ctx(this) {}
+Builder::Builder() : m_ctx(), m_codegen_ctx(nullptr) {
+    m_codegen_ctx.reset(new codegen::CodegenContext(&m_ctx));
+}
 
 ast::Module *Builder::process_source(ast::Package *package, io::Buffer *src,
                                      const string &file_name) {
     auto parts = string_split(file_name, ".");
-    auto kind = ModuleKind::XC;
-    if (!parts.empty()) {
-        auto ext = parts[parts.size() - 1];
-        if (ext == "h") {
-            kind = ModuleKind::HEADER;
-        }
-    }
-
-    auto module = package->modules.emplace();
-    module->package = package;
-    module->path = file_name;
-    module->kind = kind;
+    auto module = m_ctx.module_from_path(package, file_name);
 
     Tokenization tokenization;
     Lexer lexer(src, &tokenization);
@@ -52,17 +39,18 @@ ast::Module *Builder::process_source(ast::Package *package, io::Buffer *src,
 
     auto resolver = m_ctx.create_resolver();
     ScopeResolver scope_resolver(&resolver);
+    module->scope = scope_resolver.get_scope();
     ParseContext pc;
     pc.resolver = &scope_resolver;
     pc.module = module;
-    pc.tokens = &tokenization.tokens;
-    pc.allocator = this;
-    pc.debug_mode = m_debug_mode;
+    pc.allocator = &m_ctx;
+    pc.debug_mode = debug_mode;
+    pc.add_token_results(tokenization.tokens);
 
     Parser parser(&pc);
     parser.parse();
 
-    if (m_build_mode == BuildMode::AST) {
+    if (build_mode == BuildMode::AST) {
         print_ast(module->root);
     }
 
@@ -80,53 +68,51 @@ void Builder::build_runtime() {
     resolver.context_init_primitives();
 
     auto package = add_package();
+    package->name = "__runtime";
     package->kind = PackageKind::BUILTIN;
     auto rt_source = io::Buffer::from_string(runtime::source);
-    auto module = process_source(package, &rt_source, "runtime.chi");
+    auto module = process_source(package, &rt_source, "runtime.xc");
     resolver.context_init_builtins(module);
 
-    auto compiler = m_ctx.create_compiler();
+    auto compiler = create_codegen_compiler();
     compiler.compile_module(module);
 }
 
 void Builder::build_single_file(ast::Package *package, const string &file_name) {
-    build_runtime();
-
     auto module = process_file(package, file_name);
-    auto compiler = m_ctx.create_compiler();
+    auto compiler = create_codegen_compiler();
+    auto settings = compiler.get_settings();
+    settings->output_obj_to_file = get_tmp_file_path("main.o");
+    settings->output_ir_to_file = get_tmp_file_path("main.ll");
+    settings->lang_flags = module->get_lang_flags();
     compiler.compile_module(module);
-    auto &settings = compiler.get_context()->settings;
-    settings.output_obj_to_file = get_tmp_file_path("main.o");
-    settings.output_ir_to_file = get_tmp_file_path("main.ir");
     compiler.emit_output();
 
-    switch (m_build_mode) {
-    case BuildMode::Run: {
-        break;
+    // produce executable
+    auto cmd = fmt::format("c++ {} -o {} -lchrt", settings->output_obj_to_file, output_file_name);
+    if (debug_mode) {
+        print("running: {}\n", cmd);
     }
-    default:
-        break;
+    auto result = system(cmd.c_str());
+    if (result != 0) {
+        print("error: failed to run command: {}\n", cmd);
     }
 }
 
 void Builder::build_program(const string &entry_file_name) {
-    if (!m_working_dir.empty()) {
-        if (!fs::exists(m_working_dir)) {
-            fs::create_directories(m_working_dir);
+    build_runtime();
+
+    if (!working_dir.empty()) {
+        if (!fs::exists(working_dir)) {
+            fs::create_directories(working_dir);
         }
     }
-    build_single_file(add_package(), entry_file_name);
+    auto package = add_package();
+    package->name = "__main";
+    build_single_file(package, entry_file_name);
 }
-
-Node *Builder::create_node(NodeType type) { return m_ast_nodes.emplace(new Node(type))->get(); }
-
-ChiType *Builder::create_type(TypeKind kind) {
-    return m_types.emplace(new ChiType(kind, m_types.size + 1))->get();
-}
-
-void Builder::set_build_mode(BuildMode value) { m_build_mode = value; }
 
 string Builder::get_tmp_file_path(const string &filename) {
-    auto dir = !m_working_dir.empty() ? fs::path(m_working_dir) : fs::temp_directory_path();
+    auto dir = !working_dir.empty() ? fs::path(working_dir) : fs::temp_directory_path();
     return dir / filename;
 }
