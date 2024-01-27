@@ -66,8 +66,8 @@ class Parser {
             (*fn)(error);
             return;
         }
-        print("{}:{}:{}: error: {}\n", m_ctx->module->path, token->pos.line + 1, token->pos.col + 1,
-              message);
+        print("{}:{}:{}: error: {}\n", m_ctx->module->full_path(), token->pos.line_number(),
+              token->pos.col_number(), message);
         if (m_ctx->debug_mode) {
             panic("parser error");
         } else {

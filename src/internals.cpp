@@ -2,6 +2,8 @@
 // Created by haint on 11/25/18.
 //
 
+#include <inttypes.h>
+#include <libunwind.h>
 #include <sstream>
 
 #include "internals.h"
@@ -159,9 +161,41 @@ void cx_debug(CxString message) { fmt::print(message.data); }
 
 void cx_debug_i(const char *prefix, int value) { fmt::print("{}: {}\n", prefix, value); }
 
-void cx_panic(const char *s) {
-    fmt::print(s);
-    exit(1);
+static void backtrace() {
+    unw_cursor_t cursor;
+    unw_context_t context;
+
+    unw_getcontext(&context);
+    unw_init_local(&cursor, &context);
+
+    int n = 0;
+    while (unw_step(&cursor)) {
+        unw_word_t ip, sp, off;
+
+        unw_get_reg(&cursor, UNW_REG_IP, &ip);
+        unw_get_reg(&cursor, UNW_REG_SP, &sp);
+
+        char symbol[256] = {"<unknown>"};
+        char *name = symbol;
+
+        if (!unw_get_proc_name(&cursor, symbol, sizeof(symbol), &off)) {
+            int status;
+            name = symbol;
+        }
+
+        printf("#%-2d 0x%016" PRIxPTR " sp=0x%016" PRIxPTR " %s + 0x%" PRIxPTR "\n", ++n,
+               static_cast<uintptr_t>(ip), static_cast<uintptr_t>(sp), name,
+               static_cast<uintptr_t>(off));
+
+        if (name != symbol)
+            free(name);
+    }
+}
+
+void cx_panic(CxString message) {
+    fmt::print("panic: {}\n", message.data);
+    backtrace();
+    abort();
 }
 
 void *cx_refc_alloc(CxRefc *dest, uint32_t size) {

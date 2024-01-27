@@ -154,6 +154,9 @@ struct CodegenContext {
     box<llvm::LLVMContext> llvm_ctx;
     box<llvm::Module> llvm_module;
     box<llvm::IRBuilder<>> llvm_builder;
+    box<llvm::DIBuilder> dbg_builder;
+    llvm::DICompileUnit *dbg_cu = nullptr;
+    array<llvm::DIScope *> dbg_scopes = {};
 
     CodegenContext(CompilationContext *compilation_ctx);
     ~CodegenContext();
@@ -183,6 +186,8 @@ class Compiler {
     ChiType *get_chitype(ast::Node *node);
 
     llvm::Type *_compile_type(ChiType *type);
+    llvm::DISubroutineType *compile_di_fn_type(Function *fn);
+    llvm::DIType *compile_di_type(ChiType *type);
 
     unknown_t convert_int_type(ChiType *type);
 
@@ -312,6 +317,7 @@ class Compiler {
 
     Function *compile_end_fn();
 
+    void emit_dbg_location(ast::Node *node);
     void emit_output();
 };
 } // namespace codegen

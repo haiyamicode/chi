@@ -9,6 +9,7 @@
 
 #include <cassert>
 #include <climits>
+#include <filesystem>
 #include <fmt/format.h>
 #include <fstream>
 #include <functional>
@@ -29,6 +30,7 @@ using std::string;
 using stx::optional;
 using namespace mpark;
 using std::stringstream;
+namespace fs = std::filesystem;
 
 #define VARIANT_TRY(value, type, output)                                                           \
     const auto output(get_if<type>(&value));                                                       \

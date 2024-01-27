@@ -64,7 +64,7 @@ void Analyzer::build_runtime() {
     auto package = m_ctx.add_package();
     package->kind = PackageKind::BUILTIN;
     auto rt_source = io::Buffer::from_string(runtime::source);
-    auto module = process_source(package, &rt_source, "runtime.xc");
+    auto module = process_source(package, &rt_source, "__chiroot/runtime.xc");
     resolver.context_init_builtins(module);
 }
 

@@ -141,7 +141,8 @@ class Resolver {
         }
 
         auto pos = node->token->pos;
-        print("{}:{}:{}: error: {}\n", m_module->path, pos.line + 1, pos.col + 1, message);
+        print("{}:{}:{}: error: {}\n", m_module->full_path(), pos.line_number(), pos.col_number(),
+              message);
         exit(1);
     }
 

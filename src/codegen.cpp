@@ -38,6 +38,7 @@ void CodegenContext::init_llvm() {
     llvm_ctx = std::make_unique<llvm::LLVMContext>();
     llvm_module = std::make_unique<llvm::Module>("main", *llvm_ctx);
     llvm_builder = std::make_unique<llvm::IRBuilder<>>(*llvm_ctx);
+    dbg_builder = std::make_unique<llvm::DIBuilder>(*llvm_module);
 }
 
 Compiler::Compiler(CodegenContext *ctx) : m_ctx(ctx) {}
@@ -55,6 +56,12 @@ ChiType *Compiler::eval_type(ChiType *type) {
 ChiType *Compiler::get_chitype(ast::Node *node) { return eval_type(node->resolved_type); }
 
 void Compiler::compile_module(ast::Module *module) {
+    m_ctx->dbg_cu = m_ctx->dbg_builder->createCompileUnit(
+        llvm::dwarf::DW_LANG_C,
+        m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt,
+                                       module->source),
+        "Chi Compiler", 0, "", 0);
+
     auto &root = module->root->data.root;
     for (auto decl : root.top_level_decls) {
         if (decl->type == ast::NodeType::FnDef) {
@@ -73,6 +80,67 @@ inline llvm::Type *Compiler::compile_type_of(cx::ast::Node *node) {
     return compile_type(get_chitype(node));
 }
 
+llvm::DISubroutineType *Compiler::compile_di_fn_type(Function *fn) {
+    auto fn_type = get_chitype(fn->node);
+    llvm::SmallVector<llvm::Metadata *, 8> types;
+    for (auto param : fn_type->data.fn.params) {
+        types.push_back(compile_di_type(param));
+    }
+    return m_ctx->dbg_builder->createSubroutineType(
+        m_ctx->dbg_builder->getOrCreateTypeArray(types));
+}
+
+llvm::DIType *Compiler::compile_di_type(ChiType *type) {
+    auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
+    auto &llvm_module = *(m_ctx->llvm_module.get());
+    auto &llvm_builder = *(m_ctx->llvm_builder.get());
+    auto &llvm_db = *(m_ctx->dbg_builder.get());
+    auto &llvm_cu = *(m_ctx->dbg_cu);
+
+    switch (type->kind) {
+    case TypeKind::Void: {
+        return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
+    }
+    case TypeKind::Bool: {
+        return llvm_db.createBasicType("bool", 8, llvm::dwarf::DW_ATE_boolean);
+    }
+    case TypeKind::Int: {
+        return llvm_db.createBasicType("int", type->data.int_.bit_count,
+                                       llvm::dwarf::DW_ATE_signed);
+    }
+    case TypeKind::Float: {
+        return llvm_db.createBasicType("float", 32, llvm::dwarf::DW_ATE_float);
+    }
+    case TypeKind::String: {
+        return llvm_db.createBasicType("string", 0, llvm::dwarf::DW_ATE_UTF);
+    }
+    case TypeKind::Fn: {
+        auto &data = type->data.fn;
+        llvm::SmallVector<llvm::Metadata *, 8> types;
+        for (auto param : data.params) {
+            types.push_back(compile_di_type(param));
+        }
+        return llvm_db.createSubroutineType(llvm_db.getOrCreateTypeArray(types));
+    }
+    case TypeKind::Pointer:
+    case TypeKind::Reference: {
+        auto &data = type->data.pointer;
+        auto elem_type = compile_di_type(data.elem);
+        return llvm_db.createPointerType(elem_type, 64);
+    }
+    case TypeKind::Array: {
+        auto &data = type->data.array;
+        auto elem_type = compile_di_type(data.elem);
+        auto size = llvm_module.getDataLayout().getTypeAllocSize(compile_type(data.elem));
+        return llvm_db.createArrayType(0, size, elem_type, {});
+    }
+    default:
+        auto size = llvm_module.getDataLayout().getTypeAllocSize(compile_type(type));
+        return llvm_db.createBasicType(m_ctx->resolver.to_string(type), size,
+                                       llvm::dwarf::DW_ATE_unsigned);
+    }
+}
+
 void Compiler::compile_fn_def(ast::Node *node) {
     auto &fn_def = node->data.fn_def;
     auto fn = compile_fn_proto(fn_def.fn_proto, node);
@@ -80,6 +148,20 @@ void Compiler::compile_fn_def(ast::Node *node) {
         return panic("function already compiled");
     }
 
+    // debug info
+    auto dbg_builder = m_ctx->dbg_builder.get();
+    auto unit =
+        dbg_builder->createFile(m_ctx->dbg_cu->getFilename(), m_ctx->dbg_cu->getDirectory());
+    llvm::DIScope *dctx = unit;
+    auto line_no = fn_def.fn_proto->token->pos.line_number();
+    auto sp = dbg_builder->createFunction(
+        dctx, node->name, llvm::StringRef(), unit, 0, compile_di_fn_type(fn), line_no,
+        llvm::DINode::FlagPrototyped, llvm::DISubprogram::SPFlagDefinition);
+    fn->llvm_fn->setSubprogram(sp);
+    m_ctx->dbg_scopes.add(sp);
+    emit_dbg_location(nullptr); // unset the location for the prologue emission
+
+    // build function
     auto &builder = *m_ctx->llvm_builder.get();
     auto &llvm_ctx = *m_ctx->llvm_ctx.get();
     auto *entry_b = fn->new_label("_entry");
@@ -94,6 +176,15 @@ void Compiler::compile_fn_def(ast::Node *node) {
         auto var = builder.CreateAlloca(llvm_param->getType(), nullptr, param->name);
         builder.CreateStore(llvm_param, var);
         add_value(param, var);
+
+        // debug info
+        auto param_line_no = param->token->pos.line_number();
+        auto dbg_var = dbg_builder->createParameterVariable(sp, llvm_param->getName(), i + skip + 1,
+                                                            unit, param_line_no,
+                                                            compile_di_type(get_chitype(param)));
+        dbg_builder->insertDeclare(var, dbg_var, dbg_builder->createExpression(),
+                                   llvm::DILocation::get(sp->getContext(), param_line_no, 0, sp),
+                                   builder.GetInsertBlock());
     }
 
     // function return
@@ -116,6 +207,8 @@ void Compiler::compile_fn_def(ast::Node *node) {
         builder.CreateCall(runtime_start->llvm_fn, {stack_marker});
     }
 
+    // function body
+    emit_dbg_location(fn_def.body);
     auto return_b = fn->new_label("_return");
     fn->return_label = return_b;
     if (fn_def.body) {
@@ -353,6 +446,8 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl) {
 }
 
 void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
+    emit_dbg_location(stmt);
+
     switch (stmt->type) {
     case ast::NodeType::VarDecl: {
         auto &data = stmt->data.var_decl;
@@ -382,7 +477,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         }
 
         // fn->is_returning = llvm_builder.CreateStore(
-        //     llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(llvm_ctx), 1), fn->is_returning);
+        //     llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(llvm_ctx), 1),
+        //     fn->is_returning);
         if (data.expr) {
             auto ret_value = compile_assignment_value(fn, data.expr, stmt);
             llvm_builder.CreateStore(ret_value, fn->return_value);
@@ -422,7 +518,8 @@ void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block) 
     // auto &llvm_builder = *m_ctx->llvm_builder.get();
     // auto &llvm_ctx = *m_ctx->llvm_ctx.get();
     // fn->is_returning = llvm_builder.CreateStore(
-    //     llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(llvm_ctx), 0), fn->is_returning);
+    //     llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(llvm_ctx), 0),
+    //     fn->is_returning);
     // if (vars.size) {
     //     for (long i = vars.size - 1; i >= 0; i--) {
     //         auto var = vars[i];
@@ -540,6 +637,23 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     return nullptr;
 }
 
+void Compiler::emit_dbg_location(ast::Node *node) {
+    auto builder = m_ctx->llvm_builder.get();
+    if (!node) {
+        return builder->SetCurrentDebugLocation(llvm::DebugLoc());
+    }
+    assert(node->token);
+    auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
+    llvm::DIScope *scope = m_ctx->dbg_cu;
+    if (m_ctx->dbg_scopes.size) {
+        scope = m_ctx->dbg_scopes.last();
+    }
+    auto line_no = node->token->pos.line_number();
+    auto col_no = node->token->pos.col_number();
+    builder->SetCurrentDebugLocation(
+        llvm::DILocation::get(llvm_ctx, line_no, col_no, scope, nullptr));
+}
+
 void Compiler::emit_output() {
     llvm::InitializeAllTargetInfos();
     llvm::InitializeAllTargets();
@@ -565,6 +679,13 @@ void Compiler::emit_output() {
     module->setDataLayout(target_machine->createDataLayout());
     module->setTargetTriple(target_triple);
 
+    // Add the current debug info version into the module.
+    module->addModuleFlag(llvm::Module::Warning, "Debug Info Version",
+                          llvm::DEBUG_METADATA_VERSION);
+    // Darwin only supports dwarf2.
+    if (llvm::Triple(llvm::sys::getProcessTriple()).isOSDarwin())
+        module->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 2);
+
     auto settings = get_settings();
     std::error_code ec;
     llvm::raw_fd_ostream dest_obj(settings->output_obj_to_file, ec, llvm::sys::fs::OF_None);
@@ -586,6 +707,7 @@ void Compiler::emit_output() {
     }
 
     pass.run(*module);
+    m_ctx->dbg_builder->finalize();
     dest_obj.flush();
 }
 

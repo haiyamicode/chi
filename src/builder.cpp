@@ -32,8 +32,8 @@ ast::Module *Builder::process_source(ast::Package *package, io::Buffer *src,
     Lexer lexer(src, &tokenization);
     lexer.tokenize();
     if (tokenization.error) {
-        print("{}:{}:{}: error: {}\n", module->path, tokenization.error_pos.line + 1,
-              tokenization.error_pos.col + 1, *tokenization.error);
+        print("{}:{}:{}: error: {}\n", module->path, tokenization.error_pos.line_number(),
+              tokenization.error_pos.col_number(), *tokenization.error);
         exit(0);
     }
 
@@ -71,8 +71,9 @@ void Builder::build_runtime() {
     package->name = "__runtime";
     package->kind = PackageKind::BUILTIN;
     auto rt_source = io::Buffer::from_string(runtime::source);
-    auto module = process_source(package, &rt_source, "runtime.xc");
+    auto module = process_source(package, &rt_source, "__chiroot/runtime.xc");
     resolver.context_init_builtins(module);
+    module->source = runtime::source;
 
     auto compiler = create_codegen_compiler();
     compiler.compile_module(module);

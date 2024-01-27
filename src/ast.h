@@ -38,10 +38,14 @@ struct Module {
     Package *package = nullptr;
     string path = "";
     string name = "";
+    string filename = "";
     array<Node *> imports = {};
     array<Node *> exports = {};
     array<Error> errors = {};
     cx::Scope *scope = nullptr;
+    optional<string> source = {}; // only used for internal modules
+
+    string full_path() const { return (fs::path(path) / filename).string(); }
 
     static ModuleKind kind_from_extension(const string &ext) {
         if (ext == ".xc") {

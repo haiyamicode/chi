@@ -67,7 +67,7 @@ void cx_debug(CxString message);
 
 void cx_debug_i(const char *prefix, int value);
 
-void cx_panic(const char *s);
+void cx_panic(CxString message);
 
 void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 

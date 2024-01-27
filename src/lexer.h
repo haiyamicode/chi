@@ -83,11 +83,16 @@ MAKE_ENUM(TokenType, END, IDEN, ERROR,
 )
 
 struct Pos {
+    // these values start at 0
     long line = -1;
     long col = -1;
     long offset = -1;
 
-    bool is_valid() { return offset >= 0; }
+    bool is_valid() const { return offset >= 0; }
+
+    // get values starting at 1
+    long line_number() const { return line + 1; }
+    long col_number() const { return col + 1; }
 };
 
 struct Token {

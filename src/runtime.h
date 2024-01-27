@@ -12,6 +12,7 @@ extern "C" {
   func cx_gc_alloc(size uint32, destructor *void) *void;
   func cx_runtime_start(stack *void);
   func cx_runtime_stop();
+  func cx_panic(message string);
 }
 
 export func println(value any) {
@@ -30,6 +31,10 @@ export func print_int(value int64) {
 // export func printf(format string, ...values any) {
 //   cx_printf(format, values);
 // }
+
+export func panic(message string) {
+  cx_panic(message);
+}
 
 )"""";
 
