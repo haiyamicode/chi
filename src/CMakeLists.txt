@@ -27,7 +27,7 @@ target_link_libraries(chi ${LIBS} "$<$<CONFIG:DEBUG>:${ASAN_FLAGS}>")
 # Runtime library
 add_library(rt STATIC ${HEADER_FILES} ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c)
 set_target_properties(rt PROPERTIES COMPILE_FLAGS_DEBUG "${ASAN_FLAGS}>")
-target_link_libraries(rt PUBLIC fmt backtrace)
-target_link_libraries(rt PRIVATE ${PKG_LIBS})
+target_link_libraries(rt PUBLIC fmt backtrace uv)
+target_link_libraries(rt PRIVATE ${PKG_LIBS} CONAN_PKG::libuv)
 
 bundle_static_library(rt chrt)

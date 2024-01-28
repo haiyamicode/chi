@@ -1,6 +1,7 @@
 [requires]
 fmt/10.2.1
 libbacktrace/cci.20210118
+libuv/1.47.0
 
 [generators]
 cmake
