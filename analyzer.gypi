@@ -5,7 +5,7 @@
     "src/lexer.cpp",
     "src/parser.cpp",
     "src/sema.cpp",
-    "src/internals.cpp"
+    "src/context.cpp"
   ],
   "include_dirs": [
     "src/include",

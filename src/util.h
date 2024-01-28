@@ -17,10 +17,15 @@
 #include <unordered_map>
 #include <utility>
 
-#include "include/backward.hpp"
 #include "include/enum.h"
 #include "include/optional.h"
 #include "include/variant.h"
+
+#ifdef CHI_RUNTIME_HAS_BACKTRACE
+#include "runtime/trace.h"
+#else
+static inline void backtrace() {}
+#endif // CHI_RUNTIME_HAS_BACKTRACE
 
 namespace cx {
 using fmt::print;
@@ -36,17 +41,10 @@ namespace fs = std::filesystem;
     const auto output(get_if<type>(&value));                                                       \
     output
 
-static inline void trace() {
-    backward::StackTrace st;
-    st.load_here(32);
-    backward::Printer p;
-    p.print(st);
-}
-
 template <typename... Args> static inline void panic(const char *format, const Args &...args) {
     fmt::print(format, args...);
     fmt::print("\n");
-    trace();
+    backtrace();
     abort();
 }
 

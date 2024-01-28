@@ -9,7 +9,7 @@
 #include "analyzer.h"
 #include "ast_printer.h"
 #include "parser.h"
-#include "runtime.h"
+#include "runtime/source.h"
 #include "util.h"
 
 using namespace cx;

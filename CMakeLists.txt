@@ -22,6 +22,11 @@ function(bundle_static_library tgt_name bundled_tgt_name)
     message(STATUS "Public dependencies of ${input_target}: " ${public_dependencies})
 
     foreach(dependency IN LISTS public_dependencies)
+      # if starts with CONAN_PKG, skip; this is a hack, not sure why private dependencies are included in INTERFACE_LINK_LIBRARIES
+      if(${dependency} MATCHES "^CONAN_PKG.*$")
+        continue()
+      endif()
+
       find_library(${dependency}_full_name ${dependency})
       message(STATUS "Dependency: " ${dependency} " -> " ${${dependency}_full_name})
       list(APPEND dep_libs ${${dependency}_full_name})

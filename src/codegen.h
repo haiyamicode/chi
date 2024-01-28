@@ -9,9 +9,9 @@
 
 #include <list>
 
-#include "internals.h"
 #include "llvm.h"
 #include "resolver.h"
+#include "runtime/internals.h"
 
 namespace cx {
 struct CompilationContext;

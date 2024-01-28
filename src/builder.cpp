@@ -11,7 +11,7 @@
 #include "ast_printer.h"
 #include "builder.h"
 #include "parser.h"
-#include "runtime.h"
+#include "runtime/source.h"
 #include "util.h"
 
 using namespace cx;
@@ -90,7 +90,9 @@ void Builder::build_single_file(ast::Package *package, const string &file_name) 
     compiler.emit_output();
 
     // produce executable
-    auto cmd = fmt::format("c++ {} -o {} -lchrt", settings->output_obj_to_file, output_file_name);
+    auto cmd =
+        fmt::format("c++ {} -g -o {} -lchrt", settings->output_obj_to_file, output_file_name);
+
     if (debug_mode) {
         print("running: {}\n", cmd);
     }
@@ -98,6 +100,17 @@ void Builder::build_single_file(ast::Package *package, const string &file_name) 
     if (result != 0) {
         print("error: failed to run command: {}\n", cmd);
     }
+
+#if __APPLE__
+    cmd = fmt::format("dsymutil {} -o {}.dSYM", output_file_name, output_file_name);
+    if (debug_mode) {
+        print("running: {}\n", cmd);
+    }
+    result = system(cmd.c_str());
+    if (result != 0) {
+        print("error: failed to run command: {}\n", cmd);
+    }
+#endif
 }
 
 void Builder::build_program(const string &entry_file_name) {

@@ -5,6 +5,7 @@
  * See http://opensource.org/licenses/MIT
  */
 
+#define CHI_RUNTIME_HAS_BACKTRACE 1
 #include "analyzer.h"
 #include "builder.h"
 #include "util.h"
@@ -12,6 +13,8 @@
 using namespace cx;
 
 int main(int argc, char *argv[]) {
+    init_backtrace(NULL);
+
     // backward::SignalHandling sh;
     Builder bld;
     string file_name;
