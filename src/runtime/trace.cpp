@@ -10,18 +10,14 @@
 extern "C" {
 
 void *__bt_state = nullptr;
+FILE *bt_output_file = nullptr;
 
 int bt_callback(void *, uintptr_t, const char *filename, int lineno, const char *function) {
-    /// demangle function name
     const char *func_name = function;
     int status;
-    // char *demangled = abi::__cxa_demangle(function, nullptr, nullptr, &status);
-    // if (status == 0) {
-    //     func_name = demangled;
-    // }
 
     if (filename && func_name) {
-        printf("%s:%d in function %s\n", filename, lineno, func_name);
+        fprintf(bt_output_file, "%s:%d in function %s\n", filename, lineno, func_name);
     }
     return 0;
 }
@@ -51,5 +47,7 @@ void print_backtrace() {
 }
 
 void backtrace() { print_backtrace(); }
+
+void set_bt_output_file(FILE *file) { bt_output_file = file; }
 
 } // extern "C"

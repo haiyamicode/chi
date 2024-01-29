@@ -58,6 +58,7 @@ void Lexer::setup_keywords() {
     s_keywords["this"] = TokenType::KW_THIS;
     s_keywords["template"] = TokenType::KW_TEMPLATE;
     s_keywords["union"] = TokenType::KW_UNION;
+    s_keywords["try"] = TokenType::KW_TRY;
 
     // C keywords
     s_keywords["inline"] = TokenType::KW_INLINE;

@@ -451,7 +451,10 @@ Node *Parser::parse_fn_proto(Token *iden) {
     expect(TokenType::LPAREN);
     auto proto = create_node(NodeType::FnProto, iden);
     proto->name = iden->str;
-    parse_fn_params(&proto->data.fn_proto.params);
+    auto vararg = parse_fn_params(&proto->data.fn_proto.params);
+    if (vararg) {
+        proto->data.fn_proto.is_vararg = true;
+    }
     expect(TokenType::RPAREN);
     if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON)) {
         proto->data.fn_proto.return_type = parse_type_expr();
@@ -459,12 +462,16 @@ Node *Parser::parse_fn_proto(Token *iden) {
     return proto;
 }
 
-void Parser::parse_fn_params(NodeList *params) {
+bool Parser::parse_fn_params(NodeList *params) {
     Token *token;
     for (;;) {
         token = get();
         if (token->type == TokenType::RPAREN) {
             break;
+        }
+        if (token->type == TokenType::ELLIPSIS && lookahead(1)->type == TokenType::RPAREN) {
+            consume();
+            return true;
         }
         auto param = parse_fn_param();
         params->add(param);
@@ -473,6 +480,7 @@ void Parser::parse_fn_params(NodeList *params) {
         }
         consume();
     }
+    return false;
 }
 
 Node *Parser::parse_fn_param() {
@@ -536,6 +544,7 @@ Node *Parser::parse_stmt() {
     case TokenType::NOT:
     case TokenType::INC:
     case TokenType::DEC:
+    case TokenType::KW_TRY:
         return parse_simple_stmt();
 
     case TokenType::KW_RETURN:
@@ -655,6 +664,13 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
         consume();
         auto node = create_unary_expr_node(token);
         node->data.unary_op_expr.op1 = parse_child_expr(lhs, parent);
+        return node;
+    }
+
+    case TokenType::KW_TRY: {
+        consume();
+        auto node = create_node(NodeType::TryExpr, token);
+        node->data.try_expr.expr = parse_child_expr(lhs, parent);
         return node;
     }
 

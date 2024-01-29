@@ -275,6 +275,12 @@ void AstPrinter::print_node(Node *node) {
         }
         break;
     }
+    case NodeType::TryExpr: {
+        auto &data = node->data.try_expr;
+        print("try ");
+        print_node(data.expr);
+        break;
+    }
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
         print_node(data.expr);

@@ -19,7 +19,8 @@ struct Scope;
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
-          TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl);
+          TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
+          TryExpr, Dummy);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(FnBodyMode, Optional, Required, None);
@@ -93,6 +94,7 @@ struct FnProto {
     array<Node *> params = {};
     Node *return_type = nullptr;
     Node *fn_def_node = nullptr;
+    bool is_vararg = false;
 };
 
 MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
@@ -147,6 +149,11 @@ struct UnaryOpExpr {
     TokenType op_type = TokenType::ERROR;
     Node *op1 = nullptr;
     bool is_suffix = false;
+};
+
+struct TryExpr {
+    Node *expr = nullptr;
+    Node *catch_expr = nullptr;
 };
 
 struct FnCallExpr {
@@ -270,6 +277,7 @@ struct Node {
         FnCallExpr fn_call_expr;
         BinOpExpr bin_op_expr;
         UnaryOpExpr unary_op_expr;
+        TryExpr try_expr;
         Node *child_expr;
         Identifier identifier;
         IfStmt if_stmt;

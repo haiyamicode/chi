@@ -134,7 +134,7 @@ class Parser {
 
     Node *parse_fn_proto(Token *iden);
 
-    void parse_fn_params(NodeList *params);
+    bool parse_fn_params(NodeList *params);
 
     Node *parse_fn_param();
 

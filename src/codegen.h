@@ -52,6 +52,7 @@ struct Function {
     std::list<BlockScope> block_scopes;
     std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
+    bool has_try = false;
 
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
@@ -73,6 +74,8 @@ struct Function {
 
     label_t *new_label(const string &name = "", label_t *insert_before = nullptr);
     void use_label(label_t *bb);
+
+    void insn_noop();
 };
 
 struct StructField {
@@ -129,6 +132,11 @@ struct CompilationSettings {
     string output_obj_to_file = "";
     string output_ir_to_file = "";
     uint32_t lang_flags = LANG_FLAG_NONE;
+};
+
+struct InvokeInfo {
+    label_t *normal = nullptr;
+    label_t *landing = nullptr;
 };
 
 struct CodegenContext {
@@ -248,7 +256,7 @@ class Compiler {
 
     llvm::Value *compile_expr_ref(Function *fn, ast::Node *expr);
 
-    llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call);
+    llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr);
 
     llvm::Value *compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
                                        llvm::Value *op1, llvm::Value *op2);

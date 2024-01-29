@@ -33,6 +33,8 @@ struct SystemTypes {
     ChiType *array = nullptr;
     ChiType *optional = nullptr;
     ChiType *box = nullptr;
+    ChiType *result = nullptr;
+    ChiType *error = nullptr;
 };
 
 struct ResolveContext {
@@ -43,6 +45,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> array_of = {};
     map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
     optional<ErrorHandler> error_handler = {};
+    map<string, ChiType *> composite_types = {};
 
     ResolveContext(Allocator *allocator) { this->allocator = allocator; }
 };
@@ -171,6 +174,8 @@ class Resolver {
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
 
     ChiType *get_array_type(ChiType *elem);
+
+    ChiType *get_result_type(ChiType *value, ChiType *err);
 
     ChiType *get_wrapped_type(ChiType *elem, TypeKind kind);
 

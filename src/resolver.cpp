@@ -45,6 +45,8 @@ void Resolver::context_init_primitives() {
     system_types.array = create_type(TypeKind::Array);
     system_types.optional = create_type(TypeKind::Optional);
     system_types.box = create_type(TypeKind::Box);
+    system_types.result = create_type(TypeKind::Result);
+    system_types.error = create_type(TypeKind::Error);
 
     add_primitive("bool", system_types.bool_);
     add_primitive("string", system_types.string);
@@ -55,9 +57,6 @@ void Resolver::context_init_primitives() {
     add_primitive("char", system_types.char_);
     add_primitive("float", system_types.float_);
     add_primitive("double", system_types.double_);
-    add_primitive("optional", system_types.optional);
-    add_primitive("array", system_types.array);
-    add_primitive("box", system_types.box);
     add_primitive("uint8", system_types.uint8);
     add_primitive("int8", create_int_type(8, false));
     add_primitive("int16", create_int_type(16, false));
@@ -66,6 +65,13 @@ void Resolver::context_init_primitives() {
     add_primitive("uint16", create_int_type(16, true));
     add_primitive("uint32", create_int_type(32, true));
     add_primitive("uint64", create_int_type(64, true));
+
+    // non-primitive builtins
+    add_primitive("Array", system_types.array);
+    add_primitive("Optional", system_types.optional);
+    add_primitive("Box", system_types.box);
+    add_primitive("Result", system_types.result);
+    add_primitive("Error", system_types.error);
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -234,6 +240,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             data.return_type ? resolve_value(data.return_type, scope) : get_system_types()->void_;
         type->data.fn.return_type = return_type;
         type->is_placeholder = return_type->is_placeholder;
+        if (data.is_vararg) {
+            type->data.fn.is_variadic = true;
+        }
         for (int i = 0; i < data.params.size; i++) {
             auto param = data.params[i];
             auto &pdata = param->data.param_decl;
@@ -372,6 +381,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
     invalid:
         error(data.op1, errors::INVALID_OPERATOR, get_token_symbol(data.op_type), to_string(t));
         return nullptr;
+    }
+    case NodeType::TryExpr: {
+        auto &data = node->data.try_expr;
+        auto expr_type = resolve(data.expr, scope);
+        if (data.expr->type != NodeType::FnCallExpr) {
+            error(data.expr, errors::TRY_NOT_CALL);
+        }
+        return get_result_type(expr_type, get_system_types()->error);
     }
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
@@ -694,12 +711,14 @@ string Resolver::to_string(ChiType *type) {
     case TypeKind::Reference:
         return "&" + to_string(type->get_elem());
     case TypeKind::Optional:
-        return "()" + to_string(type->get_elem());
+        return "?" + to_string(type->get_elem());
     case TypeKind::Box:
         return "^" + to_string(type->get_elem());
     case TypeKind::Array:
-        return fmt::format("{}<{}>", to_string(get_system_type(type->kind)),
-                           to_string(type->get_elem()));
+        return fmt::format("Array<{}>", to_string(type->get_elem()));
+    case TypeKind::Result:
+        return fmt::format("Result<{},{}>", to_string(type->get_elem()),
+                           to_string(type->data.result.err));
     default:
         break;
     }
@@ -864,6 +883,8 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
     }
     if (sty->kind == TypeKind::Array) {
         sty = sty->data.array.internal;
+    } else if (sty->kind == TypeKind::Result) {
+        sty = sty->data.result.internal;
     } else if (sty->kind == TypeKind::TypeSymbol) {
         if (auto underlying_type = sty->data.type_symbol.underlying_type) {
             sty = underlying_type;
@@ -921,6 +942,37 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     type->data.array.elem = elem;
     m_ctx->array_of[elem] = type;
     return type;
+}
+
+ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
+    if (value->kind == TypeKind::Void) {
+        value = get_system_types()->bool_;
+    }
+    auto key = fmt::format("Result<{},{}>", to_string(value), to_string(err));
+    if (auto cached = m_ctx->composite_types.get(key)) {
+        return *cached;
+    }
+    auto result_type = create_type(TypeKind::Result);
+    auto &data = result_type->data.result;
+    data.value = value;
+    data.err = err;
+    assert(to_string(result_type) == key);
+    m_ctx->composite_types[key] = result_type;
+
+    // create internal struct for accessing the fields
+    data.internal = create_type(TypeKind::Struct);
+    auto &struct_ = data.internal->data.struct_;
+    auto dummy_node = create_node(NodeType::StructDecl);
+    dummy_node->name = key;
+    dummy_node->resolved_type = result_type;
+    struct_.node = dummy_node;
+    struct_.kind = ContainerKind::Struct;
+    struct_.node = nullptr;
+
+    auto err_optional = get_pointer_type(err, TypeKind::Optional);
+    struct_.add_member("err", dummy_node, err_optional);
+    struct_.add_member("value", dummy_node, value);
+    return result_type;
 }
 
 ChiType *Resolver::create_int_type(int bit_count, bool is_unsigned) {

@@ -34,6 +34,11 @@ void Function::use_label(label_t *bb) {
     builder.SetInsertPoint(bb);
 }
 
+void Function::insn_noop() {
+    auto &builder = *ctx->llvm_builder.get();
+    builder.CreateIntrinsic(llvm::Type::getVoidTy(*ctx->llvm_ctx), llvm::Intrinsic::donothing, {});
+}
+
 void CodegenContext::init_llvm() {
     llvm_ctx = std::make_unique<llvm::LLVMContext>();
     llvm_module = std::make_unique<llvm::Module>("main", *llvm_ctx);
@@ -58,8 +63,7 @@ ChiType *Compiler::get_chitype(ast::Node *node) { return eval_type(node->resolve
 void Compiler::compile_module(ast::Module *module) {
     m_ctx->dbg_cu = m_ctx->dbg_builder->createCompileUnit(
         llvm::dwarf::DW_LANG_C,
-        m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt,
-                                       module->source),
+        m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
         "Chi Compiler", 0, "", 0);
 
     auto &root = module->root->data.root;
@@ -214,11 +218,9 @@ void Compiler::compile_fn_def(ast::Node *node) {
     if (fn_def.body) {
         compile_block(fn, node, fn_def.body);
     }
-
-    // fn_end.label = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "_fn_end", fn->llvm_fn);
-
-    // fn->pop_return_scope();
-    // auto type = get_chitype(fn_def.fn_proto);
+    if (fn->has_try) {
+        fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+    }
 
     // return block
     fn->use_label(return_b);
@@ -254,12 +256,15 @@ llvm::Value *Compiler::compile_string_literal(Function *fn, const string &str) {
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto &llvm_module = *(m_ctx->llvm_module.get());
     auto &llvm_builder = *(m_ctx->llvm_builder.get());
-    auto str_type = compile_type(get_resolver()->get_system_types()->string);
-    auto str_value = llvm::ConstantDataArray::getString(llvm_ctx, str);
-    auto str_global = new llvm::GlobalVariable(llvm_module, str_type, true,
-                                               llvm::GlobalValue::PrivateLinkage, str_value);
+    auto str_lit_type = compile_type(get_resolver()->get_system_types()->str_lit);
+    auto str_value = llvm::ConstantDataArray::getString(llvm_ctx, str, false);
+    auto char_array_type = llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), str.size());
+    auto str_global = new llvm::GlobalVariable(llvm_module, char_array_type, true,
+                                               llvm::GlobalValue::PrivateLinkage, str_value, "str");
     auto str_len = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), str.size());
-    auto str_struct = llvm::ConstantStruct::getAnon({str_global, str_len});
+    auto str_type_l = compile_type(get_resolver()->get_system_types()->string);
+    auto str_struct =
+        llvm::ConstantStruct::get((llvm::StructType *)str_type_l, {str_global, str_len});
     return str_struct;
 }
 
@@ -307,8 +312,9 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
         ti_type_l, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), (int32_t)type->kind),
                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), (int32_t)typesize),
                     typedata_arr_l});
-    auto info_global = new llvm::GlobalVariable(llvm_module, ti_type_l, true,
-                                                llvm::GlobalValue::PrivateLinkage, info_l);
+    auto info_global =
+        new llvm::GlobalVariable(llvm_module, ti_type_l, true, llvm::GlobalValue::PrivateLinkage,
+                                 info_l, "typeinfo." + get_resolver()->to_string(type));
     return info_global;
 }
 
@@ -321,15 +327,28 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         }
         auto &llvm_builder = *(m_ctx->llvm_builder.get());
         auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
-        auto ti_l = compile_type_info(from_type);
+        auto ti_p = compile_type_info(from_type);
         auto from_type_l = compile_type(from_type);
         auto any_type_l = (llvm::StructType *)compile_type(to_type);
-        auto any_val = (llvm::Value *)llvm_builder.CreateAlloca(any_type_l, nullptr, "localValue");
-        auto ti_gep = llvm_builder.CreateStructGEP(any_type_l, any_val, 0);
-        llvm_builder.CreateStore(ti_l, ti_gep);
-        auto data_gep = llvm_builder.CreateStructGEP(any_type_l, any_val, 1);
+        auto any_var = (llvm::Value *)llvm_builder.CreateAlloca(any_type_l, nullptr, "to_any");
+        auto ti_gep = llvm_builder.CreateStructGEP(any_type_l, any_var, 0);
+        llvm_builder.CreateStore(ti_p, ti_gep);
+        auto data_gep = llvm_builder.CreateStructGEP(any_type_l, any_var, 1);
         llvm_builder.CreateStore(value, data_gep);
-        return any_val;
+        return llvm_builder.CreateLoad(any_type_l, any_var);
+    }
+    case TypeKind::Bool: {
+        if (from_type->kind == TypeKind::Optional) {
+            auto from_type_l = compile_type(from_type);
+            auto has_value_p =
+                m_ctx->llvm_builder->CreateStructGEP(from_type_l, value, 0, "has_value");
+            auto has_value =
+                m_ctx->llvm_builder->CreateLoad(from_type_l->getStructElementType(0), has_value_p);
+            return has_value;
+
+        } else {
+            return m_ctx->llvm_builder->CreateIntCast(value, compile_type(to_type), false);
+        }
     }
 
     default:
@@ -377,6 +396,46 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             panic("not implemented: {}", PRINT_ENUM(data.op_type));
         }
     }
+    case ast::NodeType::TryExpr: {
+        fn->has_try = true;
+        auto &data = expr->data.try_expr;
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+        auto &llvm_module = *m_ctx->llvm_module.get();
+        auto result_type_l = compile_type(get_chitype(expr));
+        llvm::Value *result_var = builder.CreateAlloca(result_type_l, nullptr, "try_result");
+        auto continue_b = fn->new_label("_try_continue");
+        auto normal_b = fn->new_label("_try_normal");
+        auto landing_b = fn->new_label("_try_landing");
+
+        InvokeInfo invoke = {};
+        invoke.normal = normal_b;
+        invoke.landing = landing_b;
+        auto value = compile_fn_call(fn, data.expr, &invoke);
+
+        fn->use_label(invoke.landing);
+        auto landing = builder.CreateLandingPad(llvm::Type::getInt8PtrTy(llvm_ctx), 1);
+        landing->addClause(llvm::ConstantPointerNull::get(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)));
+        builder.CreateBr(continue_b);
+        // auto result_err_field_type_l = result_type_l->getStructElementType(0);
+        // auto has_err_type_l = result_err_field_type_l->getStructElementType(0);
+        // auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
+        // auto err_has_value_p = builder.CreateStructGEP(result_err_field_type_l, err_p, 0);
+        // builder.CreateStore(llvm::ConstantInt::get(has_err_type_l, 1), err_has_value_p);
+        // builder.CreateBr(main_b);
+
+        fn->use_label(invoke.normal);
+        builder.CreateBr(continue_b);
+        // auto value_type_l = compile_type(get_chitype(data.expr));
+        // auto value_p = builder.CreateStructGEP(result_type_l, result_var, 1);
+        // builder.CreateStore(value, value_p);
+
+        fn->use_label(continue_b);
+        // fn->insn_noop();
+
+        return result_var;
+    }
     default:
         panic("not implemented: {}", PRINT_ENUM(expr->type));
     }
@@ -399,7 +458,7 @@ llvm::Value *Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     return val;
 }
 
-llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr) {
+llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke) {
     auto &data = expr->data.fn_call_expr;
     auto fn_ref = data.fn_ref_expr->data.identifier.decl;
     auto callee = get_fn(fn_ref);
@@ -416,6 +475,11 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr) {
         auto arg = data.args[i];
         auto param_type = fn_spec.get_param_at(i);
         args.push_back(compile_assignment_to_type(fn, arg, param_type));
+    }
+
+    if (invoke) {
+        return m_ctx->llvm_builder->CreateInvoke(callee->llvm_fn, invoke->normal, invoke->landing,
+                                                 args);
     }
     return m_ctx->llvm_builder->CreateCall(callee->llvm_fn, args);
 }
@@ -597,8 +661,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return llvm::Type::getFloatTy(llvm_ctx);
     }
     case TypeKind::String: {
-        return llvm::StructType::create(
-            {llvm::Type::getInt8PtrTy(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx)}, "CxString");
+        return llvm::StructType::create({compile_type(get_resolver()->get_system_types()->str_lit),
+                                         llvm::Type::getInt32Ty(llvm_ctx)},
+                                        "CxString");
     }
     case TypeKind::Fn: {
         auto &data = type->data.fn;
@@ -615,21 +680,45 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         auto elem_type_l = compile_type(data.elem);
         return llvm::PointerType::get(elem_type_l, 0);
     }
+    case TypeKind::Optional: {
+        auto &data = type->data.pointer;
+        auto elem_type_l = compile_type(data.elem);
+        std::vector<llvm::Type *> members;
+        members.push_back(llvm::Type::getInt1Ty(llvm_ctx)); // bool has_value
+        members.push_back(elem_type_l);                     // elem
+        return llvm::StructType::create(members, get_resolver()->to_string(type));
+    }
     case TypeKind::Array: {
         auto &data = type->data.array;
         auto elem_type_l = compile_type(data.elem);
-        std::vector<llvm::Type *> memberes;
-        memberes.push_back(llvm::Type::getInt8PtrTy(llvm_ctx)); // void *data
-        memberes.push_back(llvm::Type::getInt32Ty(llvm_ctx));   // uint32_t size
-        memberes.push_back(llvm::Type::getInt32Ty(llvm_ctx));   // uint32_t capacity
-        memberes.push_back(llvm::Type::getInt8Ty(llvm_ctx));    // uint8_t flags
-        return llvm::StructType::create(memberes, "CxArray");
+        std::vector<llvm::Type *> members;
+        members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx)); // void *data
+        members.push_back(llvm::Type::getInt32Ty(llvm_ctx));   // uint32_t size
+        members.push_back(llvm::Type::getInt32Ty(llvm_ctx));   // uint32_t capacity
+        members.push_back(llvm::Type::getInt8Ty(llvm_ctx));    // uint8_t flags
+        return llvm::StructType::create(members, get_resolver()->to_string(type));
     }
     case TypeKind::Any: {
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx));
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), 16));
         return llvm::StructType::create(members, "CxAny");
+    }
+    case TypeKind::Result: {
+        auto &data = type->data.result;
+        return compile_type(data.internal);
+    }
+    case TypeKind::Struct: {
+        auto &data = type->data.struct_;
+        std::vector<llvm::Type *> members;
+        for (auto &member : data.members) {
+            members.push_back(compile_type(member->resolved_type));
+        }
+        return llvm::StructType::create(members, get_resolver()->to_string(type));
+    }
+    case TypeKind::Error: {
+        // TODO: implement actual error type
+        return llvm::Type::getInt8PtrTy(llvm_ctx);
     }
     default:
         panic("not implemented");
@@ -695,6 +784,7 @@ void Compiler::emit_output() {
     }
 
     llvm::legacy::PassManager pass;
+    pass.add((llvm::Pass *)llvm::createVerifierPass());
     if (target_machine->addPassesToEmitFile(pass, dest_obj, nullptr,
                                             llvm::CodeGenFileType::CGFT_ObjectFile)) {
         print("error: target_machine can't emit a file of this type");

@@ -84,6 +84,8 @@ ChiType *ChiType::get_elem() {
         return data.pointer.elem;
     case TypeKind::Array:
         return data.array.elem;
+    case TypeKind::Result:
+        return data.result.value;
     default:
         unreachable();
         return nullptr;

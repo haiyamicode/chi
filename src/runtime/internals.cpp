@@ -17,7 +17,13 @@ using namespace cx;
 #include <inttypes.h>
 #include <libunwind.h>
 
+struct StackTrace {
+    string message;
+    char trace[8096];
+};
+
 static tgc_t gc;
+static thread_local StackTrace st;
 
 void cx_string_set_data(CxString *dest, const char *data) {
     if (data) {
@@ -164,9 +170,12 @@ void cx_debug(CxString message) { fmt::print(message.data); }
 void cx_debug_i(const char *prefix, int value) { fmt::print("{}: {}\n", prefix, value); }
 
 void cx_panic(CxString message) {
-    fmt::print("panic: {}\n", message.data);
+    st.message = {message.data, message.size};
+    auto bt_output_file = fmemopen(st.trace, sizeof(st.trace), "w");
+    set_bt_output_file(bt_output_file);
     backtrace();
-    abort();
+    fclose(bt_output_file);
+    throw (void *)NULL;
 }
 
 void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
@@ -177,17 +186,43 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
 }
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
-    return malloc(size);
-    // auto p = tgc_alloc(&gc, size);
-    // if (dtor) {
-    //     tgc_set_dtor(&gc, p, dtor);
-    // }
-    // return p;
+    auto p = tgc_alloc(&gc, size);
+    if (dtor) {
+        tgc_set_dtor(&gc, p, dtor);
+    }
+    return p;
+}
+
+#include <csignal>
+
+void signal_handler(int signal_num) {
+    print("panic: {}\n", st.message);
+    print(st.trace);
+    exit(1);
 }
 
 void cx_runtime_start(void *stack) {
     init_backtrace(getenv("DEBUG_FILE"));
     tgc_start(&gc, stack);
+
+    auto trace_mode = getenv("CHI_BACKTRACE");
+    bool enable_trace = true;
+    if (trace_mode && string(trace_mode) == "none") {
+        enable_trace = false;
+    }
+    if (enable_trace) {
+        signal(SIGABRT, signal_handler);
+    }
 }
 
 void cx_runtime_stop() { tgc_stop(&gc); }
+
+extern "C" {
+extern _Unwind_Reason_Code __gxx_personality_v0(...);
+}
+
+_Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t exceptionClass,
+                                   struct _Unwind_Exception *exceptionObject,
+                                   struct _Unwind_Context *context) {
+    return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
+}

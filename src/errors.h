@@ -37,6 +37,7 @@ constexpr auto CANNOT_GET_REFERENCE_UNADDRESSABLE = "cannot take reference of un
 constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant expression";
 constexpr auto NON_TRAIT_IMPL_TYPE = "cannot use non-trait type '{}' in struct implements list";
 constexpr auto VARIADIC_NOT_FINAL = "cannot use ... with non-final parameter '{}'";
+constexpr auto TRY_NOT_CALL = "try must be used with a function call expression";
 
 } // namespace errors
 } // namespace cx

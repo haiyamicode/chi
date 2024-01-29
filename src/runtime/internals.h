@@ -5,6 +5,8 @@
 #pragma once
 
 #include "sema.h"
+#include <cxxabi.h>
+#include <unwind.h>
 
 using namespace cx;
 
@@ -75,6 +77,10 @@ void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
 
 void cx_runtime_start(void *stack);
 void cx_runtime_stop();
+
+_Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t exceptionClass,
+                                   struct _Unwind_Exception *exceptionObject,
+                                   struct _Unwind_Context *context);
 
 #ifdef __cplusplus
 }
