@@ -3,6 +3,7 @@
 //
 
 #define CHI_RUNTIME_HAS_BACKTRACE 1
+#include <csignal>
 #include <sstream>
 
 #include "internals.h"
@@ -192,8 +193,6 @@ void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
     }
     return p;
 }
-
-#include <csignal>
 
 void signal_handler(int signal_num) {
     print("panic: {}\n", st.message);
