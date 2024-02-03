@@ -20,10 +20,14 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, Dummy);
+          TryExpr);
 
 MAKE_ENUM(ModuleKind, XC, XM);
-MAKE_ENUM(FnBodyMode, Optional, Required, None);
+
+enum FnParsingFlags : uint32_t {
+    FN_BODY_REQUIRED = 1 << 0,
+    FN_BODY_NONE = 1 << 1,
+};
 
 enum DeclFlag : uint32_t {
     DECL_NONE = 0,
@@ -95,9 +99,10 @@ struct FnProto {
     Node *return_type = nullptr;
     Node *fn_def_node = nullptr;
     bool is_vararg = false;
+    bool is_type_expr = false;
 };
 
-MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor);
+MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor, Lambda);
 
 struct FnDef {
     Node *fn_proto = nullptr;

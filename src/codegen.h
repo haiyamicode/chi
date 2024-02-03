@@ -48,6 +48,7 @@ struct Function {
     llvm::Value *return_value = nullptr;
     label_t *return_label = nullptr;
     ChiTypeSubtype *container_subtype = nullptr;
+    ChiType *fn_type = nullptr;
 
     std::list<BlockScope> block_scopes;
     std::list<BlockScope *> scope_stack;
@@ -88,7 +89,7 @@ struct DotValue {
     unknown_t ctn_address;
     optional<StructField> field;
     optional<ast::Node *> method;
-    optional<unknown_t> vtable_fn;
+    optional<unknown_t> vtable_4n;
 };
 
 struct Array {
@@ -149,6 +150,7 @@ struct CodegenContext {
     array<box<ImplInfo>> impls;
     array<llvm::Type *> types;
     array<box<string>> strings;
+    array<Function *> pending_fns;
 
     map<ast::Node *, llvm::Value *> value_table = {};
     map<ChiType *, box<StructData>> struct_table = {};
@@ -176,6 +178,11 @@ struct CodegenContext {
 
 enum ArrayOp { Destroy, Copy };
 enum ArrayFlag { None, Static };
+
+struct RefValue {
+    llvm::Value *address = nullptr;
+    llvm::Value *value = nullptr;
+};
 
 class Compiler {
     CodegenContext *m_ctx;
@@ -239,7 +246,7 @@ class Compiler {
 
     Function *add_internal_method_fn(ChiType *type, ast::Node *method);
 
-    Function *add_fn(llvm::Function *llvm_fn, ast::Node *node);
+    Function *add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn_type = nullptr);
 
     JumpTable *add_jump_table(long *table_index);
 
@@ -254,7 +261,7 @@ class Compiler {
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
 
-    llvm::Value *compile_expr_ref(Function *fn, ast::Node *expr);
+    RefValue compile_expr_ref(Function *fn, ast::Node *expr);
 
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr);
 
@@ -264,6 +271,8 @@ class Compiler {
     llvm::Value *compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
+
+    llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr);
 
     llvm::Value *compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                     ChiType *to_type);
@@ -300,8 +309,8 @@ class Compiler {
 
     void compile_extern(ast::Node *node);
 
-    Function *compile_fn_proto(ast::Node *node, ast::Node *fn);
-    void compile_fn_def(ast::Node *node);
+    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "");
+    Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 
     Struct get_struct(ChiType *struct_type);
 

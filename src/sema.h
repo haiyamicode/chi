@@ -16,7 +16,7 @@ struct Node;
 struct ChiType;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
-          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error)
+          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -107,7 +107,7 @@ struct ChiTypeArray {
 
 struct ChiTypeResult {
     ChiType *value = nullptr;
-    ChiType *err = nullptr;
+    ChiType *error = nullptr;
     ChiType *internal = nullptr; // internal struct type
 };
 
@@ -120,6 +120,11 @@ struct ChiTypeSubtype {
 struct ChiTypePlaceholder {
     ChiType *trait = nullptr;
     long index = 0;
+};
+
+struct ChiTypeFnLambda {
+    ChiType *fn = nullptr;
+    ChiType *internal = nullptr;
 };
 
 typedef uint32_t TypeId;
@@ -141,6 +146,7 @@ struct ChiType {
         ChiTypeSubtype subtype;
         ChiTypePlaceholder placeholder;
         ChiTypeResult result;
+        ChiTypeFnLambda fn_lambda;
 
         Data() {}
 
@@ -168,6 +174,7 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_INIT_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
             CHITYPE_CASE_INIT_FIELD(result, Result, ChiTypeResult)
+            CHITYPE_CASE_INIT_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
         default:
             break;
         }
@@ -189,6 +196,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_DESTROY_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
             CHITYPE_CASE_DESTROY_FIELD(result, Result, ChiTypeResult)
+            CHITYPE_CASE_DESTROY_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
         default:
             break;
         }

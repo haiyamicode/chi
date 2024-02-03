@@ -66,6 +66,7 @@ void Compiler::compile_module(ast::Module *module) {
         m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
         "Chi Compiler", 0, "", 0);
 
+    m_ctx->pending_fns.clear();
     auto &root = module->root->data.root;
     for (auto decl : root.top_level_decls) {
         if (decl->type == ast::NodeType::FnDef) {
@@ -78,6 +79,10 @@ void Compiler::compile_module(ast::Module *module) {
             panic("not implemented");
         }
     }
+
+    for (auto &fn : m_ctx->pending_fns) {
+        compile_fn_def(fn->node, fn);
+    }
 }
 
 inline llvm::Type *Compiler::compile_type_of(cx::ast::Node *node) {
@@ -85,9 +90,8 @@ inline llvm::Type *Compiler::compile_type_of(cx::ast::Node *node) {
 }
 
 llvm::DISubroutineType *Compiler::compile_di_fn_type(Function *fn) {
-    auto fn_type = get_chitype(fn->node);
     llvm::SmallVector<llvm::Metadata *, 8> types;
-    for (auto param : fn_type->data.fn.params) {
+    for (auto param : fn->fn_type->data.fn.params) {
         types.push_back(compile_di_type(param));
     }
     return m_ctx->dbg_builder->createSubroutineType(
@@ -145,21 +149,25 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
 }
 
-void Compiler::compile_fn_def(ast::Node *node) {
+Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     auto &fn_def = node->data.fn_def;
-    auto fn = compile_fn_proto(fn_def.fn_proto, node);
+    if (!fn) {
+        fn = compile_fn_proto(fn_def.fn_proto, node);
+    }
     if (!fn->llvm_fn->empty()) {
-        return panic("function already compiled");
+        panic("function already compiled");
+        return nullptr;
     }
 
     // debug info
+    auto name = fn->qualified_name;
     auto dbg_builder = m_ctx->dbg_builder.get();
     auto unit =
         dbg_builder->createFile(m_ctx->dbg_cu->getFilename(), m_ctx->dbg_cu->getDirectory());
     llvm::DIScope *dctx = unit;
     auto line_no = fn_def.fn_proto->token->pos.line_number();
     auto sp = dbg_builder->createFunction(
-        dctx, node->name, llvm::StringRef(), unit, 0, compile_di_fn_type(fn), line_no,
+        dctx, name, llvm::StringRef(), unit, 0, compile_di_fn_type(fn), line_no,
         llvm::DINode::FlagPrototyped, llvm::DISubprogram::SPFlagDefinition);
     fn->llvm_fn->setSubprogram(sp);
     m_ctx->dbg_scopes.add(sp);
@@ -192,7 +200,7 @@ void Compiler::compile_fn_def(ast::Node *node) {
     }
 
     // function return
-    auto fn_type = get_chitype(fn->node);
+    auto fn_type = fn->fn_type;
     auto return_type = fn_type->data.fn.return_type;
     auto return_type_l = compile_type(return_type);
     if (return_type->kind != TypeKind::Void) {
@@ -237,6 +245,7 @@ void Compiler::compile_fn_def(ast::Node *node) {
     }
 
     llvm::verifyFunction(*fn->llvm_fn);
+    return fn;
 }
 
 llvm::Value *Compiler::compile_constant_value(Function *fn, const ConstantValue &value,
@@ -318,6 +327,17 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     return info_global;
 }
 
+llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type,
+                                            llvm::Value *fn_ptr) {
+    auto &builder = *(m_ctx->llvm_builder.get());
+    auto struct_type = lambda_type->data.fn_lambda.internal;
+    auto struct_type_l = compile_type(struct_type);
+    auto var = builder.CreateAlloca(struct_type_l, nullptr, "lambda");
+    auto data_gep = builder.CreateStructGEP(struct_type_l, var, 0);
+    builder.CreateStore(fn_ptr, data_gep);
+    return builder.CreateLoad(struct_type_l, var);
+}
+
 llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                           ChiType *to_type) {
     switch (to_type->kind) {
@@ -350,6 +370,19 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             return m_ctx->llvm_builder->CreateIntCast(value, compile_type(to_type), false);
         }
     }
+    case TypeKind::Int: {
+        if (from_type->kind == TypeKind::Pointer) {
+            return m_ctx->llvm_builder->CreatePtrToInt(value, compile_type(to_type));
+        } else {
+            return m_ctx->llvm_builder->CreateIntCast(value, compile_type(to_type), false);
+        }
+    }
+    case TypeKind::FnLambda: {
+        if (from_type->kind == TypeKind::Fn) {
+            return compile_lambda_alloc(fn, to_type, value);
+        }
+        return value;
+    }
 
     default:
         // by default, do nothing
@@ -367,7 +400,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &builder = *m_ctx->llvm_builder.get();
         auto ref = compile_expr_ref(fn, expr);
         auto type_l = compile_type(get_chitype(expr));
-        return builder.CreateLoad(type_l, ref);
+        return ref.address ? builder.CreateLoad(type_l, ref.address) : ref.value;
     }
     case ast::NodeType::LiteralExpr: {
         auto value = get_resolver()->resolve_constant_value(expr);
@@ -390,7 +423,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::AND: {
             auto ref = compile_expr_ref(fn, data.op1);
-            return ref;
+            assert(ref.address);
+            return ref.address;
         }
         default:
             panic("not implemented: {}", PRINT_ENUM(data.op_type));
@@ -436,26 +470,65 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         return result_var;
     }
+    case ast::NodeType::DotExpr: {
+        auto &data = expr->data.dot_expr;
+        auto type = get_chitype(data.expr);
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto ref = compile_expr_ref(fn, data.expr);
+        auto ptr = ref.address;
+        auto struct_type = type;
+        if (type->kind == TypeKind::Fn) {
+            auto struct_type = get_resolver()->get_lambda_for_fn(type);
+            ptr = ref.value;
+        }
+        assert(ptr);
+        auto struct_type_l = compile_type(struct_type);
+        auto field_index = data.resolved_member->field_index;
+        auto gep = builder.CreateStructGEP(struct_type_l, ptr, field_index);
+        auto member_type_l = compile_type(data.resolved_member->resolved_type);
+        return builder.CreateLoad(member_type_l, gep);
+    }
+    case ast::NodeType::FnDef: {
+        // compile lambda function
+        auto &data = expr->data.fn_def;
+        assert(data.fn_kind == ast::FnKind::Lambda);
+        auto lambda_fn = compile_fn_proto(data.fn_proto, expr, fn->qualified_name + "__anonymous");
+        m_ctx->pending_fns.add(lambda_fn);
+        return compile_lambda_alloc(fn, get_chitype(expr), lambda_fn->llvm_fn);
+    }
     default:
         panic("not implemented: {}", PRINT_ENUM(expr->type));
     }
     return nullptr;
 }
 
-llvm::Value *Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
+RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     auto &builder = *m_ctx->llvm_builder.get();
     auto &data = expr->data.identifier;
+    RefValue ref = {};
     if (data.kind == ast::IdentifierKind::This) {
-        return fn->llvm_fn->getArg(0);
+        ref.value = fn->llvm_fn->getArg(0);
+        return ref;
     }
     if (data.decl->type == ast::NodeType::VarDecl) {
         auto &var = data.decl->data.var_decl;
         if (var.is_const) {
-            return compile_constant_value(fn, var.resolved_value, get_chitype(data.decl));
+            ref.value = compile_constant_value(fn, var.resolved_value, get_chitype(data.decl));
+            return ref;
+        } else {
+            ref.address = get_value(data.decl);
+            return ref;
         }
     }
-    auto &val = get_value(data.decl);
-    return val;
+    if (data.decl->type == ast::NodeType::FnDef) {
+        auto fn = get_fn(data.decl);
+        auto type_l = compile_type(get_chitype(expr));
+        ref.value = fn->llvm_fn;
+        return ref;
+    }
+
+    ref.address = get_value(data.decl);
+    return ref;
 }
 
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke) {
@@ -605,25 +678,32 @@ void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block) 
     // llvm_builder.CreateCondBr(fn->is_returning, fn->get_return_label(), bb);
 }
 
-Function *Compiler::add_fn(llvm::Function *llvm_fn, ast::Node *node) {
+Function *Compiler::add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn_type) {
     auto fn = new Function(get_context(), llvm_fn, node);
+    fn->fn_type = fn_type ? fn_type : get_chitype(node);
     return m_ctx->add_fn(node, fn);
 }
 
 Function *Compiler::get_fn(ast::Node *node) { return m_ctx->function_table.at(node); }
 
-Function *Compiler::compile_fn_proto(ast::Node *node, ast::Node *fn) {
+Function *Compiler::compile_fn_proto(ast::Node *node, ast::Node *fn, string name) {
     auto flags = fn->data.fn_def.decl_spec.flags;
     auto ftype = get_chitype(node);
+    if (ftype->kind == TypeKind::FnLambda) {
+        ftype = ftype->data.fn_lambda.fn;
+    }
+    if (name.empty()) {
+        name = node->name;
+    }
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
-    auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, node->name,
+    auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, name,
                                        m_ctx->llvm_module.get());
     // Set names for all arguments.
     unsigned Idx = 0;
     for (auto &arg : fn_l->args())
         arg.setName(node->data.fn_proto.params[Idx++]->name);
 
-    return add_fn(fn_l, fn);
+    return add_fn(fn_l, fn, ftype);
 }
 
 void Compiler::compile_extern(ast::Node *node) {
@@ -664,6 +744,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return llvm::StructType::create({compile_type(get_resolver()->get_system_types()->str_lit),
                                          llvm::Type::getInt32Ty(llvm_ctx)},
                                         "CxString");
+    }
+    case TypeKind::FnLambda: {
+        return compile_type(type->data.fn_lambda.internal);
     }
     case TypeKind::Fn: {
         auto &data = type->data.fn;

@@ -14,6 +14,8 @@ extern "C" {
   func cx_runtime_stop();
   func cx_panic(message string);
   func cx_personality(...) int32;
+  func cx_timeout(delay uint64, callback *void);
+  func cx_call(fn *void);
 }
 
 export func println(value any) {
@@ -35,6 +37,10 @@ export func print_int(value uint64) {
 
 export func panic(message string) {
   cx_panic(message);
+}
+
+export func timeout(delay uint64, callback func) {
+   cx_timeout(delay, callback.ptr);
 }
 
 )"""";

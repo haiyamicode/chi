@@ -152,6 +152,13 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
         return type_is_int(from_type) || from_type->kind == TypeKind::Optional;
     case TypeKind::Optional:
         return from_type == to_type || to_type->get_elem() == from_type;
+    case TypeKind::Fn:
+        return from_type->kind == TypeKind::Fn && to_string(from_type) == to_string(to_type);
+    case TypeKind::FnLambda:
+        if (from_type->kind == TypeKind::Fn) {
+            return to_string(from_type) == to_string(to_type->data.fn_lambda.fn);
+        }
+        return from_type->kind == TypeKind::FnLambda && to_string(from_type) == to_string(to_type);
     default:
         break;
     }
@@ -173,7 +180,7 @@ ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     return value_type;
 }
 
-ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
+ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags) {
     switch (node->type) {
     case NodeType::Root: {
         auto &data = node->data.root;
@@ -225,8 +232,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
     }
     case NodeType::FnDef: {
         auto &data = node->data.fn_def;
-        auto proto = resolve(data.fn_proto, scope);
-        node->resolved_type = proto;
+        if (data.fn_kind == ast::FnKind::Lambda) {
+            auto &data = node->data.fn_def;
+            auto proto = resolve(data.fn_proto, scope);
+            auto fn_scope = scope.set_parent_fn(proto);
+            resolve(data.body, fn_scope);
+            return proto;
+        }
+        auto proto = resolve(data.fn_proto, scope, flags | IS_FN_DECL_PROTO);
         if (data.body && should_resolve_fn_body(scope)) {
             auto fn_scope = scope.set_parent_fn(proto);
             resolve(data.body, fn_scope);
@@ -235,13 +248,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
     }
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
-        auto type = create_type(TypeKind::Fn);
+        auto is_fn_decl = flags & IS_FN_DECL_PROTO;
         auto return_type =
             data.return_type ? resolve_value(data.return_type, scope) : get_system_types()->void_;
-        type->data.fn.return_type = return_type;
-        type->is_placeholder = return_type->is_placeholder;
+        TypeList param_types;
+        bool is_variadic = false;
+
         if (data.is_vararg) {
-            type->data.fn.is_variadic = true;
+            is_variadic = true;
         }
         for (int i = 0; i < data.params.size; i++) {
             auto param = data.params[i];
@@ -249,20 +263,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
             auto is_last = i == data.params.size - 1;
             if (pdata.is_variadic && !is_last) {
                 error(param, errors::VARIADIC_NOT_FINAL, param->name);
-                return type;
+                return create_type(TypeKind::Fn);
             }
             auto param_type = resolve_value(param, scope);
             if (pdata.is_variadic) {
                 param_type = get_array_type(param_type);
                 param->resolved_type = param_type;
-                type->data.fn.is_variadic = true;
+                is_variadic = true;
             }
-            type->data.fn.params.add(param_type);
-            if (param_type->is_placeholder) {
-                type->is_placeholder = true;
-            }
+            param_types.add(param_type);
         }
-        return type;
+
+        auto fn_type = get_fn_type(return_type, &param_types, is_variadic);
+        if (!is_fn_decl) {
+            return get_lambda_for_fn(fn_type);
+        }
+        return fn_type;
     }
     case NodeType::Identifier: {
         auto &data = node->data.identifier;
@@ -427,7 +443,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
     case NodeType::DotExpr: {
         auto &data = node->data.dot_expr;
         auto field_name = data.field->str;
-        auto expr_type = resolve(data.expr, scope);
+        auto expr_type = resolve(data.expr, scope, flags);
+        if (expr_type->kind == TypeKind::Fn) {
+            expr_type = get_lambda_for_fn(expr_type);
+        }
         auto member = get_struct_member(expr_type, field_name);
         if (!member) {
             error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type));
@@ -675,12 +694,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope) {
     return nullptr;
 }
 
-ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope) {
+ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags) {
     auto cached = node_get_type(node);
     if (cached) {
         return cached;
     }
-    auto result = _resolve(node, scope);
+    auto result = _resolve(node, scope, flags);
     node->resolved_type = result;
     return result;
 }
@@ -718,12 +737,40 @@ string Resolver::to_string(ChiType *type) {
         return fmt::format("Array<{}>", to_string(type->get_elem()));
     case TypeKind::Result:
         return fmt::format("Result<{},{}>", to_string(type->get_elem()),
-                           to_string(type->data.result.err));
+                           to_string(type->data.result.error));
     default:
         break;
     }
     assert(type->kind < TypeKind::__COUNT);
-    return PRINT_ENUM(type->kind);
+    return to_string(type->kind, &type->data);
+}
+
+string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
+    switch (kind) {
+    case TypeKind::Fn: {
+        auto &fn = data->fn;
+        std::stringstream ss;
+        ss << "func(";
+        for (int i = 0; i < fn.params.size; i++) {
+            ss << to_string(fn.params[i]);
+            if (i < fn.params.size - 1) {
+                ss << ",";
+            }
+        }
+        ss << ")";
+        if (fn.return_type) {
+            ss << " " << to_string(fn.return_type);
+        }
+        return ss.str();
+    }
+    case TypeKind::FnLambda: {
+        auto &fn_lambda = data->fn_lambda;
+        return fmt::format("Lambda<{}>", to_string(fn_lambda.fn));
+    }
+    default:
+        break;
+    }
+    return PRINT_ENUM(kind);
 }
 
 void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type) {
@@ -885,6 +932,8 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
         sty = sty->data.array.internal;
     } else if (sty->kind == TypeKind::Result) {
         sty = sty->data.result.internal;
+    } else if (sty->kind == TypeKind::FnLambda) {
+        sty = sty->data.fn_lambda.internal;
     } else if (sty->kind == TypeKind::TypeSymbol) {
         if (auto underlying_type = sty->data.type_symbol.underlying_type) {
             sty = underlying_type;
@@ -944,6 +993,47 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     return type;
 }
 
+ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic) {
+    ChiTypeFn fn;
+    fn.return_type = ret;
+    fn.is_variadic = is_variadic;
+    fn.params = *params;
+    auto key = to_string(TypeKind::Fn, (ChiType::Data *)&fn);
+    if (auto cached = m_ctx->composite_types.get(key)) {
+        return *cached;
+    }
+    auto type = create_type(TypeKind::Fn);
+    type->data.fn = fn;
+    m_ctx->composite_types[key] = type;
+    for (auto param : fn.params) {
+        if (param->is_placeholder) {
+            type->is_placeholder = true;
+            break;
+        }
+    }
+    type->is_placeholder = type->is_placeholder || ret->is_placeholder;
+    return type;
+}
+
+ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
+    if (auto cached = m_ctx->lambda_of.get(fn_type)) {
+        return *cached;
+    }
+    auto lambda = create_type(TypeKind::FnLambda);
+    lambda->data.fn_lambda.fn = fn_type;
+
+    auto struct_type = create_type(TypeKind::Struct);
+    auto &struct_ = struct_type->data.struct_;
+    struct_.kind = ContainerKind::Struct;
+    auto ptr_node = create_node(NodeType::VarDecl);
+    ptr_node->name = "ptr";
+    struct_.add_member("ptr", ptr_node, get_pointer_type(get_system_types()->void_));
+
+    lambda->data.fn_lambda.internal = struct_type;
+    m_ctx->lambda_of[fn_type] = lambda;
+    return lambda;
+}
+
 ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
     if (value->kind == TypeKind::Void) {
         value = get_system_types()->bool_;
@@ -955,7 +1045,7 @@ ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
     auto result_type = create_type(TypeKind::Result);
     auto &data = result_type->data.result;
     data.value = value;
-    data.err = err;
+    data.error = err;
     assert(to_string(result_type) == key);
     m_ctx->composite_types[key] = result_type;
 

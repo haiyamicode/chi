@@ -52,7 +52,9 @@ void AstPrinter::print_node(Node *node) {
         if (data.body) {
             print(" ");
             print_node(data.body);
-            print("\n");
+            if (data.fn_kind != FnKind::Lambda) {
+                print("\n");
+            }
         } else {
             print(";");
         }
@@ -60,6 +62,10 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
+        if (data.is_type_expr && !data.params.size && !data.return_type) {
+            print("func");
+            return;
+        }
         print("func {}(", node->name);
         print_node_list(&data.params);
         print(")");

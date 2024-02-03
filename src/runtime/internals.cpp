@@ -5,6 +5,7 @@
 #define CHI_RUNTIME_HAS_BACKTRACE 1
 #include <csignal>
 #include <sstream>
+#include <uv.h>
 
 #include "internals.h"
 #include "sema.h"
@@ -214,7 +215,14 @@ void cx_runtime_start(void *stack) {
     }
 }
 
-void cx_runtime_stop() { tgc_stop(&gc); }
+void cx_runtime_stop() {
+    // run event loop
+    uv_loop_t *loop = uv_default_loop();
+    uv_run(loop, UV_RUN_DEFAULT);
+    uv_loop_close(loop);
+
+    tgc_stop(&gc);
+}
 
 extern "C" {
 extern _Unwind_Reason_Code __gxx_personality_v0(...);
@@ -224,4 +232,24 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context) {
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
+}
+
+void cx_timeout(uint64_t delay, void *callback) {
+    uv_timer_t *timer = (uv_timer_t *)malloc(sizeof(uv_timer_t));
+    uv_timer_init(uv_default_loop(), timer);
+    timer->data = callback;
+    uv_timer_start(
+        timer,
+        [](uv_timer_t *handle) {
+            auto callback = (void (*)(void))handle->data;
+            callback();
+            uv_timer_stop(handle);
+            free(handle);
+        },
+        delay, 0);
+}
+
+void cx_call(void *fn) {
+    auto fn_ptr = (void (*)(void))fn;
+    fn_ptr();
 }

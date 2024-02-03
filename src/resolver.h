@@ -46,6 +46,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
     optional<ErrorHandler> error_handler = {};
     map<string, ChiType *> composite_types = {};
+    map<ChiType *, ChiType *> lambda_of = {};
 
     ResolveContext(Allocator *allocator) { this->allocator = allocator; }
 };
@@ -68,6 +69,10 @@ struct ResolveScope {
     ResolveScope set_parent_loop(ast::Node *loop) const;
 
     ResolveScope set_is_escaping(bool is_escaping) const;
+};
+
+enum ResolveFlag : uint32_t {
+    IS_FN_DECL_PROTO = 1 << 0,
 };
 
 class Resolver {
@@ -131,9 +136,9 @@ class Resolver {
 
     void resolve(ast::Module *module);
 
-    ChiType *resolve(ast::Node *node, ResolveScope &scope);
+    ChiType *resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
 
-    ChiType *_resolve(ast::Node *node, ResolveScope &scope);
+    ChiType *_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
 
     template <typename... Args>
     void error(ast::Node *node, const char *format, const Args &...args) {
@@ -167,6 +172,8 @@ class Resolver {
 
     string to_string(ChiType *type);
 
+    string to_string(TypeKind kind, ChiType::Data *data);
+
     ChiType *to_value_type(ChiType *type);
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
@@ -174,6 +181,10 @@ class Resolver {
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
 
     ChiType *get_array_type(ChiType *elem);
+
+    ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic);
+
+    ChiType *get_lambda_for_fn(ChiType *fn);
 
     ChiType *get_result_type(ChiType *value, ChiType *err);
 

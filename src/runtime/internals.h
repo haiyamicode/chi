@@ -43,6 +43,10 @@ struct CxRefc {
     int32_t *refcnt;
 };
 
+struct CxFnLambda {
+    void *ptr;
+};
+
 typedef CxArray CxSlice;
 
 void cx_string_set_data(CxString *dest, const char *data);
@@ -81,6 +85,9 @@ void cx_runtime_stop();
 _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t exceptionClass,
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context);
+
+void cx_timeout(uint64_t delay, void *callback);
+void cx_call(void *fn);
 
 #ifdef __cplusplus
 }

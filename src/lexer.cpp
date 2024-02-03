@@ -817,6 +817,15 @@ string cx::get_strlit_repr(const string &str) {
     return out.str();
 }
 
+string Token::get_name() const {
+    switch (type) {
+    case TokenType::IDEN:
+        return str;
+    default:
+        return "";
+    }
+}
+
 string Token::to_string() const {
     switch (type) {
     case TokenType::IDEN:

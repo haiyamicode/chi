@@ -106,6 +106,7 @@ struct Token {
     Pos pos = {};
 
     string to_string() const;
+    string get_name() const;
 
     Token(TokenType type = TokenType::END) {
         this->type = type;

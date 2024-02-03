@@ -122,7 +122,9 @@ class Parser {
 
     Node *parse_type_expr();
 
-    Node *parse_fn_decl(FnBodyMode body_mode, DeclSpec decl_spec = {});
+    Node *parse_fn_lambda();
+
+    Node *parse_fn_decl(uint32_t flags, DeclSpec decl_spec = {});
 
     void parse_fn_block(Node *fn);
 
@@ -133,6 +135,8 @@ class Parser {
     Node *parse_var_decl(bool as_field);
 
     Node *parse_fn_proto(Token *iden);
+
+    Node *parse_fn_type(Token *func);
 
     bool parse_fn_params(NodeList *params);
 

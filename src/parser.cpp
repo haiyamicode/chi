@@ -240,7 +240,7 @@ Node *Parser::parse_top_level_decl(DeclSpec decl_spec) {
     case TokenType::KW_CONST:
         return parse_var_decl(false);
     case TokenType::KW_FUNC: {
-        return parse_fn_decl(FnBodyMode::Required, decl_spec);
+        return parse_fn_decl(FN_BODY_REQUIRED, decl_spec);
     }
     case TokenType::KW_EXTERN:
         return parse_extern_decl();
@@ -309,6 +309,11 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
 }
 
 Node *Parser::parse_type_expr() {
+    auto token = get();
+    if (token->type == TokenType::KW_FUNC) {
+        consume();
+        return parse_fn_type(token);
+    }
     array<Node *> sigil_nodes;
     for (;;) {
         auto token = get();
@@ -360,20 +365,31 @@ Node *Parser::parse_type_expr() {
     return node;
 }
 
-Node *Parser::parse_fn_decl(FnBodyMode body_mode, DeclSpec decl_spec) {
+Node *Parser::parse_fn_lambda() {
+    auto token = expect(TokenType::KW_FUNC);
+    auto proto = parse_fn_proto(token);
+    auto fn = create_node(NodeType::FnDef, token);
+    fn->name = "";
+    fn->data.fn_def.fn_kind = FnKind::Lambda;
+    fn->data.fn_def.fn_proto = proto;
+    fn->data.fn_def.body = parse_block();
+    return fn;
+}
+
+Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
-    expect(TokenType::KW_FUNC);
-    Token *iden;
+    auto iden = expect(TokenType::KW_FUNC);
     auto kind = parse_fn_identifier(&iden);
+
     auto fn = create_node(NodeType::FnDef, iden);
-    fn->name = iden->str;
+    fn->name = iden->get_name();
     auto proto = parse_fn_proto(iden);
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
     fn->data.fn_def.decl_spec = decl_spec;
     fn->data.fn_def.body = nullptr;
     proto->data.fn_proto.fn_def_node = fn;
-    if (body_mode == FnBodyMode::None) {
+    if (flags & FN_BODY_NONE) {
         expect(TokenType::SEMICOLON);
         add_to_scope(fn);
         return fn;
@@ -383,21 +399,15 @@ Node *Parser::parse_fn_decl(FnBodyMode body_mode, DeclSpec decl_spec) {
         save_block_pos(fn);
         skip_block();
     } else {
-        switch (body_mode) {
-        case FnBodyMode::Required:
+        if (flags & FN_BODY_REQUIRED) {
             parse_fn_block(fn);
-            break;
-        case FnBodyMode::Optional:
+        } else {
             if (next_is(TokenType::LBRACE)) {
                 parse_fn_block(fn);
-            } else {
-                expect(TokenType::SEMICOLON);
             }
-            break;
-        default:
-            panic("unreachable");
         }
     }
+
     add_to_scope(fn);
     return fn;
 }
@@ -447,10 +457,10 @@ Node *Parser::parse_var_decl(bool as_field) {
     return node;
 }
 
-Node *Parser::parse_fn_proto(Token *iden) {
+Node *Parser::parse_fn_proto(Token *token) {
     expect(TokenType::LPAREN);
-    auto proto = create_node(NodeType::FnProto, iden);
-    proto->name = iden->str;
+    auto proto = create_node(NodeType::FnProto, token);
+    proto->name = token->get_name();
     auto vararg = parse_fn_params(&proto->data.fn_proto.params);
     if (vararg) {
         proto->data.fn_proto.is_vararg = true;
@@ -458,6 +468,28 @@ Node *Parser::parse_fn_proto(Token *iden) {
     expect(TokenType::RPAREN);
     if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON)) {
         proto->data.fn_proto.return_type = parse_type_expr();
+    }
+    return proto;
+}
+
+Node *Parser::parse_fn_type(Token *func) {
+    auto proto = create_node(NodeType::FnProto, func);
+    auto &data = proto->data.fn_proto;
+    data.is_type_expr = true;
+
+    if (!next_is(TokenType::LPAREN)) {
+        return proto;
+    }
+    expect(TokenType::LPAREN);
+    auto vararg = parse_fn_params(&data.params);
+    if (vararg) {
+        data.is_vararg = true;
+    }
+    expect(TokenType::RPAREN);
+    auto next_is_separator = next_is(TokenType::RBRACE) || next_is(TokenType::SEMICOLON) ||
+                             next_is(TokenType::COMMA) || next_is(TokenType::GT);
+    if (!next_is_separator) {
+        data.return_type = parse_type_expr();
     }
     return proto;
 }
@@ -743,6 +775,9 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     case TokenType::LBRACE: {
         return parse_construct_expr();
     }
+    case TokenType::KW_FUNC: {
+        return parse_fn_lambda();
+    }
     default:
         unexpected(token);
     }
@@ -949,11 +984,11 @@ Node *Parser::parse_struct_member(ContainerKind container_kind) {
     case ContainerKind::Enum:
         return parse_enum_member();
     case ContainerKind::Trait: {
-        return parse_fn_decl(FnBodyMode::Optional);
+        return parse_fn_decl(0);
     }
     default:
         if (next_is(TokenType::KW_FUNC)) {
-            return parse_fn_decl(FnBodyMode::Required);
+            return parse_fn_decl(FN_BODY_REQUIRED);
         }
         return parse_var_decl(true);
     }
@@ -1102,7 +1137,7 @@ Node *Parser::parse_extern_decl() {
             break;
         }
 
-        auto fn = parse_fn_decl(FnBodyMode::None);
+        auto fn = parse_fn_decl(FN_BODY_NONE);
         fn->data.fn_def.decl_spec.flags |= DECL_EXTERN;
         members.add(fn);
 
