@@ -112,6 +112,7 @@ template <typename T> struct array {
 
     void operator=(const array<T> &other) {
         reserve(other.size);
+        size = 0;
         for (size_t i = 0; i < other.size; i++) {
             add(other.items[i]);
         }

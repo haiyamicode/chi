@@ -67,6 +67,18 @@ array<ast::Node *> Scope::get_all() {
     return list;
 }
 
+ast::Node *Scope::find_parent(ast::NodeType type) {
+    for (auto scope = this; scope; scope = scope->parent) {
+        if (!scope) {
+            break;
+        }
+        if (scope->owner->type == type) {
+            return scope->owner;
+        }
+    }
+    return nullptr;
+}
+
 void Scope::put(const string &name, ast::Node *node) { symbols[name] = node; }
 
 ChiType *ChiTypeFn::get_param_at(size_t index) {
@@ -86,6 +98,8 @@ ChiType *ChiType::get_elem() {
         return data.array.elem;
     case TypeKind::Result:
         return data.result.value;
+    case TypeKind::Promise:
+        return data.promise.value;
     default:
         unreachable();
         return nullptr;

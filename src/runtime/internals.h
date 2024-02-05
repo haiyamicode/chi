@@ -43,8 +43,14 @@ struct CxRefc {
     int32_t *refcnt;
 };
 
-struct CxFnLambda {
+struct S {
+    int32_t *p;
+};
+
+struct CxLambdaRef {
     void *ptr;
+    uint32_t size; // size of captured data
+    S *data;       // captured data, lives on the heap
 };
 
 typedef CxArray CxSlice;
@@ -86,8 +92,8 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context);
 
-void cx_timeout(uint64_t delay, void *callback);
-void cx_call(void *fn);
+void cx_timeout(uint64_t delay, CxLambdaRef *callback);
+void cx_call(CxLambdaRef *callback);
 
 #ifdef __cplusplus
 }

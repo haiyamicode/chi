@@ -12,11 +12,12 @@
 namespace cx {
 namespace ast {
 struct Node;
-}
+enum class NodeType;
+} // namespace ast
 struct ChiType;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
-          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda)
+          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -113,7 +114,7 @@ struct ChiTypeResult {
 
 struct ChiTypeSubtype {
     ChiType *generic = nullptr;
-    array<ChiType *> args = {};
+    TypeList args = {};
     ChiType *resolved_struct = nullptr;
 };
 
@@ -125,15 +126,27 @@ struct ChiTypePlaceholder {
 struct ChiTypeFnLambda {
     ChiType *fn = nullptr;
     ChiType *internal = nullptr;
+    TypeList captures = {};
+
+    // function type with captures
+    ChiType *bound_fn = nullptr;
+    // binding struct which stores captures
+    ChiType *bind_struct = nullptr;
 };
 
 typedef uint32_t TypeId;
+
+struct ChiTypePromise {
+    ChiType *value = nullptr;
+    ChiType *internal = nullptr;
+};
 
 struct ChiType {
     TypeKind kind = TypeKind::Void;
     optional<string> name = {};
     bool is_placeholder = false;
     TypeId id = 0;
+    optional<string> display_name = {};
 
     union Data {
         ChiTypeFn fn;
@@ -147,6 +160,7 @@ struct ChiType {
         ChiTypePlaceholder placeholder;
         ChiTypeResult result;
         ChiTypeFnLambda fn_lambda;
+        ChiTypePromise promise;
 
         Data() {}
 
@@ -175,6 +189,7 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
             CHITYPE_CASE_INIT_FIELD(result, Result, ChiTypeResult)
             CHITYPE_CASE_INIT_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
+            CHITYPE_CASE_INIT_FIELD(promise, Promise, ChiTypePromise)
         default:
             break;
         }
@@ -197,6 +212,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
             CHITYPE_CASE_DESTROY_FIELD(result, Result, ChiTypeResult)
             CHITYPE_CASE_DESTROY_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
+            CHITYPE_CASE_DESTROY_FIELD(promise, Promise, ChiTypePromise)
         default:
             break;
         }
@@ -208,6 +224,13 @@ struct ChiType {
 
     bool is_pointer() {
         return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::Box;
+    }
+
+    string get_display_name() {
+        if (display_name) {
+            return *display_name;
+        }
+        return name.value_or("");
     }
 };
 
@@ -222,6 +245,8 @@ struct Scope {
     array<ast::Node *> get_all();
 
     void put(const string &name, ast::Node *node);
+
+    ast::Node *find_parent(ast::NodeType type);
 
   private:
     map<string, ast::Node *> symbols = {};

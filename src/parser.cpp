@@ -27,6 +27,8 @@ static string get_token_type_repr(TokenType token_type) {
         return "string literal";
     case TokenType::BOOL:
         return "bool literal";
+    case TokenType::NULLP:
+        return "null literal";
     case TokenType::INT:
         return "int literal";
     case TokenType::FLOAT:
@@ -389,6 +391,10 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec decl_spec) {
     fn->data.fn_def.decl_spec = decl_spec;
     fn->data.fn_def.body = nullptr;
     proto->data.fn_proto.fn_def_node = fn;
+    for (auto param : proto->data.fn_proto.params) {
+        param->parent_fn = fn;
+    }
+
     if (flags & FN_BODY_NONE) {
         expect(TokenType::SEMICOLON);
         add_to_scope(fn);
@@ -438,6 +444,11 @@ Node *Parser::parse_var_decl(bool as_field) {
     node->data.var_decl.identifier = iden;
     node->data.var_decl.is_const = is_const;
     node->data.var_decl.is_field = as_field;
+
+    if (!is_const) {
+        node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
+        assert(node->parent_fn);
+    }
     if (as_field && next_is(TokenType::ELLIPSIS)) {
         consume();
         node->data.var_decl.is_embed = true;
@@ -562,6 +573,7 @@ Node *Parser::parse_stmt() {
     case TokenType::KW_DELETE:
     case TokenType::IDEN:
     case TokenType::BOOL:
+    case TokenType::NULLP:
     case TokenType::INT:
     case TokenType::FLOAT:
     case TokenType::CHAR:
@@ -759,6 +771,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     }
     case TokenType::INT:
     case TokenType::BOOL:
+    case TokenType::NULLP:
     case TokenType::FLOAT:
     case TokenType::CHAR:
     case TokenType::STRING: {

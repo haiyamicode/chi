@@ -54,6 +54,8 @@ struct Function {
     std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
     bool has_try = false;
+    int bind_offset = 0;
+    llvm::Value *bind_ptr = nullptr;
 
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
@@ -152,13 +154,14 @@ struct CodegenContext {
     array<box<string>> strings;
     array<Function *> pending_fns;
 
-    map<ast::Node *, llvm::Value *> value_table = {};
+    map<ast::Node *, llvm::Value *> var_table = {};
     map<ChiType *, box<StructData>> struct_table = {};
     map<TypeId, llvm::Type *> type_table = {};
     map<TypeId, box<TypeInfo>> info_table = {};
     map<ast::Node *, Function *> function_table = {};
     map<string, Function *> system_functions = {};
     map<ChiType *, llvm::Value *> typeinfo_table = {};
+    map<string, llvm::Type *> anon_type_table = {};
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx;
@@ -182,6 +185,9 @@ enum ArrayFlag { None, Static };
 struct RefValue {
     llvm::Value *address = nullptr;
     llvm::Value *value = nullptr;
+
+    static RefValue from_value(llvm::Value *value) { return {nullptr, value}; }
+    static RefValue from_address(llvm::Value *address) { return {address, nullptr}; }
 };
 
 class Compiler {
@@ -255,9 +261,9 @@ class Compiler {
     void init_method_fn(Function *fn, const string &fn_name, ChiType *struct_type,
                         ChiTypeSubtype *subtype);
 
-    void add_value(ast::Node *node, llvm::Value *value) { m_ctx->value_table[node] = value; }
+    void add_var(ast::Node *node, llvm::Value *value) { m_ctx->var_table[node] = value; }
 
-    llvm::Value *&get_value(ast::Node *node) { return m_ctx->value_table.at(node); }
+    llvm::Value *&get_var(ast::Node *node) { return m_ctx->var_table.at(node); }
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
 
@@ -272,7 +278,8 @@ class Compiler {
 
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
 
-    llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr);
+    llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
+                                      NodeList *captures);
 
     llvm::Value *compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                     ChiType *to_type);

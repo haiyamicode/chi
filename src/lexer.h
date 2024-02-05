@@ -25,6 +25,7 @@ MAKE_ENUM(TokenType, END, IDEN, ERROR,
           FLOAT,  // 322.0
           CHAR,   // '海'
           STRING, // "Hải"
+          NULLP,  // null
 
           // operators
           ADD,    // +
@@ -114,6 +115,9 @@ struct Token {
         switch (type) {
         case TokenType::BOOL:
             val.b = false;
+            break;
+        case TokenType::NULLP:
+            val.i = 0;
             break;
         case TokenType::INT:
             val.i = 0;

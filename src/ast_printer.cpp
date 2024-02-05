@@ -70,6 +70,7 @@ void AstPrinter::print_node(Node *node) {
         print_node_list(&data.params);
         print(")");
         if (data.return_type) {
+            print(" ");
             print_node(data.return_type);
         }
         break;
@@ -175,7 +176,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
         if (data.type) {
-            print("+");
+            if (data.is_new) {
+                print("new ");
+            }
             print_node(data.type);
         }
         print("{{");

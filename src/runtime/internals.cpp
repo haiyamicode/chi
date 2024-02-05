@@ -188,11 +188,12 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
 }
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
-    auto p = tgc_alloc(&gc, size);
-    if (dtor) {
-        tgc_set_dtor(&gc, p, dtor);
-    }
-    return p;
+    return malloc(size);
+    // auto p = tgc_alloc(&gc, size);
+    // if (dtor) {
+    //     tgc_set_dtor(&gc, p, dtor);
+    // }
+    // return p;
 }
 
 void signal_handler(int signal_num) {
@@ -234,22 +235,46 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
 }
 
-void cx_timeout(uint64_t delay, void *callback) {
-    uv_timer_t *timer = (uv_timer_t *)malloc(sizeof(uv_timer_t));
-    uv_timer_init(uv_default_loop(), timer);
-    timer->data = callback;
-    uv_timer_start(
-        timer,
-        [](uv_timer_t *handle) {
-            auto callback = (void (*)(void))handle->data;
-            callback();
-            uv_timer_stop(handle);
-            free(handle);
-        },
-        delay, 0);
+static CxLambdaRef *cx_lambda_clone(CxLambdaRef *callback) {
+    auto cb = new CxLambdaRef();
+    *cb = *callback;
+    if (callback->data) {
+        cb->data = (S *)malloc(callback->size);
+        memcpy(cb->data, callback->data, callback->size);
+    }
+    return cb;
 }
 
-void cx_call(void *fn) {
-    auto fn_ptr = (void (*)(void))fn;
-    fn_ptr();
+static void cx_lambda_free(CxLambdaRef *callback) {
+    free(callback->data);
+    delete callback;
+}
+
+void cx_timeout(uint64_t delay, CxLambdaRef *callback) {
+    auto cb =
+        cx_lambda_clone(callback); // clone the callback, otherwise it will be freed right away
+    uv_timer_t *timer = (uv_timer_t *)malloc(sizeof(uv_timer_t));
+    uv_timer_init(uv_default_loop(), timer);
+
+    timer->data = cb;
+
+    auto fn = (void (*)(void *))cb->ptr;
+    fn(cb->data);
+
+    // uv_timer_start(
+    //     timer,
+    //     [](uv_timer_t *handle) {
+    //         auto cb = (CxLambdaRef *)handle->data;
+    //         auto fn = (void (*)(void *))cb->ptr;
+    //         fn(cb->data);
+    //         uv_timer_stop(handle);
+    //         cx_lambda_free(cb);
+    //         free(handle);
+    //     },
+    //     delay, 0);
+}
+
+void cx_call(CxLambdaRef *fn) {
+    auto fn_ptr = (void (*)(void *))fn->ptr;
+    fn_ptr(fn->data);
 }

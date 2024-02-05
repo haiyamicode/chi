@@ -9,7 +9,7 @@ extern "C" {
   func cx_array_construct(dest *void);
   func cx_print_any(value *void);
   func cx_print_number(value uint64);
-  func cx_gc_alloc(size uint32) *void;
+  func cx_gc_alloc(size uint32, destructor *void) *void;
   func cx_runtime_start(stack *void);
   func cx_runtime_stop();
   func cx_panic(message string);
@@ -24,7 +24,7 @@ export func println(value any) {
 }
 
 export func gc_alloc(size uint32) *void {
-  return cx_gc_alloc(size);
+  return cx_gc_alloc(size, null);
 }
 
 export func print_int(value uint64) {
@@ -40,7 +40,7 @@ export func panic(message string) {
 }
 
 export func timeout(delay uint64, callback func) {
-   cx_timeout(delay, callback.ptr);
+  cx_timeout(delay, &callback);
 }
 
 )"""";

@@ -109,6 +109,8 @@ struct FnDef {
     Node *body = nullptr;
     FnKind fn_kind = FnKind::TopLevel;
     DeclSpec decl_spec = {};
+    array<Node *> captures = {};
+    map<Node *, int32_t> capture_map = {};
 
     bool is_instance_method() {
         return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
@@ -260,6 +262,7 @@ struct PrefixExpr {
 
 struct EscapeAnalysis {
     bool escaped = false;
+    int32_t local_index = -1;
 };
 
 struct Node {
@@ -270,6 +273,7 @@ struct Node {
     ChiType *resolved_type = nullptr;
     ChiType *orig_type = nullptr;
     EscapeAnalysis escape = {};
+    Node *parent_fn = nullptr;
 
     union NodeData {
         Root root;
@@ -358,6 +362,13 @@ struct Node {
     }
 
     bool is_heap_allocated() { return escape.escaped; }
+
+    Node *get_decl() {
+        if (type == NodeType::Identifier) {
+            return data.identifier.decl;
+        }
+        return nullptr;
+    }
 };
 } // namespace ast
 

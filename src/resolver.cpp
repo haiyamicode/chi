@@ -35,10 +35,13 @@ void Resolver::context_init_primitives() {
     system_types.char_ = create_int_type(8, false);
     system_types.uint8 = create_int_type(8, true);
     system_types.int_ = create_int_type(32, false);
+    system_types.int32 = create_int_type(32, false);
+    system_types.uint32 = create_int_type(32, true);
     system_types.int64 = create_int_type(64, false);
     system_types.float_ = create_float_type(32);
     system_types.double_ = create_float_type(64);
     system_types.void_ = create_type(TypeKind::Void);
+    system_types.void_ptr = create_pointer_type(system_types.void_, TypeKind::Pointer);
     system_types.bool_ = create_type(TypeKind::Bool);
     system_types.string = create_type(TypeKind::String);
     system_types.str_lit = create_pointer_type(system_types.char_, TypeKind::Pointer);
@@ -47,6 +50,7 @@ void Resolver::context_init_primitives() {
     system_types.box = create_type(TypeKind::Box);
     system_types.result = create_type(TypeKind::Result);
     system_types.error = create_type(TypeKind::Error);
+    system_types.promise = create_type(TypeKind::Promise);
 
     add_primitive("bool", system_types.bool_);
     add_primitive("string", system_types.string);
@@ -72,6 +76,7 @@ void Resolver::context_init_primitives() {
     add_primitive("Box", system_types.box);
     add_primitive("Result", system_types.result);
     add_primitive("Error", system_types.error);
+    add_primitive("Promise", system_types.promise);
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -235,13 +240,53 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.fn_kind == ast::FnKind::Lambda) {
             auto &data = node->data.fn_def;
             auto proto = resolve(data.fn_proto, scope);
-            auto fn_scope = scope.set_parent_fn(proto);
+            auto fn_scope = scope.set_parent_fn(proto).set_parent_fn_node(node);
             resolve(data.body, fn_scope);
+
+            // resolve captures
+            for (auto decl : data.captures) {
+                auto type = resolve(decl, scope);
+                proto->data.fn_lambda.captures.add(type);
+            }
+
+            // create bound form of the lambda function if it has captures
+            auto fn_type = proto->data.fn_lambda.fn;
+            auto &fn_data = fn_type->data.fn;
+            if (data.captures.size > 0) {
+                auto bound_type = create_type(TypeKind::Fn);
+                proto->data.fn_lambda.bound_fn = bound_type;
+
+                // binding struct
+                auto bstruct = create_type(TypeKind::Struct);
+                bstruct->display_name = fmt::format("__lambda_{}::Bind", proto->id);
+                auto &bstruct_data = bstruct->data.struct_;
+                bstruct_data.kind = ContainerKind::Struct;
+                for (int i = 0; i < data.captures.size; i++) {
+                    auto capture = data.captures[i];
+                    auto name = fmt::format("capture_{}", i);
+                    bstruct_data.add_member(
+                        capture->name, get_dummy_var(name),
+                        get_pointer_type(capture->resolved_type, TypeKind::Reference));
+                }
+
+                // create signature with binding struct as first parameter
+                proto->data.fn_lambda.bind_struct = bstruct;
+                auto &bound_fn = bound_type->data.fn;
+                bound_fn.params.add(get_pointer_type(bstruct, TypeKind::Reference));
+                for (auto param : fn_data.params) {
+                    bound_fn.params.add(param);
+                }
+                bound_fn.return_type = fn_data.return_type;
+                bound_fn.is_variadic = fn_data.is_variadic;
+                bound_fn.container = fn_data.container;
+            } else {
+                proto->data.fn_lambda.bound_fn = fn_type;
+            }
             return proto;
         }
         auto proto = resolve(data.fn_proto, scope, flags | IS_FN_DECL_PROTO);
         if (data.body && should_resolve_fn_body(scope)) {
-            auto fn_scope = scope.set_parent_fn(proto);
+            auto fn_scope = scope.set_parent_fn(proto).set_parent_fn_node(node);
             resolve(data.body, fn_scope);
         }
         return proto;
@@ -292,6 +337,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
         auto type = resolve(data.decl, scope);
+        if (auto decl_fn = data.decl->parent_fn) {
+            if (decl_fn != scope.parent_fn_node) {
+                data.decl->escape.escaped = true;
+                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                auto &captures = fn_def.captures;
+                auto &capture_map = fn_def.capture_map;
+
+                // deduplicate captures by the declaration
+                auto existing = capture_map.get(data.decl);
+                if (!existing) {
+                    auto idx = captures.size;
+                    data.decl->escape.local_index = idx;
+                    captures.add(data.decl);
+                    capture_map[data.decl] = idx;
+                } else {
+                    data.decl->escape.local_index = *existing;
+                }
+            }
+        }
         return type;
     }
     case NodeType::TypeSigil: {
@@ -323,6 +387,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         if (data.is_const) {
             data.resolved_value = resolve_constant_value(data.expr);
+            return var_type;
         }
         return var_type;
     }
@@ -417,6 +482,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         switch (token->type) {
         case TokenType::BOOL:
             return get_system_types()->bool_;
+        case TokenType::NULLP:
+            return get_system_types()->void_ptr;
         case TokenType::INT:
             return get_system_types()->int_;
         case TokenType::STRING:
@@ -461,7 +528,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *result_type;
         if (data.type) {
             value_type = resolve_value(data.type, scope);
-            result_type = data.is_new ? get_pointer_type(value_type) : value_type;
+            result_type =
+                data.is_new ? get_pointer_type(value_type, TypeKind::Reference) : value_type;
         } else {
             if (!scope.value_type) {
                 error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
@@ -488,9 +556,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::FnCallExpr: {
         auto &data = node->data.fn_call_expr;
         auto fn_type = resolve(data.fn_ref_expr, scope);
-        if (fn_type->kind != TypeKind::Fn) {
+        if (fn_type->kind != TypeKind::Fn && fn_type->kind != TypeKind::FnLambda) {
             error(data.fn_ref_expr, errors::CANNOT_CALL_NON_FUNCTION);
             return nullptr;
+        }
+        if (fn_type->kind == TypeKind::FnLambda) {
+            auto &fn_lambda = fn_type->data.fn_lambda;
+            fn_type = fn_lambda.fn;
         }
         auto &fn = fn_type->data.fn;
         resolve_fn_call(node, scope, &fn, &data.args);
@@ -589,7 +661,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.subtype_expr;
         auto type = to_value_type(resolve(data.type, scope));
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional ||
-            type->kind == TypeKind::Box) {
+            type->kind == TypeKind::Box || type->kind == TypeKind::Promise) {
             if (data.args.size != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
                       to_string(get_system_type(type->kind)), 1, data.args.size);
@@ -599,7 +671,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         auto &params = type->data.struct_.type_params;
         if (params.size != data.args.size) {
-            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, params.size, data.args.size);
+            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, to_string(type), params.size,
+                  data.args.size);
             return nullptr;
         }
         array<ChiType *> args;
@@ -709,6 +782,9 @@ string Resolver::to_string(ChiType *type) {
     if (type->name) {
         return *type->name;
     }
+    if (type->display_name) {
+        return *type->display_name;
+    }
     switch (type->kind) {
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
@@ -747,6 +823,31 @@ string Resolver::to_string(ChiType *type) {
 
 string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
     switch (kind) {
+    case TypeKind::Struct: {
+        auto &struct_ = data->struct_;
+        std::stringstream ss;
+        ss << "struct ";
+        if (struct_.type_params.size > 0) {
+            ss << "<";
+            for (int i = 0; i < struct_.type_params.size; i++) {
+                ss << to_string(struct_.type_params[i]);
+                if (i < struct_.type_params.size - 1) {
+                    ss << ",";
+                }
+            }
+            ss << ">";
+        }
+        ss << "{";
+        for (int i = 0; i < struct_.members.size; i++) {
+            auto &member = struct_.members[i];
+            ss << to_string(member->resolved_type);
+            if (i < struct_.members.size - 1) {
+                ss << ",";
+            }
+        }
+        ss << "}";
+        return ss.str();
+    }
     case TypeKind::Fn: {
         auto &fn = data->fn;
         std::stringstream ss;
@@ -934,6 +1035,8 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
         sty = sty->data.result.internal;
     } else if (sty->kind == TypeKind::FnLambda) {
         sty = sty->data.fn_lambda.internal;
+    } else if (sty->kind == TypeKind::Promise) {
+        sty = sty->data.promise.internal;
     } else if (sty->kind == TypeKind::TypeSymbol) {
         if (auto underlying_type = sty->data.type_symbol.underlying_type) {
             sty = underlying_type;
@@ -955,6 +1058,7 @@ void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *
     bool ok = fn->is_variadic ? n_args >= n_params - 1 : n_args == n_params;
     if (!ok) {
         error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, n_params, n_args);
+        return;
     }
     for (size_t i = 0; i < n_args; i++) {
         auto param_type = fn->get_param_at(i);
@@ -993,6 +1097,31 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     return type;
 }
 
+ChiType *Resolver::get_promise_type(ChiType *value) {
+    if (auto cached = m_ctx->promise_of.get(value)) {
+        return *cached;
+    }
+    auto type = create_type(TypeKind::Promise);
+    type->data.promise.value = value;
+    m_ctx->promise_of[value] = type;
+
+    auto stype = create_type(TypeKind::Struct);
+    auto &struct_ = stype->data.struct_;
+    type->data.promise.internal = stype;
+    TypeList cb_params = {};
+    struct_.add_member(
+        "callback", get_dummy_var("callback"),
+        get_lambda_for_fn(get_fn_type(get_system_types()->void_, &cb_params, false)));
+    struct_.kind = ContainerKind::Struct;
+    return type;
+}
+
+ast::Node *Resolver::get_dummy_var(const string &name) {
+    auto node = create_node(NodeType::VarDecl);
+    node->name = name;
+    return node;
+}
+
 ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic) {
     ChiTypeFn fn;
     fn.return_type = ret;
@@ -1016,21 +1145,19 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic)
 }
 
 ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
-    if (auto cached = m_ctx->lambda_of.get(fn_type)) {
-        return *cached;
-    }
     auto lambda = create_type(TypeKind::FnLambda);
     lambda->data.fn_lambda.fn = fn_type;
 
     auto struct_type = create_type(TypeKind::Struct);
     auto &struct_ = struct_type->data.struct_;
+    struct_type->display_name = "Lambda<" + to_string(fn_type) + ">" + "::Internal";
+
     struct_.kind = ContainerKind::Struct;
-    auto ptr_node = create_node(NodeType::VarDecl);
-    ptr_node->name = "ptr";
-    struct_.add_member("ptr", ptr_node, get_pointer_type(get_system_types()->void_));
+    struct_.add_member("ptr", get_dummy_var("ptr"), get_pointer_type(get_system_types()->void_));
+    struct_.add_member("size", get_dummy_var("size"), get_system_types()->uint32);
+    struct_.add_member("data", get_dummy_var("data"), get_pointer_type(get_system_types()->void_));
 
     lambda->data.fn_lambda.internal = struct_type;
-    m_ctx->lambda_of[fn_type] = lambda;
     return lambda;
 }
 
@@ -1091,6 +1218,12 @@ ConstantValue Resolver::resolve_constant_value(ast::Node *node) {
         }
         case TokenType::STRING: {
             return token->str;
+        }
+        case TokenType::BOOL: {
+            return (int64_t)token->val.b;
+        }
+        case TokenType::NULLP: {
+            return (int64_t)0;
         }
         default:
             break;
@@ -1271,6 +1404,8 @@ ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
         return get_pointer_type(elem, kind);
     case TypeKind::Array:
         return get_array_type(elem);
+    case TypeKind::Promise:
+        return get_promise_type(elem);
     default:
         unreachable();
         return {};
@@ -1369,4 +1504,8 @@ ResolveScope ResolveScope::set_parent_loop(ast::Node *loop) const {
 
 ResolveScope ResolveScope::set_is_escaping(bool is_escaping) const {
     RS_SET_PROP_COPY(is_escaping, is_escaping);
+}
+
+ResolveScope ResolveScope::set_parent_fn_node(ast::Node *fn) const {
+    RS_SET_PROP_COPY(parent_fn_node, fn);
 }

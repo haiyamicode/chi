@@ -67,6 +67,7 @@ void Lexer::setup_keywords() {
     // bool
     s_keywords["true"] = TokenType::BOOL;
     s_keywords["false"] = TokenType::BOOL;
+    s_keywords["null"] = TokenType::NULLP;
 }
 
 string &Lexer::new_buf(size_t reserve) {
@@ -840,6 +841,8 @@ string Token::to_string() const {
         return fmt::format("{}", val.d);
     case TokenType::BOOL:
         return val.b ? "true" : "false";
+    case TokenType::NULLP:
+        return "null";
     default:
         if (type >= TokenType::KW_BREAK && type <= TokenType::KW_UNION) {
             return str;

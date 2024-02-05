@@ -20,11 +20,14 @@ struct Allocator {
 
 struct SystemTypes {
     ChiType *int_ = nullptr;
+    ChiType *int32 = nullptr;
+    ChiType *uint32 = nullptr;
     ChiType *int64 = nullptr;
     ChiType *uint8 = nullptr;
     ChiType *float_ = nullptr;
     ChiType *double_ = nullptr;
     ChiType *void_ = nullptr;
+    ChiType *void_ptr = nullptr;
     ChiType *char_ = nullptr;
     ChiType *str_lit = nullptr;
     ChiType *any = nullptr;
@@ -35,6 +38,7 @@ struct SystemTypes {
     ChiType *box = nullptr;
     ChiType *result = nullptr;
     ChiType *error = nullptr;
+    ChiType *promise = nullptr;
 };
 
 struct ResolveContext {
@@ -46,13 +50,14 @@ struct ResolveContext {
     map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
     optional<ErrorHandler> error_handler = {};
     map<string, ChiType *> composite_types = {};
-    map<ChiType *, ChiType *> lambda_of = {};
+    map<ChiType *, ChiType *> promise_of = {};
 
     ResolveContext(Allocator *allocator) { this->allocator = allocator; }
 };
 
 struct ResolveScope {
     bool skip_fn_bodies = false;
+    ast::Node *parent_fn_node = nullptr;
     ChiType *parent_fn = nullptr;
     ChiType *parent_struct = nullptr;
     ChiType *value_type = nullptr;
@@ -69,6 +74,8 @@ struct ResolveScope {
     ResolveScope set_parent_loop(ast::Node *loop) const;
 
     ResolveScope set_is_escaping(bool is_escaping) const;
+
+    ResolveScope set_parent_fn_node(ast::Node *fn) const;
 };
 
 enum ResolveFlag : uint32_t {
@@ -182,6 +189,8 @@ class Resolver {
 
     ChiType *get_array_type(ChiType *elem);
 
+    ChiType *get_promise_type(ChiType *value);
+
     ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic);
 
     ChiType *get_lambda_for_fn(ChiType *fn);
@@ -191,6 +200,8 @@ class Resolver {
     ChiType *get_wrapped_type(ChiType *elem, TypeKind kind);
 
     ChiType *resolve_subtype(ChiType *subtype);
+
+    ast::Node *get_dummy_var(const string &name);
 
     ConstantValue resolve_constant_value(ast::Node *node);
 
