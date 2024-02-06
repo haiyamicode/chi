@@ -605,7 +605,6 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl) {
 
     if (is_managed() && decl->is_heap_allocated()) {
         auto ptr_type_l = llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0);
-        auto var_p = llvm_builder.CreateAlloca(ptr_type_l, nullptr, decl->name);
         auto gc_alloc = get_system_fn("cx_gc_alloc");
         auto size = llvm_module.getDataLayout().getTypeAllocSize(var_type_l);
         std::vector<llvm::Value *> args = {
@@ -614,9 +613,7 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl) {
                 llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)),
         };
         auto result = llvm_builder.CreateCall(gc_alloc->llvm_fn, args);
-        // auto p = llvm_builder.CreateLoad(ptr_type_l, result);
-        llvm_builder.CreateStore(result, var_p);
-        return var_p;
+        return result;
     } else {
         return llvm_builder.CreateAlloca(var_type_l, nullptr, decl->name);
     }

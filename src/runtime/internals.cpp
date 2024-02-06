@@ -188,12 +188,11 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
 }
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
-    return malloc(size);
-    // auto p = tgc_alloc(&gc, size);
-    // if (dtor) {
-    //     tgc_set_dtor(&gc, p, dtor);
-    // }
-    // return p;
+    auto p = tgc_alloc(&gc, size);
+    if (dtor) {
+        tgc_set_dtor(&gc, p, dtor);
+    }
+    return p;
 }
 
 void signal_handler(int signal_num) {
@@ -255,23 +254,19 @@ void cx_timeout(uint64_t delay, CxLambdaRef *callback) {
         cx_lambda_clone(callback); // clone the callback, otherwise it will be freed right away
     uv_timer_t *timer = (uv_timer_t *)malloc(sizeof(uv_timer_t));
     uv_timer_init(uv_default_loop(), timer);
-
     timer->data = cb;
 
-    auto fn = (void (*)(void *))cb->ptr;
-    fn(cb->data);
-
-    // uv_timer_start(
-    //     timer,
-    //     [](uv_timer_t *handle) {
-    //         auto cb = (CxLambdaRef *)handle->data;
-    //         auto fn = (void (*)(void *))cb->ptr;
-    //         fn(cb->data);
-    //         uv_timer_stop(handle);
-    //         cx_lambda_free(cb);
-    //         free(handle);
-    //     },
-    //     delay, 0);
+    uv_timer_start(
+        timer,
+        [](uv_timer_t *handle) {
+            auto cb = (CxLambdaRef *)handle->data;
+            auto fn = (void (*)(void *))cb->ptr;
+            fn(cb->data);
+            uv_timer_stop(handle);
+            cx_lambda_free(cb);
+            free(handle);
+        },
+        delay, 0);
 }
 
 void cx_call(CxLambdaRef *fn) {
