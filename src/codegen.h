@@ -269,6 +269,8 @@ class Compiler {
 
     RefValue compile_expr_ref(Function *fn, ast::Node *expr);
 
+    RefValue compile_iden_ref(Function *fn, ast::Node *iden);
+
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr);
 
     llvm::Value *compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
@@ -306,7 +308,7 @@ class Compiler {
 
     unknown_t create_string_constant(Function *fn, const char *str);
 
-    llvm::Value *compile_alloc(Function *fn, ast::Node *decl);
+    llvm::Value *compile_alloc(Function *fn, ast::Node *decl, bool is_new = false);
 
     void compile_stmt(Function *fn, ast::Node *stmt);
 

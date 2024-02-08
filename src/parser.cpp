@@ -311,11 +311,6 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
 }
 
 Node *Parser::parse_type_expr() {
-    auto token = get();
-    if (token->type == TokenType::KW_FUNC) {
-        consume();
-        return parse_fn_type(token);
-    }
     array<Node *> sigil_nodes;
     for (;;) {
         auto token = get();
@@ -337,27 +332,36 @@ Node *Parser::parse_type_expr() {
             break;
         }
     }
-    auto iden = parse_identifier();
-    auto node = iden;
-    if (next_is(TokenType::LT)) {
+
+    ast::Node *node = nullptr;
+    auto token = get();
+    if (token->type == TokenType::KW_FUNC) {
         consume();
-        node = create_node(NodeType::SubtypeExpr, iden->token);
-        auto &subtype = node->data.subtype_expr;
-        subtype.type = iden;
-        Token *token;
-        for (;;) {
-            token = get();
-            if (token->type == TokenType::GT) {
-                break;
-            }
-            auto param = parse_type_expr();
-            subtype.args.add(param);
-            if (!at_comma(TokenType::GT)) {
-                break;
-            }
+        node = parse_fn_type(token);
+    } else {
+        auto iden = parse_identifier();
+        node = iden;
+
+        if (next_is(TokenType::LT)) {
             consume();
+            node = create_node(NodeType::SubtypeExpr, iden->token);
+            auto &subtype = node->data.subtype_expr;
+            subtype.type = iden;
+            Token *token;
+            for (;;) {
+                token = get();
+                if (token->type == TokenType::GT) {
+                    break;
+                }
+                auto param = parse_type_expr();
+                subtype.args.add(param);
+                if (!at_comma(TokenType::GT)) {
+                    break;
+                }
+                consume();
+            }
+            expect(TokenType::GT);
         }
-        expect(TokenType::GT);
     }
     for (int i = int(sigil_nodes.size) - 1; i >= 0; --i) {
         auto parent = sigil_nodes[i];
@@ -374,7 +378,7 @@ Node *Parser::parse_fn_lambda() {
     fn->name = "";
     fn->data.fn_def.fn_kind = FnKind::Lambda;
     fn->data.fn_def.fn_proto = proto;
-    fn->data.fn_def.body = parse_block();
+    parse_fn_block(fn);
     return fn;
 }
 
@@ -391,9 +395,6 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec decl_spec) {
     fn->data.fn_def.decl_spec = decl_spec;
     fn->data.fn_def.body = nullptr;
     proto->data.fn_proto.fn_def_node = fn;
-    for (auto param : proto->data.fn_proto.params) {
-        param->parent_fn = fn;
-    }
 
     if (flags & FN_BODY_NONE) {
         expect(TokenType::SEMICOLON);
@@ -424,6 +425,7 @@ void Parser::parse_fn_block(Node *fn) {
     auto &fn_proto = fn_def.fn_proto->data.fn_proto;
     for (auto param : fn_proto.params) {
         add_to_scope(param);
+        param->parent_fn = fn;
     }
     fn_def.body = parse_block();
     m_ctx->resolver->pop_scope();
@@ -497,7 +499,7 @@ Node *Parser::parse_fn_type(Token *func) {
         data.is_vararg = true;
     }
     expect(TokenType::RPAREN);
-    auto next_is_separator = next_is(TokenType::RBRACE) || next_is(TokenType::SEMICOLON) ||
+    auto next_is_separator = next_is(TokenType::RPAREN) || next_is(TokenType::SEMICOLON) ||
                              next_is(TokenType::COMMA) || next_is(TokenType::GT);
     if (!next_is_separator) {
         data.return_type = parse_type_expr();

@@ -80,6 +80,7 @@ static std::string stringf(const CxAny &v) {
     case TypeKind::Int:
         return istringf(v);
     case TypeKind::Pointer:
+    case TypeKind::Reference:
         return fmt::format("{:#x}", *(intptr_t *)&v.data);
     default:
         return fmt::format("<{}>", PRINT_ENUM(v.type->kind));
@@ -142,7 +143,7 @@ void cx_print(CxString str) {
     printf("%s", s.c_str());
 }
 
-void cx_array_construct(CxArray *dest) {
+void cx_array_new(CxArray *dest) {
     dest->size = 0;
     dest->capacity = 0;
     dest->data = NULL;
@@ -188,12 +189,15 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
 }
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
-    auto p = tgc_alloc(&gc, size);
-    if (dtor) {
-        tgc_set_dtor(&gc, p, dtor);
-    }
-    return p;
+    // auto p = tgc_alloc(&gc, size);
+    // if (dtor) {
+    //     tgc_set_dtor(&gc, p, dtor);
+    // }
+    // return p;
+    return malloc(size);
 }
+
+void *cx_malloc(uint32_t size, void *_ignored) { return malloc(size); }
 
 void signal_handler(int signal_num) {
     print("panic: {}\n", st.message);
@@ -234,24 +238,22 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
 }
 
-static CxLambdaRef *cx_lambda_clone(CxLambdaRef *callback) {
-    auto cb = new CxLambdaRef();
-    *cb = *callback;
+static CxLambda *cx_lambda_clone(CxLambda *dest, CxLambda *callback) {
+    *dest = *callback;
     if (callback->data) {
-        cb->data = (S *)malloc(callback->size);
-        memcpy(cb->data, callback->data, callback->size);
+        dest->data = malloc(callback->size);
+        memcpy(dest->data, callback->data, callback->size);
     }
-    return cb;
+    return dest;
 }
 
-static void cx_lambda_free(CxLambdaRef *callback) {
+static void cx_lambda_free(CxLambda *callback) {
     free(callback->data);
     delete callback;
 }
 
-void cx_timeout(uint64_t delay, CxLambdaRef *callback) {
-    auto cb =
-        cx_lambda_clone(callback); // clone the callback, otherwise it will be freed right away
+void cx_timeout(uint64_t delay, CxLambda *callback) {
+    auto cb = cx_lambda_clone(new CxLambda(), callback);
     uv_timer_t *timer = (uv_timer_t *)malloc(sizeof(uv_timer_t));
     uv_timer_init(uv_default_loop(), timer);
     timer->data = cb;
@@ -259,7 +261,7 @@ void cx_timeout(uint64_t delay, CxLambdaRef *callback) {
     uv_timer_start(
         timer,
         [](uv_timer_t *handle) {
-            auto cb = (CxLambdaRef *)handle->data;
+            auto cb = (CxLambda *)handle->data;
             auto fn = (void (*)(void *))cb->ptr;
             fn(cb->data);
             uv_timer_stop(handle);
@@ -269,7 +271,7 @@ void cx_timeout(uint64_t delay, CxLambdaRef *callback) {
         delay, 0);
 }
 
-void cx_call(CxLambdaRef *fn) {
+void cx_call(CxLambda *fn) {
     auto fn_ptr = (void (*)(void *))fn->ptr;
     fn_ptr(fn->data);
 }

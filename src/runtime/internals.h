@@ -38,22 +38,22 @@ struct CxArray {
     uint8_t flags;
 };
 
+typedef CxArray CxSlice;
+
 struct CxRefc {
     void *data;
     int32_t *refcnt;
 };
 
-struct S {
-    int32_t *p;
-};
-
-struct CxLambdaRef {
+struct CxLambda {
     void *ptr;
     uint32_t size; // size of captured data
-    S *data;       // captured data, lives on the heap
+    void *data;    // captured data, lives on the heap
 };
 
-typedef CxArray CxSlice;
+struct CxPromise {
+    CxLambda callback;
+};
 
 void cx_string_set_data(CxString *dest, const char *data);
 
@@ -69,7 +69,7 @@ void cx_print_any(CxAny *value);
 
 void cx_print_number(uint64_t value);
 
-void cx_array_construct(CxArray *dest);
+void cx_array_new(CxArray *dest);
 
 void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap);
 
@@ -84,6 +84,7 @@ void cx_panic(CxString message);
 void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
+void *cx_malloc(uint32_t size, void *ignored = NULL);
 
 void cx_runtime_start(void *stack);
 void cx_runtime_stop();
@@ -92,8 +93,9 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context);
 
-void cx_timeout(uint64_t delay, CxLambdaRef *callback);
-void cx_call(CxLambdaRef *callback);
+void cx_timeout(uint64_t delay, CxLambda *callback);
+void cx_call(CxLambda *callback);
+void cx_promise_new(CxPromise *dest, CxLambda *fn);
 
 #ifdef __cplusplus
 }

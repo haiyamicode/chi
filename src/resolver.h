@@ -28,6 +28,7 @@ struct SystemTypes {
     ChiType *double_ = nullptr;
     ChiType *void_ = nullptr;
     ChiType *void_ptr = nullptr;
+    ChiType *void_ref = nullptr;
     ChiType *char_ = nullptr;
     ChiType *str_lit = nullptr;
     ChiType *any = nullptr;

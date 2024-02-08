@@ -6,10 +6,11 @@ static const char *source = R""""(
 extern "C" {
   func cx_print(str string);
   // func cx_printf(format string, values Array<any>);
-  func cx_array_construct(dest *void);
+  func cx_array_new(dest *void);
   func cx_print_any(value *void);
   func cx_print_number(value uint64);
   func cx_gc_alloc(size uint32, destructor *void) *void;
+  func cx_malloc(size uint32, ignored *void) *void;
   func cx_runtime_start(stack *void);
   func cx_runtime_stop();
   func cx_panic(message string);
@@ -42,6 +43,18 @@ export func panic(message string) {
 export func timeout(delay uint64, callback func) {
   cx_timeout(delay, &callback);
 }
+
+export func call(fn func) {
+  cx_call(&fn);
+}
+
+// export func delay(delay int64) &Promise<void> {
+//   return promise_new(func (resolve &func) {
+//     println("starting timeout");
+//     println(delay);
+//     // cx_timeout(delay, resolve);
+//   });
+// }
 
 )"""";
 

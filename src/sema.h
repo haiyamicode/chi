@@ -17,7 +17,7 @@ enum class NodeType;
 struct ChiType;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
-          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise)
+          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise, Infer)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
