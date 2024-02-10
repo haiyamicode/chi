@@ -46,6 +46,7 @@ struct ChiTypeFn {
 
     ChiType *get_param_at(size_t index);
     int get_va_start();
+    ChiType *get_va_type();
 };
 
 struct ChiStructMember {

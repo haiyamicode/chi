@@ -694,13 +694,32 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto va_start = fn_spec.get_va_start();
 
     std::vector<llvm::Value *> args;
+    llvm::Value *va_ptr = nullptr;
+    ChiType *va_type = nullptr;
+    if (is_variadic) {
+        auto array_type = fn_spec.params.last();
+        va_type = array_type->get_elem();
+        va_ptr = builder.CreateAlloca(compile_type(array_type), nullptr, "vararg_array");
+        auto init_fn = get_system_fn("cx_array_new");
+        builder.CreateCall(init_fn->llvm_fn, {va_ptr});
+    }
     for (int i = 0; i < data.args.size; i++) {
         if (is_variadic && i >= va_start) {
-            auto array_add_fn = get_system_fn("cx_array_new");
+            auto add_fn = get_system_fn("cx_array_add");
+            auto arg = compile_assignment_to_type(fn, data.args[i], va_type);
+            auto tsize =
+                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
+            auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
+            auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
+            builder.CreateStore(arg, ptr);
+            continue;
         }
         auto arg = data.args[i];
         auto param_type = fn_spec.get_param_at(i);
         args.push_back(compile_assignment_to_type(fn, arg, param_type));
+    }
+    if (va_ptr) {
+        args.push_back(builder.CreateLoad(compile_type(fn_spec.params.last()), va_ptr));
     }
 
     if (invoke) {
@@ -929,7 +948,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         for (auto param : data.params) {
             param_types.push_back(compile_type(param));
         }
-        return llvm::FunctionType::get(ret_type_l, param_types, data.is_variadic);
+        return llvm::FunctionType::get(ret_type_l, param_types, false);
     }
     case TypeKind::Pointer:
     case TypeKind::Reference: {

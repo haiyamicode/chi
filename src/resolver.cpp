@@ -879,6 +879,9 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
         std::stringstream ss;
         ss << "func(";
         for (int i = 0; i < fn.params.size; i++) {
+            if (fn.is_variadic && i == fn.params.size - 1) {
+                ss << "...";
+            }
             ss << to_string(fn.params[i]);
             if (i < fn.params.size - 1) {
                 ss << ",";
@@ -1081,9 +1084,10 @@ void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *
                                NodeList *args) {
     auto n_args = args->size;
     auto n_params = fn->params.size;
-    bool ok = fn->is_variadic ? n_args >= n_params - 1 : n_args == n_params;
+    auto params_required = n_params - (fn->is_variadic ? 1 : 0);
+    bool ok = fn->is_variadic ? n_args >= params_required : n_args == n_params;
     if (!ok) {
-        error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, n_params, n_args);
+        error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, params_required, n_args);
         return;
     }
     for (size_t i = 0; i < n_args; i++) {
@@ -1120,6 +1124,17 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     auto type = create_type(TypeKind::Array);
     type->data.array.elem = elem;
     m_ctx->array_of[elem] = type;
+
+    auto stype = create_type(TypeKind::Struct);
+    auto &struct_ = stype->data.struct_;
+    struct_.add_member("data", get_dummy_var("data"), get_pointer_type(elem));
+    struct_.add_member("size", get_dummy_var("size"), get_system_types()->uint32);
+    struct_.add_member("capacity", get_dummy_var("capacity"), get_system_types()->uint32);
+    struct_.add_member("flags", get_dummy_var("flags"), get_system_types()->uint8);
+
+    struct_.kind = ContainerKind::Struct;
+    type->data.promise.internal = stype;
+
     return type;
 }
 

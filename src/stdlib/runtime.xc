@@ -1,7 +1,8 @@
 extern "C" {
   func cx_print(str string);
-  // func cx_printf(format string, values Array<any>);
+  func cx_printf(format string, values &Array<any>);
   func cx_array_new(dest *void);
+  func cx_array_add(dest *void, size uint32) *void;
   func cx_print_any(value *void);
   func cx_print_number(value uint64);
   func cx_gc_alloc(size uint32, destructor *void) *void;
@@ -27,9 +28,9 @@ func print_int(value uint64) {
   cx_print_number(value);
 }
 
-// func printf(format string, ...values any) {
-//   cx_printf(format, values);
-// }
+func printf(format string, ...values any) {
+  cx_printf(format, &values);
+}
 
 func panic(message string) {
   cx_panic(message);

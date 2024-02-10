@@ -50,7 +50,7 @@ static std::string istringf(const CxAny &v) {
     auto typedata = (TypeInfoData *)v.type->data;
     auto &spec = typedata->int_;
 
-#define _FORMAT_INT(T, v) fmt::format("{}", *(T *)&v.data)
+#define _FORMAT_INT(T, v) fmt::format("{}", (T)(*(T *)(&v.data)))
     if (!spec.is_unsigned) {
         switch (spec.bit_count) {
         case 8:
@@ -61,6 +61,19 @@ static std::string istringf(const CxAny &v) {
             return _FORMAT_INT(int32_t, v);
         case 64:
             return _FORMAT_INT(int64_t, v);
+        default:
+            break;
+        }
+    } else {
+        switch (spec.bit_count) {
+        case 8:
+            return _FORMAT_INT(uint8_t, v);
+        case 16:
+            return _FORMAT_INT(uint16_t, v);
+        case 32:
+            return _FORMAT_INT(uint32_t, v);
+        case 64:
+            return _FORMAT_INT(uint64_t, v);
         default:
             break;
         }
@@ -128,19 +141,17 @@ static string format_cstr(CxString format, const CxSlice &values) {
     return ss.str();
 }
 
-void cx_string_format(CxString *dest, CxString format, CxSlice values) {
-    auto str = format_cstr(format, values);
+void cx_string_format(CxString *dest, CxString format, CxSlice *values) {
+    auto str = format_cstr(format, *values);
     dest->data = str.data();
     dest->size = (uint32_t)str.size();
 }
 
-void cx_printf(CxString format, CxSlice values) {
-    printf("%s", format_cstr(format, values).c_str());
-}
+void cx_printf(CxString format, CxSlice *values) { fmt::print(format_cstr(format, *values)); }
 
 void cx_print(CxString str) {
     string s(str.data, str.size);
-    printf("%s", s.c_str());
+    fmt::print(s);
 }
 
 void cx_array_new(CxArray *dest) {

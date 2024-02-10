@@ -59,9 +59,9 @@ void cx_string_set_data(CxString *dest, const char *data);
 
 void cx_string_concat(CxString *dest, CxString s1, CxString s2);
 
-void cx_string_format(CxString *dest, CxString format, CxSlice values);
+void cx_string_format(CxString *dest, CxString *format, CxSlice *values);
 
-void cx_printf(CxString format, CxSlice values);
+void cx_printf(CxString format, CxSlice *values);
 
 void cx_print(CxString str);
 
