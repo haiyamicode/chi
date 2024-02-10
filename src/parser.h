@@ -18,7 +18,7 @@ using namespace cx::ast;
 namespace cx {
 struct ParseContext {
     Module *module;
-    Allocator *allocator;
+    Context *allocator;
     ScopeResolver *resolver;
     bool debug_mode = false;
     optional<ErrorHandler> error_handler = {};
@@ -193,5 +193,7 @@ class Parser {
     Node *parse_enum_member();
 
     Node *parse_extern_decl();
+
+    Node *parse_import_decl();
 };
 } // namespace cx

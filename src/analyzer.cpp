@@ -9,7 +9,6 @@
 #include "analyzer.h"
 #include "ast_printer.h"
 #include "parser.h"
-#include "runtime/source.h"
 #include "util.h"
 
 using namespace cx;
@@ -19,37 +18,7 @@ Analyzer::Analyzer() {}
 
 ast::Module *Analyzer::process_source(ast::Package *package, io::Buffer *src,
                                       const string &file_name) {
-    auto module = m_ctx.module_from_path(package, file_name);
-
-    Tokenization tokenization;
-    Lexer lexer(src, &tokenization);
-    lexer.tokenize();
-    if (tokenization.error) {
-        module->errors.add({*tokenization.error, tokenization.error_pos});
-        return module;
-    }
-
-    auto resolver = m_ctx.create_resolver();
-    resolver.get_context()->error_handler = [module](Error error) { module->errors.add(error); };
-
-    ScopeResolver scope_resolver(&resolver);
-    module->scope = scope_resolver.get_scope();
-    ParseContext pc;
-    pc.resolver = &scope_resolver;
-    pc.module = module;
-    pc.allocator = &m_ctx;
-    pc.debug_mode = debug_mode;
-    pc.error_handler = [module](Error error) { module->errors.add(error); };
-    pc.add_token_results(tokenization.tokens);
-
-    Parser parser(&pc);
-    parser.parse();
-
-    if (module->errors.size > 0) {
-        return module;
-    }
-    resolver.resolve(package);
-    return module;
+    return m_ctx.process_source(package, src, file_name);
 }
 
 ast::Module *Analyzer::process_file(ast::Package *package, const string &file_name) {
@@ -63,8 +32,9 @@ void Analyzer::build_runtime() {
 
     auto package = m_ctx.add_package();
     package->kind = PackageKind::BUILTIN;
-    auto rt_source = io::Buffer::from_string(runtime::source);
-    auto module = process_source(package, &rt_source, "__chiroot/runtime.xc");
+    auto rt_path = m_ctx.get_stdlib_path("runtime.xc");
+    auto rt_source = io::Buffer::from_file(rt_path);
+    auto module = process_source(package, &rt_source, rt_path);
     resolver.context_init_builtins(module);
 }
 

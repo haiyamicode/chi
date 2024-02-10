@@ -110,9 +110,10 @@ void Resolver::resolve(ast::Package *package) {
 }
 
 void Resolver::resolve(ast::Module *module) {
-    m_module = module;
     ResolveScope scope;
-    resolve(module->root, scope);
+    m_module = module;
+    auto module_scope = scope.set_module(module);
+    resolve(module->root, module_scope);
 }
 
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
@@ -451,7 +452,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto decl = find_root_decl(data.op1);
                 decl->escape.escaped = true;
             }
-            return get_pointer_type(t, is_managed() ? TypeKind::Reference : TypeKind::Pointer);
+            return get_pointer_type(t, TypeKind::Reference);
         }
         default:
             unreachable();
@@ -510,6 +511,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto expr_type = resolve(data.expr, scope, flags);
         if (expr_type->kind == TypeKind::Fn) {
             expr_type = get_lambda_for_fn(expr_type);
+        } else if (expr_type->kind == TypeKind::Module) {
+            auto symbol = expr_type->data.module.scope->find_export(field_name);
+            if (!symbol) {
+                error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type));
+                return nullptr;
+            }
+            data.resolved_decl = symbol;
+            return symbol->resolved_type;
         }
         auto member = get_struct_member(expr_type, field_name);
         if (!member) {
@@ -756,6 +765,26 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::Error: {
         node->resolved_type = get_system_types()->void_;
         return node->resolved_type;
+    }
+    case NodeType::ImportDecl: {
+        auto &data = node->data.import_decl;
+        auto path = m_ctx->allocator->find_module_path(data.path->str, scope.module->path);
+        if (path.empty()) {
+            error(node, errors::MODULE_NOT_FOUND, data.path->str);
+            return nullptr;
+        }
+
+        auto src = io::Buffer::from_file(path);
+        auto module = m_ctx->allocator->process_source(scope.module->package, &src, path);
+        Resolver resolver(m_ctx);
+        resolver.resolve(module);
+
+        data.resolved_module = module;
+        auto type = create_type(TypeKind::Module);
+        type->name = "Module:" + module->full_path();
+        type->data.module.scope = module->scope;
+        scope.module->imports.add(module);
+        return type;
     }
     default:
         print("\n");
@@ -1520,4 +1549,8 @@ ResolveScope ResolveScope::set_is_escaping(bool is_escaping) const {
 
 ResolveScope ResolveScope::set_parent_fn_node(ast::Node *fn) const {
     RS_SET_PROP_COPY(parent_fn_node, fn);
+}
+
+ResolveScope ResolveScope::set_module(ast::Module *module) const {
+    RS_SET_PROP_COPY(module, module);
 }

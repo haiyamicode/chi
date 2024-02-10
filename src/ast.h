@@ -20,7 +20,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, InferredType);
+          TryExpr, InferredType, ImportDecl);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 
@@ -31,10 +31,9 @@ enum FnParsingFlags : uint32_t {
 
 enum DeclFlag : uint32_t {
     DECL_NONE = 0,
-    DECL_EXPORTED = 1 << 0,
-    DECL_PRIVATE = 1 << 1,
-    DECL_EXTERN = 1 << 2,
-    DECL_IS_ENTRY = 1 << 3,
+    DECL_PRIVATE = 1 << 0,
+    DECL_EXTERN = 1 << 1,
+    DECL_IS_ENTRY = 1 << 2,
 };
 
 struct Module {
@@ -44,11 +43,11 @@ struct Module {
     string path = "";
     string name = "";
     string filename = "";
-    array<Node *> imports = {};
     array<Node *> exports = {};
     array<Error> errors = {};
     cx::Scope *scope = nullptr;
-    optional<string> source = {}; // only used for internal modules
+    optional<string> source = {};
+    array<Module *> imports = {};
 
     string full_path() const { return (fs::path(path) / filename).string(); }
 
@@ -90,9 +89,17 @@ struct Root {
 
 struct DeclSpec {
     uint32_t flags = DECL_NONE;
-};
 
-inline bool declspec_has_flag(DeclSpec &spec, DeclFlag flag) { return (spec.flags & flag) != 0; }
+    Visibility get_visibility() const {
+        if (flags & DECL_PRIVATE) {
+            return Visibility::Private;
+        }
+        return Visibility::Public;
+    }
+
+    bool is_exported() const { return get_visibility() == Visibility::Public; }
+    bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
+};
 
 struct FnProto {
     array<Node *> params = {};
@@ -205,6 +212,7 @@ struct DotExpr {
     Token *field = nullptr;
     ChiStructMember *resolved_member = nullptr;
     int64_t resolved_value = 0;
+    Node *resolved_decl = nullptr;
 };
 
 struct SubtypeExpr {
@@ -265,6 +273,18 @@ struct EscapeAnalysis {
     int32_t local_index = -1;
 };
 
+struct ImportDecl {
+    Token *path = nullptr;
+    Token *alias = nullptr;
+    array<Node *> symbols = {};
+    ast::Module *resolved_module = nullptr;
+};
+
+struct ImportSymbol {
+    Token *name = nullptr;
+    Token *alias = nullptr;
+};
+
 struct Node {
     NodeType type = NodeType::Error;
     Token *token = nullptr;
@@ -304,6 +324,8 @@ struct Node {
         TypeParam type_param;
         PrefixExpr prefix_expr;
         ExternDecl extern_decl;
+        ImportDecl import_decl;
+        ImportSymbol import_symbol;
 
         NodeData() {}
 
@@ -333,6 +355,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(construct_expr, ConstructExpr)
             _AST_CASE_INITIALIZE_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_INITIALIZE_FIELD(extern_decl, ExternDecl)
+            _AST_CASE_INITIALIZE_FIELD(import_decl, ImportDecl)
         default:
             break;
         }
@@ -356,6 +379,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(construct_expr, ConstructExpr)
             _AST_CASE_DESTROY_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_DESTROY_FIELD(extern_decl, ExternDecl)
+            _AST_CASE_DESTROY_FIELD(import_decl, ImportDecl)
         default:
             break;
         }
@@ -364,10 +388,30 @@ struct Node {
     bool is_heap_allocated() { return escape.escaped; }
 
     Node *get_decl() {
-        if (type == NodeType::Identifier) {
+        switch (type) {
+        case NodeType::Identifier:
             return data.identifier.decl;
+        case NodeType::DotExpr: {
+            auto decl = data.dot_expr.resolved_decl;
+            if (decl) {
+                return decl;
+            }
+            return nullptr;
+        }
+        default:
+            return nullptr;
         }
         return nullptr;
+    }
+
+    const DeclSpec &get_declspec() {
+        switch (type) {
+        case NodeType::FnDef:
+            return data.fn_def.decl_spec;
+        default:
+            panic("node type {} does not have declspec", PRINT_ENUM(type));
+        };
+        return data.fn_def.decl_spec;
     }
 };
 } // namespace ast

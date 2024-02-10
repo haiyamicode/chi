@@ -43,7 +43,6 @@ void Lexer::setup_keywords() {
     s_keywords["goto"] = TokenType::KW_GOTO;
     s_keywords["while"] = TokenType::KW_WHILE;
     s_keywords["if"] = TokenType::KW_IF;
-    s_keywords["export"] = TokenType::KW_EXPORT;
     s_keywords["private"] = TokenType::KW_PRIVATE;
     s_keywords["return"] = TokenType::KW_RETURN;
     s_keywords["static"] = TokenType::KW_STATIC;
@@ -59,6 +58,8 @@ void Lexer::setup_keywords() {
     s_keywords["template"] = TokenType::KW_TEMPLATE;
     s_keywords["union"] = TokenType::KW_UNION;
     s_keywords["try"] = TokenType::KW_TRY;
+    s_keywords["import"] = TokenType::KW_IMPORT;
+    s_keywords["as"] = TokenType::KW_AS;
 
     // C keywords
     s_keywords["inline"] = TokenType::KW_INLINE;

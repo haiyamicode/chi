@@ -4,15 +4,30 @@
 #include "resolver.h"
 
 namespace cx {
-struct CompilationContext : public Allocator {
+
+enum ProcessingFlags : uint32_t {
+    FLAG_NONE = 0,
+    FLAG_PRINT_AST = 1 << 0,
+    FLAG_EXIT_ON_ERROR = 1 << 1
+};
+
+struct CompilationContext : public Context {
     box<ResolveContext> resolve_ctx;
     array<box<ast::Package>> packages = {};
     array<box<ast::Node>> ast_nodes = {};
     array<box<ChiType>> types = {};
     array<box<Scope>> scopes = {};
     array<box<Token>> tokens = {};
+    uint32_t flags = 0;
+    array<string> file_extensions = {"xc", "x"};
+    string root_path = "";
 
-    CompilationContext() : resolve_ctx(new ResolveContext(this)) {}
+    CompilationContext() : resolve_ctx(new ResolveContext(this)) {
+        auto rootenv = std::getenv("CHI_ROOT");
+        if (rootenv) {
+            root_path = rootenv;
+        }
+    }
 
     ast::Node *create_node(ast::NodeType type) {
         return ast_nodes.emplace(new ast::Node(type))->get();
@@ -30,6 +45,15 @@ struct CompilationContext : public Allocator {
 
     Token *create_token() { return tokens.emplace(new Token())->get(); }
 
-    ast::Module *module_from_path(ast::Package *package, const string &path);
+    ast::Module *module_from_path(ast::Package *package, const string &path,
+                                  const string &base_path = "", bool import = false);
+
+    string find_module_path(const string &path, const string &base_path = "");
+
+    ast::Module *process_source(ast::Package *package, io::Buffer *src, const string &file_name);
+
+    string get_stdlib_path(string path) {
+        return fs::path(root_path) / fs::path("src") / fs::path("stdlib") / path;
+    }
 };
 } // namespace cx

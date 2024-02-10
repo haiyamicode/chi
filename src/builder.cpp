@@ -11,7 +11,6 @@
 #include "ast_printer.h"
 #include "builder.h"
 #include "parser.h"
-#include "runtime/source.h"
 #include "util.h"
 
 using namespace cx;
@@ -25,37 +24,7 @@ Builder::Builder() : m_ctx(), m_codegen_ctx(nullptr) {
 
 ast::Module *Builder::process_source(ast::Package *package, io::Buffer *src,
                                      const string &file_name) {
-    auto parts = string_split(file_name, ".");
-    auto module = m_ctx.module_from_path(package, file_name);
-
-    Tokenization tokenization;
-    Lexer lexer(src, &tokenization);
-    lexer.tokenize();
-    if (tokenization.error) {
-        print("{}:{}:{}: error: {}\n", module->path, tokenization.error_pos.line_number(),
-              tokenization.error_pos.col_number(), *tokenization.error);
-        exit(0);
-    }
-
-    auto resolver = m_ctx.create_resolver();
-    ScopeResolver scope_resolver(&resolver);
-    module->scope = scope_resolver.get_scope();
-    ParseContext pc;
-    pc.resolver = &scope_resolver;
-    pc.module = module;
-    pc.allocator = &m_ctx;
-    pc.debug_mode = debug_mode;
-    pc.add_token_results(tokenization.tokens);
-
-    Parser parser(&pc);
-    parser.parse();
-
-    if (build_mode == BuildMode::AST) {
-        print_ast(module->root);
-    }
-
-    resolver.resolve(package);
-    return module;
+    return m_ctx.process_source(package, src, file_name);
 }
 
 ast::Module *Builder::process_file(ast::Package *package, const string &file_name) {
@@ -68,12 +37,15 @@ void Builder::build_runtime() {
     resolver.context_init_primitives();
 
     auto package = add_package();
-    package->name = "__runtime";
     package->kind = PackageKind::BUILTIN;
-    auto rt_source = io::Buffer::from_string(runtime::source);
-    auto module = process_source(package, &rt_source, "__chiroot/runtime.xc");
+    auto rt_path = m_ctx.get_stdlib_path("runtime.xc");
+    auto rt_source = io::Buffer::from_file(rt_path);
+    auto module = process_source(package, &rt_source, rt_path);
     resolver.context_init_builtins(module);
-    module->source = runtime::source;
+
+    if (m_ctx.flags & FLAG_PRINT_AST) {
+        return;
+    }
 
     auto compiler = create_codegen_compiler();
     compiler.compile_module(module);
@@ -81,11 +53,16 @@ void Builder::build_runtime() {
 
 void Builder::build_single_file(ast::Package *package, const string &file_name) {
     auto module = process_file(package, file_name);
+    if (m_ctx.flags & FLAG_PRINT_AST) {
+        return;
+    }
+
     auto compiler = create_codegen_compiler();
     auto settings = compiler.get_settings();
     settings->output_obj_to_file = get_tmp_file_path("main.o");
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
     settings->lang_flags = module->get_lang_flags();
+
     compiler.compile_module(module);
     compiler.emit_output();
 
@@ -114,6 +91,12 @@ void Builder::build_single_file(ast::Package *package, const string &file_name) 
 }
 
 void Builder::build_program(const string &entry_file_name) {
+    uint32_t flags = FLAG_EXIT_ON_ERROR;
+    if (build_mode == BuildMode::AST) {
+        flags |= FLAG_PRINT_AST;
+    }
+    m_ctx.flags = flags;
+
     build_runtime();
 
     if (!working_dir.empty()) {

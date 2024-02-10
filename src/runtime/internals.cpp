@@ -189,12 +189,11 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
 }
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
-    // auto p = tgc_alloc(&gc, size);
-    // if (dtor) {
-    //     tgc_set_dtor(&gc, p, dtor);
-    // }
-    // return p;
-    return malloc(size);
+    auto p = tgc_alloc(&gc, size);
+    if (dtor) {
+        tgc_set_dtor(&gc, p, dtor);
+    }
+    return p;
 }
 
 void *cx_malloc(uint32_t size, void *_ignored) { return malloc(size); }

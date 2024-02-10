@@ -11,11 +11,17 @@
 #include "sema.h"
 
 namespace cx {
-struct Allocator {
+struct Context {
     virtual ast::Node *create_node(ast::NodeType type) = 0;
     virtual ChiType *create_type(TypeKind kind) = 0;
     virtual Scope *create_scope(Scope *parent) = 0;
     virtual Token *create_token() = 0;
+    virtual ast::Module *module_from_path(ast::Package *package, const string &path,
+                                          const string &base_path = "", bool import = false) = 0;
+    virtual ast::Module *process_source(ast::Package *package, io::Buffer *src,
+                                        const string &file_name) = 0;
+    virtual string find_module_path(const string &path, const string &base_path = "") = 0;
+    virtual string get_stdlib_path(string path) = 0;
 };
 
 struct SystemTypes {
@@ -43,7 +49,7 @@ struct SystemTypes {
 };
 
 struct ResolveContext {
-    Allocator *allocator = nullptr;
+    Context *allocator = nullptr;
     array<ast::Node *> builtins = {};
     SystemTypes system_types = {};
     array<ast::Node *> internal_methods = {};
@@ -53,7 +59,7 @@ struct ResolveContext {
     map<string, ChiType *> composite_types = {};
     map<ChiType *, ChiType *> promise_of = {};
 
-    ResolveContext(Allocator *allocator) { this->allocator = allocator; }
+    ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
 
 struct ResolveScope {
@@ -65,6 +71,7 @@ struct ResolveScope {
     int64_t next_enum_value = 0;
     ast::Node *parent_loop = nullptr;
     bool is_escaping = false;
+    ast::Module *module = nullptr;
 
     ResolveScope set_parent_fn(ChiType *fn) const;
 
@@ -77,6 +84,8 @@ struct ResolveScope {
     ResolveScope set_is_escaping(bool is_escaping) const;
 
     ResolveScope set_parent_fn_node(ast::Node *fn) const;
+
+    ResolveScope set_module(ast::Module *module) const;
 };
 
 enum ResolveFlag : uint32_t {
@@ -91,10 +100,6 @@ class Resolver {
     void set_tmod(ast::Node *iden, ChiType *type) { m_tmods[iden->data.identifier.decl] = type; }
 
     void unset_tmod(ast::Node *iden) { m_tmods.unset(iden->data.identifier.decl); }
-
-    LANG_FLAG get_lang_flags() { return m_module->get_lang_flags(); }
-
-    bool is_managed() { return has_lang_flag(get_lang_flags(), LANG_FLAG_MANAGED); }
 
     ChiType *create_type(TypeKind kind);
 
@@ -141,8 +146,6 @@ class Resolver {
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
 
     bool should_resolve_fn_body(ResolveScope &scope);
-
-    void resolve(ast::Module *module);
 
     ChiType *resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
 
@@ -207,6 +210,8 @@ class Resolver {
     ConstantValue resolve_constant_value(ast::Node *node);
 
     void resolve(ast::Package *package);
+
+    void resolve(ast::Module *module);
 
     bool type_is_int(ChiType *type) {
         return type->kind == TypeKind::Int || type->kind == TypeKind::Bool ||

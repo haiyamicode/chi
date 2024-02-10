@@ -59,6 +59,14 @@ ast::Node *Scope::find_one(const string &symbol) {
     return nullptr;
 }
 
+ast::Node *Scope::find_export(const string &symbol) {
+    auto node = find_one(symbol);
+    if (!node || !node->get_declspec().is_exported()) {
+        return nullptr;
+    }
+    return node;
+}
+
 array<ast::Node *> Scope::get_all() {
     array<ast::Node *> list = {};
     for (auto entry : symbols.data) {

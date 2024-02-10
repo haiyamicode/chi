@@ -61,6 +61,10 @@ ChiType *Compiler::eval_type(ChiType *type) {
 ChiType *Compiler::get_chitype(ast::Node *node) { return eval_type(node->resolved_type); }
 
 void Compiler::compile_module(ast::Module *module) {
+    for (auto import : module->imports) {
+        compile_module(import);
+    }
+
     m_ctx->dbg_cu = m_ctx->dbg_builder->createCompileUnit(
         llvm::dwarf::DW_LANG_C,
         m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
@@ -69,14 +73,20 @@ void Compiler::compile_module(ast::Module *module) {
     m_ctx->pending_fns.clear();
     auto &root = module->root->data.root;
     for (auto decl : root.top_level_decls) {
-        if (decl->type == ast::NodeType::FnDef) {
+        switch (decl->type) {
+        case ast::NodeType::FnDef:
             compile_fn_def(decl);
-        } else if (decl->type == ast::NodeType::StructDecl) {
+            break;
+        case ast::NodeType::StructDecl:
             // compile_struct(decl);
-        } else if (decl->type == ast::NodeType::ExternDecl) {
+            break;
+        case ast::NodeType::ExternDecl:
             compile_extern(decl);
-        } else {
-            panic("not implemented");
+            break;
+        case ast::NodeType::ImportDecl:
+            break;
+        default:
+            panic("not implemented: {}", PRINT_ENUM(decl->type));
         }
     }
 
@@ -234,7 +244,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     }
 
     // main function initialization
-    auto is_entry = declspec_has_flag(fn_def.decl_spec, ast::DECL_IS_ENTRY);
+    auto is_entry = fn_def.decl_spec.has_flag(ast::DECL_IS_ENTRY);
     if (is_entry) {
         auto runtime_start = get_system_fn("cx_runtime_start");
         auto stack_marker = fn->return_value;
@@ -646,7 +656,6 @@ normal:
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke) {
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
-    auto ref = compile_expr_ref(fn, data.fn_ref_expr);
 
     if (data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda) {
         auto ref = compile_expr_ref(fn, data.fn_ref_expr);
@@ -676,9 +685,9 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         return builder.CreateCall(callee, args);
     }
 
-    assert(data.fn_ref_expr->type == ast::NodeType::Identifier);
-    auto fn_ref = data.fn_ref_expr->data.identifier.decl;
-    auto callee = get_fn(fn_ref);
+    auto fn_decl = data.fn_ref_expr->get_decl();
+    assert(fn_decl->type == ast::NodeType::FnDef);
+    auto callee = get_fn(fn_decl);
     auto fn_type = get_chitype(callee->node);
     auto &fn_spec = fn_type->data.fn;
     auto is_variadic = fn_spec.is_variadic;

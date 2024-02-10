@@ -15,9 +15,13 @@ struct Node;
 enum class NodeType;
 } // namespace ast
 struct ChiType;
+struct Scope;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
-          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise, Infer)
+          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise,
+          Infer, Module)
+
+MAKE_ENUM(Visibility, Public, Private)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -141,6 +145,10 @@ struct ChiTypePromise {
     ChiType *internal = nullptr;
 };
 
+struct ChiTypeModule {
+    Scope *scope = nullptr;
+};
+
 struct ChiType {
     TypeKind kind = TypeKind::Void;
     optional<string> name = {};
@@ -161,6 +169,7 @@ struct ChiType {
         ChiTypeResult result;
         ChiTypeFnLambda fn_lambda;
         ChiTypePromise promise;
+        ChiTypeModule module;
 
         Data() {}
 
@@ -190,6 +199,7 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(result, Result, ChiTypeResult)
             CHITYPE_CASE_INIT_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_INIT_FIELD(promise, Promise, ChiTypePromise)
+            CHITYPE_CASE_INIT_FIELD(module, Module, ChiTypeModule)
         default:
             break;
         }
@@ -213,6 +223,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(result, Result, ChiTypeResult)
             CHITYPE_CASE_DESTROY_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_DESTROY_FIELD(promise, Promise, ChiTypePromise)
+            CHITYPE_CASE_DESTROY_FIELD(module, Module, ChiTypeModule)
         default:
             break;
         }
@@ -241,6 +252,8 @@ struct Scope {
     explicit Scope(Scope *parent) { this->parent = parent; }
 
     ast::Node *find_one(const string &symbol);
+
+    ast::Node *find_export(const string &symbol);
 
     array<ast::Node *> get_all();
 

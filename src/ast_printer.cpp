@@ -340,6 +340,21 @@ void AstPrinter::print_node(Node *node) {
         print("{}", node->token->to_string());
         break;
     }
+    case NodeType::ImportDecl: {
+        auto &data = node->data.import_decl;
+        print("import ");
+        print(data.path->to_string());
+        if (data.alias) {
+            print(" as {}", data.alias->to_string());
+        }
+        if (data.symbols.size) {
+            print(" {{");
+            print_node_list(&data.symbols);
+            print("}}");
+        }
+        print(";\n");
+        break;
+    }
     default:
         print("\n");
         panic("unhandled node {}", PRINT_ENUM(node->type));
@@ -362,7 +377,7 @@ void AstPrinter::print_node_list(array<Node *> *list) {
 }
 
 void AstPrinter::print_declspec(DeclSpec *declspec) {
-    if (declspec_has_flag(*declspec, DECL_EXPORTED)) {
-        print("export ");
+    if (declspec->has_flag(DECL_PRIVATE)) {
+        print("private ");
     }
 }

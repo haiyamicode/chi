@@ -190,11 +190,11 @@ void Parser::parse_top_level_decls(NodeList *decls) {
 
         // add export if exported
         if (decl->type == NodeType::FnDef) {
-            if (declspec_has_flag(decl->data.fn_def.decl_spec, DECL_EXPORTED)) {
+            if (decl->data.fn_def.decl_spec.is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
         } else if (decl->type == NodeType::StructDecl) {
-            if (decl->data.struct_decl.decl_spec.flags & DECL_EXPORTED) {
+            if (decl->data.struct_decl.decl_spec.is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
         }
@@ -215,9 +215,9 @@ void Parser::parse_top_level_decls(NodeList *decls) {
 DeclSpec Parser::parse_decl_spec(DeclSpec spec) {
     auto token = get();
     switch (token->type) {
-    case TokenType::KW_EXPORT:
+    case TokenType::KW_PRIVATE:
         consume();
-        spec.flags |= DECL_EXPORTED;
+        spec.flags |= DECL_PRIVATE;
         break;
     default:
         break;
@@ -228,7 +228,7 @@ DeclSpec Parser::parse_decl_spec(DeclSpec spec) {
 Node *Parser::parse_top_level_decl(DeclSpec decl_spec) {
     auto token = get();
     switch (token->type) {
-    case TokenType::KW_EXPORT:
+    case TokenType::KW_PRIVATE:
         return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
@@ -246,6 +246,8 @@ Node *Parser::parse_top_level_decl(DeclSpec decl_spec) {
     }
     case TokenType::KW_EXTERN:
         return parse_extern_decl();
+    case TokenType::KW_IMPORT:
+        return parse_import_decl();
     default:
         unexpected(token);
         return create_error_node();
@@ -1157,9 +1159,26 @@ Node *Parser::parse_extern_decl() {
         members.add(fn);
 
         // add export if exported
-        if (declspec_has_flag(fn->data.fn_def.decl_spec, DECL_EXPORTED)) {
+        if (fn->data.fn_def.decl_spec.is_exported()) {
             m_ctx->module->exports.add(fn);
         }
     }
+    return node;
+}
+
+Node *Parser::parse_import_decl() {
+    auto kw = expect(TokenType::KW_IMPORT);
+    auto node = create_node(NodeType::ImportDecl, kw);
+    node->data.import_decl = {};
+    node->data.import_decl.path = expect(TokenType::STRING);
+    if (next_is(TokenType::KW_AS)) {
+        consume();
+        auto iden = expect(TokenType::IDEN);
+        node->data.import_decl.alias = iden;
+        add_to_scope(node, iden->str);
+    }
+    // TODO: implement symbols import
+
+    expect(TokenType::SEMICOLON);
     return node;
 }

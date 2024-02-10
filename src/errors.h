@@ -38,6 +38,7 @@ constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant
 constexpr auto NON_TRAIT_IMPL_TYPE = "cannot use non-trait type '{}' in struct implements list";
 constexpr auto VARIADIC_NOT_FINAL = "cannot use ... with non-final parameter '{}'";
 constexpr auto TRY_NOT_CALL = "try must be used with a function call expression";
+constexpr auto MODULE_NOT_FOUND = "module '{}' not found";
 
 } // namespace errors
 } // namespace cx
