@@ -4,6 +4,7 @@ LOCAL_DIR=local
 CHI = $(BUILD_DIR)/src/bin/chi
 INPUT_FILE ?= $(LOCAL_DIR)/test.xc
 BUILD_MODE ?= Debug
+export CHI_ROOT=$(BASE)
 
 all: debug
 
@@ -30,9 +31,9 @@ debug: build
 ast: build
 	$(CHI) -a $(INPUT_FILE)
 
-test: test_jit
+test: test_compiler
 
-test_jit: build
+test_compiler: build
 	(cd tests; make test)
 
 clean:
