@@ -35,7 +35,7 @@ struct LoopLabels {
 
 struct BlockScope {
     VarLabels vars = {};
-    bool returned = false;
+    bool branched = false;
 };
 
 struct Function {
@@ -69,7 +69,7 @@ struct Function {
         return scope;
     }
     void pop_scope() { scope_stack.pop_back(); }
-    BlockScope *get_scope() { return &block_scopes.back(); }
+    BlockScope *get_scope() { return scope_stack.back(); }
 
     LoopLabels *push_loop() { return &loop_labels.emplace_back(); }
     void pop_loop() { loop_labels.pop_back(); }
@@ -312,7 +312,7 @@ class Compiler {
 
     void compile_stmt(Function *fn, ast::Node *stmt);
 
-    void compile_block(Function *fn, ast::Node *parent, ast::Node *block);
+    void compile_block(Function *fn, ast::Node *parent, ast::Node *block, label_t *end_label);
 
     void compile_struct(ast::Node *node);
 

@@ -74,9 +74,11 @@ void Compiler::compile_module(ast::Module *module) {
     auto &root = module->root->data.root;
     for (auto decl : root.top_level_decls) {
         switch (decl->type) {
-        case ast::NodeType::FnDef:
-            compile_fn_def(decl);
+        case ast::NodeType::FnDef: {
+            auto fn = compile_fn_proto(decl->data.fn_def.fn_proto, decl);
+            m_ctx->pending_fns.add(fn);
             break;
+        }
         case ast::NodeType::StructDecl:
             // compile_struct(decl);
             break;
@@ -260,7 +262,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     auto return_b = fn->new_label("_return");
     fn->return_label = return_b;
     if (fn_def.body) {
-        compile_block(fn, node, fn_def.body);
+        compile_block(fn, node, fn_def.body, return_b);
     }
     if (fn->has_try) {
         fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
@@ -458,6 +460,59 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
     }
 }
 
+static llvm::CmpInst::Predicate get_cmpop(TokenType op, ChiType *type) {
+    auto is_unsigned = type->kind == TypeKind::Int && type->data.int_.is_unsigned;
+    switch (op) {
+    case TokenType::LT:
+        return is_unsigned ? llvm::CmpInst::Predicate::ICMP_ULT
+                           : llvm::CmpInst::Predicate::ICMP_SLT;
+    case TokenType::GT:
+        return is_unsigned ? llvm::CmpInst::Predicate::ICMP_UGT
+                           : llvm::CmpInst::Predicate::ICMP_SGT;
+    case TokenType::LE:
+        return is_unsigned ? llvm::CmpInst::Predicate::ICMP_ULE
+                           : llvm::CmpInst::Predicate::ICMP_SLE;
+    case TokenType::GE:
+        return is_unsigned ? llvm::CmpInst::Predicate::ICMP_UGE
+                           : llvm::CmpInst::Predicate::ICMP_SGE;
+    case TokenType::EQ:
+        return llvm::CmpInst::Predicate::ICMP_EQ;
+    case TokenType::NE:
+        return llvm::CmpInst::Predicate::ICMP_NE;
+    default:
+        panic("not implemented: {}", PRINT_ENUM(op));
+    };
+    return llvm::CmpInst::Predicate::BAD_ICMP_PREDICATE;
+}
+
+static llvm::BinaryOperator::BinaryOps get_binop(TokenType op) {
+    switch (op) {
+    case TokenType::ADD:
+        return llvm::BinaryOperator::BinaryOps::Add;
+    case TokenType::SUB:
+        return llvm::BinaryOperator::BinaryOps::Sub;
+    case TokenType::MUL:
+        return llvm::BinaryOperator::BinaryOps::Mul;
+    case TokenType::DIV:
+        return llvm::BinaryOperator::BinaryOps::SDiv;
+    case TokenType::MOD:
+        return llvm::BinaryOperator::BinaryOps::SRem;
+    case TokenType::AND:
+        return llvm::BinaryOperator::BinaryOps::And;
+    case TokenType::OR:
+        return llvm::BinaryOperator::BinaryOps::Or;
+    case TokenType::XOR:
+        return llvm::BinaryOperator::BinaryOps::Xor;
+    case TokenType::LAND:
+        return llvm::BinaryOperator::BinaryOps::And;
+    case TokenType::LOR:
+        return llvm::BinaryOperator::BinaryOps::Or;
+    default:
+        panic("not implemented: {}", PRINT_ENUM(op));
+    }
+    return llvm::BinaryOperator::BinaryOps::Add;
+}
+
 llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
@@ -497,6 +552,36 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         default:
             panic("not implemented: {}", PRINT_ENUM(data.op_type));
         }
+    }
+    case ast::NodeType::BinOpExpr: {
+        auto &data = expr->data.bin_op_expr;
+        auto &builder = *m_ctx->llvm_builder.get();
+        switch (data.op_type) {
+        case TokenType::LT:
+        case TokenType::GT:
+        case TokenType::LE:
+        case TokenType::GE:
+        case TokenType::EQ:
+        case TokenType::NE: {
+            auto lhs = compile_expr(fn, data.op1);
+            auto rhs = compile_expr(fn, data.op2);
+            auto cmpop = get_cmpop(data.op_type, get_chitype(expr));
+            return builder.CreateCmp(cmpop, lhs, rhs);
+        }
+        case TokenType::ASS: {
+            auto value = compile_assignment_value(fn, data.op2, data.op1);
+            auto ref = compile_expr_ref(fn, data.op1);
+            assert(ref.address);
+            builder.CreateStore(value, ref.address);
+            return value;
+        }
+        default: {
+            auto llvm_op = get_binop(data.op_type);
+            auto lhs = compile_expr(fn, data.op1);
+            auto rhs = compile_expr(fn, data.op2);
+            return builder.CreateBinOp(llvm_op, lhs, rhs);
+        }
+        };
     }
     case ast::NodeType::TryExpr: {
         fn->has_try = true;
@@ -556,22 +641,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::ConstructExpr: {
         auto &data = expr->data.construct_expr;
         return compile_alloc(fn, expr, data.is_new);
-    }
-    case ast::NodeType::BinOpExpr: {
-        auto &data = expr->data.bin_op_expr;
-        auto &builder = *m_ctx->llvm_builder.get();
-        switch (data.op_type) {
-        case TokenType::ASS: {
-            auto value = compile_assignment_value(fn, data.op2, data.op1);
-            auto ref = compile_expr_ref(fn, data.op1);
-            assert(ref.address);
-            builder.CreateStore(value, ref.address);
-            return value;
-        }
-        default:
-            panic("not implemented: {}", PRINT_ENUM(data.op_type));
-        }
-        return nullptr;
     }
     default:
         panic("not implemented: {}", PRINT_ENUM(expr->type));
@@ -759,6 +828,10 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new)
 
 void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     emit_dbg_location(stmt);
+    auto scope = fn->get_scope();
+    if (scope->branched) {
+        return;
+    }
 
     switch (stmt->type) {
     case ast::NodeType::VarDecl: {
@@ -778,19 +851,29 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
         assert(fn->return_label);
         auto scope = fn->get_scope();
-        if (scope->returned) {
-            return;
-        }
 
-        // fn->is_returning = llvm_builder.CreateStore(
-        //     llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(llvm_ctx), 1),
-        //     fn->is_returning);
         if (data.expr) {
             auto ret_value = compile_assignment_value(fn, data.expr, stmt);
             llvm_builder.CreateStore(ret_value, fn->return_value);
         }
         llvm_builder.CreateBr(fn->return_label);
-        scope->returned = true;
+        scope->branched = true;
+        break;
+    }
+    case ast::NodeType::IfStmt: {
+        auto &data = stmt->data.if_stmt;
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+        auto &llvm_module = *m_ctx->llvm_module.get();
+        auto cond = compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
+        auto bb = builder.GetInsertBlock();
+        auto then_b = fn->new_label("_if_then");
+        auto end_b = fn->new_label("_if_end");
+
+        builder.CreateCondBr(cond, then_b, end_b);
+        fn->use_label(then_b);
+        compile_block(fn, stmt, data.then_block, end_b);
+        fn->use_label(end_b);
         break;
     }
     default:
@@ -798,7 +881,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
 }
 
-void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block) {
+void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block,
+                             label_t *end_label) {
     // TODO: implement destructors
 
     assert(block->type == ast::NodeType::Block);
@@ -816,8 +900,11 @@ void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block) 
         compile_stmt(fn, stmt);
     }
     fn->pop_scope();
-    if (!fn->scope_stack.size() && !scope->returned) {
-        builder.CreateBr(fn->return_label);
+
+    auto bb = builder.GetInsertBlock();
+    auto term = bb->getTerminator();
+    if (!term && end_label) {
+        builder.CreateBr(end_label);
     }
 
     // call destructors
