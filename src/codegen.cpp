@@ -869,10 +869,22 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto bb = builder.GetInsertBlock();
         auto then_b = fn->new_label("_if_then");
         auto end_b = fn->new_label("_if_end");
+        label_t *else_b = nullptr;
+        if (data.else_node) {
+            else_b = fn->new_label("_if_else");
+            builder.CreateCondBr(cond, then_b, else_b);
+        } else {
+            builder.CreateCondBr(cond, then_b, end_b);
+        }
 
-        builder.CreateCondBr(cond, then_b, end_b);
         fn->use_label(then_b);
         compile_block(fn, stmt, data.then_block, end_b);
+
+        if (data.else_node) {
+            fn->use_label(else_b);
+            compile_block(fn, stmt, data.else_node, end_b);
+        }
+
         fn->use_label(end_b);
         break;
     }
