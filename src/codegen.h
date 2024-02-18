@@ -240,7 +240,7 @@ class Compiler {
     void compile_array_reserve(Function *fn, const unknown_t &dest, unknown_t elem_size,
                                const unknown_t &size);
 
-    void compile_construction(Function *fn, unknown_t dest, ChiType *type, ast::Node *expr);
+    void compile_construction(Function *fn, llvm::Value *dest, ChiType *type, ast::Node *expr);
 
     unknown_t compile_string_alloc(Function *fn, const unknown_t &data);
 

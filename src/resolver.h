@@ -72,6 +72,7 @@ struct ResolveScope {
     ast::Node *parent_loop = nullptr;
     bool is_escaping = false;
     ast::Module *module = nullptr;
+    ast::Node *move_outlet = nullptr;
 
     ResolveScope set_parent_fn(ChiType *fn) const;
 
@@ -86,6 +87,8 @@ struct ResolveScope {
     ResolveScope set_parent_fn_node(ast::Node *fn) const;
 
     ResolveScope set_module(ast::Module *module) const;
+
+    ResolveScope set_move_outlet(ast::Node *outlet) const;
 };
 
 enum ResolveFlag : uint32_t {
@@ -195,7 +198,8 @@ class Resolver {
 
     ChiType *get_promise_type(ChiType *value);
 
-    ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic);
+    ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
+                         ChiType *container = nullptr);
 
     ChiType *get_lambda_for_fn(ChiType *fn);
 

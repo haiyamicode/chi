@@ -6,6 +6,10 @@ func main() {
 struct Fib {
     n int;
 
+    func new(n int) {
+        this.n = n;
+    }
+
     func calculate() int {
         return this.fib(this.n);
     }

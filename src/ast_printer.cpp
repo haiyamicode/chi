@@ -110,8 +110,8 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.var_decl;
         if (!data.is_field) {
             print(data.is_const ? "const" : "var");
+            print(" ");
         }
-        print(" ");
         print(node->name);
         if (data.type) {
             print(" ");
@@ -138,16 +138,18 @@ void AstPrinter::print_node(Node *node) {
             print(">");
         }
         print(" {{");
+
+        NodeType member_type = NodeType::VarDecl;
         if (data.members.size) {
             print("\n");
             m_indent++;
             size_t i = 0;
             for (auto member : data.members) {
-                print_indent(m_indent);
-                if (member->type == NodeType::FnDef) {
-                    auto kind = member->data.fn_def.fn_kind;
-                    print("[@{}] ", PRINT_ENUM(kind));
+                if (member_type != member->type) {
+                    print("\n");
                 }
+                member_type = member->type;
+                print_indent(m_indent);
                 print_node(member);
                 if (member->type == NodeType::VarDecl) {
                     print(";\n");

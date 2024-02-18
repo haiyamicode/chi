@@ -823,6 +823,10 @@ string Token::get_name() const {
     switch (type) {
     case TokenType::IDEN:
         return str;
+    case TokenType::KW_NEW:
+        return "new";
+    case TokenType::KW_DELETE:
+        return "delete";
     default:
         return "";
     }

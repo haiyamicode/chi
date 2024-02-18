@@ -433,7 +433,7 @@ void Parser::parse_fn_block(Node *fn) {
     m_ctx->resolver->pop_scope();
 }
 
-Node *Parser::parse_var_decl(bool as_field) {
+Node *Parser::parse_var_decl(bool as_field, DeclSpec decl_spec) {
     bool is_const = false;
     if (!as_field) {
         if (next_is(TokenType::KW_CONST)) {
@@ -448,8 +448,9 @@ Node *Parser::parse_var_decl(bool as_field) {
     node->data.var_decl.identifier = iden;
     node->data.var_decl.is_const = is_const;
     node->data.var_decl.is_field = as_field;
+    node->data.var_decl.decl_spec = decl_spec;
 
-    if (!is_const) {
+    if (!is_const && !as_field) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
         assert(node->parent_fn);
     }
@@ -1004,10 +1005,11 @@ Node *Parser::parse_struct_member(ContainerKind container_kind) {
         return parse_fn_decl(0);
     }
     default:
+        auto spec = parse_decl_spec();
         if (next_is(TokenType::KW_FUNC)) {
-            return parse_fn_decl(FN_BODY_REQUIRED);
+            return parse_fn_decl(FN_BODY_REQUIRED, spec);
         }
-        return parse_var_decl(true);
+        return parse_var_decl(true, spec);
     }
 }
 

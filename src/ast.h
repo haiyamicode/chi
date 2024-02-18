@@ -151,6 +151,7 @@ struct VarDecl {
     bool is_embed = false;
     ChiStructMember *resolved_field = nullptr;
     ConstantValue resolved_value = {};
+    DeclSpec decl_spec = {};
 };
 
 struct BinOpExpr {
@@ -200,6 +201,7 @@ struct ConstructExpr {
     bool is_new = false;
     array<Node *> items = {};
     Node *type = nullptr;
+    Node *resolved_outlet = nullptr;
 };
 
 struct TypedefDecl {
@@ -271,6 +273,7 @@ struct PrefixExpr {
 struct EscapeAnalysis {
     bool escaped = false;
     int32_t local_index = -1;
+    bool moved = false;
 };
 
 struct ImportDecl {
@@ -389,6 +392,8 @@ struct Node {
 
     Node *get_decl() {
         switch (type) {
+        case NodeType::VarDecl:
+            return this;
         case NodeType::Identifier:
             return data.identifier.decl;
         case NodeType::DotExpr: {
@@ -398,8 +403,10 @@ struct Node {
             }
             return nullptr;
         }
+        case NodeType::FnDef:
+            return this;
         default:
-            return nullptr;
+            panic("node type {} does not have decl", PRINT_ENUM(type));
         }
         return nullptr;
     }
@@ -408,6 +415,8 @@ struct Node {
         switch (type) {
         case NodeType::FnDef:
             return data.fn_def.decl_spec;
+        case NodeType::VarDecl:
+            return data.var_decl.decl_spec;
         default:
             panic("node type {} does not have declspec", PRINT_ENUM(type));
         };

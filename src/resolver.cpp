@@ -317,7 +317,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             param_types.add(param_type);
         }
 
-        auto fn_type = get_fn_type(return_type, &param_types, is_variadic);
+        auto fn_type = get_fn_type(return_type, &param_types, is_variadic, scope.parent_struct);
         if (!is_fn_decl) {
             return get_lambda_for_fn(fn_type);
         }
@@ -373,6 +373,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         if (data.expr) {
             auto var_scope = var_type ? scope.set_value_type(var_type) : scope;
+            var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
             if (var_type) {
                 if (data.expr->type != NodeType::ConstructExpr ||
@@ -394,7 +395,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto t1 = resolve(data.op1, scope);
         ChiType *t2;
         if (data.op_type == TokenType::ASS) {
-            auto var_scope = scope.set_value_type(t1);
+            auto var_scope = scope.set_value_type(t1).set_move_outlet(data.op1);
             t2 = resolve(data.op2, var_scope);
         } else {
             t2 = resolve(data.op2, scope);
@@ -526,10 +527,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
         data.resolved_member = member;
+        data.resolved_decl = member->node;
         return member->resolved_type;
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
+        if (scope.move_outlet) {
+            data.resolved_outlet = scope.move_outlet;
+            node->escape.moved = true;
+        }
         ChiType *value_type;
         ChiType *result_type;
         if (data.type) {
@@ -639,6 +645,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type == NodeType::VarDecl && member->data.var_decl.is_embed) {
                     resolve_struct_embed(struct_type, member, scope);
                 }
+                if (member->name == "new") {
+                    struct_->constructor = member;
+                }
+                if (member->name == "delete") {
+                    struct_->destructor = member;
+                }
             }
             for (auto implement : data.implements) {
                 auto impl_trait = resolve_value(implement, scope);
@@ -653,7 +665,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             for (auto member : data.members) {
                 if (member->type == NodeType::FnDef) {
                     auto fn_type = node_get_type(member);
-                    auto fn_scope = struct_scope.set_parent_fn(fn_type);
+                    auto fn_scope = struct_scope.set_parent_fn(fn_type).set_parent_fn_node(member);
                     if (auto body = member->data.fn_def.body) {
                         resolve(body, fn_scope);
                     }
@@ -878,6 +890,9 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
         auto &fn = data->fn;
         std::stringstream ss;
         ss << "func(";
+        if (fn.container_ref) {
+            ss << to_string(fn.container_ref) << ",";
+        }
         for (int i = 0; i < fn.params.size; i++) {
             if (fn.is_variadic && i == fn.params.size - 1) {
                 ss << "...";
@@ -948,7 +963,6 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         node->data.var_decl.resolved_field = member;
     } else if (node->type == NodeType::FnDef) {
         member->resolved_type = resolve(node, scope);
-        member->resolved_type->data.fn.container = struct_type;
     } else if (node->type == NodeType::EnumMember) {
         member->resolved_type = resolve(node, scope);
     }
@@ -1163,11 +1177,17 @@ ast::Node *Resolver::get_dummy_var(const string &name) {
     return node;
 }
 
-ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic) {
+ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
+                               ChiType *container) {
     ChiTypeFn fn;
     fn.return_type = ret;
     fn.is_variadic = is_variadic;
     fn.params = *params;
+    if (container) {
+        fn.container = container;
+        fn.container_ref = get_pointer_type(container, TypeKind::Reference);
+    }
+
     auto key = to_string(TypeKind::Fn, (ChiType::Data *)&fn);
     if (auto cached = m_ctx->composite_types.get(key)) {
         return *cached;
@@ -1568,4 +1588,8 @@ ResolveScope ResolveScope::set_parent_fn_node(ast::Node *fn) const {
 
 ResolveScope ResolveScope::set_module(ast::Module *module) const {
     RS_SET_PROP_COPY(module, module);
+}
+
+ResolveScope ResolveScope::set_move_outlet(ast::Node *outlet) const {
+    RS_SET_PROP_COPY(move_outlet, outlet);
 }

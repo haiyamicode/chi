@@ -80,7 +80,7 @@ void Compiler::compile_module(ast::Module *module) {
             break;
         }
         case ast::NodeType::StructDecl:
-            // compile_struct(decl);
+            compile_struct(decl);
             break;
         case ast::NodeType::ExternDecl:
             compile_extern(decl);
@@ -102,8 +102,20 @@ inline llvm::Type *Compiler::compile_type_of(cx::ast::Node *node) {
     return compile_type(get_chitype(node));
 }
 
+void Compiler::compile_struct(ast::Node *node) {
+    for (auto member : node->data.struct_decl.members) {
+        if (member->type == ast::NodeType::FnDef) {
+            auto fn = compile_fn_proto(member->data.fn_def.fn_proto, member);
+            m_ctx->pending_fns.add(fn);
+        }
+    }
+}
+
 llvm::DISubroutineType *Compiler::compile_di_fn_type(Function *fn) {
     llvm::SmallVector<llvm::Metadata *, 8> types;
+    if (fn->fn_type->data.fn.container) {
+        types.push_back(compile_di_type(fn->fn_type->data.fn.container_ref));
+    }
     for (auto param : fn->fn_type->data.fn.params) {
         types.push_back(compile_di_type(param));
     }
@@ -157,7 +169,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     case TypeKind::Struct: {
         auto &data = type->data.struct_;
-        if (!data.members.size) {
+        if (!data.fields.size) {
             return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
         }
         auto name = m_ctx->resolver.to_string(type);
@@ -569,10 +581,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             return builder.CreateCmp(cmpop, lhs, rhs);
         }
         case TokenType::ASS: {
-            auto value = compile_assignment_value(fn, data.op2, data.op1);
             auto ref = compile_expr_ref(fn, data.op1);
+            auto value = compile_assignment_value(fn, data.op2, data.op1);
             assert(ref.address);
-            builder.CreateStore(value, ref.address);
+            if (!data.op2->escape.moved) {
+                builder.CreateStore(value, ref.address);
+            }
             return value;
         }
         default: {
@@ -640,12 +654,40 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::ConstructExpr: {
         auto &data = expr->data.construct_expr;
-        return compile_alloc(fn, expr, data.is_new);
+        auto ptr = data.resolved_outlet ? get_var(data.resolved_outlet->get_decl())
+                                        : compile_alloc(fn, expr, data.is_new);
+        auto type = data.is_new ? get_chitype(expr)->get_elem() : get_chitype(expr);
+        compile_construction(fn, ptr, type, expr);
+        return ptr;
     }
     default:
         panic("not implemented: {}", PRINT_ENUM(expr->type));
     }
     return nullptr;
+}
+
+void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *type,
+                                    ast::Node *expr) {
+    switch (type->kind) {
+    case TypeKind::Struct: {
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto &data = type->data.struct_;
+        auto constructor = data.constructor;
+        if (constructor) {
+            auto constructor_fn = get_fn(constructor);
+            auto constructor_type = get_chitype(constructor);
+            auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
+            auto args = std::vector<llvm::Value *>{dest};
+            for (auto arg : expr->data.construct_expr.items) {
+                args.push_back(compile_expr(fn, arg));
+            }
+            builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
+        }
+        break;
+    }
+    default:
+        break;
+    }
 }
 
 RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
@@ -772,6 +814,11 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto init_fn = get_system_fn("cx_array_new");
         builder.CreateCall(init_fn->llvm_fn, {va_ptr});
     }
+    if (fn_spec.container_ref) {
+        auto ref = compile_expr_ref(fn, data.fn_ref_expr->data.dot_expr.expr);
+        auto ptr = ref.address ? ref.address : ref.value;
+        args.push_back(ptr);
+    }
     for (int i = 0; i < data.args.size; i++) {
         if (is_variadic && i >= va_start) {
             auto add_fn = get_system_fn("cx_array_add");
@@ -836,13 +883,15 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     switch (stmt->type) {
     case ast::NodeType::VarDecl: {
         auto &data = stmt->data.var_decl;
-        auto value = compile_assignment_to_type(fn, data.expr, get_chitype(stmt));
         auto &llvm_builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
         auto &llvm_module = *m_ctx->llvm_module.get();
         auto var = compile_alloc(fn, stmt);
-        llvm_builder.CreateStore(value, var);
         add_var(stmt, var);
+        auto value = compile_assignment_to_type(fn, data.expr, get_chitype(stmt));
+        if (!data.expr->escape.moved) {
+            llvm_builder.CreateStore(value, var);
+        }
         break;
     }
     case ast::NodeType::ReturnStmt: {
@@ -963,6 +1012,11 @@ Function *Compiler::compile_fn_proto(ast::Node *node, ast::Node *fn, string name
         ftype = ftype->data.fn_lambda.bound_fn;
         assert(ftype);
     }
+    if (ftype->kind == TypeKind::Fn) {
+        if (ftype->data.fn.container) {
+            bind_offset = 1;
+        }
+    }
     if (name.empty()) {
         name = node->name;
     }
@@ -1044,6 +1098,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         auto &data = type->data.fn;
         auto ret_type_l = compile_type(data.return_type);
         std::vector<llvm::Type *> param_types = {};
+        if (data.container) {
+            param_types.push_back(compile_type(data.container_ref));
+        }
         for (auto param : data.params) {
             param_types.push_back(compile_type(param));
         }
@@ -1085,11 +1142,11 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     }
     case TypeKind::Struct: {
         auto &data = type->data.struct_;
-        if (!data.members.size) {
+        if (!data.fields.size) {
             return compile_type(get_system_types()->void_);
         }
         std::vector<llvm::Type *> members;
-        for (auto &member : data.members) {
+        for (auto &member : data.fields) {
             members.push_back(compile_type(member->resolved_type));
         }
         return llvm::StructType::create(members, get_resolver()->to_string(type));

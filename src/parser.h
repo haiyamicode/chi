@@ -132,7 +132,7 @@ class Parser {
 
     optional<SigilKind> get_sigil_kind(TokenType token_type);
 
-    Node *parse_var_decl(bool as_field);
+    Node *parse_var_decl(bool as_field, DeclSpec decl_spec = {});
 
     Node *parse_fn_proto(Token *iden);
 
