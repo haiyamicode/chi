@@ -279,7 +279,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             bound_fn.return_type = fn_data.return_type;
             bound_fn.is_variadic = fn_data.is_variadic;
-            bound_fn.container = fn_data.container;
+            bound_fn.container_ref = fn_data.container_ref;
             return proto;
         }
         auto proto = resolve(data.fn_proto, scope, flags | IS_FN_DECL_PROTO);
@@ -423,6 +423,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::DEC:
             check_assignment(data.op1, t, get_system_types()->int_);
             return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
+        case TokenType::MUL: {
+            if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
+                return t->get_elem();
+            } else {
+                goto invalid;
+            }
+            break;
+        }
         case TokenType::LNOT: {
             if (data.is_suffix) {
                 if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
@@ -438,12 +446,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return get_system_types()->bool_;
             }
             break;
-        }
-        case TokenType::MUL: {
-            if (!is_addressable(data.op1)) {
-                error(node, errors::CANNOT_GET_POINTER_UNADDRESSABLE);
-            }
-            return get_pointer_type(t);
         }
         case TokenType::AND: {
             if (!is_addressable(data.op1)) {
@@ -553,7 +555,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             value_type = data.is_new ? result_type->get_elem() : result_type;
         }
-        auto constructor = get_struct_member(value_type, "new");
+        auto constructor = ChiTypeStruct::get_constructor(value_type);
         if (constructor) {
             auto &fn_type = constructor->resolved_type->data.fn;
             resolve_fn_call(node, scope, &fn_type, &data.items);
@@ -645,12 +647,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type == NodeType::VarDecl && member->data.var_decl.is_embed) {
                     resolve_struct_embed(struct_type, member, scope);
                 }
-                if (member->name == "new") {
-                    struct_->constructor = member;
-                }
-                if (member->name == "delete") {
-                    struct_->destructor = member;
-                }
             }
             for (auto implement : data.implements) {
                 auto impl_trait = resolve_value(implement, scope);
@@ -703,12 +699,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::IndexExpr: {
         auto &data = node->data.index_expr;
         auto expr_type = resolve(data.expr, scope);
-        if (expr_type->kind != TypeKind::Array) {
+        auto subscript_type = resolve(data.subscript, scope);
+        check_assignment(data.subscript, subscript_type, get_system_types()->int_);
+
+        switch (expr_type->kind) {
+        case TypeKind::Pointer:
+        case TypeKind::Array:
+            break;
+        default:
             error(node, errors::CANNOT_SUBSCRIPT, to_string(expr_type));
             return nullptr;
         }
-        auto subscript_type = resolve(data.subscript, scope);
-        check_assignment(data.subscript, subscript_type, get_system_types()->int_);
         return expr_type->get_elem();
     }
     case NodeType::EnumMember: {
@@ -758,11 +759,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::PrefixExpr: {
         auto &data = node->data.prefix_expr;
-        auto expr_type = resolve(data.expr, scope);
-        if (!expr_type->is_raw_pointer()) {
-            error(node, errors::INVALID_OPERATOR, data.prefix->to_string(), to_string(expr_type));
+        switch (data.prefix->type) {
+        case TokenType::KW_DELETE: {
+            auto expr_type = resolve(data.expr, scope);
+            if (!expr_type->is_raw_pointer()) {
+                error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
+                      to_string(expr_type));
+            }
+            return get_system_types()->void_;
         }
-        return get_system_types()->void_;
+        case TokenType::KW_SIZEOF: {
+            auto type = resolve_value(data.expr, scope);
+            data.expr->resolved_type = type;
+            return get_system_types()->int_;
+        }
+        default:
+            panic("unhandled prefix operator {}", data.prefix->to_string());
+        }
+        break;
     }
     case NodeType::ExternDecl: {
         auto &data = node->data.extern_decl;
@@ -1056,11 +1070,10 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
     }
     case TypeKind::Fn: {
         auto &data = type->data.fn;
-        auto fn = create_type(TypeKind::Fn);
-        fn->data.fn.return_type = type_placeholders_sub(data.return_type, subs);
-        fn->data.fn.container = data.container;
-        type_placeholders_sub_each(&data.params, subs, &fn->data.fn.params);
-        return fn;
+        auto return_type = type_placeholders_sub(data.return_type, subs);
+        array<ChiType *> params = {};
+        type_placeholders_sub_each(&data.params, subs, &params);
+        return get_fn_type(return_type, &params, data.is_variadic, data.container_ref->get_elem());
     }
     default:
         return type;
@@ -1184,7 +1197,6 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
     fn.is_variadic = is_variadic;
     fn.params = *params;
     if (container) {
-        fn.container = container;
         fn.container_ref = get_pointer_type(container, TypeKind::Reference);
     }
 
@@ -1233,7 +1245,7 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
     }
     bound_fn.return_type = fn_data.return_type;
     bound_fn.is_variadic = fn_data.is_variadic;
-    bound_fn.container = fn_data.container;
+    bound_fn.container_ref = fn_data.container_ref;
     return lambda;
 }
 
@@ -1414,14 +1426,16 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     cpy.node = base.node;
     for (auto &member : base.members) {
         auto type = type_placeholders_sub(member->resolved_type, &data);
-        if (member->node->type == NodeType::FnDef) {
-            type->data.fn.container = subtype;
-        }
         auto node = create_node(member->node->type);
         node->name = member->node->name;
         node->token = member->node->token;
         node->resolved_type = type;
         memcpy(&node->data, &member->node->data, sizeof(member->node->data));
+
+        if (member->node->type == NodeType::FnDef) {
+            type->data.fn.container_ref = get_pointer_type(subtype, TypeKind::Reference);
+            node->data.fn_def.is_generated = true;
+        }
         cpy.add_member(member->get_name(), node, type);
     }
     data.resolved_struct = sty;

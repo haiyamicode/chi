@@ -113,8 +113,8 @@ struct WrappedType {
 };
 
 struct StructData {
-    Function *constructor;
-    Function *destructor;
+    Function *constructor = nullptr;
+    Function *destructor = nullptr;
 };
 
 struct Struct {
@@ -326,7 +326,10 @@ class Compiler {
     void compile_cprintf(Function *fn, const char *s);
     void compile_debug_i(Function *fn, const char *prefix, const unknown_t &v);
     Function *get_system_fn(const string &name);
+
     llvm::Value *compile_type_info(ChiType *type);
+
+    llvm::TypeSize llvm_type_size(llvm::Type *type);
 
   public:
     Compiler(CodegenContext *ctx);

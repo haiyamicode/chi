@@ -184,6 +184,8 @@ class Parser {
 
     Node *parse_prefix_expr();
 
+    Node *parse_sizeof_expr();
+
     Node *parse_dot_expr(Node *expr);
 
     Node *parse_index_expr(Node *expr);

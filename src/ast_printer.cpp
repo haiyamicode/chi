@@ -79,7 +79,15 @@ void AstPrinter::print_node(Node *node) {
         print("{}", node->name);
         break;
     }
-    case NodeType::TypeParam:
+    case NodeType::TypeParam: {
+        auto &data = node->data.type_param;
+        print("{}", node->name);
+        if (data.bound) {
+            print(" : ");
+            print_node(data.bound);
+        }
+        break;
+    }
     case NodeType::ParamDecl: {
         auto &data = node->data.param_decl;
         if (data.is_variadic) {
@@ -355,6 +363,12 @@ void AstPrinter::print_node(Node *node) {
             print("}}");
         }
         print(";\n");
+        break;
+    }
+    case NodeType::PrefixExpr: {
+        auto &data = node->data.prefix_expr;
+        print("{} ", data.prefix->str);
+        print_node(data.expr);
         break;
     }
     default:

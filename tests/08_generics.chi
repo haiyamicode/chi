@@ -2,7 +2,7 @@ struct Node<T> {
     data T;
     next *Node<T> = 0;
 
-    static func new(data T): Node<T> {
+    func new(data T) {
         return Node<T>{data};
     }
 }

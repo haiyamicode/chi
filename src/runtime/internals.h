@@ -35,7 +35,6 @@ struct CxArray {
     void *data;
     uint32_t size;
     uint32_t capacity;
-    uint8_t flags;
 };
 
 typedef CxArray CxSlice;
@@ -59,7 +58,7 @@ void cx_string_set_data(CxString *dest, const char *data);
 
 void cx_string_concat(CxString *dest, CxString s1, CxString s2);
 
-void cx_string_format(CxString *dest, CxString *format, CxSlice *values);
+CxString cx_string_format(CxString format, CxSlice *values);
 
 void cx_printf(CxString format, CxSlice *values);
 
@@ -85,6 +84,7 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
 void *cx_malloc(uint32_t size, void *ignored = NULL);
+void cx_free(void *address);
 
 void cx_runtime_start(void *stack);
 void cx_runtime_stop();

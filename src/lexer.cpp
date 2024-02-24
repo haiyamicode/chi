@@ -60,9 +60,7 @@ void Lexer::setup_keywords() {
     s_keywords["try"] = TokenType::KW_TRY;
     s_keywords["import"] = TokenType::KW_IMPORT;
     s_keywords["as"] = TokenType::KW_AS;
-
-    // C keywords
-    s_keywords["inline"] = TokenType::KW_INLINE;
+    s_keywords["sizeof"] = TokenType::KW_SIZEOF;
     s_keywords["extern"] = TokenType::KW_EXTERN;
 
     // bool

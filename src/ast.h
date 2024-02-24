@@ -20,7 +20,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, InferredType, ImportDecl);
+          TryExpr, InferredType, ImportDecl, SizeofExpr);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 
@@ -118,6 +118,7 @@ struct FnDef {
     DeclSpec decl_spec = {};
     array<Node *> captures = {};
     map<Node *, int32_t> capture_map = {};
+    bool is_generated = false;
 
     bool is_instance_method() {
         return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
@@ -132,6 +133,7 @@ struct ParamDecl {
 struct TypeParam {
     Node *type = nullptr;
     long index = 0;
+    Node *bound = nullptr;
 };
 
 struct Block {
@@ -274,6 +276,13 @@ struct EscapeAnalysis {
     bool escaped = false;
     int32_t local_index = -1;
     bool moved = false;
+
+    bool is_capture() { return local_index >= 0; }
+};
+
+struct SizeofExpr {
+    Node *type = nullptr;
+    Node *expr = nullptr;
 };
 
 struct ImportDecl {

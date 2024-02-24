@@ -463,7 +463,7 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec decl_spec) {
     }
     if (next_is(TokenType::ASS)) {
         consume();
-        node->data.var_decl.expr = parse_expr_clause(false);
+        node->data.var_decl.expr = parse_expr();
     }
     expect(TokenType::SEMICOLON);
     auto so = get_scope()->owner;
@@ -645,6 +645,13 @@ Node *Parser::parse_expr() {
         consume();
         break;
 
+    case TokenType::KW_AS: {
+        auto node = create_node(NodeType::CastExpr, read());
+        node->data.cast_expr.dest_type = parse_type_expr();
+        node->data.cast_expr.expr = lhs;
+        return node;
+    }
+
     default:
         return lhs;
     }
@@ -701,6 +708,7 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
     case TokenType::KW_NEW:
         return parse_construct_expr();
 
+    case TokenType::KW_SIZEOF:
     case TokenType::KW_DELETE:
         return parse_prefix_expr();
 
@@ -1078,22 +1086,20 @@ Node *Parser::parse_construct_expr() {
 }
 
 Node *Parser::parse_prefix_expr() {
-    Node *node = create_node(NodeType::PrefixExpr, get());
-    auto tok = expect(TokenType::KW_DELETE);
+    auto node = create_node(NodeType::PrefixExpr, get());
+    auto tok = get();
+    consume();
     node->data.prefix_expr.prefix = tok;
-    node->data.prefix_expr.expr = parse_expr();
+    if (tok->type == TokenType::KW_SIZEOF) {
+        node->data.prefix_expr.expr = parse_type_expr();
+    } else {
+        node->data.prefix_expr.expr = parse_expr();
+    }
     return node;
 }
 
 Node *Parser::parse_dot_expr(Node *expr) {
     auto dot = expect(TokenType::DOT);
-    if (next_is(TokenType::LPAREN)) {
-        auto node = create_node(NodeType::CastExpr, read());
-        node->data.cast_expr.dest_type = parse_type_expr();
-        expect(TokenType::RPAREN);
-        node->data.cast_expr.expr = expr;
-        return node;
-    }
     auto node = create_node(NodeType::DotExpr, dot);
     node->data.dot_expr.expr = expr;
     node->data.dot_expr.field = expect(TokenType::IDEN);

@@ -2,8 +2,8 @@ SHELL=/bin/bash
 BASE=..
 BUILD_DIR=$(BASE)/build
 TESTS = 00_fib.test \
-    01_fib_struct.test
-    # 02_basic_array.test \
+    01_fib_struct.test \
+    02_generics.test \
     # 03_destructors.test \
     # 04_enum_union.test \
     # 05_ptr_casting.test \

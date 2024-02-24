@@ -42,7 +42,6 @@ struct ChiTypeFn {
     ChiType *return_type = nullptr;
     array<ChiType *> params = {};
     bool is_variadic = false;
-    ChiType *container = nullptr;
     ChiType *container_ref = nullptr;
 
     ChiType *get_param_at(size_t index);
@@ -89,8 +88,6 @@ struct ChiTypeStruct {
     map<ChiType *, TraitImpl *> trait_table = {};
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
-    ast::Node *constructor = nullptr;
-    ast::Node *destructor = nullptr;
 
     ChiStructMember *add_member(const string &name, ast::Node *node, ChiType *resolved_type);
 
@@ -103,8 +100,11 @@ struct ChiTypeStruct {
     static bool is_pointer_type(ChiType *type);
 
     static bool is_generic(ChiType *type);
-};
 
+    static ChiStructMember *get_constructor(ChiType *type);
+    static ChiStructMember *get_destructor(ChiType *type);
+};
+ 
 struct ChiTypePointer {
     ChiType *elem = nullptr;
 };

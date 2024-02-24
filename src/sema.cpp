@@ -50,6 +50,20 @@ bool ChiTypeStruct::is_pointer_type(ChiType *type) {
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference;
 }
 
+ChiStructMember *ChiTypeStruct::get_constructor(ChiType *type) {
+    if (type->kind == TypeKind::Struct) {
+        return type->data.struct_.find_member("new");
+    }
+    return nullptr;
+}
+
+ChiStructMember *ChiTypeStruct::get_destructor(ChiType *type) {
+    if (type->kind == TypeKind::Struct) {
+        return type->data.struct_.find_member("delete");
+    }
+    return nullptr;
+}
+
 string ChiStructMember::get_name() { return node->name; }
 
 ast::Node *Scope::find_one(const string &symbol) {

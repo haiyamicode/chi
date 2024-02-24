@@ -104,7 +104,7 @@ void cx_print_any(CxAny *value) { fmt::print(stringf(*value)); }
 
 void cx_print_number(uint64_t value) { fmt::print("{}\n", value); }
 
-static string format_cstr(CxString format, const CxSlice &values) {
+static string format_cstr(CxString &format, const CxSlice &values) {
     int val_i = 0;
     int state = 0;
     std::stringstream ss;
@@ -141,10 +141,13 @@ static string format_cstr(CxString format, const CxSlice &values) {
     return ss.str();
 }
 
-void cx_string_format(CxString *dest, CxString format, CxSlice *values) {
+CxString cx_string_format(CxString format, CxSlice *values) {
+    CxString s;
     auto str = format_cstr(format, *values);
-    dest->data = str.data();
-    dest->size = (uint32_t)str.size();
+    s.size = (uint32_t)str.size();
+    s.data = (char *)malloc(str.size());
+    memcpy(s.data, str.data(), s.size);
+    return s;
 }
 
 void cx_printf(CxString format, CxSlice *values) { fmt::print(format_cstr(format, *values)); }
@@ -158,7 +161,6 @@ void cx_array_new(CxArray *dest) {
     dest->size = 0;
     dest->capacity = 0;
     dest->data = NULL;
-    dest->flags = 0;
 }
 
 void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap) {
@@ -208,6 +210,8 @@ void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
 }
 
 void *cx_malloc(uint32_t size, void *_ignored) { return malloc(size); }
+
+void cx_free(void *address) { return free(address); }
 
 void signal_handler(int signal_num) {
     print("panic: {}\n", st.message);
