@@ -241,8 +241,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.fn_def;
         if (data.fn_kind == ast::FnKind::Lambda) {
             auto &data = node->data.fn_def;
-            auto proto = resolve(data.fn_proto, scope);
-            auto fn_scope = scope.set_parent_fn(proto).set_parent_fn_node(node);
+            auto fn_scope = scope.set_parent_fn_node(node);
+            auto proto = resolve(data.fn_proto, fn_scope);
+            fn_scope = fn_scope.set_parent_fn(proto);
             resolve(data.body, fn_scope);
 
             // resolve captures
@@ -282,9 +283,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             bound_fn.container_ref = fn_data.container_ref;
             return proto;
         }
-        auto proto = resolve(data.fn_proto, scope, flags | IS_FN_DECL_PROTO);
+
+        auto fn_scope = scope.set_parent_fn_node(node);
+        auto proto = resolve(data.fn_proto, fn_scope, flags | IS_FN_DECL_PROTO);
         if (data.body && should_resolve_fn_body(scope)) {
-            auto fn_scope = scope.set_parent_fn(proto).set_parent_fn_node(node);
+            fn_scope = fn_scope.set_parent_fn(proto);
             resolve(data.body, fn_scope);
         }
         return proto;
@@ -363,7 +366,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ParamDecl: {
         auto &data = node->data.param_decl;
-        return resolve_value(data.type, scope);
+        auto result = resolve_value(data.type, scope);
+        return result;
     }
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
@@ -470,6 +474,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.expr->type != NodeType::FnCallExpr) {
             error(data.expr, errors::TRY_NOT_CALL);
         }
+        scope.parent_fn_def().has_try = true;
         return get_result_type(expr_type, get_system_types()->error);
     }
     case NodeType::CastExpr: {
@@ -826,6 +831,11 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
     }
     auto result = _resolve(node, scope, flags);
     node->resolved_type = result;
+    if (node->type == NodeType::VarDecl || node->type == NodeType::ParamDecl) {
+        if (scope.parent_fn_node && should_destroy(node)) {
+            scope.parent_fn_def().cleanup_vars.add(node);
+        }
+    }
     return result;
 }
 
@@ -1034,6 +1044,12 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
         _resolve(base.node, parent_scope);
     }
     resolve_vtable(em_type, struct_type, base_node);
+}
+
+bool Resolver::should_destroy(ast::Node *node) {
+    auto is_managed = has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED);
+    auto is_on_heap = is_managed && node->is_heap_allocated();
+    return !is_on_heap && ChiTypeStruct::get_destructor(node_get_type(node));
 }
 
 bool Resolver::should_resolve_fn_body(ResolveScope &scope) {

@@ -21,20 +21,12 @@ struct CodegenContext;
 typedef void *unknown_t;
 typedef llvm::BasicBlock label_t;
 
-struct VarLabel {
-    label_t *label = nullptr;
-    ast::Node *var = nullptr;
-};
-
-typedef std::list<VarLabel> VarLabels;
-
 struct LoopLabels {
     label_t *start = nullptr;
     label_t *end = nullptr;
 };
 
 struct BlockScope {
-    VarLabels vars = {};
     bool branched = false;
 };
 
@@ -46,6 +38,7 @@ struct Function {
 
     llvm::Value *is_returning = nullptr;
     llvm::Value *return_value = nullptr;
+    label_t *cleanup_landing_label = nullptr;
     label_t *return_label = nullptr;
     ChiTypeSubtype *container_subtype = nullptr;
     ChiType *fn_type = nullptr;
@@ -53,7 +46,7 @@ struct Function {
     std::list<BlockScope> block_scopes;
     std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
-    bool has_try = false;
+    bool has_cleanup_invoke = false;
     int bind_offset = 0;
     llvm::Value *bind_ptr = nullptr;
 
@@ -79,6 +72,7 @@ struct Function {
     void use_label(label_t *bb);
 
     void insn_noop();
+    ast::FnDef &get_def() { return node->data.fn_def; }
 };
 
 struct StructField {
@@ -177,6 +171,8 @@ struct CodegenContext {
     void init_llvm();
 
     Function *add_fn(ast::Node *node, Function *fn);
+
+    llvm::StructType *get_caught_result_type();
 };
 
 enum ArrayOp { Destroy, Copy };
@@ -225,13 +221,7 @@ class Compiler {
 
     unknown_t compile_array_loop(Function *fn, unknown_t &address, ChiType *type, ArrayOp op);
 
-    bool should_destroy(ast::Node *node);
-
-    bool should_destroy_for_type(ChiType *type);
-
-    void compile_destruction_for_type(Function *fn, unknown_t &address, ChiType *type);
-
-    void compile_destruction(Function *fn, unknown_t &address, ast::Node *node);
+    void compile_destruction(Function *fn, llvm::Value *address, ast::Node *node);
 
     DotValue compile_dot_expr(Function *fn, ast::Node *expr);
 

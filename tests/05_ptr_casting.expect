@@ -1,6 +1,0 @@
-b: -2019
-b after inc: -2018
-b after inc == -2018: true
-(b.(int8) + 1).(int): 31
-foo_cpy.a: -2018
-p.(*int)!: -2018

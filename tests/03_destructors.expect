@@ -1,14 +1,4 @@
-delete bar -1
-delete bar -2
-delete bar -3
-delete bar -4
-delete bar 22
-delete bar 21
+delete foo 3
 delete foo 2
-delete bar 12
-delete bar 11
+done in main
 delete foo 1
-delete bar -1
-delete bar -2
-delete bar -3
-delete bar -4

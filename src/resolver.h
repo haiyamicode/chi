@@ -74,6 +74,11 @@ struct ResolveScope {
     ast::Module *module = nullptr;
     ast::Node *move_outlet = nullptr;
 
+    ast::FnDef &parent_fn_def() {
+        assert(parent_fn_node);
+        return parent_fn_node->data.fn_def;
+    }
+
     ResolveScope set_parent_fn(ChiType *fn) const;
 
     ResolveScope set_parent_struct(ChiType *struct_) const;
@@ -149,6 +154,8 @@ class Resolver {
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
 
     bool should_resolve_fn_body(ResolveScope &scope);
+
+    bool should_destroy(ast::Node *node);
 
     ChiType *resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
 

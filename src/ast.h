@@ -119,10 +119,14 @@ struct FnDef {
     array<Node *> captures = {};
     map<Node *, int32_t> capture_map = {};
     bool is_generated = false;
+    array<Node *> cleanup_vars = {};
+    bool has_try = false;
 
     bool is_instance_method() {
         return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
     }
+
+    bool has_try_or_cleanup() { return has_try || cleanup_vars.size; }
 };
 
 struct ParamDecl {

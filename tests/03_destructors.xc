@@ -22,17 +22,18 @@ struct Foo {
     }
 }
 
-func main() {
-    var arr array<Bar> = {};
-    arr.add({-1});
-    arr.add({-2});
-    arr.add({-3});
-    arr.add({-4});
-
-    var foo1 Foo = {1};
-    if 1 == 1 {
-        var foo2 Foo = {2};
-        return;
-    }
+func f2() {
     var foo3 Foo = {3};
+    panic("exit");
+}
+
+func f() {
+    var foo2 Foo = {2};
+    f2();
+}
+
+func main() {
+    var foo1 Foo = {1};
+    try f();
+    println("done in main");
 }

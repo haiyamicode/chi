@@ -4,6 +4,8 @@
 namespace cx {
 namespace codegen {
 
+typedef llvm::ArrayRef<llvm::Type *> TypeArray;
+
 CodegenContext::~CodegenContext() {}
 CodegenContext::CodegenContext(CompilationContext *compilation_ctx)
     : compilation_ctx(compilation_ctx), resolver(compilation_ctx->resolve_ctx.get()) {
@@ -14,6 +16,12 @@ Function *CodegenContext::add_fn(ast::Node *node, Function *fn) {
     functions.emplace(fn)->get();
     function_table[node] = fn;
     return fn;
+}
+
+llvm::StructType *CodegenContext::get_caught_result_type() {
+    auto &builder = *llvm_builder;
+    llvm::Type *field_types[] = {builder.getPtrTy(), builder.getInt32Ty()};
+    return llvm::StructType::get(*llvm_ctx, TypeArray(field_types));
 }
 
 Function::Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node)
@@ -312,12 +320,15 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (fn_def.body) {
         compile_block(fn, node, fn_def.body, return_b);
     }
-    if (fn->has_try) {
+    if (fn->get_def().has_try_or_cleanup()) {
         fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
     }
 
-    // return block
+    // clean up & return
     fn->use_label(return_b);
+    for (auto var : fn->get_def().cleanup_vars) {
+        compile_destruction(fn, get_var(var), var);
+    }
     if (is_entry) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
@@ -325,9 +336,22 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (return_type->kind == TypeKind::Void) {
         builder.CreateRetVoid();
     } else {
-        // auto ret_value = builder.CreateLoad(return_type_l, fn->return_value);
         auto value = builder.CreateLoad(return_type_l, fn->return_value);
         builder.CreateRet(value);
+    }
+
+    // cleanup landing pad (for handling exceptions)
+    if (fn->cleanup_landing_label) {
+        fn->use_label(fn->cleanup_landing_label);
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 0);
+        landing->setCleanup(true);
+        builder.CreateExtractValue(landing, {0});
+        builder.CreateExtractValue(landing, {1});
+        for (auto var : fn->get_def().cleanup_vars) {
+            compile_destruction(fn, get_var(var), var);
+        }
+        fn->insn_noop();
+        builder.CreateResume(landing);
     }
 
     llvm::verifyFunction(*fn->llvm_fn);
@@ -568,6 +592,20 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op) {
 llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
+        if (fn->get_def().cleanup_vars.size) {
+            // return compile_fn_call(fn, expr);
+            InvokeInfo invoke;
+            auto next_label = fn->new_label("_invoke_next");
+            invoke.normal = next_label;
+            if (!fn->cleanup_landing_label) {
+                fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
+            }
+            invoke.landing = fn->cleanup_landing_label;
+            auto result = compile_fn_call(fn, expr, &invoke);
+            fn->use_label(next_label);
+            fn->has_cleanup_invoke = true;
+            return result;
+        }
         return compile_fn_call(fn, expr);
     }
     case ast::NodeType::Identifier: {
@@ -647,7 +685,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         };
     }
     case ast::NodeType::TryExpr: {
-        fn->has_try = true;
         auto &data = expr->data.try_expr;
         auto &builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
@@ -664,9 +701,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto value = compile_fn_call(fn, data.expr, &invoke);
 
         fn->use_label(invoke.landing);
-        auto landing = builder.CreateLandingPad(llvm::Type::getInt8PtrTy(llvm_ctx), 1);
-        landing->addClause(llvm::ConstantPointerNull::get(
-            llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)));
+        auto caught_type_l = m_ctx->get_caught_result_type();
+        auto landing = builder.CreateLandingPad(caught_type_l, 1);
+        auto null_ptr = llvm::ConstantPointerNull::get(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0));
+        landing->addClause(null_ptr);
         builder.CreateBr(continue_b);
         // auto result_err_field_type_l = result_type_l->getStructElementType(0);
         // auto has_err_type_l = result_err_field_type_l->getStructElementType(0);
@@ -1048,22 +1087,26 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
 }
 
+void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node *node) {
+    auto type = get_chitype(node);
+    auto destructor = ChiTypeStruct::get_destructor(type);
+    if (destructor) {
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto destructor_type = get_chitype(destructor->node);
+        auto destructor_fn = get_fn(destructor->node);
+        auto destructor_type_l = (llvm::FunctionType *)compile_type(destructor_type);
+        auto args = std::vector<llvm::Value *>{address};
+        builder.CreateCall(destructor_type_l, destructor_fn->llvm_fn, args);
+    }
+}
+
 void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block,
                              label_t *end_label) {
-    // TODO: implement destructors
-
     assert(block->type == ast::NodeType::Block);
     auto &builder = *m_ctx->llvm_builder.get();
-    // array<ast::Node *> vars; // vars to destroy
 
     auto scope = fn->push_scope();
     for (auto stmt : block->data.block.statements) {
-        // if (stmt->type == ast::NodeType::VarDecl) {
-        //     if (should_destroy(stmt)) {
-        //         vars.add(stmt);
-        //         ret_scope->emplace_back().var = stmt;
-        //     }
-        // }
         compile_stmt(fn, stmt);
     }
     fn->pop_scope();
@@ -1073,32 +1116,6 @@ void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block,
     if (!term && end_label) {
         builder.CreateBr(end_label);
     }
-
-    // call destructors
-    // auto &llvm_builder = *m_ctx->llvm_builder.get();
-    // auto &llvm_ctx = *m_ctx->llvm_ctx.get();
-    // fn->is_returning = llvm_builder.CreateStore(
-    //     llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(llvm_ctx), 0),
-    //     fn->is_returning);
-    // if (vars.size) {
-    //     for (long i = vars.size - 1; i >= 0; i--) {
-    //         auto var = vars[i];
-    //         if (var == ret_scope->back().var) {
-    //             ret_scope->back().label =
-    //                 llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "", fn->llvm_fn);
-    //             ret_scope->pop_back();
-    //         }
-    //         // TODO
-    //         // compile_destruction(fn, get_value(var), var);
-    //     }
-    // }
-
-    // auto bb = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "", fn->llvm_fn);
-    // ret_scope->back().label = bb;
-    // ret_scope->pop_back();
-    // assert(ret_scope->empty());
-    // fn->pop_return_scope();
-    // llvm_builder.CreateCondBr(fn->is_returning, fn->get_return_label(), bb);
 }
 
 Function *Compiler::add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn_type) {

@@ -1,4 +1,0 @@
-has value: node.id == 1
-has value: node.id == 1
-forced print: node!.id == 1
-has no value, !node == true
