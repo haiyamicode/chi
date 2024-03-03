@@ -32,7 +32,7 @@ ast::Module *Builder::process_file(ast::Package *package, const string &file_nam
     return process_source(package, &src, file_name);
 }
 
-void Builder::build_runtime() {
+ast::Module *Builder::build_runtime() {
     auto resolver = m_ctx.create_resolver();
     resolver.context_init_primitives();
 
@@ -42,16 +42,14 @@ void Builder::build_runtime() {
     auto rt_source = io::Buffer::from_file(rt_path);
     auto module = process_source(package, &rt_source, rt_path);
     resolver.context_init_builtins(module);
-
-    if (m_ctx.flags & FLAG_PRINT_AST) {
-        return;
-    }
-
-    auto compiler = create_codegen_compiler();
-    compiler.compile_module(module);
+    return module;
 }
 
-void Builder::build_single_file(ast::Package *package, const string &file_name) {
+void Builder::build_single_file(const string &file_name) {
+    auto runtime_module = build_runtime();
+
+    auto package = add_package();
+    package->name = "__main";
     auto module = process_file(package, file_name);
     if (m_ctx.flags & FLAG_PRINT_AST) {
         return;
@@ -63,6 +61,7 @@ void Builder::build_single_file(ast::Package *package, const string &file_name) 
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
     settings->lang_flags = module->get_lang_flags();
 
+    compiler.compile_module(runtime_module);
     compiler.compile_module(module);
     compiler.emit_output();
 
@@ -97,16 +96,13 @@ void Builder::build_program(const string &entry_file_name) {
     }
     m_ctx.flags = flags;
 
-    build_runtime();
-
     if (!working_dir.empty()) {
         if (!fs::exists(working_dir)) {
             fs::create_directories(working_dir);
         }
     }
-    auto package = add_package();
-    package->name = "__main";
-    build_single_file(package, entry_file_name);
+
+    build_single_file(entry_file_name);
 }
 
 string Builder::get_tmp_file_path(const string &filename) {

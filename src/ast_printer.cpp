@@ -47,7 +47,7 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::FnDef: {
         auto &data = node->data.fn_def;
-        print_declspec(&data.decl_spec);
+        print_declspec(data.decl_spec);
         print_node(data.fn_proto);
         if (data.body) {
             print(" ");
@@ -393,6 +393,12 @@ void AstPrinter::print_node_list(array<Node *> *list) {
 }
 
 void AstPrinter::print_declspec(DeclSpec *declspec) {
+    for (auto attr : declspec->attributes) {
+        print("@[");
+        print_node(attr->data.decl_attribute.term);
+        print("]\n");
+        print_indent(m_indent);
+    }
     if (declspec->has_flag(DECL_PRIVATE)) {
         print("private ");
     }

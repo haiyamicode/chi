@@ -20,7 +20,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, InferredType, ImportDecl, SizeofExpr);
+          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 
@@ -89,6 +89,7 @@ struct Root {
 
 struct DeclSpec {
     uint32_t flags = DECL_NONE;
+    array<Node *> attributes = {};
 
     Visibility get_visibility() const {
         if (flags & DECL_PRIVATE) {
@@ -115,7 +116,7 @@ struct FnDef {
     Node *fn_proto = nullptr;
     Node *body = nullptr;
     FnKind fn_kind = FnKind::TopLevel;
-    DeclSpec decl_spec = {};
+    DeclSpec *decl_spec = nullptr;
     array<Node *> captures = {};
     map<Node *, int32_t> capture_map = {};
     bool is_generated = false;
@@ -142,6 +143,8 @@ struct TypeParam {
 
 struct Block {
     array<Node *> statements = {};
+    array<Node *> implicit_vars = {};
+    cx::Scope *scope = nullptr;
 };
 
 struct ReturnStmt {
@@ -157,7 +160,8 @@ struct VarDecl {
     bool is_embed = false;
     ChiStructMember *resolved_field = nullptr;
     ConstantValue resolved_value = {};
-    DeclSpec decl_spec = {};
+    DeclSpec *decl_spec = {};
+    bool is_generated = false;
 };
 
 struct BinOpExpr {
@@ -194,7 +198,7 @@ struct StructDecl {
     ContainerKind kind = ContainerKind::Struct;
     array<Node *> type_params = {};
     array<Node *> implements = {};
-    DeclSpec decl_spec = {};
+    DeclSpec *decl_spec = {};
 };
 
 struct ExternDecl {
@@ -221,6 +225,7 @@ struct DotExpr {
     ChiStructMember *resolved_member = nullptr;
     int64_t resolved_value = 0;
     Node *resolved_decl = nullptr;
+    bool resolve_variant = false;
 };
 
 struct SubtypeExpr {
@@ -231,6 +236,7 @@ struct SubtypeExpr {
 struct IndexExpr {
     Node *expr = nullptr;
     Node *subscript = nullptr;
+    ChiStructMember *resolved_method = nullptr;
 };
 
 MAKE_ENUM(IdentifierKind, Value, TypeName, This)
@@ -256,7 +262,7 @@ struct ForStmt {
     Node *body;
 };
 
-MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short);
+MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short)
 
 MAKE_ENUM(SigilKind, Pointer, Reference, Optional, Box)
 
@@ -264,6 +270,7 @@ struct TypeSigil {
     Node *type;
     SigilKind sigil;
     Node *etype;
+    bool has_paren = false;
 };
 
 struct EnumMember {
@@ -299,6 +306,10 @@ struct ImportDecl {
 struct ImportSymbol {
     Token *name = nullptr;
     Token *alias = nullptr;
+};
+
+struct DeclAttribute {
+    Node *term = nullptr;
 };
 
 struct Node {
@@ -342,6 +353,7 @@ struct Node {
         ExternDecl extern_decl;
         ImportDecl import_decl;
         ImportSymbol import_symbol;
+        DeclAttribute decl_attribute;
 
         NodeData() {}
 
@@ -372,6 +384,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_INITIALIZE_FIELD(extern_decl, ExternDecl)
             _AST_CASE_INITIALIZE_FIELD(import_decl, ImportDecl)
+            _AST_CASE_INITIALIZE_FIELD(decl_attribute, DeclAttribute)
         default:
             break;
         }
@@ -396,6 +409,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_DESTROY_FIELD(extern_decl, ExternDecl)
             _AST_CASE_DESTROY_FIELD(import_decl, ImportDecl)
+            _AST_CASE_DESTROY_FIELD(decl_attribute, DeclAttribute)
         default:
             break;
         }
@@ -403,13 +417,18 @@ struct Node {
 
     bool is_heap_allocated() { return escape.escaped; }
 
-    Node *get_decl() {
+    Node *get_decl(ChiTypeSubtype *variant_input = nullptr) {
         switch (type) {
         case NodeType::VarDecl:
             return this;
         case NodeType::Identifier:
             return data.identifier.decl;
         case NodeType::DotExpr: {
+            if (data.dot_expr.resolve_variant) {
+                auto variant_member = data.dot_expr.resolved_member->variants[variant_input];
+                assert(variant_member);
+                return variant_member->node;
+            }
             auto decl = data.dot_expr.resolved_decl;
             if (decl) {
                 return decl;
@@ -424,16 +443,23 @@ struct Node {
         return nullptr;
     }
 
-    const DeclSpec &get_declspec() {
+    DeclSpec &get_declspec() {
         switch (type) {
         case NodeType::FnDef:
-            return data.fn_def.decl_spec;
+            return *data.fn_def.decl_spec;
         case NodeType::VarDecl:
-            return data.var_decl.decl_spec;
+            return *data.var_decl.decl_spec;
         default:
             panic("node type {} does not have declspec", PRINT_ENUM(type));
         };
-        return data.fn_def.decl_spec;
+        return *data.fn_def.decl_spec;
+    }
+
+    bool can_escape() {
+        if (type == NodeType::Identifier) {
+            return data.identifier.kind == IdentifierKind::Value;
+        }
+        return true;
     }
 };
 } // namespace ast

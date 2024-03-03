@@ -39,6 +39,7 @@ constexpr auto NON_TRAIT_IMPL_TYPE = "cannot use non-trait type '{}' in struct i
 constexpr auto VARIADIC_NOT_FINAL = "cannot use ... with non-final parameter '{}'";
 constexpr auto TRY_NOT_CALL = "try must be used with a function call expression";
 constexpr auto MODULE_NOT_FOUND = "module '{}' not found";
+constexpr auto INVALID_ATTRIBUTE_TERM = "invalid attribute term '{}'";
 
 } // namespace errors
 } // namespace cx

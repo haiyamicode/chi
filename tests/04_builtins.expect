@@ -1,0 +1,15 @@
+testing optional:
+t is null
+has value
+t=5
+
+testing array:
+a=[1, 2]
+a=[2, 1]
+
+testing map:
+m["abc"] = 1
+m["d"] = 2
+m["ef"] = 0
+m.find("abc")!! = 1
+m.find("invalid") = null

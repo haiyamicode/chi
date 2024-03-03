@@ -13,6 +13,7 @@
 namespace cx {
 struct Context {
     virtual ast::Node *create_node(ast::NodeType type) = 0;
+    virtual ast::DeclSpec *create_decl_spec() = 0;
     virtual ChiType *create_type(TypeKind kind) = 0;
     virtual Scope *create_scope(Scope *parent) = 0;
     virtual Token *create_token() = 0;
@@ -34,6 +35,7 @@ struct SystemTypes {
     ChiType *double_ = nullptr;
     ChiType *void_ = nullptr;
     ChiType *void_ptr = nullptr;
+    ChiType *null_ptr = nullptr;
     ChiType *void_ref = nullptr;
     ChiType *char_ = nullptr;
     ChiType *str_lit = nullptr;
@@ -58,6 +60,7 @@ struct ResolveContext {
     optional<ErrorHandler> error_handler = {};
     map<string, ChiType *> composite_types = {};
     map<ChiType *, ChiType *> promise_of = {};
+    map<string, IntrinsicSymbol> intrinsic_symbols = {};
 
     ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
@@ -73,6 +76,7 @@ struct ResolveScope {
     bool is_escaping = false;
     ast::Module *module = nullptr;
     ast::Node *move_outlet = nullptr;
+    ast::Block *block = nullptr;
 
     ast::FnDef &parent_fn_def() {
         assert(parent_fn_node);
@@ -94,6 +98,8 @@ struct ResolveScope {
     ResolveScope set_module(ast::Module *module) const;
 
     ResolveScope set_move_outlet(ast::Node *outlet) const;
+
+    ResolveScope set_block(ast::Block *block) const;
 };
 
 enum ResolveFlag : uint32_t {
@@ -102,12 +108,7 @@ enum ResolveFlag : uint32_t {
 
 class Resolver {
     ResolveContext *m_ctx = nullptr;
-    map<ast::Node *, ChiType *> m_tmods = {};
     ast::Module *m_module = nullptr;
-
-    void set_tmod(ast::Node *iden, ChiType *type) { m_tmods[iden->data.identifier.decl] = type; }
-
-    void unset_tmod(ast::Node *iden) { m_tmods.unset(iden->data.identifier.decl); }
 
     ChiType *create_type(TypeKind kind);
 
@@ -138,6 +139,10 @@ class Resolver {
     void check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type);
 
     ChiType *resolve_value(ast::Node *node, ResolveScope &scope);
+
+    string resolve_term_string(ast::Node *term);
+
+    ChiTypeStruct *resolve_struct_type(ChiType *type);
 
     ChiStructMember *resolve_struct_member(ChiType *struct_type, ast::Node *node,
                                            ResolveScope &scope);
@@ -216,7 +221,7 @@ class Resolver {
 
     ChiType *resolve_subtype(ChiType *subtype);
 
-    ast::Node *get_dummy_var(const string &name);
+    ast::Node *get_dummy_var(const string &name, ast::Node *expr = nullptr);
 
     ConstantValue resolve_constant_value(ast::Node *node);
 

@@ -16,12 +16,15 @@ enum class NodeType;
 } // namespace ast
 struct ChiType;
 struct Scope;
+struct ChiTypeSubtype;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
           Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise,
           Infer, Module)
 
 MAKE_ENUM(Visibility, Public, Private)
+
+MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -55,6 +58,8 @@ struct ChiStructMember {
     ChiType *resolved_type = nullptr;
     long field_index = -1;
     long method_index = -1;
+    IntrinsicSymbol symbol = IntrinsicSymbol::None;
+    map<ChiTypeSubtype *, ChiStructMember *> variants = {};
 
     string get_name();
 
@@ -88,12 +93,15 @@ struct ChiTypeStruct {
     map<ChiType *, TraitImpl *> trait_table = {};
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
+    map<IntrinsicSymbol, ChiStructMember *> intrinsics = {};
 
     ChiStructMember *add_member(const string &name, ast::Node *node, ChiType *resolved_type);
 
     ChiStructMember *find_member(const string &name);
 
     TraitImpl *add_trait(ChiType *trait, ChiType *impl);
+
+    bool is_generic() { return type_params.size > 0; }
 
     static bool is_trait(ChiType *type);
 
@@ -103,10 +111,12 @@ struct ChiTypeStruct {
 
     static ChiStructMember *get_constructor(ChiType *type);
     static ChiStructMember *get_destructor(ChiType *type);
+    static ChiStructMember *get_symbol(ChiType *type, IntrinsicSymbol symbol);
 };
- 
+
 struct ChiTypePointer {
     ChiType *elem = nullptr;
+    bool is_null = false;
 };
 
 struct ChiTypeArray {

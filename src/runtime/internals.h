@@ -54,6 +54,11 @@ struct CxPromise {
     CxLambda callback;
 };
 
+struct CxHash {
+    char *data;
+    uint32_t size;
+};
+
 void cx_string_set_data(CxString *dest, const char *data);
 
 void cx_string_concat(CxString *dest, CxString s1, CxString s2);
@@ -85,6 +90,7 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
 void *cx_malloc(uint32_t size, void *ignored = NULL);
 void cx_free(void *address);
+void cx_memset(void *address, int value, uint32_t size);
 
 void cx_runtime_start(void *stack);
 void cx_runtime_stop();
@@ -95,7 +101,13 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
 
 void cx_timeout(uint64_t delay, CxLambda *callback);
 void cx_call(CxLambda *callback);
-void cx_promise_new(CxPromise *dest, CxLambda *fn);
+
+CxHash cx_hbytes(CxAny *value);
+void *cx_map_new();
+void cx_map_delete(void *data);
+void *cx_map_find(void *data, CxHash *key);
+void cx_map_add(void *data, CxHash *key, void *value);
+void cx_map_remove(void *data, CxHash *key);
 
 #ifdef __cplusplus
 }

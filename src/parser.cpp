@@ -190,11 +190,11 @@ void Parser::parse_top_level_decls(NodeList *decls) {
 
         // add export if exported
         if (decl->type == NodeType::FnDef) {
-            if (decl->data.fn_def.decl_spec.is_exported()) {
+            if (decl->data.fn_def.decl_spec->is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
         } else if (decl->type == NodeType::StructDecl) {
-            if (decl->data.struct_decl.decl_spec.is_exported()) {
+            if (decl->data.struct_decl.decl_spec->is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
         }
@@ -212,22 +212,48 @@ void Parser::parse_top_level_decls(NodeList *decls) {
     }
 }
 
-DeclSpec Parser::parse_decl_spec(DeclSpec spec) {
+DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
+    if (!spec) {
+        spec = m_ctx->allocator->create_decl_spec();
+    }
+    parse_attributes(&spec->attributes);
     auto token = get();
     switch (token->type) {
-    case TokenType::KW_PRIVATE:
+    case TokenType::KW_PRIVATE: {
         consume();
-        spec.flags |= DECL_PRIVATE;
+        spec->flags |= DECL_PRIVATE;
         break;
+    }
     default:
         break;
     }
     return spec;
 }
 
-Node *Parser::parse_top_level_decl(DeclSpec decl_spec) {
+void Parser::parse_attributes(NodeList *attributes) {
+    while (next_is(TokenType::AT)) {
+        attributes->add(parse_attribute());
+    }
+}
+
+Node *Parser::parse_attribute() {
+    auto at = expect(TokenType::AT);
+    expect(TokenType::LBRACK);
+    auto iden = expect(TokenType::IDEN);
+    auto term = create_identifier_node(iden, nullptr);
+    while (next_is(TokenType::DOT)) {
+        term = parse_dot_expr(term);
+    }
+    auto node = create_node(NodeType::DeclAttribute, iden);
+    node->data.decl_attribute.term = term;
+    expect(TokenType::RBRACK);
+    return node;
+}
+
+Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     auto token = get();
     switch (token->type) {
+    case TokenType::AT:
     case TokenType::KW_PRIVATE:
         return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
@@ -307,6 +333,8 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
         return SigilKind::Reference;
     case TokenType::XOR:
         return SigilKind::Box;
+    case TokenType::QUES:
+        return SigilKind::Optional;
     default:
         return {};
     }
@@ -316,16 +344,7 @@ Node *Parser::parse_type_expr() {
     array<Node *> sigil_nodes;
     for (;;) {
         auto token = get();
-        if (token->type == TokenType::LPAREN) {
-            consume();
-            auto node = create_node(NodeType::TypeSigil, token);
-            node->data.sigil_type.sigil = SigilKind::Optional;
-            if (!next_is(TokenType::RPAREN)) {
-                node->data.sigil_type.etype = parse_type_expr();
-            }
-            expect(TokenType::RPAREN);
-            sigil_nodes.add(node);
-        } else if (auto sigil_kind = get_sigil_kind(token->type)) {
+        if (auto sigil_kind = get_sigil_kind(token->type)) {
             consume();
             auto node = create_node(NodeType::TypeSigil, token);
             node->data.sigil_type.sigil = *sigil_kind;
@@ -384,7 +403,7 @@ Node *Parser::parse_fn_lambda() {
     return fn;
 }
 
-Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec decl_spec) {
+Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
     auto iden = expect(TokenType::KW_FUNC);
     auto kind = parse_fn_identifier(&iden);
@@ -396,7 +415,6 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec decl_spec) {
     fn->data.fn_def.fn_kind = kind;
     fn->data.fn_def.decl_spec = decl_spec;
     fn->data.fn_def.body = nullptr;
-    proto->data.fn_proto.fn_def_node = fn;
 
     if (flags & FN_BODY_NONE) {
         expect(TokenType::SEMICOLON);
@@ -422,18 +440,19 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec decl_spec) {
 }
 
 void Parser::parse_fn_block(Node *fn) {
-    m_ctx->resolver->push_scope(fn);
+    auto scope = m_ctx->resolver->push_scope(fn);
     auto &fn_def = fn->data.fn_def;
     auto &fn_proto = fn_def.fn_proto->data.fn_proto;
     for (auto param : fn_proto.params) {
         add_to_scope(param);
         param->parent_fn = fn;
     }
-    fn_def.body = parse_block();
+    fn_def.body = parse_block(scope);
     m_ctx->resolver->pop_scope();
 }
 
-Node *Parser::parse_var_decl(bool as_field, DeclSpec decl_spec) {
+Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
+    decl_spec = parse_decl_spec(decl_spec);
     bool is_const = false;
     if (!as_field) {
         if (next_is(TokenType::KW_CONST)) {
@@ -545,9 +564,15 @@ Node *Parser::parse_fn_param() {
     return param;
 }
 
-Node *Parser::parse_block() {
+Node *Parser::parse_block(Scope *scope) {
     auto lb = expect(TokenType::LBRACE);
     auto node = create_node(NodeType::Block, lb);
+    bool should_pop_scope = false;
+    if (!scope) {
+        scope = m_ctx->resolver->push_scope(node);
+        should_pop_scope = true;
+    }
+    node->data.block.scope = scope;
     for (;;) {
         auto token = get();
         if (token->type == TokenType::END) {
@@ -560,6 +585,9 @@ Node *Parser::parse_block() {
         }
         auto stmt = parse_stmt();
         node->data.block.statements.add(stmt);
+    }
+    if (should_pop_scope) {
+        m_ctx->resolver->pop_scope();
     }
 }
 
@@ -864,9 +892,9 @@ void Parser::add_to_scope(Node *node, const string &name) {
 Node *Parser::parse_if_stmt() {
     auto kw = expect(TokenType::KW_IF);
     auto node = create_node(NodeType::IfStmt, kw);
-    m_ctx->resolver->push_scope(node);
+    auto scope = m_ctx->resolver->push_scope(node);
     node->data.if_stmt.condition = parse_expr();
-    node->data.if_stmt.then_block = parse_block();
+    node->data.if_stmt.then_block = parse_block(scope);
     auto token = get();
     if (token->type == TokenType::KW_ELSE) {
         consume();
@@ -886,7 +914,7 @@ Node *Parser::parse_if_stmt() {
 Node *Parser::parse_for_stmt() {
     auto kw = expect(TokenType::KW_FOR);
     auto node = create_node(NodeType::ForStmt, kw);
-    m_ctx->resolver->push_scope(node);
+    auto scope = m_ctx->resolver->push_scope(node);
     if (!next_is(TokenType::LBRACE)) {
         Node *expr;
         bool ternary = false;
@@ -913,7 +941,7 @@ Node *Parser::parse_for_stmt() {
             node->data.for_stmt.condition = expr;
         }
     }
-    node->data.for_stmt.body = parse_block();
+    node->data.for_stmt.body = parse_block(scope);
     m_ctx->resolver->pop_scope();
     return node;
 }
@@ -955,7 +983,7 @@ Node *Parser::create_struct_node(Token *keyword, const string &name) {
     return node;
 }
 
-Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec decl_spec) {
+Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
     auto kw = expect(keyword);
     auto iden = expect(TokenType::IDEN);
@@ -1163,11 +1191,11 @@ Node *Parser::parse_extern_decl() {
         }
 
         auto fn = parse_fn_decl(FN_BODY_NONE);
-        fn->data.fn_def.decl_spec.flags |= DECL_EXTERN;
+        fn->data.fn_def.decl_spec->flags |= DECL_EXTERN;
         members.add(fn);
 
         // add export if exported
-        if (fn->data.fn_def.decl_spec.is_exported()) {
+        if (fn->data.fn_def.decl_spec->is_exported()) {
             m_ctx->module->exports.add(fn);
         }
     }

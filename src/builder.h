@@ -36,8 +36,8 @@ class Builder {
     ast::Module *process_source(ast::Package *package, io::Buffer *src, const string &file_name);
     ast::Module *process_file(ast::Package *package, const string &file_name);
 
-    void build_runtime();
-    void build_single_file(ast::Package *package, const string &file_name);
+    ast::Module *build_runtime();
+    void build_single_file(const string &file_name);
 
     void build_program(const string &entry_file_name);
 

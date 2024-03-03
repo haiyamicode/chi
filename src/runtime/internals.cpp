@@ -11,6 +11,7 @@
 #include "sema.h"
 
 extern "C" {
+#include "include/hashdict/hashdict.h"
 #include "include/tgc/tgc.h"
 }
 
@@ -95,6 +96,15 @@ static std::string stringf(const CxAny &v) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
         return fmt::format("{:#x}", *(intptr_t *)&v.data);
+    case TypeKind::Optional: {
+        auto has_value = *(bool *)&v.data;
+        if (has_value) {
+            return "<optional>";
+        } else {
+            return "null";
+        }
+        break;
+    }
     default:
         return fmt::format("<{}>", PRINT_ENUM(v.type->kind));
     }
@@ -213,6 +223,8 @@ void *cx_malloc(uint32_t size, void *_ignored) { return malloc(size); }
 
 void cx_free(void *address) { return free(address); }
 
+void cx_memset(void *dest, uint8_t value, uint32_t size) { memset(dest, value, size); }
+
 void signal_handler(int signal_num) {
     print("panic: {}\n", st.message);
     print(st.trace);
@@ -285,7 +297,50 @@ void cx_timeout(uint64_t delay, CxLambda *callback) {
         delay, 0);
 }
 
+CxHash cx_hbytes(CxAny *v) {
+    switch ((TypeKind)v->type->kind) {
+    case TypeKind::String: {
+        auto s = (CxString *)v->data;
+        return {s->data, s->size};
+    }
+    default:
+        return {v->data, (uint32_t)v->type->size};
+    }
+    return {v->data, (uint32_t)v->type->size};
+}
+
 void cx_call(CxLambda *fn) {
     auto fn_ptr = (void (*)(void *))fn->ptr;
     fn_ptr(fn->data);
 }
+
+void *cx_map_new() { return dic_new(0); }
+
+void cx_map_delete(void *data) {
+    auto dict = (dictionary *)data;
+    dic_forEach(
+        dict,
+        [](void *key, int count, void **value, void *user) -> int {
+            free(*value);
+            return true;
+        },
+        NULL);
+    dic_delete(dict);
+}
+
+void *cx_map_find(void *data, CxHash *key) {
+    auto dict = (dictionary *)data;
+    auto found = dic_find(dict, key->data, key->size);
+    if (!found) {
+        return nullptr;
+    }
+    return *dict->value;
+}
+
+void cx_map_add(void *data, CxHash *key, void *value) {
+    auto dict = (dictionary *)data;
+    dic_add(dict, key->data, key->size);
+    *dict->value = value;
+}
+
+void cx_map_remove(void *data, CxHash *key) {}

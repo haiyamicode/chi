@@ -18,6 +18,7 @@ struct CompilationContext : public Context {
     array<box<ChiType>> types = {};
     array<box<Scope>> scopes = {};
     array<box<Token>> tokens = {};
+    array<box<ast::DeclSpec>> decl_specs = {};
     uint32_t flags = 0;
     array<string> file_extensions = {"xc", "x"};
     string root_path = "";
@@ -32,6 +33,8 @@ struct CompilationContext : public Context {
     ast::Node *create_node(ast::NodeType type) {
         return ast_nodes.emplace(new ast::Node(type))->get();
     }
+
+    ast::DeclSpec *create_decl_spec() { return decl_specs.emplace(new ast::DeclSpec())->get(); }
 
     ChiType *create_type(TypeKind kind) {
         return types.emplace(new ChiType(kind, types.size + 1))->get();

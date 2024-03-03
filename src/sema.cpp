@@ -64,6 +64,16 @@ ChiStructMember *ChiTypeStruct::get_destructor(ChiType *type) {
     return nullptr;
 }
 
+ChiStructMember *ChiTypeStruct::get_symbol(ChiType *type, IntrinsicSymbol symbol) {
+    if (type->kind == TypeKind::Subtype) {
+        return get_symbol(type->data.subtype.resolved_struct, symbol);
+    } else if (type->kind == TypeKind::Struct) {
+        auto it = type->data.struct_.intrinsics.get(symbol);
+        return it ? *it : nullptr;
+    }
+    return nullptr;
+}
+
 string ChiStructMember::get_name() { return node->name; }
 
 ast::Node *Scope::find_one(const string &symbol) {

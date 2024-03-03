@@ -110,9 +110,12 @@ class Parser {
 
     void parse_top_level_decls(NodeList *decls);
 
-    DeclSpec parse_decl_spec(DeclSpec spec = {});
+    DeclSpec *parse_decl_spec(DeclSpec *spec = {});
 
-    Node *parse_top_level_decl(DeclSpec decl_spec = {});
+    void parse_attributes(NodeList *attributes);
+    Node *parse_attribute();
+
+    Node *parse_top_level_decl(DeclSpec *decl_spec = nullptr);
 
     FnKind parse_fn_identifier(Token **iden);
 
@@ -124,7 +127,7 @@ class Parser {
 
     Node *parse_fn_lambda();
 
-    Node *parse_fn_decl(uint32_t flags, DeclSpec decl_spec = {});
+    Node *parse_fn_decl(uint32_t flags, DeclSpec *decl_spec = nullptr);
 
     void parse_fn_block(Node *fn);
 
@@ -132,7 +135,7 @@ class Parser {
 
     optional<SigilKind> get_sigil_kind(TokenType token_type);
 
-    Node *parse_var_decl(bool as_field, DeclSpec decl_spec = {});
+    Node *parse_var_decl(bool as_field, DeclSpec *decl_spec = nullptr);
 
     Node *parse_fn_proto(Token *iden);
 
@@ -142,7 +145,7 @@ class Parser {
 
     Node *parse_fn_param();
 
-    Node *parse_block();
+    Node *parse_block(Scope *scope = nullptr);
 
     Node *parse_stmt();
 
@@ -178,7 +181,7 @@ class Parser {
 
     void parse_struct_block(Node *node);
 
-    Node *parse_struct_decl(TokenType keyword, DeclSpec decl_spec = {});
+    Node *parse_struct_decl(TokenType keyword, DeclSpec *decl_spec = nullptr);
 
     Node *parse_construct_expr();
 
