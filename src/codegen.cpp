@@ -805,6 +805,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return result_var;
     }
     case ast::NodeType::DotExpr: {
+        auto member = expr->data.dot_expr.resolved_member;
+        if (member->node->type == ast::NodeType::EnumMember) {
+            return compile_constant_value(fn, member->node->data.enum_member.resolved_value,
+                                          get_chitype(expr));
+        }
         auto ref = compile_expr_ref(fn, expr);
         assert(ref.address);
         auto &builder = *m_ctx->llvm_builder.get();
