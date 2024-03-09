@@ -30,16 +30,16 @@ ChiStructMember *ChiTypeStruct::find_member(const string &name) {
     return found ? *found : nullptr;
 }
 
-TraitImpl *ChiTypeStruct::add_trait(ChiType *trait, ChiType *impl) {
-    auto entry = traits.emplace(new TraitImpl())->get();
-    entry->trait_type = trait;
+InterfaceImpl *ChiTypeStruct::add_interface(ChiType *iface, ChiType *impl) {
+    auto entry = interfaces.emplace(new InterfaceImpl())->get();
+    entry->interface_type = iface;
     entry->impl_type = impl;
-    trait_table[trait] = entry;
+    interface_table[iface] = entry;
     return entry;
 }
 
-bool ChiTypeStruct::is_trait(ChiType *type) {
-    return type->kind == TypeKind::Struct && type->data.struct_.kind == ContainerKind::Trait;
+bool ChiTypeStruct::is_interface(ChiType *type) {
+    return type->kind == TypeKind::Struct && type->data.struct_.kind == ContainerKind::Interface;
 }
 
 bool ChiTypeStruct::is_generic(ChiType *type) {

@@ -237,6 +237,8 @@ class Resolver {
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);
 
     ast::Node *find_root_decl(ast::Node *node);
+
+    bool compare_impl_type(ChiType *base, ChiType *impl);
 };
 
 class ScopeResolver {

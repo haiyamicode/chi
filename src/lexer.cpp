@@ -48,7 +48,7 @@ void Lexer::setup_keywords() {
     s_keywords["static"] = TokenType::KW_STATIC;
     s_keywords["select"] = TokenType::KW_SELECT;
     s_keywords["struct"] = TokenType::KW_STRUCT;
-    s_keywords["trait"] = TokenType::KW_TRAIT;
+    s_keywords["interface"] = TokenType::KW_INTERFACE;
     s_keywords["switch"] = TokenType::KW_SWITCH;
     s_keywords["typedef"] = TokenType::KW_TYPEDEF;
     s_keywords["typeof"] = TokenType::KW_TYPEOF;

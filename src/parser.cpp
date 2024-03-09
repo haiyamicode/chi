@@ -259,7 +259,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
     case TokenType::KW_ENUM:
-    case TokenType::KW_TRAIT: {
+    case TokenType::KW_INTERFACE: {
         return parse_struct_decl(token->type, decl_spec);
     }
     case TokenType::KW_TYPEDEF:
@@ -429,8 +429,12 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
         if (flags & FN_BODY_REQUIRED) {
             parse_fn_block(fn);
         } else {
-            if (next_is(TokenType::LBRACE)) {
-                parse_fn_block(fn);
+            if (next_is(TokenType::SEMICOLON)) {
+                consume();
+            } else {
+                if (next_is(TokenType::LBRACE)) {
+                    parse_fn_block(fn);
+                }
             }
         }
     }
@@ -969,8 +973,8 @@ ContainerKind Parser::get_container_kind(TokenType keyword) {
         return ContainerKind::Enum;
     case TokenType::KW_UNION:
         return ContainerKind::Union;
-    case TokenType::KW_TRAIT:
-        return ContainerKind::Trait;
+    case TokenType::KW_INTERFACE:
+        return ContainerKind::Interface;
     default:
         return ContainerKind::Struct;
     }
@@ -1037,7 +1041,7 @@ Node *Parser::parse_struct_member(ContainerKind container_kind) {
     switch (container_kind) {
     case ContainerKind::Enum:
         return parse_enum_member();
-    case ContainerKind::Trait: {
+    case ContainerKind::Interface: {
         return parse_fn_decl(0);
     }
     default:

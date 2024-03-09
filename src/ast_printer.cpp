@@ -147,13 +147,13 @@ void AstPrinter::print_node(Node *node) {
         }
         print(" {{");
 
-        NodeType member_type = NodeType::VarDecl;
+        NodeType member_type = NodeType::Error;
         if (data.members.size) {
             print("\n");
             m_indent++;
             size_t i = 0;
             for (auto member : data.members) {
-                if (member_type != member->type) {
+                if (member_type != NodeType::Error && member_type != member->type) {
                     print("\n");
                 }
                 member_type = member->type;
@@ -175,6 +175,7 @@ void AstPrinter::print_node(Node *node) {
             m_indent--;
         }
         print("}}");
+        print("\n");
         break;
     }
     case NodeType::DotExpr: {

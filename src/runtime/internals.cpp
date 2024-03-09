@@ -48,7 +48,7 @@ void cx_string_concat(CxString *dest, CxString s1, CxString s2) {
 }
 
 static std::string istringf(const CxAny &v) {
-    auto typedata = (TypeInfoData *)v.type->data;
+    auto typedata = &v.type->data;
     auto &spec = typedata->int_;
 
 #define _FORMAT_INT(T, v) fmt::format("{}", (T)(*(T *)(&v.data)))

@@ -312,6 +312,11 @@ struct DeclAttribute {
     Node *term = nullptr;
 };
 
+struct ExprInfo {
+    Node *decl = nullptr;
+    ChiStructMember *member = nullptr;
+};
+
 struct Node {
     NodeType type = NodeType::Error;
     Token *token = nullptr;
@@ -432,7 +437,7 @@ struct Node {
             auto decl = data.dot_expr.resolved_decl;
             if (decl) {
                 return decl;
-            }
+            } 
             return nullptr;
         }
         case NodeType::FnDef:

@@ -31,7 +31,7 @@ struct keynode *keynode_new(char *k, int l) {
     node->key = malloc(l);
     memcpy(node->key, k, l);
     node->next = 0;
-    node->value = -1;
+    node->value = 0;
     return node;
 }
 

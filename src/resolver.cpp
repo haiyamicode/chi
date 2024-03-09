@@ -137,31 +137,34 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
                can_assign(from_type->get_elem(), to_type->get_elem());
     case TypeKind::Pointer:
     case TypeKind::Reference: {
-        auto tt = to_type->get_elem();
-        if (ChiTypeStruct::is_trait(tt) && ChiTypeStruct::is_pointer_type(from_type)) {
-            auto ft = from_type->get_elem();
-            if (ft->kind != TypeKind::Struct) {
-                return false;
-            }
-            auto &ss = ft->data.struct_;
-            if (ss.kind == ContainerKind::Struct) {
-                for (auto &impl : ss.traits) {
-                    if (is_same_type(impl->trait_type, tt)) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-        }
         return from_type->kind == TypeKind::Pointer ||
                can_assign(from_type, get_system_types()->int_);
     }
     case TypeKind::Int:
         return type_is_int(from_type);
     case TypeKind::Any:
-        return from_type->kind != TypeKind::Struct || ChiTypeStruct::is_trait(from_type);
-    case TypeKind::Struct:
-        return from_type == to_type;
+        return from_type->kind != TypeKind::Struct || ChiTypeStruct::is_interface(from_type);
+    case TypeKind::Struct: {
+        if (from_type == to_type) {
+            return true;
+        }
+        if (ChiTypeStruct::is_interface(to_type) && ChiTypeStruct::is_pointer_type(from_type)) {
+            auto ft = from_type->get_elem();
+            if (ft->kind != TypeKind::Struct) {
+                return false;
+            }
+            auto &ss = ft->data.struct_;
+            if (ss.kind == ContainerKind::Struct) {
+                for (auto &impl : ss.interfaces) {
+                    if (is_same_type(impl->interface_type, to_type)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+        return false;
+    }
     case TypeKind::Bool:
         return type_is_int(from_type) || from_type->kind == TypeKind::Optional;
     case TypeKind::Optional: {
@@ -194,6 +197,8 @@ ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     auto value_type = to_value_type(resolve(node, scope));
     if (ChiTypeStruct::is_generic(value_type)) {
         error(node, errors::MISSING_TYPE_ARGUMENTS, to_string(value_type));
+    }
+    if (ChiTypeStruct::is_interface(value_type)) {
     }
     return value_type;
 }
@@ -693,8 +698,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             for (auto implement : data.implements) {
                 auto impl_trait = resolve_value(implement, scope);
-                if (!ChiTypeStruct::is_trait(impl_trait)) {
-                    error(implement, errors::NON_TRAIT_IMPL_TYPE, to_string(impl_trait));
+                if (!ChiTypeStruct::is_interface(impl_trait)) {
+                    error(implement, errors::NON_INTERFACE_IMPL_TYPE, to_string(impl_trait));
                 }
                 resolve_vtable(impl_trait, struct_type, implement);
             }
@@ -964,7 +969,10 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
         std::stringstream ss;
         ss << "func(";
         if (fn.container_ref) {
-            ss << to_string(fn.container_ref) << ",";
+            ss << to_string(fn.container_ref);
+            if (fn.params.size > 0) {
+                ss << ", ";
+            }
         }
         for (int i = 0; i < fn.params.size; i++) {
             if (fn.is_variadic && i == fn.params.size - 1) {
@@ -1069,31 +1077,42 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
 void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node) {
     auto &base = base_type->data.struct_;
     auto &derived = derived_type->data.struct_;
-    TraitImpl *trait_impl = nullptr;
-    if (base.kind == ContainerKind::Trait) {
-        trait_impl = derived.add_trait(base_type, derived_type);
+    InterfaceImpl *iface_impl = nullptr;
+    if (base.kind == ContainerKind::Interface) {
+        iface_impl = derived.add_interface(base_type, derived_type);
     }
-    for (auto &member : base.members) {
-        auto node = member->node;
-        if (member->node->type == NodeType::FnDef) {
-            auto method = derived.find_member(node->name);
+    for (auto &base_member : base.members) {
+        auto node = base_member->node;
+        if (base_member->is_method()) {
+            auto child_method = derived.find_member(node->name);
             if (node->data.fn_def.body) {
-                if (!method) {
-                    method = derived.add_member(node->name, node, member->resolved_type);
-                    method->orig_parent = base_type;
+                if (!child_method) {
+                    child_method = derived.add_member(node->name, node, base_member->resolved_type);
+                    child_method->orig_parent = base_type;
                 }
-            } else if (!method) {
+            } else if (!child_method) {
                 error(base_node, errors::METHOD_NOT_IMPLEMENTED, node->name);
                 break;
             }
-            if (trait_impl) {
-                assert(method);
-                trait_impl->impl_table.add(method);
+            if (!compare_impl_type(base_member->resolved_type, child_method->resolved_type)) {
+                error(base_node, errors::IMPLEMENT_NOT_MATCH, node->name, to_string(base_type));
+                break;
+            }
+            if (iface_impl) {
+                assert(child_method);
+                iface_impl->impl_members.add(child_method);
+            }
+        }
+        if (base_member->is_field()) {
+            auto child_field = derived.find_member(node->name);
+            if (!child_field) {
+                child_field = derived.add_member(node->name, node, base_member->resolved_type);
+                child_field->orig_parent = base_type;
             }
         }
     }
-    for (auto &impl : base.traits) {
-        resolve_vtable(impl->trait_type, derived_type, base_node);
+    for (auto &impl : base.interfaces) {
+        resolve_vtable(impl->interface_type, derived_type, base_node);
     }
 }
 
@@ -1106,7 +1125,7 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
         return;
     }
     auto &base = em_type->data.struct_;
-    if (base.kind != ContainerKind::Struct && base.kind != ContainerKind::Trait) {
+    if (base.kind != ContainerKind::Struct && base.kind != ContainerKind::Interface) {
         error(base_node, errors::INVALID_EMBED);
         return;
     }
@@ -1131,7 +1150,7 @@ bool Resolver::should_resolve_fn_body(ResolveScope &scope) {
         return !scope.skip_fn_bodies;
     }
     auto &struct_ = parent_struct->data.struct_;
-    return struct_.kind != ContainerKind::Trait &&
+    return struct_.kind != ContainerKind::Interface &&
            struct_.resolve_status >= ResolveStatus::MemberTypesKnown;
 }
 
@@ -1636,6 +1655,27 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
         panic("unhandled find_root_decl {}", PRINT_ENUM(node->type));
     }
     return nullptr;
+}
+
+bool Resolver::compare_impl_type(ChiType *base, ChiType *impl) {
+    if (base == impl) {
+        return true;
+    }
+    if (base->kind == TypeKind::Fn) {
+        if (base->data.fn.params.size != impl->data.fn.params.size) {
+            return false;
+        }
+        for (int i = 0; i < base->data.fn.params.size; ++i) {
+            if (!compare_impl_type(base->data.fn.params[i], impl->data.fn.params[i])) {
+                return false;
+            }
+        }
+        if (!compare_impl_type(base->data.fn.return_type, impl->data.fn.return_type)) {
+            return false;
+        }
+        return true;
+    }
+    return can_assign(base, impl);
 }
 
 Scope *ScopeResolver::push_scope(ast::Node *owner) {

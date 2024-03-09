@@ -64,20 +64,21 @@ struct ChiStructMember {
     string get_name();
 
     bool is_field() { return field_index > -1; }
+    bool is_method() { return method_index > -1; }
 };
 
-typedef array<ChiStructMember *> ImplTable;
+typedef array<ChiStructMember *> ImplMembers;
 
-struct TraitImpl {
-    ChiType *trait_type = nullptr;
+struct InterfaceImpl {
+    ChiType *interface_type = nullptr;
     ChiType *impl_type = nullptr;
-    ImplTable impl_table = {};
+    ImplMembers impl_members = {};
     long itable_index = -1;
 };
 
 MAKE_ENUM(ResolveStatus, None, MemberTypesKnown, EmbedsResolved, BodiesResolved, Done);
 
-MAKE_ENUM(ContainerKind, Struct, Enum, Union, Trait)
+MAKE_ENUM(ContainerKind, Struct, Enum, Union, Interface)
 
 typedef array<ChiType *> TypeList;
 
@@ -88,9 +89,10 @@ struct ChiTypeStruct {
     array<ChiStructMember *> fields = {};
     array<ChiType *> type_params = {};
     array<ChiType *> subtypes = {};
-    array<box<TraitImpl>> traits = {};
+    array<box<InterfaceImpl>> interfaces = {};
     map<string, ChiStructMember *> member_table = {};
-    map<ChiType *, TraitImpl *> trait_table = {};
+    map<ChiType *, InterfaceImpl *> interface_table = {};
+
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
     map<IntrinsicSymbol, ChiStructMember *> intrinsics = {};
@@ -99,11 +101,11 @@ struct ChiTypeStruct {
 
     ChiStructMember *find_member(const string &name);
 
-    TraitImpl *add_trait(ChiType *trait, ChiType *impl);
+    InterfaceImpl *add_interface(ChiType *trait, ChiType *impl);
 
     bool is_generic() { return type_params.size > 0; }
 
-    static bool is_trait(ChiType *type);
+    static bool is_interface(ChiType *type);
 
     static bool is_pointer_type(ChiType *type);
 
@@ -279,16 +281,15 @@ struct Scope {
     map<string, ast::Node *> symbols = {};
 };
 
+union TypeInfoData {
+    ChiTypeInt int_;
+};
+
 struct TypeInfo {
     int32_t kind = 0;
     int32_t size = 0;
-
-    // store 32 bytes of data
-    char data[32];
-};
-
-union TypeInfoData {
-    ChiTypeInt int_;
+    TypeInfoData data;
+    int32_t vtable_len = 0;
 };
 
 enum LANG_FLAG : uint32_t {
@@ -301,4 +302,5 @@ inline bool has_lang_flag(uint32_t flags, LANG_FLAG flag) { return (flags & flag
 typedef int64_t const_int_t;
 typedef double const_float_t;
 typedef variant<const_int_t, const_float_t, string> ConstantValue;
+
 } // namespace cx
