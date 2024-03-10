@@ -887,10 +887,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         type->name = "Module:" + module->full_path();
         type->data.module.scope = module->scope;
         scope.module->imports.add(module);
+
+        for (auto symbol : data.symbols) {
+        }
         return type;
     }
     case NodeType::BindIdentifier: {
         return scope.value_type;
+    }
+    case NodeType::ImportSymbol: {
+        auto &data = node->data.import_symbol;
+        auto module = data.import->data.import_decl.resolved_module;
+        auto decl = module->scope->find_one(data.name->get_name());
+        if (!decl) {
+            error(node, errors::SYMBOL_NOT_FOUND_MODULE, data.name->get_name(), module->path);
+            return nullptr;
+        }
+        data.resolved_decl = decl;
+        return decl->resolved_type;
     }
     default:
         print("\n");

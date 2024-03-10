@@ -380,6 +380,14 @@ void AstPrinter::print_node(Node *node) {
         print(";\n");
         break;
     }
+    case NodeType::ImportSymbol: {
+        auto &data = node->data.import_symbol;
+        print("{}", data.name->to_string());
+        if (data.alias) {
+            print(" as {}", data.alias->to_string());
+        }
+        break;
+    }
     case NodeType::PrefixExpr: {
         auto &data = node->data.prefix_expr;
         print("{} ", data.prefix->str);

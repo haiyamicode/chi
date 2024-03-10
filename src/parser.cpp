@@ -362,6 +362,9 @@ Node *Parser::parse_type_expr() {
     } else {
         auto iden = parse_identifier();
         node = iden;
+        if (next_is(TokenType::DOT)) {
+            node = parse_dot_expr(iden);
+        }
 
         if (next_is(TokenType::LT)) {
             consume();
@@ -1228,8 +1231,27 @@ Node *Parser::parse_import_decl() {
         auto iden = expect(TokenType::IDEN);
         node->data.import_decl.alias = iden;
         add_to_scope(node, iden->str);
+    } else if (next_is(TokenType::LBRACE)) {
+        consume();
+        while (!next_is(TokenType::RBRACE)) {
+            auto iden = expect(TokenType::IDEN);
+            auto member = create_node(NodeType::ImportSymbol, iden);
+            member->data.import_symbol.name = iden;
+            auto name_iden = iden;
+            if (next_is(TokenType::KW_AS)) {
+                consume();
+                name_iden = expect(TokenType::IDEN);
+                member->data.import_symbol.alias = name_iden;
+            }
+            if (!next_is(TokenType::RBRACE)) {
+                expect(TokenType::COMMA);
+            }
+            node->data.import_decl.symbols.add(member);
+            member->data.import_symbol.import = node;
+            add_to_scope(member, name_iden->get_name());
+        }
+        expect(TokenType::RBRACE);
     }
-    // TODO: implement symbols import
 
     expect(TokenType::SEMICOLON);
     return node;

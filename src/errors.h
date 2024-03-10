@@ -44,6 +44,7 @@ constexpr auto INVALID_ATTRIBUTE_TERM = "invalid attribute term '{}'";
 constexpr auto IMPLEMENT_NOT_MATCH = "member '{}' does not match definition from interface of {}";
 constexpr auto FOR_EXPR_NOT_ITERABLE = "for expression must be an iterable, got {}";
 constexpr auto CANNOT_INDEX = "cannot perform index operation on type {}";
+constexpr auto SYMBOL_NOT_FOUND_MODULE = "symbol '{}' not found in module '{}'";
 
 } // namespace errors
 } // namespace cx

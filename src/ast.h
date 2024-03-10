@@ -20,7 +20,8 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier);
+          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
+          ImportSymbol);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -314,6 +315,8 @@ struct ImportDecl {
 struct ImportSymbol {
     Token *name = nullptr;
     Token *alias = nullptr;
+    Node *import = nullptr;
+    Node *resolved_decl = nullptr;
 };
 
 struct DeclAttribute {
@@ -435,7 +438,7 @@ struct Node {
         case NodeType::VarDecl:
             return this;
         case NodeType::Identifier:
-            return data.identifier.decl;
+            return data.identifier.decl->get_decl();
         case NodeType::DotExpr: {
             if (data.dot_expr.resolve_variant) {
                 auto variant_member = data.dot_expr.resolved_member->variants[variant_input];
@@ -448,6 +451,8 @@ struct Node {
             }
             return nullptr;
         }
+        case NodeType::ImportSymbol:
+            return data.import_symbol.resolved_decl;
         case NodeType::FnDef:
             return this;
         default:
@@ -462,6 +467,8 @@ struct Node {
             return *data.fn_def.decl_spec;
         case NodeType::VarDecl:
             return *data.var_decl.decl_spec;
+        case NodeType::StructDecl:
+            return *data.struct_decl.decl_spec;
         default:
             panic("node type {} does not have declspec", PRINT_ENUM(type));
         };
