@@ -727,6 +727,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             assert(ref.address);
             return ref.address;
         }
+        case TokenType::INC:
+        case TokenType::DEC: {
+            auto ref = compile_expr_ref(fn, data.op1);
+            auto value = builder.CreateLoad(compile_type(get_chitype(data.op1)), ref.address);
+            auto one = llvm::ConstantInt::get(value->getType(), 1);
+            auto after = data.op_type == TokenType::INC ? builder.CreateAdd(value, one)
+                                                        : builder.CreateSub(value, one);
+            builder.CreateStore(after, ref.address);
+            return data.is_suffix ? value : after;
+        }
         default:
             panic("not implemented: {}", PRINT_ENUM(data.op_type));
         }
@@ -1224,6 +1234,18 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         scope->branched = true;
         break;
     }
+    case ast::NodeType::BranchStmt: {
+        auto token = stmt->token;
+        auto loop = fn->get_loop();
+        auto &builder = *m_ctx->llvm_builder.get();
+        if (token->type == TokenType::KW_BREAK) {
+            builder.CreateBr(loop->end);
+        }
+        if (token->type == TokenType::KW_CONTINUE) {
+            builder.CreateBr(loop->start);
+        }
+        break;
+    }
     case ast::NodeType::IfStmt: {
         auto &data = stmt->data.if_stmt;
         auto &builder = *m_ctx->llvm_builder.get();
@@ -1246,10 +1268,104 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
         if (data.else_node) {
             fn->use_label(else_b);
-            compile_block(fn, stmt, data.else_node, end_b);
+            if (data.else_node->type == ast::NodeType::Block) {
+                compile_block(fn, stmt, data.else_node, end_b);
+            } else {
+                compile_stmt(fn, data.else_node);
+                builder.CreateBr(end_b);
+            }
         }
 
         fn->use_label(end_b);
+        break;
+    }
+    case ast::NodeType::ForStmt: {
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto &data = stmt->data.for_stmt;
+        if (data.kind == ast::ForLoopKind::Range) {
+            auto ref = compile_expr_ref(fn, data.expr);
+            auto ptr = ref.address ? ref.address : ref.value;
+            assert(ptr);
+            auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+            auto begin = sty->member_intrinsics[IntrinsicSymbol::IterBegin];
+            auto end = sty->member_intrinsics[IntrinsicSymbol::IterEnd];
+            auto next = sty->member_intrinsics[IntrinsicSymbol::IterNext];
+            auto index = sty->member_intrinsics[IntrinsicSymbol::OpIndex];
+            llvm::Value *item_var = nullptr;
+            if (data.bind) {
+                item_var = builder.CreateAlloca(compile_type(data.bind->resolved_type), nullptr,
+                                                "_bind_item_var");
+                add_var(data.bind, item_var);
+            }
+
+            auto loop = fn->push_loop();
+            auto iter_begin =
+                builder.CreateCall(get_fn(begin->node)->llvm_fn, {ptr}, "_iter_begin");
+            auto iter_end = builder.CreateCall(get_fn(end->node)->llvm_fn, {ptr}, "_iter_end");
+            auto iter_type_l = iter_begin->getType();
+            auto it = builder.CreateAlloca(iter_type_l, nullptr, "_iter_alloc");
+            builder.CreateStore(iter_begin, it);
+
+            loop->start = fn->new_label("_for_start");
+            loop->end = fn->new_label("_for_end");
+            auto loop_main = fn->new_label("_for_main");
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->start);
+            auto cond = builder.CreateICmpSLT(builder.CreateLoad(iter_type_l, it), iter_end);
+            builder.CreateCondBr(cond, loop_main, loop->end);
+
+            fn->use_label(loop_main);
+            auto loop_post = fn->new_label("_for_post");
+            if (item_var) {
+                auto item =
+                    builder.CreateCall(get_fn(index->node)->llvm_fn,
+                                       {ptr, builder.CreateLoad(iter_type_l, it)}, "_iter_item");
+                builder.CreateStore(item, item_var);
+            }
+            compile_block(fn, stmt, data.body, loop_post);
+
+            fn->use_label(loop_post);
+            auto iter_value = builder.CreateLoad(iter_type_l, it);
+            auto iter_next =
+                builder.CreateCall(get_fn(next->node)->llvm_fn, {ptr, iter_value}, "_iter_next");
+            builder.CreateStore(iter_next, it);
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->end);
+            fn->pop_loop();
+
+        } else {
+            auto loop = fn->push_loop();
+            if (data.init) {
+                compile_stmt(fn, data.init);
+            }
+            loop->start = fn->new_label("_for_start");
+            loop->end = fn->new_label("_for_end");
+            auto loop_main = fn->new_label("_for_main");
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->start);
+            if (data.condition) {
+                auto cond =
+                    compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
+                builder.CreateCondBr(cond, loop_main, loop->end);
+            } else {
+                builder.CreateBr(loop_main);
+            }
+
+            fn->use_label(loop_main);
+            auto loop_post = fn->new_label("_for_post");
+            compile_block(fn, stmt, data.body, loop_post);
+            fn->use_label(loop_post);
+            if (data.post) {
+                compile_stmt(fn, data.post);
+            }
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->end);
+            fn->pop_loop();
+        }
         break;
     }
     default:
@@ -1274,6 +1390,7 @@ void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block,
                              label_t *end_label) {
     assert(block->type == ast::NodeType::Block);
     auto &builder = *m_ctx->llvm_builder.get();
+    end_label = end_label ? end_label : fn->next_end_label;
 
     for (auto var : block->data.block.implicit_vars) {
         compile_stmt(fn, var);

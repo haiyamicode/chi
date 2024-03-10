@@ -20,9 +20,10 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute);
+          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier);
 
 MAKE_ENUM(ModuleKind, XC, XM);
+MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
 
 enum FnParsingFlags : uint32_t {
     FN_BODY_REQUIRED = 1 << 0,
@@ -242,45 +243,52 @@ struct IndexExpr {
 MAKE_ENUM(IdentifierKind, Value, TypeName, This)
 
 struct Identifier {
-    IdentifierKind kind;
-    Node *decl;
+    IdentifierKind kind = IdentifierKind::Value;
+    Node *decl = nullptr;
 };
 
 struct VarIdentifier {
-    Node *size_expr;
+    Node *size_expr = nullptr;
 };
 
 struct CastExpr {
-    Node *dest_type;
-    Node *expr;
-};
-
-struct ForStmt {
-    Node *init;
-    Node *condition;
-    Node *post;
-    Node *body;
+    Node *dest_type = nullptr;
+    Node *expr = nullptr;
 };
 
 MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short)
 
-MAKE_ENUM(SigilKind, Pointer, Reference, Optional, Box)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, Box)
+
+struct SigilExpr {
+    SigilKind sigil = SigilKind::None;
+    Node *expr = nullptr;
+};
+
+struct ForStmt {
+    ForLoopKind kind = ForLoopKind::Empty;
+    Node *init = nullptr;
+    Node *condition = nullptr;
+    Node *post = nullptr;
+    Node *body = nullptr;
+    Node *bind = nullptr;
+    Node *expr = nullptr;
+};
 
 struct TypeSigil {
-    Node *type;
-    SigilKind sigil;
-    Node *etype;
-    bool has_paren = false;
+    Node *type = nullptr;
+    SigilKind sigil = SigilKind::None;
+    Node *etype = nullptr;
 };
 
 struct EnumMember {
-    Node *value;
-    int64_t resolved_value;
+    Node *value = nullptr;
+    int64_t resolved_value = 0;
 };
 
 struct PrefixExpr {
-    Token *prefix;
-    Node *expr;
+    Token *prefix = nullptr;
+    Node *expr = nullptr;
 };
 
 struct EscapeAnalysis {
@@ -437,7 +445,7 @@ struct Node {
             auto decl = data.dot_expr.resolved_decl;
             if (decl) {
                 return decl;
-            } 
+            }
             return nullptr;
         }
         case NodeType::FnDef:

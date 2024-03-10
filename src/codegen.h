@@ -42,6 +42,7 @@ struct Function {
     label_t *return_label = nullptr;
     ChiTypeSubtype *container_subtype = nullptr;
     ChiType *fn_type = nullptr;
+    label_t *next_end_label = nullptr;
 
     std::list<BlockScope> block_scopes;
     std::list<BlockScope *> scope_stack;
@@ -182,9 +183,6 @@ class Compiler {
     RefValue compile_iden_ref(Function *fn, ast::Node *iden);
 
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr);
-
-    llvm::Value *compile_arithmetic_op(Function *fn, ChiType *value_type, TokenType op_type,
-                                       llvm::Value *op1, llvm::Value *op2);
 
     llvm::Value *compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 

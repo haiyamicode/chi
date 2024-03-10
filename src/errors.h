@@ -42,6 +42,8 @@ constexpr auto TRY_NOT_CALL = "try must be used with a function call expression"
 constexpr auto MODULE_NOT_FOUND = "module '{}' not found";
 constexpr auto INVALID_ATTRIBUTE_TERM = "invalid attribute term '{}'";
 constexpr auto IMPLEMENT_NOT_MATCH = "member '{}' does not match definition from interface of {}";
+constexpr auto FOR_EXPR_NOT_ITERABLE = "for expression must be an iterable, got {}";
+constexpr auto CANNOT_INDEX = "cannot perform index operation on type {}";
 
 } // namespace errors
 } // namespace cx

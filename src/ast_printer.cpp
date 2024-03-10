@@ -310,23 +310,37 @@ void AstPrinter::print_node(Node *node) {
         print(")");
         break;
     }
+    case NodeType::BindIdentifier: {
+        print("{}", node->token->to_string());
+        break;
+    }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
-        print("for (");
-        if (data.init) {
-            print_node(data.init);
-        }
-        print(";");
-        if (data.condition) {
+        print("for ");
+        if (data.kind == ForLoopKind::Ternary) {
+            if (data.init) {
+                print_node(data.init);
+            }
+            print(";");
+            if (data.condition) {
+                print(" ");
+                print_node(data.condition);
+            }
+            print(";");
+            if (data.post) {
+                print(" ");
+                print_node(data.post);
+            }
             print(" ");
-            print_node(data.condition);
         }
-        print(";");
-        if (data.post) {
+        if (data.kind == ForLoopKind::Range) {
+            print_node(data.expr);
+            if (data.bind) {
+                print(": ");
+                print_node(data.bind);
+            }
             print(" ");
-            print_node(data.post);
         }
-        print(") ");
         print_node(data.body);
         print("\n");
         break;

@@ -9,3 +9,7 @@ print from 1 to 5 without 4:
 2
 3
 5
+print from 1 to 3
+item: 1
+item: 2
+item: 3

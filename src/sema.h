@@ -24,7 +24,7 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Poin
 
 MAKE_ENUM(Visibility, Public, Private)
 
-MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext)
+MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -95,7 +95,8 @@ struct ChiTypeStruct {
 
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
-    map<IntrinsicSymbol, ChiStructMember *> intrinsics = {};
+    map<IntrinsicSymbol, ChiStructMember *> member_intrinsics = {};
+    map<IntrinsicSymbol, bool> intrinsics = {};
 
     ChiStructMember *add_member(const string &name, ast::Node *node, ChiType *resolved_type);
 

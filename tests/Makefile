@@ -8,7 +8,7 @@ TESTS = 00_fib.test \
     04_builtins.test \
 		05_interface.test \
     06_enum.test \
-    # 07_for_loop.test
+    07_for_loop.test
 
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

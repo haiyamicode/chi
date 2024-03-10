@@ -142,8 +142,6 @@ class Resolver {
 
     string resolve_term_string(ast::Node *term);
 
-    ChiTypeStruct *resolve_struct_type(ChiType *type);
-
     ChiStructMember *resolve_struct_member(ChiType *struct_type, ast::Node *node,
                                            ResolveScope &scope);
 
@@ -203,6 +201,8 @@ class Resolver {
     ChiType *to_value_type(ChiType *type);
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
+
+    ChiTypeStruct *resolve_struct_type(ChiType *type);
 
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
 

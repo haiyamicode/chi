@@ -198,8 +198,6 @@ ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     if (ChiTypeStruct::is_generic(value_type)) {
         error(node, errors::MISSING_TYPE_ARGUMENTS, to_string(value_type));
     }
-    if (ChiTypeStruct::is_interface(value_type)) {
-    }
     return value_type;
 }
 
@@ -349,7 +347,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         if (data.kind == ast::IdentifierKind::Value && scope.block) {
             auto replacement = scope.block->scope->find_one(data.decl->name);
-            if (replacement && replacement != data.decl) {
+            if (replacement && replacement->type == NodeType::VarDecl &&
+                replacement->data.var_decl.is_generated && replacement != data.decl) {
                 data.decl = replacement;
             }
         }
@@ -795,6 +794,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.post) {
             resolve(data.post, scope);
         }
+        if (data.expr) {
+            auto expr_type = resolve(data.expr, scope);
+            auto sty = resolve_struct_type(expr_type);
+            if (!sty || !sty->intrinsics.get(IntrinsicSymbol::Iterable)) {
+                error(node, errors::FOR_EXPR_NOT_ITERABLE, to_string(expr_type));
+                return nullptr;
+            }
+
+            if (data.bind) {
+                auto index_fn = sty->member_intrinsics.get(IntrinsicSymbol::OpIndex);
+                if (!index_fn) {
+                    error(node, errors::CANNOT_INDEX, to_string(expr_type));
+                    return nullptr;
+                }
+                auto ref_type = (*index_fn)->resolved_type->data.fn.return_type;
+                auto bind_scope = scope.set_value_type(ref_type);
+                resolve(data.bind, bind_scope);
+            }
+        }
         auto loop_scope = scope.set_parent_loop(node);
         resolve(data.body, loop_scope);
         return nullptr;
@@ -870,6 +888,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         type->data.module.scope = module->scope;
         scope.module->imports.add(module);
         return type;
+    }
+    case NodeType::BindIdentifier: {
+        return scope.value_type;
     }
     default:
         print("\n");
@@ -1062,7 +1083,10 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
             auto sym = m_ctx->intrinsic_symbols.get(term_string);
             if (sym) {
                 member->symbol = *sym;
-                struct_.intrinsics[member->symbol] = member;
+                struct_.member_intrinsics[member->symbol] = member;
+                if (*sym == IntrinsicSymbol::IterBegin) {
+                    struct_.intrinsics[IntrinsicSymbol::Iterable] = true;
+                }
             } else {
                 error(node, errors::INVALID_ATTRIBUTE_TERM, term_string);
                 continue;
@@ -1553,10 +1577,11 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         }
         auto new_member = scpy.add_member(member->get_name(), node, type);
         if (member->symbol != IntrinsicSymbol::None) {
-            scpy.intrinsics[member->symbol] = new_member;
+            scpy.member_intrinsics[member->symbol] = new_member;
         }
         member->variants[&data] = new_member;
     }
+    scpy.intrinsics = base.intrinsics;
     data.resolved_struct = sty;
     return sty;
 }

@@ -921,18 +921,22 @@ Node *Parser::parse_for_stmt() {
     auto scope = m_ctx->resolver->push_scope(node);
     if (!next_is(TokenType::LBRACE)) {
         Node *expr;
-        bool ternary = false;
+        ForLoopKind kind = ForLoopKind::Empty;
         if (next_is(TokenType::KW_VAR)) {
             expr = parse_var_decl(false);
-            ternary = true;
+            kind = ForLoopKind::Ternary;
         } else {
             expr = parse_expr();
             if (next_is(TokenType::SEMICOLON)) {
                 consume();
-                ternary = true;
+                kind = ForLoopKind::Ternary;
+            } else {
+                kind = ForLoopKind::Range;
             }
         }
-        if (ternary) {
+
+        node->data.for_stmt.kind = kind;
+        if (kind == ForLoopKind::Ternary) {
             node->data.for_stmt.init = expr;
             if (!next_is(TokenType::SEMICOLON)) {
                 node->data.for_stmt.condition = parse_expr();
@@ -941,8 +945,16 @@ Node *Parser::parse_for_stmt() {
             if (!next_is(TokenType::LBRACE)) {
                 node->data.for_stmt.post = parse_expr();
             }
-        } else {
-            node->data.for_stmt.condition = expr;
+        }
+        if (kind == ForLoopKind::Range) {
+            node->data.for_stmt.expr = expr;
+            if (next_is(TokenType::COLON)) {
+                consume();
+                auto iden = expect(TokenType::IDEN);
+                auto bind = create_node(NodeType::BindIdentifier, iden);
+                node->data.for_stmt.bind = bind;
+                add_to_scope(bind, iden->get_name());
+            }
         }
     }
     node->data.for_stmt.body = parse_block(scope);

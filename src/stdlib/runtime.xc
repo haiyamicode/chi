@@ -99,7 +99,7 @@ struct Array<T> {
   }
 
   @[std.iter.End]
-  func end(index uint32) uint32 {
+  func end() uint32 {
     return this.size;
   }
 }
