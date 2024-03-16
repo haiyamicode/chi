@@ -35,5 +35,5 @@ func f() {
 func main() {
     var foo1 Foo = {1};
     try f();
-    println("done in main");
+    println("finished");
 }
