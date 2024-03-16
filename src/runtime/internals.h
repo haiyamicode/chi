@@ -65,6 +65,8 @@ void cx_string_concat(CxString *dest, CxString s1, CxString s2);
 
 CxString cx_string_format(CxString format, CxSlice *values);
 
+CxString cx_string_from_chars(const char *data, uint32_t size);
+
 void cx_printf(CxString format, CxSlice *values);
 
 void cx_print(CxString str);
@@ -78,6 +80,8 @@ void cx_array_new(CxArray *dest);
 void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap);
 
 void *cx_array_add(CxArray *dest, uint32_t elem_size);
+
+void cx_array_write_str(CxArray *dest, CxString *str);
 
 void cx_debug(CxString message);
 

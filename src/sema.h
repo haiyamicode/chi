@@ -20,7 +20,7 @@ struct ChiTypeSubtype;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
           Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise,
-          Infer, Module)
+          Infer, Module, This)
 
 MAKE_ENUM(Visibility, Public, Private)
 
@@ -246,19 +246,48 @@ struct ChiType {
         }
     }
 
+    void clone(ChiType *b) {
+#define CHITYPE_CASE_CLONE_FIELD(field, type, type_struct)                                         \
+    case TypeKind::type:                                                                           \
+        b->data.field = data.field;                                                                \
+        break;
+
+        switch (kind) {
+            CHITYPE_CASE_CLONE_FIELD(fn, Fn, ChiTypeFn)
+            // CHITYPE_CASE_CLONE_FIELD(struct_, Struct, ChiTypeStruct)
+            CHITYPE_CASE_CLONE_FIELD(subtype, Subtype, ChiTypeSubtype)
+            CHITYPE_CASE_CLONE_FIELD(array, Array, ChiTypeArray)
+            CHITYPE_CASE_CLONE_FIELD(pointer, Pointer, ChiTypePointer)
+            CHITYPE_CASE_CLONE_FIELD(int_, Int, ChiTypeInt)
+            CHITYPE_CASE_CLONE_FIELD(float_, Float, ChiTypeFloat)
+            CHITYPE_CASE_CLONE_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
+            CHITYPE_CASE_CLONE_FIELD(result, Result, ChiTypeResult)
+            CHITYPE_CASE_CLONE_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
+            CHITYPE_CASE_CLONE_FIELD(promise, Promise, ChiTypePromise)
+            CHITYPE_CASE_CLONE_FIELD(module, Module, ChiTypeModule)
+        default:
+            break;
+        }
+    }
+
     ChiType *get_elem();
 
     bool is_raw_pointer() { return kind == TypeKind::Pointer; }
 
-    bool is_pointer() {
-        return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::Box;
-    }
+    bool is_pointer() { return kind == TypeKind::Reference || kind == TypeKind::Pointer; }
 
     string get_display_name() {
         if (display_name) {
             return *display_name;
         }
         return name.value_or("");
+    }
+
+    ChiType *eval() {
+        if (kind == TypeKind::This) {
+            return get_elem();
+        }
+        return this;
     }
 };
 

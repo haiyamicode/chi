@@ -68,10 +68,18 @@ ChiType *Compiler::eval_type(ChiType *type) {
     if (type->kind == TypeKind::Subtype) {
         return type->data.subtype.resolved_struct;
     }
+    if (type->kind == TypeKind::This) {
+        return m_fn->fn_type->data.fn.container_ref;
+    }
     return type;
 }
 
-ChiType *Compiler::get_chitype(ast::Node *node) { return eval_type(node->resolved_type); }
+ChiType *Compiler::get_chitype(ast::Node *node) {
+    if (m_fn && node->orig_type && node->orig_type->kind == TypeKind::This) {
+        return m_fn->fn_type->data.fn.container_ref;
+    }
+    return eval_type(node->resolved_type);
+}
 
 void Compiler::compile_module(ast::Module *module) {
     for (auto import : module->imports) {
@@ -106,9 +114,12 @@ void Compiler::compile_module(ast::Module *module) {
     }
 
     while (m_ctx->pending_fns.size) {
-        auto fn = m_ctx->pending_fns.pop();
-        m_fn = fn;
-        compile_fn_def(fn->node, fn);
+        auto list = m_ctx->pending_fns;
+        m_ctx->pending_fns.clear();
+        for (auto fn : list) {
+            m_fn = fn;
+            compile_fn_def(fn->node, fn);
+        }
     }
 }
 
@@ -234,6 +245,9 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     case TypeKind::Subtype: {
         return compile_di_type(type->data.subtype.resolved_struct);
+    }
+    case TypeKind::This: {
+        return llvm_db.createBasicType("this", 0, llvm::dwarf::DW_ATE_address);
     }
     default:
         auto size = llvm_type_size(compile_type(type));
@@ -933,6 +947,15 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
     }
 }
 
+llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
+    auto ctn_type = get_chitype(expr);
+    if (ctn_type->is_pointer()) {
+        return compile_expr(fn, expr);
+    }
+    auto ref = compile_expr_ref(fn, expr);
+    return ref.address ? ref.address : ref.value;
+}
+
 RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::VarDecl:
@@ -949,7 +972,6 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         } else {
             auto ref = compile_expr_ref(fn, data.expr);
             if (type->kind == TypeKind::Fn) {
-                auto struct_type = get_resolver()->get_lambda_for_fn(type);
                 ptr = ref.value;
             } else {
                 ptr = ref.address;
@@ -1116,16 +1138,16 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     llvm::Value *ctn_ptr = nullptr;
     if (fn_spec.container_ref) {
         auto dot_expr = data.fn_ref_expr->data.dot_expr;
-        auto ref = compile_expr_ref(fn, dot_expr.expr);
-        auto ref_type = compile_type_of(dot_expr.expr);
-        auto ptr = ref.address ? ref.address : ref.value;
+        auto ctn_type = get_chitype(dot_expr.expr);
+        auto ctn_type_l = compile_type(ctn_type);
+        auto ptr = compile_dot_ptr(fn, dot_expr.expr);
 
         if (!fn_decl->data.fn_def.body) {
             // handle interface
-            auto data_gep = builder.CreateStructGEP(ref_type, ptr, 1);
-            auto vtable_gep = builder.CreateStructGEP(ref_type, ptr, 2);
-            auto data_ptr = builder.CreateLoad(ref_type->getStructElementType(1), data_gep);
-            auto vtable_ptr = builder.CreateLoad(ref_type->getStructElementType(2), vtable_gep);
+            auto data_gep = builder.CreateStructGEP(ctn_type_l, ptr, 1);
+            auto vtable_gep = builder.CreateStructGEP(ctn_type_l, ptr, 2);
+            auto data_ptr = builder.CreateLoad(ctn_type_l->getStructElementType(1), data_gep);
+            auto vtable_ptr = builder.CreateLoad(ctn_type_l->getStructElementType(2), vtable_gep);
             ctn_ptr = data_ptr;
             auto index = llvm::ConstantInt::get(
                 *m_ctx->llvm_ctx, llvm::APInt(32, dot_expr.resolved_member->method_index));
@@ -1283,8 +1305,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &builder = *m_ctx->llvm_builder.get();
         auto &data = stmt->data.for_stmt;
         if (data.kind == ast::ForLoopKind::Range) {
-            auto ref = compile_expr_ref(fn, data.expr);
-            auto ptr = ref.address ? ref.address : ref.value;
+            auto ptr = compile_dot_ptr(fn, data.expr);
             assert(ptr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
             auto begin = sty->member_intrinsics[IntrinsicSymbol::IterBegin];
@@ -1494,6 +1515,12 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 llvm::Type *Compiler::_compile_type(ChiType *type) {
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
+    case TypeKind::This: {
+        if (m_fn && m_fn->container_subtype) {
+            return m_fn->llvm_fn->getArg(0)->getType();
+        }
+        return compile_type(type->get_elem());
+    }
     case TypeKind::Void: {
         return llvm::Type::getVoidTy(llvm_ctx);
     }

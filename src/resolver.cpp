@@ -108,7 +108,11 @@ ast::Node *Resolver::get_builtin(const string &name) {
     return nullptr;
 }
 
-ChiType *Resolver::node_get_type(ast::Node *node) { return node->resolved_type; }
+ChiType *Resolver::node_get_type(ast::Node *node) {
+    if (!node->resolved_type)
+        return nullptr;
+    return node->resolved_type;
+}
 
 void Resolver::resolve(ast::Package *package) {
     for (auto &module : package->modules) {
@@ -124,6 +128,9 @@ void Resolver::resolve(ast::Module *module) {
 }
 
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
+    from_type = from_type->eval();
+    to_type = to_type->eval();
+
     if (is_same_type(from_type, to_type)) {
         return true;
     }
@@ -343,7 +350,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::Identifier: {
         auto &data = node->data.identifier;
         if (data.kind == ast::IdentifierKind::This) {
-            return get_pointer_type(scope.parent_struct, TypeKind::Reference);
+            auto type = create_type(TypeKind::This);
+            type->data.pointer.elem = get_pointer_type(scope.parent_struct, TypeKind::Reference);
+            return type;
         }
         if (data.kind == ast::IdentifierKind::Value && scope.block) {
             auto replacement = scope.block->scope->find_one(data.decl->name);
@@ -920,11 +929,14 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
     }
     auto result = _resolve(node, scope, flags);
     node->resolved_type = result;
+
     if (node->type == NodeType::VarDecl || node->type == NodeType::ParamDecl) {
         if (scope.parent_fn_node && should_destroy(node)) {
             scope.parent_fn_def().cleanup_vars.add(node);
         }
     }
+    if (!result)
+        return nullptr;
     return result;
 }
 
@@ -1202,12 +1214,13 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
     switch (type->kind) {
     case TypeKind::Placeholder:
         return subs->args[type->data.placeholder.index];
-    case TypeKind::Array:
+
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::Optional:
     case TypeKind::Box:
         return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->kind);
+
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
         array<ChiType *> args;
@@ -1228,6 +1241,9 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
 
 ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
     auto sty = type;
+    if (sty->kind == TypeKind::This) {
+        sty = sty->get_elem();
+    }
     if (sty->is_pointer()) {
         sty = sty->get_elem();
     }
@@ -1578,7 +1594,13 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     scpy.kind = base.kind;
     scpy.node = base.node;
     for (auto &member : base.members) {
-        auto type = type_placeholders_sub(member->resolved_type, &data);
+        auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
+        member->resolved_type->clone(type);
+        if (member->is_method()) {
+            type->data.fn.container_ref = get_pointer_type(subtype, TypeKind::Reference);
+        }
+
+        type = type_placeholders_sub(type, &data);
         auto node = create_node(member->node->type);
         node->name = member->node->name;
         node->token = member->node->token;
@@ -1586,9 +1608,9 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         memcpy(&node->data, &member->node->data, sizeof(member->node->data));
 
         if (member->node->type == NodeType::FnDef) {
-            type->data.fn.container_ref = get_pointer_type(subtype, TypeKind::Reference);
             node->data.fn_def.is_generated = true;
         }
+
         auto new_member = scpy.add_member(member->get_name(), node, type);
         if (member->symbol != IntrinsicSymbol::None) {
             scpy.member_intrinsics[member->symbol] = new_member;

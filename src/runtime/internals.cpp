@@ -191,6 +191,21 @@ void *cx_array_add(CxArray *dest, uint32_t elem_size) {
     return ((char *)dest->data) + (dest->size - 1) * elem_size;
 }
 
+void cx_array_write_str(CxArray *dest, CxString *str) {
+    auto new_size = dest->size + str->size;
+    cx_array_reserve(dest, sizeof(char), new_size);
+    memcpy(((char *)dest->data) + dest->size, str->data, str->size);
+    dest->size = (uint32_t)new_size;
+}
+
+CxString cx_string_from_chars(const char *data, uint32_t size) {
+    CxString s;
+    s.size = size;
+    s.data = (char *)malloc(size);
+    memcpy(s.data, data, size);
+    return s;
+}
+
 void cx_debug(CxString message) { fmt::print(message.data); }
 
 void cx_debug_i(const char *prefix, int value) { fmt::print("{}: {}\n", prefix, value); }

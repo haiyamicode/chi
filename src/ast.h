@@ -337,6 +337,7 @@ struct Node {
     ChiType *orig_type = nullptr;
     EscapeAnalysis escape = {};
     Node *parent_fn = nullptr;
+    uint32_t id = 0;
 
     union NodeData {
         Root root;

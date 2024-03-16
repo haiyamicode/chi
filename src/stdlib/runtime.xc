@@ -8,6 +8,7 @@ extern "C" {
   func cx_printf(format string, values *void);
   func cx_array_new(dest *void);
   func cx_array_add(dest *void, size uint32) *void;
+  func cx_array_write_str(dest *void, str *string);
   func cx_print_any(value *void);
   func cx_print_number(value uint64);
   func cx_gc_alloc(size uint32, destructor *void) *void;
@@ -21,6 +22,7 @@ extern "C" {
   func cx_timeout(delay uint64, callback *void);
   func cx_call(fn *void);
   func cx_string_format(format string, values *void) string;
+  func cx_string_from_chars(data *void, size uint32) string;
   func cx_hbytes(value *any) HashBytes;
   func cx_map_new() *void;
   func cx_map_delete(data *void);
@@ -93,14 +95,24 @@ struct Array<T> {
     return 0;
   }
 
+  @[std.iter.End]
+  func end() uint32 {
+    return this.size;
+  }
+
   @[std.iter.Next]
   func next(index uint32) uint32 {
     return index + 1;
   }
 
-  @[std.iter.End]
-  func end() uint32 {
-    return this.size;
+  func display() string {
+    var buf Buffer = {};
+    buf.write("[");
+    for this: item {
+      buf.write(stringf("{}, ", item!));
+    }
+    buf.write("]");
+    return buf.to_string();
   }
 }
 
@@ -142,5 +154,21 @@ struct Map<K, V> {
       cx_map_add(this.data, &h, p);
     }
     return p;
+  }
+}
+
+struct Buffer {
+  bytes Array<char>;
+
+  func new() {
+    this.bytes = {};
+  }
+
+  func write(str string) {
+    cx_array_write_str(&this.bytes, &str);
+  }
+
+  func to_string() string {
+    return cx_string_from_chars(this.bytes.data, this.bytes.size);
   }
 }

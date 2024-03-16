@@ -132,6 +132,8 @@ ChiType *ChiType::get_elem() {
         return data.result.value;
     case TypeKind::Promise:
         return data.promise.value;
+    case TypeKind::This:
+        return data.pointer.elem;
     default:
         unreachable();
         return nullptr;
