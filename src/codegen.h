@@ -178,6 +178,9 @@ class Compiler {
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
 
+    llvm::Value *compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
+                                    ChiStructMember *member);
+
     llvm::Value *compile_dot_ptr(Function *fn, ast::Node *expr);
 
     RefValue compile_expr_ref(Function *fn, ast::Node *expr);

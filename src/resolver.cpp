@@ -693,6 +693,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (struct_->resolve_status == ResolveStatus::None) {
             // second pass
             scope.next_enum_value = 0;
+            if (struct_->node->name == "AnimalBase") {
+                print("");
+            }
             for (auto member : data.members) {
                 resolve_struct_member(struct_type, member, struct_scope);
             }
@@ -1158,6 +1161,8 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
             if (!child_field) {
                 child_field = derived.add_member(node->name, node, base_member->resolved_type);
                 child_field->orig_parent = base_type;
+                child_field->parent_member = base_node->data.var_decl.resolved_field;
+                child_field->field_index = base_member->field_index;
             }
         }
     }

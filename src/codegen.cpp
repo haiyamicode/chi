@@ -956,6 +956,19 @@ llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     return ref.address ? ref.address : ref.value;
 }
 
+llvm::Value *Compiler::compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
+                                          ChiStructMember *member) {
+    auto &builder = *m_ctx->llvm_builder;
+    if (member->parent_member) {
+        ptr = compile_dot_access(fn, ptr, type, member->parent_member);
+        type = member->parent_member->resolved_type;
+    }
+    auto struct_type_l = compile_type(type);
+    auto gep = builder.CreateStructGEP(struct_type_l, ptr, member->field_index);
+    // auto member_type_l = compile_type(member->resolved_type);
+    return gep;
+}
+
 RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::VarDecl:
@@ -978,13 +991,9 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             }
         }
 
-        auto &builder = *m_ctx->llvm_builder.get();
-        auto struct_type = type;
         assert(ptr);
-        auto struct_type_l = compile_type(struct_type);
-        auto field_index = data.resolved_member->field_index;
-        auto gep = builder.CreateStructGEP(struct_type_l, ptr, field_index);
-        auto member_type_l = compile_type(data.resolved_member->resolved_type);
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto gep = compile_dot_access(fn, ptr, type, data.resolved_member);
         return RefValue::from_address(gep);
     }
     case ast::NodeType::UnaryOpExpr: {

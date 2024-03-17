@@ -60,6 +60,7 @@ struct ChiStructMember {
     long method_index = -1;
     IntrinsicSymbol symbol = IntrinsicSymbol::None;
     map<ChiTypeSubtype *, ChiStructMember *> variants = {};
+    ChiStructMember *parent_member = nullptr;
 
     string get_name();
 
