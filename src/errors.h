@@ -45,6 +45,8 @@ constexpr auto IMPLEMENT_NOT_MATCH = "member '{}' does not match definition from
 constexpr auto FOR_EXPR_NOT_ITERABLE = "for expression must be an iterable, got {}";
 constexpr auto CANNOT_INDEX = "cannot perform index operation on type {}";
 constexpr auto SYMBOL_NOT_FOUND_MODULE = "symbol '{}' not found in module '{}'";
+constexpr auto VARIABLE_USED_BEFORE_INITIALIZED = "variable '{}' used before initialized";
+constexpr auto UNINITIALIZED_FIELD = "field '{}' of type '{}' has not been initialized";
 
 } // namespace errors
 } // namespace cx

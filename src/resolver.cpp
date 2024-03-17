@@ -381,6 +381,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
         }
+        if (data.decl->type == NodeType::VarDecl && !scope.is_lhs) {
+            auto init_at = data.decl->data.var_decl.initialized_at;
+            if (!init_at || init_at->token->pos.offset > node->token->pos.offset) {
+                error(data.decl, errors::VARIABLE_USED_BEFORE_INITIALIZED, data.decl->name);
+            }
+        }
         return type;
     }
     case NodeType::TypeSigil: {
@@ -420,9 +426,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::BinOpExpr: {
         auto &data = node->data.bin_op_expr;
-        auto t1 = resolve(data.op1, scope);
+        auto op1_scope = scope;
+        if (data.op_type == TokenType::ASS) {
+            op1_scope = scope.set_is_lhs(true);
+        }
+        auto t1 = resolve(data.op1, op1_scope);
+
         ChiType *t2;
         if (data.op_type == TokenType::ASS) {
+            auto var = data.op1->get_decl();
+            if (var && var->type == NodeType::VarDecl && !var->data.var_decl.initialized_at) {
+                if (!var->data.var_decl.is_field || scope.parent_fn->name != "new") {
+                    var->data.var_decl.initialized_at = node;
+                }
+            }
             auto var_scope = scope.set_value_type(t1).set_move_outlet(data.op1);
             t2 = resolve(data.op2, var_scope);
         } else {
@@ -644,6 +661,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             var->token = data.condition->token;
             var->parent_fn = scope.parent_fn_node;
             var->resolved_type = cond_type->get_elem();
+            var->data.var_decl.initialized_at = node;
             auto &block_data = data.then_block->data.block;
             block_data.implicit_vars.add(var);
             block_data.scope->put(name, var);
@@ -693,9 +711,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (struct_->resolve_status == ResolveStatus::None) {
             // second pass
             scope.next_enum_value = 0;
-            if (struct_->node->name == "AnimalBase") {
-                print("");
-            }
             for (auto member : data.members) {
                 resolve_struct_member(struct_type, member, struct_scope);
             }
@@ -726,6 +741,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             }
+
+            for (auto member : data.members) {
+                if (member->type == NodeType::VarDecl && !member->data.var_decl.initialized_at) {
+                    auto not_needed = member->data.var_decl.is_embed &&
+                                      ChiTypeStruct::get_constructor(struct_type);
+                    if (!not_needed) {
+                        error(member, errors::UNINITIALIZED_FIELD, member->name,
+                              to_string(struct_type));
+                    }
+                }
+            }
+
             struct_->resolve_status = ResolveStatus::Done;
         }
         return type_sym;
@@ -1821,3 +1848,5 @@ ResolveScope ResolveScope::set_move_outlet(ast::Node *outlet) const {
 }
 
 ResolveScope ResolveScope::set_block(ast::Block *block) const { RS_SET_PROP_COPY(block, block); }
+
+ResolveScope ResolveScope::set_is_lhs(bool is_lhs) const { RS_SET_PROP_COPY(is_lhs, is_lhs); }

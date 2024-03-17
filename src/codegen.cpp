@@ -965,7 +965,6 @@ llvm::Value *Compiler::compile_dot_access(Function *fn, llvm::Value *ptr, ChiTyp
     }
     auto struct_type_l = compile_type(type);
     auto gep = builder.CreateStructGEP(struct_type_l, ptr, member->field_index);
-    // auto member_type_l = compile_type(member->resolved_type);
     return gep;
 }
 

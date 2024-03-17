@@ -13,8 +13,8 @@ struct Foo {
 
     func new(id int) {
         this.id = id;
-        this.bar1.id = id * 10 + 1;
-        this.bar2.id = id * 10 + 2;
+        this.bar1 = {id * 10 + 1};
+        this.bar2 = {id * 10 + 2};
     }
 
     func delete() {

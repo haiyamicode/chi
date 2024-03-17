@@ -1,7 +1,7 @@
 struct Arr<T> {
-	data *T;
-	size uint32;
-	capacity uint32;
+	data *T = null;
+	size uint32 = 0;
+	capacity uint32 = 0;
 
 	func new() {
 		cx_array_new(this);

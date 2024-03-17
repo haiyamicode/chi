@@ -490,6 +490,7 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     if (next_is(TokenType::ASS)) {
         consume();
         node->data.var_decl.expr = parse_expr();
+        node->data.var_decl.initialized_at = node;
     }
     expect(TokenType::SEMICOLON);
     auto so = get_scope()->owner;

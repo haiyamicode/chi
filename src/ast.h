@@ -164,6 +164,7 @@ struct VarDecl {
     ConstantValue resolved_value = {};
     DeclSpec *decl_spec = {};
     bool is_generated = false;
+    Node *initialized_at = nullptr;
 };
 
 struct BinOpExpr {
@@ -441,7 +442,7 @@ struct Node {
         case NodeType::Identifier:
             return data.identifier.decl->get_decl();
         case NodeType::DotExpr: {
-            if (data.dot_expr.resolve_variant) {
+            if (data.dot_expr.resolve_variant && variant_input) {
                 auto variant_member = data.dot_expr.resolved_member->variants[variant_input];
                 assert(variant_member);
                 return variant_member->node;
@@ -456,8 +457,10 @@ struct Node {
             return data.import_symbol.resolved_decl;
         case NodeType::FnDef:
             return this;
+        case NodeType::UnaryOpExpr:
+            return data.unary_op_expr.op1;
         default:
-            panic("node type {} does not have decl", PRINT_ENUM(type));
+            break;
         }
         return nullptr;
     }
