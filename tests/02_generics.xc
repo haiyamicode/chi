@@ -23,7 +23,7 @@ struct Arr<T> {
 }
 
 func main() {
-	var a Arr<int> = {};
+	var a Arr<int> = .{};
 	a.add(1);
 	a.add(2);
 	printf("a.size={}\n", a.size);

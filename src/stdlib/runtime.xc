@@ -106,7 +106,7 @@ struct Array<T> {
   }
 
   func display() string {
-    var buf Buffer = {};
+    var buf Buffer = .{};
     buf.write("[");
     for this: item {
       buf.write(stringf("{}, ", item!));
@@ -139,7 +139,7 @@ struct Map<K, V> {
     var h = cx_hbytes(&k);
     var p = cx_map_find(this.data, &h) as *V;
     if p {
-      return {p};
+      return .{p};
     }
     return null;
   }
@@ -161,7 +161,7 @@ struct Buffer {
   bytes Array<char>;
 
   func new() {
-    this.bytes = {};
+    this.bytes = .{};
   }
 
   func write(str string) {

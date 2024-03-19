@@ -6,11 +6,11 @@ func main() {
   mod.hello();
   
   println("using type from module");
-  var g mod.Greeting = {"Lila"};
+  var g mod.Greeting = .{"Lila"};
   g.hello();
 
   println("using imported members from module");
   test();
-  var g2 Greeting = {"Xenia"};
+  var g2 Greeting = .{"Xenia"};
   g2.hello();
 }

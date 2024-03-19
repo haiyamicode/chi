@@ -189,6 +189,8 @@ void AstPrinter::print_node(Node *node) {
         if (data.type) {
             if (data.is_new) {
                 print("new ");
+            } else {
+                print(".");
             }
             print_node(data.type);
         }

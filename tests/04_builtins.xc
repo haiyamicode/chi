@@ -14,7 +14,7 @@ func test_optional() {
 
 func test_array() {
   println("testing array:");
-  var a Array<int> = {};
+  var a Array<int> = .{};
   a.add(1);
   a.add(2);
   printf("a=[{}, {}]\n", a[0], a[1]);
@@ -26,7 +26,7 @@ func test_array() {
 
 func test_map() {
   println("testing map:");
-  var m Map<string, int> = {};
+  var m Map<string, int> = .{};
   m["abc"] = 1;
   m["d"] = 2;
   printf("m[\"abc\"] = {}\n", m["abc"]);
