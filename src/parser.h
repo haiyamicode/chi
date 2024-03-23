@@ -145,9 +145,9 @@ class Parser {
 
     Node *parse_fn_param();
 
-    Node *parse_block(Scope *scope = nullptr);
+    Node *parse_block(Scope *scope = nullptr, Token *arrow = nullptr);
 
-    Node *parse_stmt();
+    Node *parse_stmt(bool *as_expr);
 
     Node *parse_expr();
 
@@ -200,5 +200,9 @@ class Parser {
     Node *parse_extern_decl();
 
     Node *parse_import_decl();
+
+    Node *parse_switch_expr();
+
+    Node *parse_case_expr();
 };
 } // namespace cx

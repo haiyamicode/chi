@@ -572,34 +572,68 @@ Node *Parser::parse_fn_param() {
     return param;
 }
 
-Node *Parser::parse_block(Scope *scope) {
-    auto lb = expect(TokenType::LBRACE);
-    auto node = create_node(NodeType::Block, lb);
+Node *Parser::parse_block(Scope *scope, Token *arrow) {
+    Token *token = arrow;
+    bool has_braces = false;
+    if (!arrow) {
+        token = expect(TokenType::LBRACE);
+        has_braces = true;
+    } else {
+        if (next_is(TokenType::LBRACE)) {
+            consume();
+            has_braces = true;
+        }
+    }
+
+    auto node = create_node(NodeType::Block, token);
+    node->data.block.has_braces = has_braces;
+    if (arrow) {
+        node->data.block.is_arrow = true;
+    }
     bool should_pop_scope = false;
     if (!scope) {
         scope = m_ctx->resolver->push_scope(node);
         should_pop_scope = true;
     }
     node->data.block.scope = scope;
-    for (;;) {
-        auto token = get();
-        if (token->type == TokenType::END) {
-            error(token, errors::UNEXPECTED_EOF);
-            return node;
+
+    if (!has_braces) {
+        bool as_expr = false;
+        auto stmt = parse_stmt(&as_expr);
+        node->data.block.return_expr = stmt;
+
+    } else {
+        for (;;) {
+            auto token = get();
+            if (token->type == TokenType::END) {
+                error(token, errors::UNEXPECTED_EOF);
+                break;
+            }
+            if (token->type == TokenType::RBRACE) {
+                consume();
+                break;
+            }
+            bool as_expr = false;
+            auto stmt = parse_stmt(&as_expr);
+            stmt->parent = node;
+
+            if (as_expr) {
+                node->data.block.return_expr = stmt;
+                expect(TokenType::RBRACE);
+                break;
+            } else {
+                stmt->index = node->data.block.statements.size;
+                node->data.block.statements.add(stmt);
+            }
         }
-        if (token->type == TokenType::RBRACE) {
-            consume();
-            return node;
-        }
-        auto stmt = parse_stmt();
-        node->data.block.statements.add(stmt);
     }
     if (should_pop_scope) {
         m_ctx->resolver->pop_scope();
     }
+    return node;
 }
 
-Node *Parser::parse_stmt() {
+Node *Parser::parse_stmt(bool *as_expr) {
     auto token = get();
     switch (token->type) {
     case TokenType::KW_IF:
@@ -629,8 +663,20 @@ Node *Parser::parse_stmt() {
     case TokenType::NOT:
     case TokenType::INC:
     case TokenType::DEC:
-    case TokenType::KW_TRY:
-        return parse_simple_stmt();
+    case TokenType::KW_SWITCH:
+    case TokenType::KW_TRY: {
+        if (next_is(TokenType::KW_VAR)) {
+            return parse_var_decl(false);
+        }
+
+        auto expr = parse_expr();
+        if (next_is(TokenType::SEMICOLON)) {
+            consume();
+        } else {
+            *as_expr = true;
+        }
+        return expr;
+    }
 
     case TokenType::KW_RETURN:
         return parse_return_stmt();
@@ -650,15 +696,6 @@ Node *Parser::parse_stmt() {
         unexpected(token);
         return create_error_node();
     }
-}
-
-Node *Parser::parse_simple_stmt() {
-    if (next_is(TokenType::KW_VAR)) {
-        return parse_var_decl(false);
-    }
-    auto node = parse_expr();
-    expect(TokenType::SEMICOLON);
-    return node;
 }
 
 bool Parser::next_is(TokenType token_type) { return get()->type == token_type; }
@@ -843,6 +880,9 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     }
     case TokenType::KW_FUNC: {
         return parse_fn_lambda();
+    }
+    case TokenType::KW_SWITCH: {
+        return parse_switch_expr();
     }
     default:
         unexpected(token);
@@ -1259,5 +1299,55 @@ Node *Parser::parse_import_decl() {
     }
 
     expect(TokenType::SEMICOLON);
+    return node;
+}
+
+Node *Parser::parse_switch_expr() {
+    auto kw = expect(TokenType::KW_SWITCH);
+    auto node = create_node(NodeType::SwitchExpr, kw);
+    auto scope = m_ctx->resolver->push_scope(node);
+
+    node->data.switch_expr.expr = parse_expr();
+    expect(TokenType::LBRACE);
+    while (!next_is(TokenType::RBRACE)) {
+        auto case_expr = parse_case_expr();
+        node->data.switch_expr.cases.add(case_expr);
+        if (!at_comma(TokenType::RBRACE)) {
+            break;
+        }
+        consume();
+    }
+    expect(TokenType::RBRACE);
+    m_ctx->resolver->pop_scope();
+    return node;
+}
+
+Node *Parser::parse_case_expr() {
+    Token *token = nullptr;
+    Node *node = nullptr;
+    if (next_is(TokenType::KW_ELSE)) {
+        auto token = read();
+        node = create_node(NodeType::CaseExpr, token);
+        node->data.case_expr.is_else = true;
+
+    } else {
+        auto expr = parse_expr();
+        node = create_node(NodeType::CaseExpr, expr->token);
+        node->data.case_expr.clauses = {expr};
+        if (next_is(TokenType::COMMA)) {
+            consume();
+            while (!next_is(TokenType::ARROW)) {
+                auto expr = parse_expr();
+                node->data.case_expr.clauses.add(expr);
+                if (!at_comma(TokenType::ARROW)) {
+                    break;
+                }
+                consume();
+            }
+        }
+    }
+
+    auto arrow = expect(TokenType::ARROW);
+    node->data.case_expr.body = parse_block(nullptr, arrow);
     return node;
 }

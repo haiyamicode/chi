@@ -20,8 +20,8 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          ImportSymbol);
+          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier, SwitchExpr,
+          CaseExpr, ImportSymbol);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -147,6 +147,9 @@ struct Block {
     array<Node *> statements = {};
     array<Node *> implicit_vars = {};
     cx::Scope *scope = nullptr;
+    bool is_arrow = false;
+    Node *return_expr = nullptr;
+    bool has_braces = false;
 };
 
 struct ReturnStmt {
@@ -277,6 +280,18 @@ struct ForStmt {
     Node *expr = nullptr;
 };
 
+struct SwitchExpr {
+    Node *expr = nullptr;
+    array<Node *> cases = {};
+    Node *resolved_outlet = nullptr;
+};
+
+struct CaseExpr {
+    array<Node *> clauses = {};
+    Node *body = nullptr;
+    bool is_else = false;
+};
+
 struct TypeSigil {
     Node *type = nullptr;
     SigilKind sigil = SigilKind::None;
@@ -339,6 +354,8 @@ struct Node {
     EscapeAnalysis escape = {};
     Node *parent_fn = nullptr;
     uint32_t id = 0;
+    int index = 0;
+    Node *parent = nullptr;
 
     union NodeData {
         Root root;
@@ -372,6 +389,8 @@ struct Node {
         ImportDecl import_decl;
         ImportSymbol import_symbol;
         DeclAttribute decl_attribute;
+        SwitchExpr switch_expr;
+        CaseExpr case_expr;
 
         NodeData() {}
 
@@ -403,6 +422,8 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(extern_decl, ExternDecl)
             _AST_CASE_INITIALIZE_FIELD(import_decl, ImportDecl)
             _AST_CASE_INITIALIZE_FIELD(decl_attribute, DeclAttribute)
+            _AST_CASE_INITIALIZE_FIELD(switch_expr, SwitchExpr)
+            _AST_CASE_INITIALIZE_FIELD(case_expr, CaseExpr)
         default:
             break;
         }
@@ -428,6 +449,8 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(extern_decl, ExternDecl)
             _AST_CASE_DESTROY_FIELD(import_decl, ImportDecl)
             _AST_CASE_DESTROY_FIELD(decl_attribute, DeclAttribute)
+            _AST_CASE_DESTROY_FIELD(switch_expr, SwitchExpr)
+            _AST_CASE_DESTROY_FIELD(case_expr, CaseExpr)
         default:
             break;
         }
@@ -484,6 +507,11 @@ struct Node {
             return data.identifier.kind == IdentifierKind::Value;
         }
         return true;
+    }
+
+    bool is_last_stmt() {
+        return parent && parent->type == NodeType::Block &&
+               index == parent->data.block.statements.size - 1;
     }
 };
 } // namespace ast

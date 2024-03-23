@@ -83,7 +83,7 @@ void *cx_array_add(CxArray *dest, uint32_t elem_size);
 
 void cx_array_write_str(CxArray *dest, CxString *str);
 
-void cx_debug(CxString message);
+void cx_print_string(CxString *message);
 
 void cx_debug_i(const char *prefix, int value);
 

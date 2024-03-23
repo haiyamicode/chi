@@ -35,7 +35,6 @@ void Lexer::setup_keywords() {
     s_keywords["case"] = TokenType::KW_CASE;
     s_keywords["const"] = TokenType::KW_CONST;
     s_keywords["continue"] = TokenType::KW_CONTINUE;
-    s_keywords["default"] = TokenType::KW_DEFAULT;
     s_keywords["else"] = TokenType::KW_ELSE;
     s_keywords["enum"] = TokenType::KW_ENUM;
     s_keywords["for"] = TokenType::KW_FOR;
@@ -204,7 +203,11 @@ l0:
             m_tok.type = read_rep('=', TokenType::LE, TokenType::LT);
         }
     } else if (c == '=') {
-        m_tok.type = read_rep('=', TokenType::EQ, TokenType::ASS);
+        if (read_expect('>')) {
+            m_tok.type = TokenType::ARROW;
+        } else {
+            m_tok.type = read_rep('=', TokenType::EQ, TokenType::ASS);
+        }
     } else if (c == '!') {
         m_tok.type = read_rep('=', TokenType::NE, TokenType::LNOT);
     } else if (c == '&') {
@@ -219,6 +222,7 @@ l0:
         m_tok.type = TokenType::NOT;
     } else if (c == '@') {
         m_tok.type = TokenType::AT;
+
     } else {
         auto &t = m_tok.type;
         switch (c) {

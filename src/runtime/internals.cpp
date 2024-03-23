@@ -87,7 +87,7 @@ static std::string stringf(const CxAny &v) {
     switch ((TypeKind)v.type->kind) {
     case TypeKind::String: {
         auto s = (CxString *)&v.data;
-        return fmt::format(s->data);
+        return string(s->data, s->size);
     }
     case TypeKind::Bool:
         return fmt::format("{}", *(bool *)&v.data);
@@ -206,7 +206,10 @@ CxString cx_string_from_chars(const char *data, uint32_t size) {
     return s;
 }
 
-void cx_debug(CxString message) { fmt::print(message.data); }
+void cx_print_string(CxString *message) {
+    string s(message->data, message->size);
+    fmt::print(s);
+}
 
 void cx_debug_i(const char *prefix, int value) { fmt::print("{}: {}\n", prefix, value); }
 

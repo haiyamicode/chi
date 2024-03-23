@@ -679,7 +679,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         for (auto stmt : data.statements) {
             resolve(stmt, child_scope);
         }
-        return nullptr;
+        if (data.return_expr) {
+            return resolve(data.return_expr, child_scope);
+        }
+        return get_system_types()->void_;
     }
     case NodeType::StructDecl: {
         auto &data = node->data.struct_decl;
@@ -944,6 +947,41 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         data.resolved_decl = decl;
         return decl->resolved_type;
+    }
+    case NodeType::SwitchExpr: {
+        auto &data = node->data.switch_expr;
+        if (scope.move_outlet) {
+            data.resolved_outlet = scope.move_outlet;
+            node->escape.moved = true;
+        }
+        auto expr_type = resolve(data.expr, scope);
+        ChiType *ret_type = scope.value_type;
+        for (auto scase : data.cases) {
+            auto case_type = resolve(scase, scope);
+
+            if (!scase->data.case_expr.is_else) {
+                for (auto clause : scase->data.case_expr.clauses) {
+                    auto clause_type = resolve(clause, scope);
+                    resolve_constant_value(clause);
+                    check_assignment(clause, clause_type, expr_type);
+                    if (clause_type->kind != TypeKind::Int) {
+                        error(clause, errors::INVALID_SWITCH_TYPE, to_string(clause_type));
+                    }
+                }
+            }
+
+            if (ret_type) {
+                check_assignment(scase, case_type, ret_type);
+                scase->resolved_type = ret_type;
+            } else {
+                ret_type = case_type;
+            }
+        }
+        return ret_type ? ret_type : get_system_types()->void_;
+    }
+    case NodeType::CaseExpr: {
+        auto &data = node->data.case_expr;
+        return resolve(data.body, scope);
     }
     default:
         print("\n");

@@ -207,7 +207,8 @@ class Compiler {
 
     void compile_stmt(Function *fn, ast::Node *stmt);
 
-    void compile_block(Function *fn, ast::Node *parent, ast::Node *block, label_t *end_label);
+    llvm::Value *compile_block(Function *fn, ast::Node *parent, ast::Node *block,
+                               label_t *end_label, llvm::Value *var = nullptr);
 
     void compile_struct(ast::Node *node);
 

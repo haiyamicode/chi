@@ -11,6 +11,7 @@ extern "C" {
   func cx_array_write_str(dest *void, str *string);
   func cx_print_any(value *void);
   func cx_print_number(value uint64);
+  func cx_print_string(str *string);
   func cx_gc_alloc(size uint32, destructor *void) *void;
   func cx_malloc(size uint32, ignored *void) *void;
   func cx_free(address *void);

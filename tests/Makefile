@@ -10,6 +10,7 @@ TESTS = 00_fib.test \
     06_enum.test \
     07_for_loop.test \
 		08_module.test \
+		09_switch.test \
 
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

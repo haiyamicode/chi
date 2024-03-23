@@ -100,8 +100,13 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::Block: {
         auto &data = node->data.block;
-        print("{{\n");
-        m_indent++;
+        if (data.is_arrow) {
+            print(" => ");
+        }
+        if (data.has_braces) {
+            m_indent++;
+            print("{{\n");
+        }
         for (auto stmt : data.statements) {
             print_indent(m_indent);
             print_node(stmt);
@@ -109,9 +114,19 @@ void AstPrinter::print_node(Node *node) {
                 print(";\n");
             }
         }
-        m_indent--;
-        print_indent(m_indent);
-        print("}}");
+
+        if (data.return_expr) {
+            if (data.statements.size) {
+                print_indent(m_indent);
+            }
+            print_node(data.return_expr);
+        }
+
+        if (data.has_braces) {
+            m_indent--;
+            print_indent(m_indent);
+            print("}}");
+        }
         break;
     }
     case NodeType::VarDecl: {
@@ -318,6 +333,10 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
+        if (node->index > 0) {
+            print("\n");
+            print_indent(m_indent);
+        }
         print("for ");
         if (data.kind == ForLoopKind::Ternary) {
             if (data.init) {
@@ -345,6 +364,9 @@ void AstPrinter::print_node(Node *node) {
         }
         print_node(data.body);
         print("\n");
+        if (!node->is_last_stmt()) {
+            print("\n");
+        }
         break;
     }
     case NodeType::BranchStmt: {
@@ -394,6 +416,42 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.prefix_expr;
         print("{} ", data.prefix->str);
         print_node(data.expr);
+        break;
+    }
+    case NodeType::SwitchExpr: {
+        auto &data = node->data.switch_expr;
+        print("switch ");
+        print_node(data.expr);
+        print(" {{\n");
+        for (int i = 0; i < data.cases.size; i++) {
+            auto case_node = data.cases.at(i);
+            print_indent(m_indent + 1);
+            print_node(case_node);
+            if (i < data.cases.size - 1) {
+                print(",");
+            }
+            print("\n");
+        }
+        print_indent(m_indent);
+        print("}}");
+        break;
+    }
+
+    case NodeType::CaseExpr: {
+        auto &data = node->data.case_expr;
+        if (data.is_else) {
+            print("else");
+        } else {
+            for (int i = 0; i < data.clauses.size; i++) {
+                auto clause = data.clauses.at(i);
+                print_node(clause);
+                if (i < data.clauses.size - 1) {
+                    print(", ");
+                }
+            }
+        }
+
+        print_node(data.body);
         break;
     }
     default:

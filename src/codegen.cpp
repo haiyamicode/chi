@@ -890,6 +890,49 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::ParenExpr: {
         return compile_expr(fn, expr->data.child_expr);
     }
+    case ast::NodeType::SwitchExpr: {
+        auto &data = expr->data.switch_expr;
+        auto expr_value = compile_expr(fn, data.expr);
+        auto ret_type = get_chitype(expr);
+        llvm::Value *var = nullptr;
+        if (ret_type->kind != TypeKind::Void) {
+            if (data.resolved_outlet) {
+                var = compile_expr_ref(fn, data.resolved_outlet).address;
+            } else {
+                var = compile_alloc(fn, expr, false);
+            }
+        }
+        auto &builder = *m_ctx->llvm_builder;
+        auto default_label = fn->new_label("_switch_default");
+
+        auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.size);
+
+        auto done_label = fn->new_label("_switch_done");
+
+        array<label_t *> case_labels;
+        for (auto scase : data.cases) {
+            auto label = default_label;
+            if (!scase->data.case_expr.is_else) {
+                label = fn->new_label("_switch_case");
+            }
+            for (auto clause : scase->data.case_expr.clauses) {
+                auto clause_value = get_resolver()->resolve_constant_value(clause);
+                auto cond_value = (llvm::ConstantInt *)compile_constant_value(fn, clause_value,
+                                                                              get_chitype(clause));
+                switch_b->addCase(cond_value, label);
+            }
+            case_labels.add(label);
+        }
+
+        for (int i = 0; i < data.cases.size; i++) {
+            fn->use_label(case_labels[i]);
+            auto scase = data.cases[i];
+            compile_block(fn, scase, scase->data.case_expr.body, done_label, var);
+        }
+
+        fn->use_label(done_label);
+        return expr_value;
+    }
     default:
         panic("not implemented: {}", PRINT_ENUM(expr->type));
     }
@@ -1415,27 +1458,41 @@ void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node
     }
 }
 
-void Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block,
-                             label_t *end_label) {
+llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block,
+                                     label_t *end_label, llvm::Value *var) {
     assert(block->type == ast::NodeType::Block);
+    auto &data = block->data.block;
     auto &builder = *m_ctx->llvm_builder.get();
     end_label = end_label ? end_label : fn->next_end_label;
+    llvm::Value *result = nullptr;
 
-    for (auto var : block->data.block.implicit_vars) {
+    for (auto var : data.implicit_vars) {
         compile_stmt(fn, var);
     }
 
     auto scope = fn->push_scope();
-    for (auto stmt : block->data.block.statements) {
+    for (auto stmt : data.statements) {
         compile_stmt(fn, stmt);
+    }
+    if (data.return_expr) {
+        result = compile_expr(fn, data.return_expr);
     }
     fn->pop_scope();
 
-    auto bb = builder.GetInsertBlock();
-    auto term = bb->getTerminator();
-    if (!term && end_label) {
+    if (data.return_expr) {
+        if (var) {
+            builder.CreateStore(result, var);
+        }
         builder.CreateBr(end_label);
+    } else {
+        auto bb = builder.GetInsertBlock();
+        auto term = bb->getTerminator();
+        if (!term && end_label) {
+            builder.CreateBr(end_label);
+        }
     }
+
+    return result;
 }
 
 Function *Compiler::add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn_type) {
