@@ -43,6 +43,7 @@ struct Function {
     ChiTypeSubtype *container_subtype = nullptr;
     ChiType *fn_type = nullptr;
     label_t *next_end_label = nullptr;
+    array<llvm::Value *> vararg_pointers = {};
 
     std::list<BlockScope> block_scopes;
     std::list<BlockScope *> scope_stack;
@@ -73,6 +74,7 @@ struct Function {
     void use_label(label_t *bb);
 
     void insn_noop();
+    llvm::AllocaInst* entry_alloca(llvm::Type *ty, const string &name = "");
     ast::FnDef &get_def() { return node->data.fn_def; }
 };
 

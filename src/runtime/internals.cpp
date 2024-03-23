@@ -47,6 +47,13 @@ void cx_string_concat(CxString *dest, CxString s1, CxString s2) {
     strncat(dest->data, s2.data, s2.size);
 }
 
+void cx_string_delete(CxString *dest) {
+    if (!dest->is_static) {
+        free(dest->data);
+        dest->data = NULL;
+    }
+}
+
 static std::string istringf(const CxAny &v) {
     auto typedata = &v.type->data;
     auto &spec = typedata->int_;
@@ -151,16 +158,17 @@ static string format_cstr(CxString &format, const CxSlice &values) {
     return ss.str();
 }
 
-CxString cx_string_format(CxString format, CxSlice *values) {
+CxString cx_string_format(CxString *format, CxSlice *values) {
     CxString s;
-    auto str = format_cstr(format, *values);
+    auto str = format_cstr(*format, *values);
     s.size = (uint32_t)str.size();
     s.data = (char *)malloc(str.size());
+    s.is_static = false;
     memcpy(s.data, str.data(), s.size);
     return s;
 }
 
-void cx_printf(CxString format, CxSlice *values) { fmt::print(format_cstr(format, *values)); }
+void cx_printf(CxString *format, CxSlice *values) { fmt::print(format_cstr(*format, *values)); }
 
 void cx_print(CxString str) {
     string s(str.data, str.size);
@@ -168,6 +176,15 @@ void cx_print(CxString str) {
 }
 
 void cx_array_new(CxArray *dest) {
+    dest->size = 0;
+    dest->capacity = 0;
+    dest->data = NULL;
+}
+
+void cx_array_delete(CxArray *dest) {
+    if (dest->data) {
+        free(dest->data);
+    }
     dest->size = 0;
     dest->capacity = 0;
     dest->data = NULL;
@@ -202,6 +219,7 @@ CxString cx_string_from_chars(const char *data, uint32_t size) {
     CxString s;
     s.size = size;
     s.data = (char *)malloc(size);
+    s.is_static = false;
     memcpy(s.data, data, size);
     return s;
 }
@@ -213,8 +231,8 @@ void cx_print_string(CxString *message) {
 
 void cx_debug_i(const char *prefix, int value) { fmt::print("{}: {}\n", prefix, value); }
 
-void cx_panic(CxString message) {
-    st.message = {message.data, message.size};
+void cx_panic(CxString *message) {
+    st.message = {message->data, message->size};
     auto bt_output_file = fmemopen(st.trace, sizeof(st.trace), "w");
     set_bt_output_file(bt_output_file);
     backtrace();

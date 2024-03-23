@@ -5,8 +5,9 @@ struct HashBytes {
 
 extern "C" {
   func cx_print(str string);
-  func cx_printf(format string, values *void);
+  func cx_printf(format *string, values *void);
   func cx_array_new(dest *void);
+  func cx_array_delete(dest *void);
   func cx_array_add(dest *void, size uint32) *void;
   func cx_array_write_str(dest *void, str *string);
   func cx_print_any(value *void);
@@ -18,12 +19,13 @@ extern "C" {
   func cx_memset(address *void, v int, n uint32);
   func cx_runtime_start(stack *void);
   func cx_runtime_stop();
-  func cx_panic(message string);
+  func cx_panic(message *string);
   func cx_personality(...) int32;
   func cx_timeout(delay uint64, callback *void);
   func cx_call(fn *void);
-  func cx_string_format(format string, values *void) string;
+  func cx_string_format(format *string, values *void) string;
   func cx_string_from_chars(data *void, size uint32) string;
+  func cx_string_delete(dest *string);
   func cx_hbytes(value *any) HashBytes;
   func cx_map_new() *void;
   func cx_map_delete(data *void);
@@ -46,11 +48,11 @@ func print_int(value uint64) {
 }
 
 func printf(format string, ...values any) {
-  cx_printf(format, &values);
+  cx_printf(&format, &values);
 }
 
 func panic(message string) {
-  cx_panic(message);
+  cx_panic(&message);
 }
 
 func timeout(delay uint64, callback func) {
@@ -58,7 +60,7 @@ func timeout(delay uint64, callback func) {
 }
 
 func stringf(format string, ...values any) string {
-  return cx_string_format(format, &values);
+  return cx_string_format(&format, &values);
 }
 
 func assert(cond bool, message string) {

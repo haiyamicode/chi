@@ -1261,7 +1261,8 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
 bool Resolver::should_destroy(ast::Node *node) {
     auto is_managed = has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED);
     auto is_on_heap = is_managed && node->is_heap_allocated();
-    return !is_on_heap && ChiTypeStruct::get_destructor(node_get_type(node));
+    return !is_on_heap && (node->resolved_type->kind == TypeKind::String ||
+                           ChiTypeStruct::get_destructor(node_get_type(node)));
 }
 
 bool Resolver::should_resolve_fn_body(ResolveScope &scope) {

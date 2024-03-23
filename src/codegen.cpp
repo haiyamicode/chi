@@ -52,6 +52,16 @@ void Function::insn_noop() {
     builder.CreateIntrinsic(llvm::Type::getVoidTy(*ctx->llvm_ctx), llvm::Intrinsic::donothing, {});
 }
 
+llvm::AllocaInst *Function::entry_alloca(llvm::Type *ty, const string &name) {
+    auto &builder = *ctx->llvm_builder.get();
+    auto &block = llvm_fn->getEntryBlock();
+    llvm::IRBuilder<> tmp(&block, block.begin());
+    auto var = tmp.CreateAlloca(ty, 0, name);
+    tmp.CreateMemSet(var, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*ctx->llvm_ctx), 0),
+                     ctx->llvm_module->getDataLayout().getTypeAllocSize(ty), {});
+    return var;
+}
+
 void CodegenContext::init_llvm() {
     llvm_ctx = std::make_unique<llvm::LLVMContext>();
     llvm_module = std::make_unique<llvm::Module>("main", *llvm_ctx);
@@ -350,6 +360,9 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     for (auto var : fn->get_def().cleanup_vars) {
         compile_destruction(fn, get_var(var), var);
     }
+    for (auto ptr : fn->vararg_pointers) {
+        builder.CreateCall(get_system_fn("cx_array_delete")->llvm_fn, {ptr});
+    }
     if (is_entry) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
@@ -406,8 +419,9 @@ llvm::Value *Compiler::compile_string_literal(Function *fn, const string &str) {
                                                llvm::GlobalValue::PrivateLinkage, str_value, "str");
     auto str_len = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), str.size());
     auto str_type_l = compile_type(get_resolver()->get_system_types()->string);
+    auto one = llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1);
     auto str_struct =
-        llvm::ConstantStruct::get((llvm::StructType *)str_type_l, {str_global, str_len});
+        llvm::ConstantStruct::get((llvm::StructType *)str_type_l, {str_global, str_len, one});
     return str_struct;
 }
 
@@ -422,12 +436,6 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
     if (dest_type) {
         value = compile_conversion(fn, src_value, src_type, dest_type);
     }
-    // if (expr->type == ast::NodeType::FnCallExpr && src_type->kind != TypeKind::Void) {
-    //     if (should_destroy_for_type(src_type)) {
-    //         // auto addr = fn->insn_address_of(src_value);
-    //         // compile_destruction_for_type(fn, addr, src_type);
-    //     }
-    // }
     return value;
 }
 
@@ -1180,7 +1188,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     if (is_variadic) {
         auto array_type = fn_spec.params.last();
         va_type = array_type->get_elem();
-        va_ptr = builder.CreateAlloca(compile_type(array_type), nullptr, "vararg_array");
+        va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
         auto init_fn = get_system_fn("cx_array_new");
         builder.CreateCall(init_fn->llvm_fn, {va_ptr});
     }
@@ -1234,6 +1242,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     }
     if (va_ptr) {
         args.push_back(builder.CreateLoad(compile_type(fn_spec.params.last()), va_ptr));
+        fn->vararg_pointers.add(va_ptr);
     }
 
     if (invoke) {
@@ -1268,7 +1277,7 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new)
         auto result = llvm_builder.CreateCall(alloc_fn->llvm_fn, args);
         return result;
     }
-    return llvm_builder.CreateAlloca(var_type_l, nullptr, decl->name);
+    return fn->entry_alloca(var_type_l, decl->name);
 }
 
 void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
@@ -1447,9 +1456,16 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
 void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node *node) {
     auto type = get_chitype(node);
+    if (type->kind == TypeKind::String) {
+        auto &builder = *m_ctx->llvm_builder;
+        auto string_delete = get_system_fn("cx_string_delete");
+        builder.CreateCall(string_delete->llvm_fn, {address});
+        return;
+    }
+
     auto destructor = ChiTypeStruct::get_destructor(type);
     if (destructor) {
-        auto &builder = *m_ctx->llvm_builder.get();
+        auto &builder = *m_ctx->llvm_builder;
         auto destructor_type = get_chitype(destructor->node);
         auto destructor_fn = get_fn(destructor->node);
         auto destructor_type_l = (llvm::FunctionType *)compile_type(destructor_type);
@@ -1599,9 +1615,13 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return llvm::Type::getFloatTy(llvm_ctx);
     }
     case TypeKind::String: {
-        return llvm::StructType::create({compile_type(get_resolver()->get_system_types()->str_lit),
-                                         llvm::Type::getInt32Ty(llvm_ctx)},
-                                        "CxString");
+        return llvm::StructType::create(
+            {
+                compile_type(get_resolver()->get_system_types()->str_lit),
+                llvm::Type::getInt32Ty(llvm_ctx),
+                compile_type(get_system_types()->bool_),
+            },
+            "String");
     }
     case TypeKind::FnLambda: {
         return compile_type(type->data.fn_lambda.internal);
@@ -1646,7 +1666,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx));
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), 16));
-        return llvm::StructType::create(members, "CxAny");
+        return llvm::StructType::create(members, "Any");
     }
     case TypeKind::Result: {
         auto &data = type->data.result;
