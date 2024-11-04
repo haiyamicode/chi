@@ -60,9 +60,7 @@ struct CxHash {
     uint32_t size;
 };
 
-void cx_string_set_data(CxString *dest, const char *data);
-
-void cx_string_concat(CxString *dest, CxString s1, CxString s2);
+void cx_string_copy(CxString *dest, CxString *src);
 
 void cx_string_delete(CxString *dest);
 

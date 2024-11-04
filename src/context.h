@@ -12,18 +12,23 @@ enum ProcessingFlags : uint32_t {
 };
 
 struct CompilationContext : public Context {
-    box<ResolveContext> resolve_ctx;
-    array<box<ast::Package>> packages = {};
+    CompilationContext(const CompilationContext &) = delete;
+    CompilationContext &operator=(const CompilationContext &) = delete;
+
+    array<box<Token>> tokens = {};
     array<box<ast::Node>> ast_nodes = {};
     array<box<ChiType>> types = {};
     array<box<Scope>> scopes = {};
-    array<box<Token>> tokens = {};
     array<box<ast::DeclSpec>> decl_specs = {};
+    array<box<ChiStructMember>> struct_members = {};
+    array<box<InterfaceImpl>> interface_impls = {};
     uint32_t flags = 0;
     array<string> file_extensions = {"xc", "x"};
     string root_path = "";
+    array<box<ast::Package>> packages = {};
+    ResolveContext resolve_ctx;
 
-    CompilationContext() : resolve_ctx(new ResolveContext(this)) {
+    explicit CompilationContext() : resolve_ctx(this) {
         auto rootenv = std::getenv("CHI_ROOT");
         if (rootenv) {
             root_path = rootenv;
@@ -46,7 +51,7 @@ struct CompilationContext : public Context {
 
     ast::Package *add_package() { return packages.emplace(new ast::Package())->get(); }
 
-    Resolver create_resolver() { return {resolve_ctx.get()}; }
+    Resolver create_resolver() { return {&resolve_ctx}; }
 
     Token *create_token() { return tokens.emplace(new Token())->get(); }
 
@@ -59,6 +64,14 @@ struct CompilationContext : public Context {
 
     string get_stdlib_path(string path) {
         return fs::path(root_path) / fs::path("src") / fs::path("stdlib") / path;
+    }
+
+    ChiStructMember *create_struct_member() {
+        return struct_members.emplace(new ChiStructMember())->get();
+    }
+
+    InterfaceImpl *create_interface_impl() {
+        return interface_impls.emplace(new InterfaceImpl())->get();
     }
 };
 } // namespace cx

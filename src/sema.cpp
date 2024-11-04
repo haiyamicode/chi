@@ -7,14 +7,17 @@
 
 #include "sema.h"
 #include "ast.h"
+#include "context.h"
 
 using namespace cx;
 
-ChiStructMember *ChiTypeStruct::add_member(const string &name, ast::Node *node,
+ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &name, ast::Node *node,
                                            ChiType *resolved_type) {
-    auto member = members.emplace(new ChiStructMember())->get();
+    auto member = allocator->create_struct_member();
     member->node = node;
     member->resolved_type = resolved_type;
+    members.add(member);
+
     if (node->type == ast::NodeType::FnDef) {
         member->method_index = vtable_size++;
     } else {
@@ -30,11 +33,12 @@ ChiStructMember *ChiTypeStruct::find_member(const string &name) {
     return found ? *found : nullptr;
 }
 
-InterfaceImpl *ChiTypeStruct::add_interface(ChiType *iface, ChiType *impl) {
-    auto entry = interfaces.emplace(new InterfaceImpl())->get();
+InterfaceImpl *ChiTypeStruct::add_interface(Context *allocator, ChiType *iface, ChiType *impl) {
+    auto entry = allocator->create_interface_impl();
     entry->interface_type = iface;
     entry->impl_type = impl;
     interface_table[iface] = entry;
+    interfaces.add(entry);
     return entry;
 }
 

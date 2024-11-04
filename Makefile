@@ -22,11 +22,17 @@ install:
 asm: build
 	$(CHI) -s $(INPUT_FILE) 
 
-run: build
+compile_example: build
 	$(CHI) $(INPUT_FILE) -o local/test -w local/build
 
-debug: build
+run_example: compile_example
+	./local/test
+
+compile_example_debug: build
 	$(CHI) -d $(INPUT_FILE) -o local/test -w local/build
+
+run_example_debug: compile_example_debug
+	./local/test
 
 ast: build
 	$(CHI) -a $(INPUT_FILE)

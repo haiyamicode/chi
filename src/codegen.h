@@ -40,6 +40,7 @@ struct Function {
     llvm::Value *return_value = nullptr;
     label_t *cleanup_landing_label = nullptr;
     label_t *return_label = nullptr;
+    ChiType *container_type = nullptr;
     ChiTypeSubtype *container_subtype = nullptr;
     ChiType *fn_type = nullptr;
     label_t *next_end_label = nullptr;
@@ -74,8 +75,12 @@ struct Function {
     void use_label(label_t *bb);
 
     void insn_noop();
-    llvm::AllocaInst* entry_alloca(llvm::Type *ty, const string &name = "");
-    ast::FnDef &get_def() { return node->data.fn_def; }
+    llvm::AllocaInst *entry_alloca(llvm::Type *ty, const string &name = "");
+
+    ast::FnDef *get_def() {
+        assert(node && node->type == ast::NodeType::FnDef);
+        return &node->data.fn_def;
+    }
 };
 
 struct CompilationSettings {
@@ -90,29 +95,32 @@ struct InvokeInfo {
 };
 
 struct CodegenContext {
+    CodegenContext(const CodegenContext &) = delete;
+    CodegenContext &operator=(const CodegenContext &) = delete;
+
     CompilationSettings settings;
     CompilationContext *compilation_ctx = nullptr;
     Resolver resolver;
 
-    array<box<Function>> functions;
-    array<llvm::Type *> types;
-    array<box<string>> strings;
-    array<Function *> pending_fns;
+    array<box<Function>> functions = {};
+    array<llvm::Type *> types = {};
+    array<box<string>> strings = {};
+    array<Function *> pending_fns = {};
 
     map<ast::Node *, llvm::Value *> var_table = {};
     map<TypeId, llvm::Type *> type_table = {};
     map<TypeId, box<TypeInfo>> info_table = {};
-    map<ast::Node *, Function *> function_table = {};
+    map<string, Function *> function_table = {};
     map<string, Function *> system_functions = {};
     map<ChiType *, llvm::Value *> typeinfo_table = {};
     map<string, llvm::Type *> anon_type_table = {};
     map<InterfaceImpl *, llvm::Value *> vtable_table = {};
 
     // llvm
-    box<llvm::LLVMContext> llvm_ctx;
-    box<llvm::Module> llvm_module;
-    box<llvm::IRBuilder<>> llvm_builder;
-    box<llvm::DIBuilder> dbg_builder;
+    box<llvm::LLVMContext> llvm_ctx = {};
+    box<llvm::Module> llvm_module = {};
+    box<llvm::IRBuilder<>> llvm_builder = {};
+    box<llvm::DIBuilder> dbg_builder = {};
     llvm::DICompileUnit *dbg_cu = nullptr;
     array<llvm::DIScope *> dbg_scopes = {};
 
@@ -143,7 +151,7 @@ struct CompiledVtable {
 };
 
 class Compiler {
-    CodegenContext *m_ctx;
+    CodegenContext *m_ctx = nullptr;
     Function *m_fn = nullptr;
 
     llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
@@ -179,6 +187,10 @@ class Compiler {
     llvm::Value *&get_var(ast::Node *node) { return m_ctx->var_table.at(node); }
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
+
+    llvm::Type *get_llvm_ptr_type();
+
+    void compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type);
 
     llvm::Value *compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
                                     ChiStructMember *member);

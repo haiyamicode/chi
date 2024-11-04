@@ -51,6 +51,9 @@ struct Module {
     optional<string> source = {};
     array<Module *> imports = {};
 
+    Module() = default;
+    NO_COPY(Module);
+
     string full_path() const { return (fs::path(path) / filename).string(); }
 
     static ModuleKind kind_from_extension(const string &ext) {
@@ -231,7 +234,7 @@ struct DotExpr {
     ChiStructMember *resolved_member = nullptr;
     int64_t resolved_value = 0;
     Node *resolved_decl = nullptr;
-    bool resolve_variant = false;
+    bool should_resolve_variant = false;
 };
 
 struct SubtypeExpr {
@@ -357,6 +360,9 @@ struct Node {
     int index = 0;
     Node *parent = nullptr;
 
+    Node(const Node &) = delete;
+    Node &operator=(const Node &) = delete;
+
     union NodeData {
         Root root;
         FnProto fn_proto;
@@ -396,8 +402,6 @@ struct Node {
 
         ~NodeData() {}
     } data;
-
-    Node(const Node &) = delete;
 
 #define _AST_CASE_INITIALIZE_FIELD(field, type)                                                    \
     case NodeType::type:                                                                           \
@@ -452,23 +456,64 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_DESTROY_FIELD(case_expr, CaseExpr)
         default:
+            memset(&data, 0, sizeof(data));
+            break;
+        }
+    }
+
+#define _AST_CASE_CLONE_FIELD(field, type)                                                         \
+    case NodeType::type:                                                                           \
+        b->data.field = data.field;                                                                \
+        break;
+
+    void clone(ast::Node *b) {
+        b->type = type;
+        b->token = token;
+        b->module = module;
+        b->name = name;
+        b->resolved_type = resolved_type;
+        b->orig_type = orig_type;
+        b->escape = escape;
+        b->parent_fn = parent_fn;
+        b->index = index;
+        b->parent = parent;
+
+        switch (type) {
+            _AST_CASE_CLONE_FIELD(root, Root)
+            _AST_CASE_CLONE_FIELD(fn_proto, FnProto)
+            _AST_CASE_CLONE_FIELD(fn_def, FnDef)
+            _AST_CASE_CLONE_FIELD(block, Block)
+            _AST_CASE_CLONE_FIELD(fn_call_expr, FnCallExpr)
+            _AST_CASE_CLONE_FIELD(struct_decl, StructDecl)
+            _AST_CASE_CLONE_FIELD(typedef_decl, TypedefDecl)
+            _AST_CASE_CLONE_FIELD(enum_member, EnumMember)
+            _AST_CASE_CLONE_FIELD(construct_expr, ConstructExpr)
+            _AST_CASE_CLONE_FIELD(subtype_expr, SubtypeExpr)
+            _AST_CASE_CLONE_FIELD(extern_decl, ExternDecl)
+            _AST_CASE_CLONE_FIELD(import_decl, ImportDecl)
+            _AST_CASE_CLONE_FIELD(decl_attribute, DeclAttribute)
+            _AST_CASE_CLONE_FIELD(switch_expr, SwitchExpr)
+            _AST_CASE_CLONE_FIELD(case_expr, CaseExpr)
+        default:
             break;
         }
     }
 
     bool is_heap_allocated() { return escape.escaped; }
 
-    Node *get_decl(ChiTypeSubtype *variant_input = nullptr) {
+    Node *get_decl(optional<TypeId> container_type_id = std::nullopt) {
         switch (type) {
         case NodeType::VarDecl:
             return this;
         case NodeType::Identifier:
             return data.identifier.decl->get_decl();
         case NodeType::DotExpr: {
-            if (data.dot_expr.resolve_variant && variant_input) {
-                auto variant_member = data.dot_expr.resolved_member->variants[variant_input];
-                assert(variant_member);
-                return variant_member->node;
+            if (data.dot_expr.should_resolve_variant && container_type_id.has_value()) {
+                auto parent_id = *container_type_id;
+                auto member_name = data.dot_expr.field->get_name();
+                auto base_member = data.dot_expr.resolved_member->root_variant;
+                auto variant_member = base_member->variants.get(parent_id);
+                return (*variant_member)->node;
             }
             auto decl = data.dot_expr.resolved_decl;
             if (decl) {

@@ -17,9 +17,9 @@ namespace cx {
 enum class BuildMode { Run, Executable, AST, Fuzz };
 
 class Builder {
+    CompilationContext m_ctx;
     box<codegen::CodegenContext> m_codegen_ctx;
     codegen::Compiler create_codegen_compiler();
-    CompilationContext m_ctx;
 
   public:
     string output_file_name;
@@ -28,6 +28,8 @@ class Builder {
     BuildMode build_mode = BuildMode::Run;
 
     Builder();
+    Builder(const Builder &) = delete;
+    Builder &operator=(const Builder &) = delete;
 
     CompilationContext *get_context() { return &m_ctx; }
 

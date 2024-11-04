@@ -10,6 +10,7 @@ extern "C" {
   func cx_array_delete(dest *void);
   func cx_array_add(dest *void, size uint32) *void;
   func cx_array_write_str(dest *void, str *string);
+  func cx_array_reserve(dest *void, elem_size uint32, new_cap uint32);
   func cx_print_any(value *void);
   func cx_print_number(value uint64);
   func cx_print_string(str *string);
@@ -26,6 +27,7 @@ extern "C" {
   func cx_string_format(format *string, values *void) string;
   func cx_string_from_chars(data *void, size uint32) string;
   func cx_string_delete(dest *string);
+  func cx_string_copy(dest *string, src *string);
   func cx_hbytes(value *any) HashBytes;
   func cx_map_new() *void;
   func cx_map_delete(data *void);
@@ -78,14 +80,21 @@ struct Array<T> {
 		cx_array_new(this);
 	}
 
+  func delete() {
+		delete this.data;
+	}
+
 	func add(item T) {
 		var ptr = cx_array_add(this, sizeof T) as *T;
 		*ptr = item;
 	}
 
-	func delete() {
-		delete this.data;
-	}
+  func clear() {
+    if (this.data) {
+      delete this.data;
+    }
+    cx_array_new(this);
+  }
 
   @[std.ops.Index]
 	func index(index uint32) &T {
@@ -116,6 +125,16 @@ struct Array<T> {
     }
     buf.write("]");
     return buf.to_string();
+  }
+
+  @[std.ops.Copy]
+  func copy() Array<T> {
+    var a Array<T> = .{};
+    cx_array_reserve(&a, sizeof T, this.capacity);
+    for this: item {
+      a.add(item!);
+    }
+    return a;
   }
 }
 

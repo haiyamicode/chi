@@ -32,8 +32,12 @@ func f() {
     f2();
 }
 
-func main() {
+func test_foo() {
     var foo1 Foo = .{1};
     try f();
     println("finished");
+}
+
+func main() {
+    test_foo();
 }

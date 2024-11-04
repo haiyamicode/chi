@@ -17,6 +17,9 @@ struct Context {
     virtual ChiType *create_type(TypeKind kind) = 0;
     virtual Scope *create_scope(Scope *parent) = 0;
     virtual Token *create_token() = 0;
+    virtual ChiStructMember *create_struct_member() = 0;
+    virtual InterfaceImpl *create_interface_impl() = 0;
+
     virtual ast::Module *module_from_path(ast::Package *package, const string &path,
                                           const string &base_path = "", bool import = false) = 0;
     virtual ast::Module *process_source(ast::Package *package, io::Buffer *src,
@@ -51,6 +54,9 @@ struct SystemTypes {
 };
 
 struct ResolveContext {
+    ResolveContext(const ResolveContext &) = delete;
+    ResolveContext &operator=(const ResolveContext &) = delete;
+
     Context *allocator = nullptr;
     array<ast::Node *> builtins = {};
     SystemTypes system_types = {};
@@ -62,7 +68,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> promise_of = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
 
-    ResolveContext(Context *allocator) { this->allocator = allocator; }
+    explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
 
 struct ResolveScope {
@@ -79,9 +85,10 @@ struct ResolveScope {
     ast::Block *block = nullptr;
     bool is_lhs = false;
 
-    ast::FnDef &parent_fn_def() {
+    ast::FnDef *parent_fn_def() {
         assert(parent_fn_node);
-        return parent_fn_node->data.fn_def;
+        assert(parent_fn_node->type == ast::NodeType::FnDef);
+        return &parent_fn_node->data.fn_def;
     }
 
     ResolveScope set_parent_fn(ChiType *fn) const;
@@ -112,6 +119,8 @@ enum ResolveFlag : uint32_t {
 class Resolver {
     ResolveContext *m_ctx = nullptr;
     ast::Module *m_module = nullptr;
+
+    Context *get_allocator() { return m_ctx->allocator; }
 
     ChiType *create_type(TypeKind kind);
 
@@ -157,8 +166,6 @@ class Resolver {
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);
 
-    ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
-
     bool should_resolve_fn_body(ResolveScope &scope);
 
     bool should_destroy(ast::Node *node);
@@ -201,6 +208,10 @@ class Resolver {
 
     string to_string(TypeKind kind, ChiType::Data *data);
 
+    string resolve_global_id(ast::Node *node);
+
+    string resolve_qualified_name(ast::Node *node);
+
     ChiType *to_value_type(ChiType *type);
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
@@ -242,6 +253,8 @@ class Resolver {
     ast::Node *find_root_decl(ast::Node *node);
 
     bool compare_impl_type(ChiType *base, ChiType *impl);
+
+    ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
 };
 
 class ScopeResolver {

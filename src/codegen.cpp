@@ -8,13 +8,14 @@ typedef llvm::ArrayRef<llvm::Type *> TypeArray;
 
 CodegenContext::~CodegenContext() {}
 CodegenContext::CodegenContext(CompilationContext *compilation_ctx)
-    : compilation_ctx(compilation_ctx), resolver(compilation_ctx->resolve_ctx.get()) {
+    : compilation_ctx(compilation_ctx), resolver(&compilation_ctx->resolve_ctx) {
     init_llvm();
 }
 
 Function *CodegenContext::add_fn(ast::Node *node, Function *fn) {
     functions.emplace(fn)->get();
-    function_table[node] = fn;
+    auto id = resolver.resolve_global_id(node);
+    function_table[id] = fn;
     return fn;
 }
 
@@ -27,12 +28,7 @@ llvm::StructType *CodegenContext::get_caught_result_type() {
 Function::Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node)
     : ctx(ctx), llvm_fn(llvm_fn), node(node) {
     if (node) {
-        if (node->data.fn_def.is_instance_method()) {
-            auto container_type = node->resolved_type->data.fn.container_ref->get_elem();
-            qualified_name = ctx->resolver.to_string(container_type) + "." + node->name;
-        } else {
-            qualified_name = node->name;
-        }
+        qualified_name = ctx->resolver.resolve_qualified_name(node);
     }
 }
 
@@ -82,6 +78,11 @@ ChiType *Compiler::eval_type(ChiType *type) {
         return m_fn->fn_type->data.fn.container_ref;
     }
     return type;
+}
+
+llvm::Type *Compiler::get_llvm_ptr_type() {
+    auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
+    return llvm::Type::getInt8PtrTy(llvm_ctx);
 }
 
 ChiType *Compiler::get_chitype(ast::Node *node) {
@@ -170,6 +171,9 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node);
             if (subtype) {
                 fn->container_subtype = &subtype->data.subtype;
+                fn->container_type = subtype;
+            } else {
+                fn->container_type = type;
             }
             m_ctx->pending_fns.add(fn);
         }
@@ -311,7 +315,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         auto param = proto.params[idx];
         auto llvm_param = fn->llvm_fn->getArg(i);
         auto var = compile_alloc(fn, param);
-        builder.CreateStore(llvm_param, var);
+        compile_copy(fn, llvm_param, var, get_chitype(param));
         add_var(param, var);
 
         // debug info
@@ -351,13 +355,13 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (fn_def.body) {
         compile_block(fn, node, fn_def.body, return_b);
     }
-    if (fn->get_def().has_try_or_cleanup()) {
+    if (fn->get_def()->has_try_or_cleanup()) {
         fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
     }
 
     // clean up & return
     fn->use_label(return_b);
-    for (auto var : fn->get_def().cleanup_vars) {
+    for (auto var : fn->get_def()->cleanup_vars) {
         compile_destruction(fn, get_var(var), var);
     }
     for (auto ptr : fn->vararg_pointers) {
@@ -381,7 +385,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         landing->setCleanup(true);
         builder.CreateExtractValue(landing, {0});
         builder.CreateExtractValue(landing, {1});
-        for (auto var : fn->get_def().cleanup_vars) {
+        for (auto var : fn->get_def()->cleanup_vars) {
             compile_destruction(fn, get_var(var), var);
         }
         fn->insn_noop();
@@ -452,10 +456,10 @@ void Compiler::compile_vtables(ChiType *type) {
     int32_t count = 0;
     std::vector<llvm::Constant *> methods;
     assert(type->kind == TypeKind::Struct);
-    for (auto &impl : type->data.struct_.interfaces) {
+    for (auto impl : type->data.struct_.interfaces) {
         auto vtable = vtables.add({});
         vtable->offset = count;
-        vtable->impl = impl.get();
+        vtable->impl = impl;
         for (auto &method : impl->impl_members) {
             if (method->is_method()) {
                 auto method_fn = get_fn(method->node);
@@ -465,7 +469,7 @@ void Compiler::compile_vtables(ChiType *type) {
         }
     }
 
-    auto vtable_type_l = llvm::ArrayType::get(llvm::Type::getInt8PtrTy(*m_ctx->llvm_ctx), count);
+    auto vtable_type_l = llvm::ArrayType::get(get_llvm_ptr_type(), count);
     auto vtable_data_l = llvm::ConstantArray::get(vtable_type_l, methods);
     auto global = new llvm::GlobalVariable(*m_ctx->llvm_module, vtable_type_l, true,
                                            llvm::GlobalValue::PrivateLinkage, vtable_data_l,
@@ -678,7 +682,7 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op) {
 llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
-        if (fn->get_def().cleanup_vars.size) {
+        if (fn->get_def()->cleanup_vars.size) {
             // return compile_fn_call(fn, expr);
             InvokeInfo invoke;
             auto next_label = fn->new_label("_invoke_next");
@@ -783,7 +787,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto value = compile_assignment_value(fn, data.op2, data.op1);
             assert(ref.address);
             if (!data.op2->escape.moved) {
-                builder.CreateStore(value, ref.address);
+                compile_copy(fn, value, ref.address, get_chitype(data.op2));
             }
             return value;
         }
@@ -945,6 +949,31 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         panic("not implemented: {}", PRINT_ENUM(expr->type));
     }
     return nullptr;
+}
+
+void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    switch (type->kind) {
+    case TypeKind::String: {
+        builder.CreateStore(value, dest);
+        auto copy_fn = get_system_fn("cx_string_copy");
+        builder.CreateCall(copy_fn->llvm_fn, {dest, dest});
+        break;
+    }
+    // case TypeKind::Array:
+    // case TypeKind::Struct: {
+    //     auto sty = get_resolver()->resolve_struct_type(type);
+    //     auto copy = sty->member_intrinsics[IntrinsicSymbol::Copy];
+    //     if (copy) {
+    //         builder.CreateCall(get_fn(copy->node)->llvm_fn,
+    //                            {ptr, builder.CreateLoad(iter_type_l, it)}, "_iter_item");
+    //     }
+    // }
+    default:
+        builder.CreateStore(value, dest);
+        break;
+    }
 }
 
 void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *type,
@@ -1175,7 +1204,9 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         return builder.CreateCall(callee, args);
     }
 
-    auto fn_decl = data.fn_ref_expr->get_decl(fn->container_subtype);
+    auto container_type_id =
+        fn->container_type ? std::optional{fn->container_type->id} : std::nullopt;
+    auto fn_decl = data.fn_ref_expr->get_decl(container_type_id);
     assert(fn_decl->type == ast::NodeType::FnDef);
     auto fn_type = get_chitype(fn_decl);
     auto &fn_spec = fn_type->data.fn;
@@ -1222,7 +1253,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         args.push_back(ctn_ptr);
     }
     if (!callee.getCallee()) {
-        callee = get_fn(fn_decl)->llvm_fn;
+        auto callee_fn = get_fn(fn_decl);
+        callee = callee_fn->llvm_fn;
     }
 
     for (int i = 0; i < data.args.size; i++) {
@@ -1297,7 +1329,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         add_var(stmt, var);
         auto value = compile_assignment_to_type(fn, data.expr, get_chitype(stmt));
         if (!data.expr->escape.moved) {
-            llvm_builder.CreateStore(value, var);
+            compile_copy(fn, value, var, get_chitype(stmt));
         }
         break;
     }
@@ -1517,7 +1549,14 @@ Function *Compiler::add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn
     return m_ctx->add_fn(node, fn);
 }
 
-Function *Compiler::get_fn(ast::Node *node) { return m_ctx->function_table.at(node); }
+Function *Compiler::get_fn(ast::Node *node) {
+    auto id = get_resolver()->resolve_global_id(node);
+    auto entry = m_ctx->function_table.get(id);
+    if (!entry) {
+        panic("Function not found: {}", id);
+    }
+    return *entry;
+}
 
 Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
     auto flags = fn->data.fn_def.decl_spec->flags;
@@ -1563,9 +1602,10 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 void Compiler::compile_extern(ast::Node *node) {
     auto &data = node->data.extern_decl;
     for (auto member : data.members) {
-        auto fn_data = member->data.fn_def;
+        auto &fn_data = member->data.fn_def;
         auto fn = compile_fn_proto(fn_data.fn_proto, member);
-        m_ctx->function_table.emplace(member, fn);
+        auto id = get_resolver()->resolve_global_id(member);
+        m_ctx->function_table.emplace(id, fn);
     }
 }
 
@@ -1656,15 +1696,15 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         auto &data = type->data.array;
         auto elem_type_l = compile_type(data.elem);
         std::vector<llvm::Type *> members;
-        members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx)); // void *data
-        members.push_back(llvm::Type::getInt32Ty(llvm_ctx));   // uint32_t size
-        members.push_back(llvm::Type::getInt32Ty(llvm_ctx));   // uint32_t capacity
-        members.push_back(llvm::Type::getInt8Ty(llvm_ctx));    // uint8_t flags
+        members.push_back(get_llvm_ptr_type());              // void *data
+        members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t size
+        members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t capacity
+        members.push_back(llvm::Type::getInt8Ty(llvm_ctx));  // uint8_t flags
         return llvm::StructType::create(members, get_resolver()->to_string(type));
     }
     case TypeKind::Any: {
         std::vector<llvm::Type *> members;
-        members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx));
+        members.push_back(get_llvm_ptr_type());
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), 16));
         return llvm::StructType::create(members, "Any");
     }
@@ -1676,9 +1716,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         auto &data = type->data.struct_;
         if (data.kind == ContainerKind::Interface) {
             std::vector<llvm::Type *> members;
-            members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx)); // typeinfo
-            members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx)); // data
-            members.push_back(llvm::Type::getInt8PtrTy(llvm_ctx)); // vtable
+            members.push_back(get_llvm_ptr_type()); // typeinfo
+            members.push_back(get_llvm_ptr_type()); // data
+            members.push_back(get_llvm_ptr_type()); // vtable
             return llvm::StructType::create(members, get_resolver()->to_string(type));
         }
         if (!data.fields.size) {
@@ -1692,7 +1732,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     }
     case TypeKind::Error: {
         // TODO: implement actual error type
-        return llvm::Type::getInt8PtrTy(llvm_ctx);
+        return get_llvm_ptr_type();
     }
     case TypeKind::Promise: {
         return compile_type(type->data.promise.internal);

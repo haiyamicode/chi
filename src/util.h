@@ -41,6 +41,10 @@ namespace fs = std::filesystem;
     const auto output(get_if<type>(&value));                                                       \
     output
 
+#define NO_COPY(type)                                                                              \
+    type(const type &) = delete;                                                                   \
+    type &operator=(const type &) = delete;
+
 template <typename... Args> static inline void panic(const char *format, const Args &...args) {
     fmt::print(format, args...);
     fmt::print("\n");
@@ -80,18 +84,20 @@ static inline std::string string_replace(std::string subject, const std::string 
     return subject;
 }
 
-// part of this is from zig by Andrew Kelley
-// http://opensource.org/licenses/MIT
 template <typename T> struct array {
     size_t size = 0;
     size_t capacity = 0;
     T *items = nullptr;
 
     ~array() {
+        if (!items) {
+            return;
+        }
         for (size_t i = 0; i < size; i++) {
             items[i].~T();
         }
         free(items);
+        items = nullptr;
     }
 
     array() {}

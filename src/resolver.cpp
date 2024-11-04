@@ -85,6 +85,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.iter.Begin"] = IntrinsicSymbol::IterBegin;
     m_ctx->intrinsic_symbols["std.iter.Next"] = IntrinsicSymbol::IterNext;
     m_ctx->intrinsic_symbols["std.iter.End"] = IntrinsicSymbol::IterEnd;
+    m_ctx->intrinsic_symbols["std.ops.Copy"] = IntrinsicSymbol::Copy;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -288,7 +289,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto capture = data.captures[i];
                 auto name = fmt::format("capture_{}", i);
                 bstruct_data.add_member(
-                    capture->name, get_dummy_var(name),
+                    get_allocator(), capture->name, get_dummy_var(name),
                     get_pointer_type(capture->resolved_type, TypeKind::Reference));
             }
 
@@ -519,7 +520,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.expr->type != NodeType::FnCallExpr) {
             error(data.expr, errors::TRY_NOT_CALL);
         }
-        scope.parent_fn_def().has_try = true;
+        scope.parent_fn_def()->has_try = true;
         return get_result_type(expr_type, get_system_types()->error);
     }
     case NodeType::CastExpr: {
@@ -581,8 +582,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         data.resolved_member = member;
         data.resolved_decl = member->node;
-        if (resolve_struct_type(expr_type)->is_generic()) {
-            data.resolve_variant = true;
+        auto expr_struct = resolve_struct_type(expr_type);
+        if (expr_struct->is_generic()) {
+            data.should_resolve_variant = true;
         }
         return member->resolved_type;
     }
@@ -747,8 +749,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             for (auto member : data.members) {
                 if (member->type == NodeType::VarDecl && !member->data.var_decl.initialized_at) {
-                    auto not_needed = member->data.var_decl.is_embed &&
-                                      ChiTypeStruct::get_constructor(struct_type);
+                    auto not_needed =
+                        member->data.var_decl.is_embed && get_struct_member(struct_type, "new");
                     if (!not_needed) {
                         error(member, errors::UNINITIALIZED_FIELD, member->name,
                               to_string(struct_type));
@@ -1000,12 +1002,30 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
 
     if (node->type == NodeType::VarDecl || node->type == NodeType::ParamDecl) {
         if (scope.parent_fn_node && should_destroy(node)) {
-            scope.parent_fn_def().cleanup_vars.add(node);
+            scope.parent_fn_def()->cleanup_vars.add(node);
         }
     }
     if (!result)
         return nullptr;
     return result;
+}
+
+string Resolver::resolve_global_id(ast::Node *node) {
+    return fmt::format("{}:{}", node->id, resolve_qualified_name(node));
+}
+
+string Resolver::resolve_qualified_name(ast::Node *node) {
+    switch (node->type) {
+    case NodeType::FnDef:
+        if (node->data.fn_def.is_instance_method()) {
+            auto container_type = node->resolved_type->data.fn.container_ref->get_elem();
+            return to_string(container_type) + "." + node->name;
+        }
+        break;
+    default:
+        break;
+    }
+    return node->name;
 }
 
 string Resolver::to_string(ChiType *type) {
@@ -1166,7 +1186,7 @@ string Resolver::resolve_term_string(ast::Node *term) {
 ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node *node,
                                                  ResolveScope &scope) {
     auto &struct_ = struct_type->data.struct_;
-    auto member = struct_.add_member(node->name, node, nullptr);
+    auto member = struct_.add_member(get_allocator(), node->name, node, nullptr);
     if (node->type == NodeType::VarDecl) {
         member->resolved_type = resolve(node, scope);
         node->data.var_decl.resolved_field = member;
@@ -1197,7 +1217,7 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
     auto &derived = derived_type->data.struct_;
     InterfaceImpl *iface_impl = nullptr;
     if (base.kind == ContainerKind::Interface) {
-        iface_impl = derived.add_interface(base_type, derived_type);
+        iface_impl = derived.add_interface(get_allocator(), base_type, derived_type);
     }
     for (auto &base_member : base.members) {
         auto node = base_member->node;
@@ -1205,7 +1225,8 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
             auto child_method = derived.find_member(node->name);
             if (node->data.fn_def.body) {
                 if (!child_method) {
-                    child_method = derived.add_member(node->name, node, base_member->resolved_type);
+                    child_method = derived.add_member(get_allocator(), node->name, node,
+                                                      base_member->resolved_type);
                     child_method->orig_parent = base_type;
                 }
             } else if (!child_method) {
@@ -1224,7 +1245,8 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
         if (base_member->is_field()) {
             auto child_field = derived.find_member(node->name);
             if (!child_field) {
-                child_field = derived.add_member(node->name, node, base_member->resolved_type);
+                child_field = derived.add_member(get_allocator(), node->name, node,
+                                                 base_member->resolved_type);
                 child_field->orig_parent = base_type;
                 child_field->parent_member = base_node->data.var_decl.resolved_field;
                 child_field->field_index = base_member->field_index;
@@ -1262,7 +1284,7 @@ bool Resolver::should_destroy(ast::Node *node) {
     auto is_managed = has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED);
     auto is_on_heap = is_managed && node->is_heap_allocated();
     return !is_on_heap && (node->resolved_type->kind == TypeKind::String ||
-                           ChiTypeStruct::get_destructor(node_get_type(node)));
+                           get_struct_member(node_get_type(node), "delete"));
 }
 
 bool Resolver::should_resolve_fn_body(ResolveScope &scope) {
@@ -1340,7 +1362,13 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
 }
 
 ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string &field_name) {
+    if (!struct_type) {
+        return nullptr;
+    }
     auto sty = resolve_struct_type(struct_type);
+    if (!sty) {
+        return nullptr;
+    }
     return sty->find_member(field_name);
 }
 
@@ -1391,10 +1419,11 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
 
     auto stype = create_type(TypeKind::Struct);
     auto &struct_ = stype->data.struct_;
-    struct_.add_member("data", get_dummy_var("data"), get_pointer_type(elem));
-    struct_.add_member("size", get_dummy_var("size"), get_system_types()->uint32);
-    struct_.add_member("capacity", get_dummy_var("capacity"), get_system_types()->uint32);
-    struct_.add_member("flags", get_dummy_var("flags"), get_system_types()->uint8);
+    struct_.add_member(get_allocator(), "data", get_dummy_var("data"), get_pointer_type(elem));
+    struct_.add_member(get_allocator(), "size", get_dummy_var("size"), get_system_types()->uint32);
+    struct_.add_member(get_allocator(), "capacity", get_dummy_var("capacity"),
+                       get_system_types()->uint32);
+    struct_.add_member(get_allocator(), "flags", get_dummy_var("flags"), get_system_types()->uint8);
 
     struct_.kind = ContainerKind::Struct;
     type->data.promise.internal = stype;
@@ -1415,7 +1444,7 @@ ChiType *Resolver::get_promise_type(ChiType *value) {
     type->data.promise.internal = stype;
     TypeList cb_params = {};
     struct_.add_member(
-        "callback", get_dummy_var("callback"),
+        get_allocator(), "callback", get_dummy_var("callback"),
         get_lambda_for_fn(get_fn_type(get_system_types()->void_, &cb_params, false)));
     struct_.kind = ContainerKind::Struct;
     return type;
@@ -1465,9 +1494,11 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
     struct_type->display_name = "Lambda<" + to_string(fn_type) + ">" + "::Internal";
 
     struct_.kind = ContainerKind::Struct;
-    struct_.add_member("ptr", get_dummy_var("ptr"), get_pointer_type(get_system_types()->void_));
-    struct_.add_member("size", get_dummy_var("size"), get_system_types()->uint32);
-    struct_.add_member("data", get_dummy_var("data"), get_pointer_type(get_system_types()->void_));
+    struct_.add_member(get_allocator(), "ptr", get_dummy_var("ptr"),
+                       get_pointer_type(get_system_types()->void_));
+    struct_.add_member(get_allocator(), "size", get_dummy_var("size"), get_system_types()->uint32);
+    struct_.add_member(get_allocator(), "data", get_dummy_var("data"),
+                       get_pointer_type(get_system_types()->void_));
 
     lambda->data.fn_lambda.internal = struct_type;
 
@@ -1514,8 +1545,8 @@ ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
     struct_.node = nullptr;
 
     auto err_optional = get_pointer_type(err, TypeKind::Optional);
-    struct_.add_member("err", dummy_node, err_optional);
-    struct_.add_member("value", dummy_node, value);
+    struct_.add_member(get_allocator(), "err", dummy_node, err_optional);
+    struct_.add_member(get_allocator(), "value", dummy_node, value);
     return result_type;
 }
 
@@ -1657,6 +1688,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     if (data.resolved_struct) {
         return data.resolved_struct;
     }
+
     auto &base = data.generic->data.struct_;
     auto sty = create_type(TypeKind::Struct);
     sty->name = to_string(subtype);
@@ -1664,7 +1696,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     auto &scpy = sty->data.struct_;
     scpy.kind = base.kind;
     scpy.node = base.node;
-    for (auto &member : base.members) {
+    for (auto member : base.members) {
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
         if (member->is_method()) {
@@ -1672,22 +1704,30 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         }
 
         type = type_placeholders_sub(type, &data);
-        auto node = create_node(member->node->type);
+        auto node = get_allocator()->create_node(member->node->type);
+        member->node->clone(node);
         node->name = member->node->name;
         node->token = member->node->token;
         node->resolved_type = type;
-        memcpy(&node->data, &member->node->data, sizeof(member->node->data));
 
         if (member->node->type == NodeType::FnDef) {
             node->data.fn_def.is_generated = true;
         }
 
-        auto new_member = scpy.add_member(member->get_name(), node, type);
+        auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type);
         if (member->symbol != IntrinsicSymbol::None) {
             scpy.member_intrinsics[member->symbol] = new_member;
         }
-        member->variants[&data] = new_member;
+        member->variants[subtype->id] = new_member;
+        new_member->root_variant = member->root_variant ? member->root_variant : member;
     }
+
+    for (auto type_arg : data.args) {
+        if (type_arg->is_placeholder) {
+            scpy.type_params.add(type_arg);
+        }
+    }
+
     scpy.intrinsics = base.intrinsics;
     data.resolved_struct = sty;
     return sty;

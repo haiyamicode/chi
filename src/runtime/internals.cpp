@@ -54,6 +54,16 @@ void cx_string_delete(CxString *dest) {
     }
 }
 
+void cx_string_copy(CxString *dest, CxString *src) {
+    if (src->is_static) {
+        return;
+    }
+    string s(src->data, src->size);
+    dest->data = (char *)malloc(s.size());
+    memcpy(dest->data, s.data(), s.size());
+    dest->size = s.size();
+}
+
 static std::string istringf(const CxAny &v) {
     auto typedata = &v.type->data;
     auto &spec = typedata->int_;
@@ -90,7 +100,7 @@ static std::string istringf(const CxAny &v) {
     return "";
 }
 
-static std::string stringf(const CxAny &v) {
+static std::string get_value_display(const CxAny &v) {
     switch ((TypeKind)v.type->kind) {
     case TypeKind::String: {
         auto s = (CxString *)&v.data;
@@ -117,7 +127,7 @@ static std::string stringf(const CxAny &v) {
     }
 }
 
-void cx_print_any(CxAny *value) { fmt::print(stringf(*value)); }
+void cx_print_any(CxAny *value) { fmt::print(get_value_display(*value)); }
 
 void cx_print_number(uint64_t value) { fmt::print("{}\n", value); }
 
@@ -139,7 +149,7 @@ static string format_cstr(CxString &format, const CxSlice &values) {
         case '}':
             if (state == 1) {
                 if (val_i < values.size) {
-                    ss << stringf(((CxAny *)values.data)[val_i++]);
+                    ss << get_value_display(((CxAny *)values.data)[val_i++]);
                 }
                 state = 0;
             } else if (state == 2) {

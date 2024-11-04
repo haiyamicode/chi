@@ -17,6 +17,7 @@ enum class NodeType;
 struct ChiType;
 struct Scope;
 struct ChiTypeSubtype;
+struct Context;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
           Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise,
@@ -24,13 +25,15 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Poin
 
 MAKE_ENUM(Visibility, Public, Private)
 
-MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable)
+MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable, Copy)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
     ChiType *underlying_type = nullptr;
     bool is_placeholder = false; // is generic placeholder symbol
 };
+
+typedef uint32_t TypeId;
 
 struct ChiTypeInt {
     int bit_count = 0;
@@ -49,7 +52,6 @@ struct ChiTypeFn {
 
     ChiType *get_param_at(size_t index);
     int get_va_start();
-    ChiType *get_va_type();
 };
 
 struct ChiStructMember {
@@ -59,7 +61,8 @@ struct ChiStructMember {
     long field_index = -1;
     long method_index = -1;
     IntrinsicSymbol symbol = IntrinsicSymbol::None;
-    map<ChiTypeSubtype *, ChiStructMember *> variants = {};
+    ChiStructMember *root_variant = nullptr;
+    map<TypeId, ChiStructMember *> variants = {};
     ChiStructMember *parent_member = nullptr;
 
     string get_name();
@@ -86,11 +89,11 @@ typedef array<ChiType *> TypeList;
 struct ChiTypeStruct {
     ContainerKind kind = ContainerKind::Struct;
     ast::Node *node = nullptr;
-    array<box<ChiStructMember>> members = {};
+    array<ChiStructMember *> members = {};
     array<ChiStructMember *> fields = {};
     array<ChiType *> type_params = {};
     array<ChiType *> subtypes = {};
-    array<box<InterfaceImpl>> interfaces = {};
+    array<InterfaceImpl *> interfaces = {};
     map<string, ChiStructMember *> member_table = {};
     map<ChiType *, InterfaceImpl *> interface_table = {};
 
@@ -99,11 +102,12 @@ struct ChiTypeStruct {
     map<IntrinsicSymbol, ChiStructMember *> member_intrinsics = {};
     map<IntrinsicSymbol, bool> intrinsics = {};
 
-    ChiStructMember *add_member(const string &name, ast::Node *node, ChiType *resolved_type);
+    ChiStructMember *add_member(Context *allocator, const string &name, ast::Node *node,
+                                ChiType *resolved_type);
 
     ChiStructMember *find_member(const string &name);
 
-    InterfaceImpl *add_interface(ChiType *trait, ChiType *impl);
+    InterfaceImpl *add_interface(Context *allocator, ChiType *trait, ChiType *impl);
 
     bool is_generic() { return type_params.size > 0; }
 
@@ -156,8 +160,6 @@ struct ChiTypeFnLambda {
     ChiType *bind_struct = nullptr;
 };
 
-typedef uint32_t TypeId;
-
 struct ChiTypePromise {
     ChiType *value = nullptr;
     ChiType *internal = nullptr;
@@ -173,6 +175,10 @@ struct ChiType {
     bool is_placeholder = false;
     TypeId id = 0;
     optional<string> display_name = {};
+
+    ChiType() = delete;
+    ChiType(const ChiType &) = delete;
+    ChiType &operator=(const ChiType &) = delete;
 
     union Data {
         ChiTypeFn fn;
@@ -194,7 +200,7 @@ struct ChiType {
         ~Data() {}
     } data;
 
-    ChiType(TypeKind kind, TypeId id) {
+    explicit ChiType(TypeKind kind, TypeId id) {
         this->kind = kind;
         this->id = id;
         memset(&data, 0, sizeof(data));
@@ -255,7 +261,7 @@ struct ChiType {
 
         switch (kind) {
             CHITYPE_CASE_CLONE_FIELD(fn, Fn, ChiTypeFn)
-            // CHITYPE_CASE_CLONE_FIELD(struct_, Struct, ChiTypeStruct)
+            CHITYPE_CASE_CLONE_FIELD(struct_, Struct, ChiTypeStruct)
             CHITYPE_CASE_CLONE_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_CLONE_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_CLONE_FIELD(pointer, Pointer, ChiTypePointer)
@@ -295,6 +301,9 @@ struct ChiType {
 struct Scope {
     Scope *parent = nullptr;
     ast::Node *owner = nullptr;
+
+    Scope(const Scope &) = delete;
+    Scope &operator=(const Scope &) = delete;
 
     explicit Scope(Scope *parent) { this->parent = parent; }
 

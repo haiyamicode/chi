@@ -39,7 +39,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     if (!exitOnError) {
         error_handler = [module](Error error) { module->errors.add(error); };
     }
-    resolve_ctx->error_handler = error_handler;
+    resolve_ctx.error_handler = error_handler;
 
     Tokenization tokenization;
     Lexer lexer(src, &tokenization);

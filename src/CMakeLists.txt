@@ -1,7 +1,7 @@
 include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
 conan_basic_setup(TARGETS)
 
-find_package(LLVM REQUIRED CONFIG)
+find_package(LLVM 17 REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
@@ -17,7 +17,7 @@ set(PKG_LIBS CONAN_PKG::fmt CONAN_PKG::libbacktrace CONAN_PKG::libuv)
 set(LIBS ${PKG_LIBS} ${LLVM_LIBS} pthread dl)
 
 # Compiler executable
-add_executable(chi chc.cpp ${HEADER_FILES} ${SOURCE_FILES})
+add_executable(chi chc.cpp ${SOURCE_FILES})
 target_include_directories(chi PUBLIC ${LLVM_INCLUDE_DIRS})
 
 set(ASAN_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
@@ -26,7 +26,6 @@ target_link_libraries(chi ${LIBS} "$<$<CONFIG:DEBUG>:${ASAN_FLAGS}>")
 
 # Runtime library
 add_library(rt STATIC ${HEADER_FILES} ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
-set_target_properties(rt PROPERTIES COMPILE_FLAGS_DEBUG "${ASAN_FLAGS}>")
 target_link_libraries(rt PUBLIC fmt backtrace uv)
 target_link_libraries(rt PRIVATE ${PKG_LIBS})
 
