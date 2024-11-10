@@ -16,17 +16,19 @@ set(SOURCE_FILES analyzer.cpp builder.cpp ${RUNTIME_SOURCE_FILES} context.cpp co
 set(PKG_LIBS CONAN_PKG::fmt CONAN_PKG::libbacktrace CONAN_PKG::libuv)
 set(LIBS ${PKG_LIBS} ${LLVM_LIBS} pthread dl)
 
+# Runtime library
+include(GenerateExportHeader)
+add_library(rt STATIC ${HEADER_FILES} ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
+generate_export_header(rt PREFIX_NAME CHI_ EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/generated/rt_export.h)
+target_include_directories(rt PUBLIC ${PROJECT_BINARY_DIR})
+target_link_libraries(rt PUBLIC fmt backtrace uv)
+target_link_libraries(rt PRIVATE ${PKG_LIBS})
+bundle_static_library(rt chrt)
+
 # Compiler executable
 add_executable(chi chc.cpp ${SOURCE_FILES})
-target_include_directories(chi PUBLIC ${LLVM_INCLUDE_DIRS})
+target_include_directories(chi PUBLIC ${LLVM_INCLUDE_DIRS} ${PROJECT_BINARY_DIR})
 
 set(ASAN_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
 set_target_properties(chi PROPERTIES COMPILE_FLAGS_DEBUG "${ASAN_FLAGS}>")
 target_link_libraries(chi ${LIBS} "$<$<CONFIG:DEBUG>:${ASAN_FLAGS}>")
-
-# Runtime library
-add_library(rt STATIC ${HEADER_FILES} ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
-target_link_libraries(rt PUBLIC fmt backtrace uv)
-target_link_libraries(rt PRIVATE ${PKG_LIBS})
-
-bundle_static_library(rt chrt)

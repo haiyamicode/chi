@@ -97,6 +97,22 @@ Token *Parser::expect(TokenType expected) {
     }
 }
 
+Token *Parser::expect_identifier() {
+    auto token = read();
+    switch (token->type) {
+    case TokenType::IDEN:
+    case TokenType::KW_THIS:
+    case TokenType::KW_NEW:
+    case TokenType::KW_DELETE:
+        return token;
+
+    default:
+        unread();
+        expected_got(TokenType::IDEN, token);
+        return token;
+    }
+}
+
 void Parser::expected_got(TokenType expected, Token *token) {
     auto expected_str = get_token_type_repr(expected);
     error(token, errors::TOKEN_EXPECTED_GOT, expected_str, token->to_string());
@@ -316,11 +332,14 @@ IdentifierKind Parser::get_identifier_kind(Node *node) {
 }
 
 Node *Parser::parse_identifier() {
-    auto token = expect(TokenType::IDEN);
+    auto token = expect_identifier();
     auto decl = m_ctx->resolver->find_symbol(token->str);
     auto node = create_identifier_node(token, decl);
     if (!decl) {
         error(token, errors::UNDECLARED, node->name);
+    }
+    if (token->type == TokenType::KW_THIS) {
+        node->data.identifier.kind = IdentifierKind::This;
     }
     return node;
 }
@@ -852,6 +871,8 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
         node->name = "this";
         return node;
     }
+    case TokenType::KW_NEW:
+    case TokenType::KW_DELETE:
     case TokenType::IDEN: {
         return parse_identifier();
     }
@@ -1194,7 +1215,7 @@ Node *Parser::parse_dot_expr(Node *expr) {
     auto dot = expect(TokenType::DOT);
     auto node = create_node(NodeType::DotExpr, dot);
     node->data.dot_expr.expr = expr;
-    node->data.dot_expr.field = expect(TokenType::IDEN);
+    node->data.dot_expr.field = expect_identifier();
     return node;
 }
 

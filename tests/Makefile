@@ -11,6 +11,8 @@ TESTS = 00_fib.test \
     07_for_loop.test \
 		08_module.test \
 		09_switch.test \
+		10_copy.test \
+		11_copy_builtins.test
 
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

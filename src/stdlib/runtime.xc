@@ -1,5 +1,5 @@
 struct HashBytes {
-  data &void = null;
+  data *void = null;
   size uint32 = 0;
 }
 
@@ -17,7 +17,7 @@ extern "C" {
   func cx_gc_alloc(size uint32, destructor *void) *void;
   func cx_malloc(size uint32, ignored *void) *void;
   func cx_free(address *void);
-  func cx_memset(address *void, v int, n uint32);
+  func cx_memset(address *void, v uint8, n uint32);
   func cx_runtime_start(stack *void);
   func cx_runtime_stop();
   func cx_panic(message *string);
@@ -127,14 +127,12 @@ struct Array<T> {
     return buf.to_string();
   }
 
-  @[std.ops.Copy]
-  func copy() Array<T> {
-    var a Array<T> = .{};
-    cx_array_reserve(&a, sizeof T, this.capacity);
-    for this: item {
-      a.add(item!);
+  @[std.ops.CopyFrom]
+  func copy(from &Array<T>) {
+    this.clear();
+    for from: item {
+      this.add(item!);
     }
-    return a;
   }
 }
 

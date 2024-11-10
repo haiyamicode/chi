@@ -233,7 +233,8 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     case TypeKind::Reference: {
         auto &data = type->data.pointer;
         auto elem_type = compile_di_type(data.elem);
-        return llvm_db.createPointerType(elem_type, 64);
+        auto size = llvm_type_size(compile_type(data.elem));
+        return llvm_db.createPointerType(elem_type, size, 0, llvm::dwarf::DW_ATE_address);
     }
     case TypeKind::Array: {
         auto &data = type->data.array;
@@ -252,10 +253,10 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         if (data.node) {
             line_no = data.node->token->pos.line_number();
         }
-        auto scope = llvm_db.createStructType(m_ctx->dbg_cu, name, file, line_no, 0, 0,
-                                              llvm::DINode::FlagZero, nullptr, {});
-        m_ctx->dbg_scopes.add(scope);
-        return scope;
+        assert(m_ctx->dbg_scopes.size);
+        auto scope = m_ctx->dbg_scopes.last();
+        return llvm_db.createStructType(scope, name, file, line_no, 0, 0, llvm::DINode::FlagZero,
+                                        nullptr, {});
     }
     case TypeKind::Subtype: {
         return compile_di_type(type->data.subtype.resolved_struct);
@@ -448,6 +449,9 @@ llvm::Value *Compiler::compile_assignment_value(Function *fn, ast::Node *expr, a
 }
 
 llvm::TypeSize Compiler::llvm_type_size(llvm::Type *type) {
+    if (type->isVoidTy()) {
+        return llvm::TypeSize::Fixed(0);
+    }
     return m_ctx->llvm_module->getDataLayout().getTypeAllocSize(type);
 }
 
@@ -787,7 +791,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto value = compile_assignment_value(fn, data.op2, data.op1);
             assert(ref.address);
             if (!data.op2->escape.moved) {
-                compile_copy(fn, value, ref.address, get_chitype(data.op2));
+                compile_copy(fn, value, ref.address, get_chitype(data.op2), data.op2);
             }
             return value;
         }
@@ -951,7 +955,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     return nullptr;
 }
 
-void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type) {
+void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type,
+                            ast::Node *expr) {
     auto &builder = *m_ctx->llvm_builder;
 
     switch (type->kind) {
@@ -959,20 +964,38 @@ void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest,
         builder.CreateStore(value, dest);
         auto copy_fn = get_system_fn("cx_string_copy");
         builder.CreateCall(copy_fn->llvm_fn, {dest, dest});
-        break;
+        return;
     }
     // case TypeKind::Array:
-    // case TypeKind::Struct: {
-    //     auto sty = get_resolver()->resolve_struct_type(type);
-    //     auto copy = sty->member_intrinsics[IntrinsicSymbol::Copy];
-    //     if (copy) {
-    //         builder.CreateCall(get_fn(copy->node)->llvm_fn,
-    //                            {ptr, builder.CreateLoad(iter_type_l, it)}, "_iter_item");
-    //     }
-    // }
-    default:
-        builder.CreateStore(value, dest);
+    case TypeKind::Struct: {
+        auto sty = get_resolver()->resolve_struct_type(type);
+        auto &builder = *m_ctx->llvm_builder;
+        auto copy = sty->member_intrinsics[IntrinsicSymbol::CopyFrom];
+        if (copy) {
+            auto from_address = expr ? compile_expr_ref(fn, expr).address : nullptr;
+            if (!from_address) {
+                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy_from");
+                builder.CreateStore(value, from_address);
+            }
+            auto size = llvm_type_size(compile_type(type));
+            builder.CreateMemSet(
+                dest, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                size, {});
+            builder.CreateCall(get_fn(copy->node)->llvm_fn, {
+                                                                dest,
+                                                                from_address,
+                                                            });
+            return;
+        }
         break;
+    }
+    default:
+        break;
+    }
+
+    auto size = llvm_type_size(compile_type(type));
+    if (size > 0) {
+        builder.CreateStore(value, dest);
     }
 }
 
@@ -1127,6 +1150,14 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         default:
             panic("not implemented: {}", PRINT_ENUM(type->kind));
         }
+    }
+    case ast::NodeType::FnCallExpr: {
+        auto &data = expr->data.fn_call_expr;
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto ret = compile_fn_call(fn, expr);
+        auto var = compile_alloc(fn, expr);
+        builder.CreateStore(ret, var);
+        return RefValue::from_address(var);
     }
     default:
         panic("not implemented: {}", PRINT_ENUM(expr->type));
@@ -1329,7 +1360,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         add_var(stmt, var);
         auto value = compile_assignment_to_type(fn, data.expr, get_chitype(stmt));
         if (!data.expr->escape.moved) {
-            compile_copy(fn, value, var, get_chitype(stmt));
+            compile_copy(fn, value, var, get_chitype(stmt), data.expr);
         }
         break;
     }
@@ -1342,7 +1373,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
         if (data.expr) {
             auto ret_value = compile_assignment_value(fn, data.expr, stmt);
-            llvm_builder.CreateStore(ret_value, fn->return_value);
+            compile_copy(fn, ret_value, fn->return_value, get_chitype(stmt), data.expr);
         }
         llvm_builder.CreateBr(fn->return_label);
         scope->branched = true;
@@ -1681,8 +1712,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference: {
         auto &data = type->data.pointer;
-        auto elem_type_l = compile_type(data.elem);
-        return llvm::PointerType::get(elem_type_l, 0);
+        return get_llvm_ptr_type();
+        // auto elem_type_l = compile_type(data.elem);
+        // return llvm::PointerType::get(elem_type_l, 0);
     }
     case TypeKind::Optional: {
         auto &data = type->data.pointer;

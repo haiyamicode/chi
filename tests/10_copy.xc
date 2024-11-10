@@ -1,15 +1,38 @@
-func test_string_pass(str string) {
-  printf("passed string: {}\n");
+struct Foo {
+  p *int = null;
+  id string;
+
+  func new(id string) {
+    this.id = id;
+    this.p = cx_malloc(sizeof int, null);
+    cx_memset(this.p, 0, sizeof int);
+    printf("creating {}\n", this.id);
+  }
+
+  @[std.ops.CopyFrom]
+  func copy_from(b &Foo) {
+    this.new(stringf("{}_copy", b.id));
+    this.p! = b.p!;
+    printf("copied {}, p = {}\n", this.id, b.p!);
+  }
+
+  func delete() {
+    printf("deleting {}\n", this.id);
+    cx_free(this.p);
+  }
 }
 
-func test_string() {
-  // ensure that strings are properly copied and not double-freed
-  var s = stringf("hello {}", "world");
-  var t = s;
-  println(t);
-  test_string_pass(s);
+func f() Foo {
+  var a Foo = .{"fa"};
+  a.p! = 42;
+  var b = a;
+  b.id = "fb";
+  println("f() done");
+  return b;
 }
 
 func main() {
-  test_string();
+  var foo = f();
+  printf("g: {}\n", foo.p!);
+  println("done");
 }

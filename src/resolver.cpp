@@ -85,7 +85,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.iter.Begin"] = IntrinsicSymbol::IterBegin;
     m_ctx->intrinsic_symbols["std.iter.Next"] = IntrinsicSymbol::IterNext;
     m_ctx->intrinsic_symbols["std.iter.End"] = IntrinsicSymbol::IterEnd;
-    m_ctx->intrinsic_symbols["std.ops.Copy"] = IntrinsicSymbol::Copy;
+    m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -418,6 +418,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 var_type = expr_type;
             }
+        }
+        if (var_type->kind == TypeKind::Void) {
+            error(node, errors::INVALID_VARIABLE_TYPE, to_string(var_type));
         }
         if (data.is_const) {
             data.resolved_value = resolve_constant_value(data.expr);
@@ -1018,7 +1021,9 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
     switch (node->type) {
     case NodeType::FnDef:
         if (node->data.fn_def.is_instance_method()) {
-            auto container_type = node->resolved_type->data.fn.container_ref->get_elem();
+            auto container_ref = node->resolved_type->data.fn.container_ref;
+            assert(container_ref);
+            auto container_type = container_ref->get_elem();
             return to_string(container_type) + "." + node->name;
         }
         break;
@@ -1104,6 +1109,7 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
         std::stringstream ss;
         ss << "func(";
         if (fn.container_ref) {
+            ss << "this ";
             ss << to_string(fn.container_ref);
             if (fn.params.size > 0) {
                 ss << ", ";
@@ -1282,9 +1288,14 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
 
 bool Resolver::should_destroy(ast::Node *node) {
     auto is_managed = has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED);
-    auto is_on_heap = is_managed && node->is_heap_allocated();
-    return !is_on_heap && (node->resolved_type->kind == TypeKind::String ||
-                           get_struct_member(node_get_type(node), "delete"));
+    if (is_managed && node->is_heap_allocated()) {
+        return false;
+    }
+    auto resolved_type = node_get_type(node);
+    if (resolved_type->kind == TypeKind::String) {
+        return false;
+    }
+    return is_struct_type(resolved_type) && get_struct_member(resolved_type, "delete");
 }
 
 bool Resolver::should_resolve_fn_body(ResolveScope &scope) {
@@ -1329,6 +1340,17 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
     }
     default:
         return type;
+    }
+}
+
+bool Resolver::is_struct_type(ChiType *type) {
+    switch (type->kind) {
+    case TypeKind::This:
+    case TypeKind::Pointer:
+    case TypeKind::Reference:
+        return false;
+    default:
+        return (bool)resolve_struct_type(type);
     }
 }
 

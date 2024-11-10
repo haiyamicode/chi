@@ -512,7 +512,15 @@ struct Node {
                 auto parent_id = *container_type_id;
                 auto member_name = data.dot_expr.field->get_name();
                 auto base_member = data.dot_expr.resolved_member->root_variant;
+                if (!base_member) {
+                    base_member = data.dot_expr.resolved_member;
+                }
+
+                assert(base_member);
                 auto variant_member = base_member->variants.get(parent_id);
+                if (!variant_member) {
+                    panic("variant member not found: {}", member_name);
+                }
                 return (*variant_member)->node;
             }
             auto decl = data.dot_expr.resolved_decl;

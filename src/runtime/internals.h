@@ -14,6 +14,8 @@ using namespace cx;
 extern "C" {
 #endif
 
+#include "generated/rt_export.h"
+
 struct CxString {
     char *data;
     uint32_t size;
@@ -60,60 +62,61 @@ struct CxHash {
     uint32_t size;
 };
 
-void cx_string_copy(CxString *dest, CxString *src);
+CHI_RT_EXPORT void cx_string_copy(CxString *dest, CxString *src);
 
-void cx_string_delete(CxString *dest);
+CHI_RT_EXPORT void cx_string_delete(CxString *dest);
 
-CxString cx_string_format(CxString *format, CxSlice *values);
+CHI_RT_EXPORT CxString cx_string_format(CxString *format, CxSlice *values);
 
-CxString cx_string_from_chars(const char *data, uint32_t size);
+CHI_RT_EXPORT CxString cx_string_from_chars(const char *data, uint32_t size);
 
-void cx_printf(CxString *format, CxSlice *values);
+CHI_RT_EXPORT void cx_printf(CxString *format, CxSlice *values);
 
-void cx_print(CxString str);
+CHI_RT_EXPORT void cx_print(CxString str);
 
-void cx_print_any(CxAny *value);
+CHI_RT_EXPORT void cx_print_any(CxAny *value);
 
-void cx_print_number(uint64_t value);
+CHI_RT_EXPORT void cx_print_number(uint64_t value);
 
-void cx_array_new(CxArray *dest);
+CHI_RT_EXPORT void cx_array_new(CxArray *dest);
 
-void cx_array_delete(CxArray *dest);
+CHI_RT_EXPORT void cx_array_delete(CxArray *dest);
 
-void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap);
+CHI_RT_EXPORT void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap);
 
-void *cx_array_add(CxArray *dest, uint32_t elem_size);
+CHI_RT_EXPORT void *cx_array_add(CxArray *dest, uint32_t elem_size);
 
-void cx_array_write_str(CxArray *dest, CxString *str);
+CHI_RT_EXPORT void cx_array_write_str(CxArray *dest, CxString *str);
 
-void cx_print_string(CxString *message);
+CHI_RT_EXPORT void cx_print_string(CxString *message);
 
-void cx_debug_i(const char *prefix, int value);
+CHI_RT_EXPORT void cx_debug_i(const char *prefix, int value);
 
-void cx_panic(CxString *message);
+CHI_RT_EXPORT void cx_panic(CxString *message);
 
-void *cx_refc_alloc(CxRefc *dest, uint32_t size);
+CHI_RT_EXPORT void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
-void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
-void *cx_malloc(uint32_t size, void *ignored = NULL);
-void cx_free(void *address);
+CHI_RT_EXPORT void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
+CHI_RT_EXPORT void *cx_malloc(uint32_t size, void *ignored = NULL);
+CHI_RT_EXPORT void cx_free(void *address);
+CHI_RT_EXPORT void cx_memset(void *dest, uint8_t value, uint32_t size);
 
-void cx_runtime_start(void *stack);
-void cx_runtime_stop();
+CHI_RT_EXPORT void cx_runtime_start(void *stack);
+CHI_RT_EXPORT void cx_runtime_stop();
 
 _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t exceptionClass,
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context);
 
-void cx_timeout(uint64_t delay, CxLambda *callback);
-void cx_call(CxLambda *callback);
+CHI_RT_EXPORT void cx_timeout(uint64_t delay, CxLambda *callback);
+CHI_RT_EXPORT void cx_call(CxLambda *callback);
 
-CxHash cx_hbytes(CxAny *value);
-void *cx_map_new();
-void cx_map_delete(void *data);
-void *cx_map_find(void *data, CxHash *key);
-void cx_map_add(void *data, CxHash *key, void *value);
-void cx_map_remove(void *data, CxHash *key);
+CHI_RT_EXPORT CxHash cx_hbytes(CxAny *value);
+CHI_RT_EXPORT void *cx_map_new();
+CHI_RT_EXPORT void cx_map_delete(void *data);
+CHI_RT_EXPORT void *cx_map_find(void *data, CxHash *key);
+CHI_RT_EXPORT void cx_map_add(void *data, CxHash *key, void *value);
+CHI_RT_EXPORT void cx_map_remove(void *data, CxHash *key);
 
 #ifdef __cplusplus
 }

@@ -53,6 +53,8 @@ class Parser {
 
     Token *expect(TokenType expected);
 
+    Token *expect_identifier();
+
     void expected_got(TokenType expected, Token *token);
 
     void save_block_pos(Node *node) { m_block_pos[node] = m_toki; }

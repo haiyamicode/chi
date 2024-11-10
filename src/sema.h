@@ -25,7 +25,7 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Poin
 
 MAKE_ENUM(Visibility, Public, Private)
 
-MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable, Copy)
+MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable, CopyFrom)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;

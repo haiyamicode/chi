@@ -48,6 +48,7 @@ constexpr auto SYMBOL_NOT_FOUND_MODULE = "symbol '{}' not found in module '{}'";
 constexpr auto VARIABLE_USED_BEFORE_INITIALIZED = "variable '{}' used before initialized";
 constexpr auto UNINITIALIZED_FIELD = "field '{}' of type '{}' has not been initialized";
 constexpr auto INVALID_SWITCH_TYPE = "switch type {} must be an enum or integer";
+constexpr auto INVALID_VARIABLE_TYPE = "cannot declare variable of type {}";
 
 } // namespace errors
 } // namespace cx

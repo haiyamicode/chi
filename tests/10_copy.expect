@@ -1,0 +1,21 @@
+creating fa
+creating fa_copy
+copied fa_copy, p = 42
+f() done
+creating fb_copy
+copied fb_copy, p = 42
+deleting fa
+deleting fb
+creating fa
+creating fa_copy
+copied fa_copy, p = 42
+f() done
+creating fb_copy
+copied fb_copy, p = 42
+deleting fa
+deleting fb
+creating fb_copy_copy
+copied fb_copy_copy, p = 42
+g: 42
+done
+deleting fb_copy_copy

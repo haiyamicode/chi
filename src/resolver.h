@@ -216,6 +216,8 @@ class Resolver {
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
 
+    bool is_struct_type(ChiType *type);
+
     ChiTypeStruct *resolve_struct_type(ChiType *type);
 
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
