@@ -23,7 +23,7 @@ struct Foo {
 }
 
 func f() Foo {
-  var a Foo = .{"fa"};
+  var a Foo = {"fa"};
   a.p! = 42;
   var b = a;
   b.id = "fb";

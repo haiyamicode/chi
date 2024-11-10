@@ -22,7 +22,7 @@ struct Sheep {
     base ...AnimalBase;
 
     func new(id int) {
-        this.base = .{id};
+        this.base = {id};
     }
 
     func make_sound() {
@@ -43,9 +43,9 @@ struct Cat: Animal {
 };
 
 func main() {
-    var sheep Sheep = .{1};
-    var cat Cat = .{2};
-    var ant Ant = .{3};
+    var sheep Sheep = {1};
+    var cat Cat = {2};
+    var ant Ant = {3};
     var animal Animal = &sheep;
     animal.make_sound();
     animal = &cat;

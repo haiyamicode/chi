@@ -12,7 +12,7 @@ func test_string() {
 
 func test_array() {
   // ensure that arrays are properly copied
-  var a Array<int> = .{};
+  var a Array<int> = {};
   a.add(1);
   a.add(2);
   var b = a;

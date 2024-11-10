@@ -892,18 +892,14 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
         expect(TokenType::RPAREN);
         return node;
     }
-    case TokenType::DOT: {
-        if (lookahead(1)->type == TokenType::LBRACE) {
-            consume();
-            return parse_construct_expr();
-        }
-        unexpected(token);
-    }
     case TokenType::KW_FUNC: {
         return parse_fn_lambda();
     }
     case TokenType::KW_SWITCH: {
         return parse_switch_expr();
+    }
+    case TokenType::LBRACE: {
+        return parse_construct_expr();
     }
     default:
         unexpected(token);
