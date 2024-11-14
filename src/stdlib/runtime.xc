@@ -192,16 +192,3 @@ struct Buffer {
     return cx_string_from_chars(this.bytes.data, this.bytes.size);
   }
 }
-
-func range(start int32, end int32) Array<int32> {
-  var a Array<int32> = {};
-  var i = start;
-  for {
-    if i >= end {
-      break;
-    }
-    a.add(i);
-    i++;
-  }
-  return a;
-}
