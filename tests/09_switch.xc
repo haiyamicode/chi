@@ -5,8 +5,8 @@ func switch_int() {
   levels.add(3);
   levels.add(4);
 
-  for levels: item {
-    var label = switch item! {
+  for levels => item {
+    var label = switch item {
       1, 2 => "low",
       3 => "medium",
       else => {

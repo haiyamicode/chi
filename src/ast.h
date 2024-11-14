@@ -19,9 +19,9 @@ struct Scope;
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
-          TypeSigil, EnumMember, CastExpr, ForStmt, BranchStmt, TypeParam, PrefixExpr, ExternDecl,
-          TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier, SwitchExpr,
-          CaseExpr, ImportSymbol);
+          TypeSigil, EnumMember, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
+          ExternDecl, TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
+          SwitchExpr, CaseExpr, ImportSymbol);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -281,6 +281,12 @@ struct ForStmt {
     Node *body = nullptr;
     Node *bind = nullptr;
     Node *expr = nullptr;
+    bool is_ref = false;
+};
+
+struct WhileStmt {
+    Node *condition = nullptr;
+    Node *body = nullptr;
 };
 
 struct SwitchExpr {
@@ -389,6 +395,7 @@ struct Node {
         VarIdentifier var_identifier;
         CastExpr cast_expr;
         ForStmt for_stmt;
+        WhileStmt while_stmt;
         TypeParam type_param;
         PrefixExpr prefix_expr;
         ExternDecl extern_decl;
@@ -495,6 +502,7 @@ struct Node {
             _AST_CASE_CLONE_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_CLONE_FIELD(case_expr, CaseExpr)
         default:
+            memcpy(&b->data, &data, sizeof(data));
             break;
         }
     }

@@ -678,6 +678,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         return nullptr;
     }
+    case NodeType::WhileStmt: {
+        auto &data = node->data.while_stmt;
+        if (data.condition) {
+            auto cond_type = resolve(data.condition, scope);
+            check_assignment(data.condition, cond_type, get_system_types()->bool_);
+        }
+        auto loop_scope = scope.set_parent_loop(node);
+        resolve(data.body, loop_scope);
+        return nullptr;
+    }
     case NodeType::Block: {
         auto &data = node->data.block;
         auto child_scope = scope.set_block(&data);
@@ -856,7 +866,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     return nullptr;
                 }
                 auto ref_type = (*index_fn)->resolved_type->data.fn.return_type;
-                auto bind_scope = scope.set_value_type(ref_type);
+                auto value_type = data.is_ref ? ref_type : ref_type->get_elem();
+                auto bind_scope = scope.set_value_type(value_type);
                 resolve(data.bind, bind_scope);
             }
         }

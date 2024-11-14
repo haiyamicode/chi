@@ -192,6 +192,8 @@ class Compiler {
 
     void compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type,
                       ast::Node *expr = nullptr);
+    void compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
+                               ast::Node *expr = nullptr);
 
     llvm::Value *compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
                                     ChiStructMember *member);

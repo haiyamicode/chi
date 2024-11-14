@@ -661,6 +661,9 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::KW_FOR:
         return parse_for_stmt();
 
+    case TokenType::KW_WHILE:
+        return parse_while_stmt();
+
     case TokenType::KW_VAR:
     case TokenType::KW_THIS:
     case TokenType::KW_NEW:
@@ -991,6 +994,10 @@ Node *Parser::parse_for_stmt() {
             expr = parse_var_decl(false);
             kind = ForLoopKind::Ternary;
         } else {
+            if (next_is(TokenType::AND)) {
+                node->data.for_stmt.is_ref = true;
+                consume();
+            }
             expr = parse_expr();
             if (next_is(TokenType::SEMICOLON)) {
                 consume();
@@ -1013,7 +1020,7 @@ Node *Parser::parse_for_stmt() {
         }
         if (kind == ForLoopKind::Range) {
             node->data.for_stmt.expr = expr;
-            if (next_is(TokenType::COLON)) {
+            if (next_is(TokenType::ARROW)) {
                 consume();
                 auto iden = expect(TokenType::IDEN);
                 auto bind = create_node(NodeType::BindIdentifier, iden);
@@ -1023,6 +1030,19 @@ Node *Parser::parse_for_stmt() {
         }
     }
     node->data.for_stmt.body = parse_block(scope);
+    m_ctx->resolver->pop_scope();
+    return node;
+}
+
+Node *Parser::parse_while_stmt() {
+    auto kw = expect(TokenType::KW_WHILE);
+    auto node = create_node(NodeType::WhileStmt, kw);
+    auto scope = m_ctx->resolver->push_scope(node);
+    if (!next_is(TokenType::LBRACE)) {
+        auto expr = parse_expr();
+        node->data.while_stmt.condition = expr;
+    }
+    node->data.while_stmt.body = parse_block(scope);
     m_ctx->resolver->pop_scope();
     return node;
 }

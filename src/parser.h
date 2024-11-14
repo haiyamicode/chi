@@ -177,6 +177,8 @@ class Parser {
 
     Node *parse_for_stmt();
 
+    Node *parse_while_stmt();
+
     void skip_block();
 
     Node *parse_struct_member(ContainerKind container_kind);

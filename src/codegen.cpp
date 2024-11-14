@@ -957,25 +957,32 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
 void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type,
                             ast::Node *expr) {
+    return compile_copy_with_ref(fn, RefValue::from_value(value), dest, type, expr);
+}
+
+void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
+                                     ast::Node *expr) {
     auto &builder = *m_ctx->llvm_builder;
+    assert(src.value);
 
     switch (type->kind) {
     case TypeKind::String: {
-        builder.CreateStore(value, dest);
+        builder.CreateStore(src.value, dest);
         auto copy_fn = get_system_fn("cx_string_copy");
         builder.CreateCall(copy_fn->llvm_fn, {dest, dest});
         return;
     }
-    // case TypeKind::Array:
+    case TypeKind::Array:
     case TypeKind::Struct: {
         auto sty = get_resolver()->resolve_struct_type(type);
         auto &builder = *m_ctx->llvm_builder;
         auto copy = sty->member_intrinsics[IntrinsicSymbol::CopyFrom];
         if (copy) {
-            auto from_address = expr ? compile_expr_ref(fn, expr).address : nullptr;
+            auto from_address =
+                src.address ? src.address : (expr ? compile_expr_ref(fn, expr).address : nullptr);
             if (!from_address) {
                 from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy_from");
-                builder.CreateStore(value, from_address);
+                builder.CreateStore(src.value, from_address);
             }
             auto size = llvm_type_size(compile_type(type));
             builder.CreateMemSet(
@@ -995,7 +1002,7 @@ void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest,
 
     auto size = llvm_type_size(compile_type(type));
     if (size > 0) {
-        builder.CreateStore(value, dest);
+        builder.CreateStore(src.value, dest);
     }
 }
 
@@ -1462,10 +1469,17 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop_main);
             auto loop_post = fn->new_label("_for_post");
             if (item_var) {
-                auto item =
+                auto item_ref =
                     builder.CreateCall(get_fn(index->node)->llvm_fn,
                                        {ptr, builder.CreateLoad(iter_type_l, it)}, "_iter_item");
-                builder.CreateStore(item, item_var);
+                if (data.is_ref) {
+                    builder.CreateStore(item_ref, item_var);
+                } else {
+                    auto value = builder.CreateLoad(compile_type(data.bind->resolved_type),
+                                                    item_ref, "_item_value");
+                    compile_copy_with_ref(fn, RefValue{item_ref, value}, item_var,
+                                          get_chitype(data.bind));
+                }
             }
             compile_block(fn, stmt, data.body, loop_post);
 
@@ -1510,6 +1524,34 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop->end);
             fn->pop_loop();
         }
+        break;
+    }
+    case ast::NodeType::WhileStmt: {
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto &data = stmt->data.while_stmt;
+        auto loop = fn->push_loop();
+        loop->start = fn->new_label("_while_start");
+        loop->end = fn->new_label("_while_end");
+        auto loop_main = fn->new_label("_while_main");
+        builder.CreateBr(loop->start);
+
+        fn->use_label(loop->start);
+        if (data.condition) {
+            auto cond = compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
+            builder.CreateCondBr(cond, loop_main, loop->end);
+        } else {
+            builder.CreateBr(loop_main);
+        }
+
+        fn->use_label(loop_main);
+        auto loop_post = fn->new_label("_while_post");
+        compile_block(fn, stmt, data.body, loop_post);
+        fn->use_label(loop_post);
+
+        builder.CreateBr(loop->start);
+
+        fn->use_label(loop->end);
+        fn->pop_loop();
         break;
     }
     default:

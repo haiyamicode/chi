@@ -357,7 +357,7 @@ void AstPrinter::print_node(Node *node) {
         if (data.kind == ForLoopKind::Range) {
             print_node(data.expr);
             if (data.bind) {
-                print(": ");
+                print("=> ");
                 print_node(data.bind);
             }
             print(" ");

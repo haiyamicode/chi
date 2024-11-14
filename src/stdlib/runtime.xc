@@ -120,8 +120,8 @@ struct Array<T> {
   func display() string {
     var buf Buffer = {};
     buf.write("[");
-    for this: item {
-      buf.write(stringf("{}, ", item!));
+    for this => item {
+      buf.write(stringf("{}, ", item));
     }
     buf.write("]");
     return buf.to_string();
@@ -130,8 +130,8 @@ struct Array<T> {
   @[std.ops.CopyFrom]
   func copy(from &Array<T>) {
     this.clear();
-    for from: item {
-      this.add(item!);
+    for from => item {
+      this.add(item);
     }
   }
 }
@@ -191,4 +191,17 @@ struct Buffer {
   func to_string() string {
     return cx_string_from_chars(this.bytes.data, this.bytes.size);
   }
+}
+
+func range(start int32, end int32) Array<int32> {
+  var a Array<int32> = {};
+  var i = start;
+  for {
+    if i >= end {
+      break;
+    }
+    a.add(i);
+    i++;
+  }
+  return a;
 }

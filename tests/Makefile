@@ -8,7 +8,7 @@ TESTS = 00_fib.test \
     04_builtins.test \
 		05_interface.test \
     06_enum.test \
-    07_for_loop.test \
+    07_loops.test \
 		08_module.test \
 		09_switch.test \
 		10_copy.test \
