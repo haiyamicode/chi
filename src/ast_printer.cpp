@@ -135,13 +135,13 @@ void AstPrinter::print_node(Node *node) {
             print(data.is_const ? "const" : "var");
             print(" ");
         }
+        if (data.is_embed) {
+            print("...");
+        }
         print(node->name);
         if (data.type) {
             print(": ");
             print_node(data.type);
-        }
-        if (data.is_embed) {
-            print("...");
         }
         if (data.expr) {
             print(" = ");
@@ -159,6 +159,10 @@ void AstPrinter::print_node(Node *node) {
             print("<");
             print_node_list(&data.type_params);
             print(">");
+        }
+        if (data.implements.size) {
+            print(": ");
+            print_node_list(&data.implements);
         }
         print(" {{");
 

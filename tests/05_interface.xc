@@ -15,11 +15,11 @@ struct AnimalBase: Animal {
 };
 
 struct Ant {
-    base: ...AnimalBase;
+    ...base: AnimalBase;
 }
 
 struct Sheep {
-    base: ...AnimalBase;
+    ...base: AnimalBase;
 
     func new(id: int) {
         this.base = {id};

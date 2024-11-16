@@ -492,26 +492,26 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
             expect(TokenType::KW_VAR);
         }
     }
+
+    bool is_embed = false;
+    if (as_field && next_is(TokenType::ELLIPSIS)) {
+        is_embed = true;
+        consume();
+    }
     auto iden = expect(TokenType::IDEN);
     auto node = create_node(NodeType::VarDecl, iden);
     node->data.var_decl.identifier = iden;
     node->data.var_decl.is_const = is_const;
     node->data.var_decl.is_field = as_field;
     node->data.var_decl.decl_spec = decl_spec;
+    node->data.var_decl.is_embed = is_embed;
 
     if (!is_const && !as_field) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
         assert(node->parent_fn);
     }
     if (!next_is(TokenType::ASS)) {
-        if (as_field && next_is(TokenType::COLON) && lookahead(1)->type == TokenType::ELLIPSIS) {
-            node->data.var_decl.is_embed = true;
-            consume();
-            consume();
-            node->data.var_decl.type = parse_type_expr(true);
-        } else {
-            node->data.var_decl.type = parse_type_expr();
-        }
+        node->data.var_decl.type = parse_type_expr();
     }
     if (next_is(TokenType::ASS)) {
         consume();
