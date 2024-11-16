@@ -1,7 +1,7 @@
 struct Greeting {
-  name string;
+  name: string;
 
-  func new(name string) {
+  func new(name: string) {
     this.name = name;
   }
 

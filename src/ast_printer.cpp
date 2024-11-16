@@ -94,7 +94,7 @@ void AstPrinter::print_node(Node *node) {
             print("...");
         }
         print(node->name);
-        print(" ");
+        print(": ");
         print_node(data.type);
         break;
     }
@@ -137,7 +137,7 @@ void AstPrinter::print_node(Node *node) {
         }
         print(node->name);
         if (data.type) {
-            print(" ");
+            print(": ");
             print_node(data.type);
         }
         if (data.is_embed) {
@@ -321,10 +321,8 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
         print_node(data.expr);
-        print(".");
-        print("(");
+        print(" as ");
         print_node(data.dest_type);
-        print(")");
         break;
     }
     case NodeType::BindIdentifier: {

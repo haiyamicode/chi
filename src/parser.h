@@ -125,7 +125,7 @@ class Parser {
 
     IdentifierKind get_identifier_kind(Node *node);
 
-    Node *parse_type_expr();
+    Node *parse_type_expr(bool type_only = false);
 
     Node *parse_fn_lambda();
 

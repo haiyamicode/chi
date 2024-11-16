@@ -1,8 +1,8 @@
 struct Foo {
-  p *int = null;
-  id string;
+  p: *int = null;
+  id: string;
 
-  func new(id string) {
+  func new(id: string) {
     this.id = id;
     this.p = cx_malloc(sizeof int, null);
     cx_memset(this.p, 0, sizeof int);
@@ -10,7 +10,7 @@ struct Foo {
   }
 
   @[std.ops.CopyFrom]
-  func copy_from(b &Foo) {
+  func copy_from(b: &Foo) {
     this.new(stringf("{}_copy", b.id));
     this.p! = b.p!;
     printf("copied {}, p = {}\n", this.id, b.p!);
@@ -23,7 +23,7 @@ struct Foo {
 }
 
 func f() Foo {
-  var a Foo = {"fa"};
+  var a: Foo = {"fa"};
   a.p! = 42;
   var b = a;
   b.id = "fb";

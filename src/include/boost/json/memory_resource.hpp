@@ -13,20 +13,20 @@
 #include <boost/json/detail/config.hpp>
 
 #ifdef BOOST_JSON_STANDALONE
-# if __has_include(<memory_resource>)
-#  include <memory_resource>
-#  ifndef __cpp_lib_memory_resource
-#   error Support for std::memory_resource is required to use Boost.JSON standalone
-#  endif
-# elif __has_include(<experimental/memory_resource>)
-#  include <experimental/memory_resource>
-#  warning Support for std::memory_resource is required to use Boost.JSON standalone, using std::experimental::memory_resource as fallback
-# else
-#  error Header <memory_resource> is required to use Boost.JSON standalone
-# endif
+#if __has_include(<memory_resource>)
+#include <memory_resource>
+#ifndef __cpp_lib_memory_resource
+#error Support for std::memory_resource is required to use Boost.JSON standalone
+#endif
+#elif __has_include(<experimental/memory_resource>)
+#include <experimental/memory_resource>
+#warning Support for std::memory_resource is required to use Boost.JSON standalone, using std::experimental::memory_resource as fallback
 #else
-# include <boost/container/pmr/memory_resource.hpp>
-# include <boost/container/pmr/polymorphic_allocator.hpp>
+#error Header <memory_resource> is required to use Boost.JSON standalone
+#endif
+#else
+#include <boost/container/pmr/memory_resource.hpp>
+#include <boost/container/pmr/polymorphic_allocator.hpp>
 #endif
 
 BOOST_JSON_NS_BEGIN
@@ -58,9 +58,7 @@ BOOST_JSON_NS_BEGIN
 
     @see https://en.cppreference.com/w/cpp/memory/memory_resource
 */
-class memory_resource
-{
-};
+class memory_resource {};
 
 /** The type of polymorphic allocator used by the library.
 
@@ -87,34 +85,27 @@ class memory_resource
 
     @see https://en.cppreference.com/w/cpp/memory/polymorphic_allocator
 */
-template<class T>
-class polymorphic_allocator;
+template <class T> class polymorphic_allocator;
 
 // VFALCO Bug: doc toolchain won't make this a ref
-//using memory_resource = __see_below__;
+// using memory_resource = __see_below__;
 
 #elif defined(BOOST_JSON_STANDALONE)
 
-# if __has_include(<memory_resource>)
+#if __has_include(<memory_resource>)
 using memory_resource = std::pmr::memory_resource;
-template<class T>
-using polymorphic_allocator =
-    std::pmr::polymorphic_allocator<T>;
+template <class T> using polymorphic_allocator = std::pmr::polymorphic_allocator<T>;
 
-# else
+#else
 using memory_resource = std::experimental::pmr::memory_resource;
-template<class T>
-using polymorphic_allocator =
-    std::experimental::pmr::polymorphic_allocator<T>;
+template <class T> using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 
-# endif
+#endif
 
 #else
 using memory_resource = boost::container::pmr::memory_resource;
 
-template<class T>
-using polymorphic_allocator =
-    boost::container::pmr::polymorphic_allocator<T>;
+template <class T> using polymorphic_allocator = boost::container::pmr::polymorphic_allocator<T>;
 #endif
 
 /** Return true if a memory resource's deallocate function has no effect.
@@ -163,9 +154,7 @@ using polymorphic_allocator =
         @ref memory_resource,
         @ref storage_ptr
 */
-template<class T>
-struct is_deallocate_trivial
-{
+template <class T> struct is_deallocate_trivial {
     /** A bool equal to true if calls to `T::do_deallocate` have no effect.
 
         The primary template sets `value` to false.

@@ -1,13 +1,13 @@
 struct Arr<T> {
-	data *T = null;
-	size uint32 = 0;
-	capacity uint32 = 0;
+	data: *T = null;
+	size: uint32 = 0;
+	capacity: uint32 = 0;
 
 	func new() {
 		cx_array_new(this);
 	}
 
-	func add(item T) {
+	func add(item: T) {
 		var ptr = cx_array_add(this, sizeof T) as *T;
 		*ptr = item;
 	}
@@ -16,14 +16,14 @@ struct Arr<T> {
 		delete this.data;
 	}
 
-	func get(index uint32) T {
+	func get(index: uint32) T {
 		assert(index < this.size, "index out of bounds");
 		return this.data[index];
 	}
 }
 
 func main() {
-	var a Arr<int> = {};
+	var a: Arr<int> = {};
 	a.add(1);
 	a.add(2);
 	printf("a.size={}\n", a.size);

@@ -359,7 +359,11 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
     }
 }
 
-Node *Parser::parse_type_expr() {
+Node *Parser::parse_type_expr(bool type_only) {
+    if (!type_only) {
+        expect(TokenType::COLON);
+    }
+
     array<Node *> sigil_nodes;
     for (;;) {
         auto token = get();
@@ -396,7 +400,7 @@ Node *Parser::parse_type_expr() {
                 if (token->type == TokenType::GT) {
                     break;
                 }
-                auto param = parse_type_expr();
+                auto param = parse_type_expr(true);
                 subtype.args.add(param);
                 if (!at_comma(TokenType::GT)) {
                     break;
@@ -499,12 +503,15 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
         assert(node->parent_fn);
     }
-    if (as_field && next_is(TokenType::ELLIPSIS)) {
-        consume();
-        node->data.var_decl.is_embed = true;
-    }
     if (!next_is(TokenType::ASS)) {
-        node->data.var_decl.type = parse_type_expr();
+        if (as_field && next_is(TokenType::COLON) && lookahead(1)->type == TokenType::ELLIPSIS) {
+            node->data.var_decl.is_embed = true;
+            consume();
+            consume();
+            node->data.var_decl.type = parse_type_expr(true);
+        } else {
+            node->data.var_decl.type = parse_type_expr();
+        }
     }
     if (next_is(TokenType::ASS)) {
         consume();
@@ -529,7 +536,7 @@ Node *Parser::parse_fn_proto(Token *token) {
     }
     expect(TokenType::RPAREN);
     if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON)) {
-        proto->data.fn_proto.return_type = parse_type_expr();
+        proto->data.fn_proto.return_type = parse_type_expr(true);
     }
     return proto;
 }
@@ -742,7 +749,7 @@ Node *Parser::parse_expr() {
 
     case TokenType::KW_AS: {
         auto node = create_node(NodeType::CastExpr, read());
-        node->data.cast_expr.dest_type = parse_type_expr();
+        node->data.cast_expr.dest_type = parse_type_expr(true);
         node->data.cast_expr.expr = lhs;
         return node;
     }
@@ -1162,7 +1169,7 @@ void Parser::parse_struct_block(Node *node) {
             if (token->type == TokenType::LBRACE) {
                 break;
             }
-            auto expr = parse_type_expr();
+            auto expr = parse_type_expr(true);
             node->data.struct_decl.implements.add(expr);
             if (!at_comma(TokenType::LBRACE)) {
                 break;
@@ -1189,7 +1196,7 @@ Node *Parser::parse_construct_expr() {
         consume();
         node->data.construct_expr.is_new = true;
         if (!next_is(TokenType::LBRACE)) {
-            node->data.construct_expr.type = parse_type_expr();
+            node->data.construct_expr.type = parse_type_expr(true);
         }
     }
     expect(TokenType::LBRACE);
@@ -1220,7 +1227,7 @@ Node *Parser::parse_prefix_expr() {
     consume();
     node->data.prefix_expr.prefix = tok;
     if (tok->type == TokenType::KW_SIZEOF) {
-        node->data.prefix_expr.expr = parse_type_expr();
+        node->data.prefix_expr.expr = parse_type_expr(true);
     } else {
         node->data.prefix_expr.expr = parse_expr();
     }
@@ -1250,7 +1257,7 @@ Node *Parser::parse_typedef() {
     auto iden = expect(TokenType::IDEN);
     node->data.typedef_decl.identifier = iden;
     expect(TokenType::ASS);
-    node->data.typedef_decl.type = parse_type_expr();
+    node->data.typedef_decl.type = parse_type_expr(true);
     add_to_scope(node, iden->str);
     expect(TokenType::SEMICOLON);
     return node;

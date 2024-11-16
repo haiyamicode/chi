@@ -1,80 +1,80 @@
 struct HashBytes {
-  data *void = null;
-  size uint32 = 0;
+  data: *void = null;
+  size: uint32 = 0;
 }
 
 extern "C" {
-  func cx_print(str string);
-  func cx_printf(format *string, values *void);
-  func cx_array_new(dest *void);
-  func cx_array_delete(dest *void);
-  func cx_array_add(dest *void, size uint32) *void;
-  func cx_array_write_str(dest *void, str *string);
-  func cx_array_reserve(dest *void, elem_size uint32, new_cap uint32);
-  func cx_print_any(value *void);
-  func cx_print_number(value uint64);
-  func cx_print_string(str *string);
-  func cx_gc_alloc(size uint32, destructor *void) *void;
-  func cx_malloc(size uint32, ignored *void) *void;
-  func cx_free(address *void);
-  func cx_memset(address *void, v uint8, n uint32);
-  func cx_runtime_start(stack *void);
+  func cx_print(str: string);
+  func cx_printf(format: *string, values: *void);
+  func cx_array_new(dest: *void);
+  func cx_array_delete(dest: *void);
+  func cx_array_add(dest: *void, size: uint32) *void;
+  func cx_array_write_str(dest: *void, str: *string);
+  func cx_array_reserve(dest: *void, elem_size: uint32, new_cap: uint32);
+  func cx_print_any(value: *void);
+  func cx_print_number(value: uint64);
+  func cx_print_string(str: *string);
+  func cx_gc_alloc(size: uint32, destructor: *void) *void;
+  func cx_malloc(size: uint32, ignored: *void) *void;
+  func cx_free(address: *void);
+  func cx_memset(address: *void, v: uint8, n: uint32);
+  func cx_runtime_start(stack: *void);
   func cx_runtime_stop();
-  func cx_panic(message *string);
+  func cx_panic(message: *string);
   func cx_personality(...) int32;
-  func cx_timeout(delay uint64, callback *void);
-  func cx_call(fn *void);
-  func cx_string_format(format *string, values *void) string;
-  func cx_string_from_chars(data *void, size uint32) string;
-  func cx_string_delete(dest *string);
-  func cx_string_copy(dest *string, src *string);
-  func cx_hbytes(value *any) HashBytes;
+  func cx_timeout(delay: uint64, callback: *void);
+  func cx_call(fn: *void);
+  func cx_string_format(format: *string, values: *void) string;
+  func cx_string_from_chars(data: *void, size: uint32) string;
+  func cx_string_delete(dest: *string);
+  func cx_string_copy(dest: *string, src: *string);
+  func cx_hbytes(value: *any) HashBytes;
   func cx_map_new() *void;
-  func cx_map_delete(data *void);
-  func cx_map_find(data *void, key *HashBytes) *void;
-  func cx_map_add(data *void, key *HashBytes, value *void);
-  func cx_map_remove(data *void, key *HashBytes);
+  func cx_map_delete(data: *void);
+  func cx_map_find(data: *void, key: *HashBytes) *void;
+  func cx_map_add(data: *void, key: *HashBytes, value: *void);
+  func cx_map_remove(data: *void, key: *HashBytes);
 }
 
-func println(value any) {
+func println(value: any) {
   cx_print_any(&value);
   cx_print("\n");
 }
 
-func gc_alloc(size uint32) *void {
+func gc_alloc(size: uint32) *void {
   return cx_gc_alloc(size, null);
 }
 
-func print_int(value uint64) {
+func print_int(value: uint64) {
   cx_print_number(value);
 }
 
-func printf(format string, ...values any) {
+func printf(format: string, ...values: any) {
   cx_printf(&format, &values);
 }
 
-func panic(message string) {
+func panic(message: string) {
   cx_panic(&message);
 }
 
-func timeout(delay uint64, callback func) {
+func timeout(delay: uint64, callback: func) {
   cx_timeout(delay, &callback);
 }
 
-func stringf(format string, ...values any) string {
+func stringf(format: string, ...values: any) string {
   return cx_string_format(&format, &values);
 }
 
-func assert(cond bool, message string) {
+func assert(cond: bool, message: string) {
   if !cond {
     panic(stringf("assertion failed: {}", message));
   }
 }
 
 struct Array<T> {
-  data *T = null;
-	size uint32 = 0;
-	capacity uint32 = 0;
+  data: *T = null;
+	size: uint32 = 0;
+	capacity: uint32 = 0;
 
 	func new() {
 		cx_array_new(this);
@@ -84,7 +84,7 @@ struct Array<T> {
 		delete this.data;
 	}
 
-	func add(item T) {
+	func add(item: T) {
 		var ptr = cx_array_add(this, sizeof T) as *T;
 		*ptr = item;
 	}
@@ -97,7 +97,7 @@ struct Array<T> {
   }
 
   @[std.ops.Index]
-	func index(index uint32) &T {
+	func index(index: uint32) &T {
 		assert(index < this.size, "index out of bounds");
 		return &this.data[index];
 	}
@@ -113,12 +113,12 @@ struct Array<T> {
   }
 
   @[std.iter.Next]
-  func next(index uint32) uint32 {
+  func next(index: uint32) uint32 {
     return index + 1;
   }
 
   func display() string {
-    var buf Buffer = {};
+    var buf: Buffer = {};
     buf.write("[");
     for this => item {
       buf.write(stringf("{}, ", item));
@@ -128,7 +128,7 @@ struct Array<T> {
   }
 
   @[std.ops.CopyFrom]
-  func copy(from &Array<T>) {
+  func copy(from: &Array<T>) {
     this.clear();
     for from => item {
       this.add(item);
@@ -137,7 +137,7 @@ struct Array<T> {
 }
 
 struct Map<K, V> {
-  data *void;
+  data: *void;
 
   func new() {
     this.data = cx_map_new();
@@ -148,14 +148,14 @@ struct Map<K, V> {
     this.data = null;
   }
 
-  func remove(key K) {
-    var k any = key;
+  func remove(key: K) {
+    var k: any = key;
     var h = cx_hbytes(&k);
     cx_map_remove(this.data, &h);
   }
 
-  func find(key K) ?&V {
-    var k any = key;
+  func find(key: K) ?&V {
+    var k: any = key;
     var h = cx_hbytes(&k);
     var p = cx_map_find(this.data, &h) as *V;
     if p {
@@ -165,8 +165,8 @@ struct Map<K, V> {
   }
 
   @[std.ops.Index]
-  func index(key K) &V {
-    var k any = key;
+  func index(key: K) &V {
+    var k: any = key;
     var h = cx_hbytes(&k);
     var p = cx_map_find(this.data, &h) as *V;
     if !p {
@@ -178,13 +178,13 @@ struct Map<K, V> {
 }
 
 struct Buffer {
-  bytes Array<char>;
+  bytes: Array<char>;
 
   func new() {
     this.bytes = {};
   }
 
-  func write(str string) {
+  func write(str: string) {
     cx_array_write_str(&this.bytes, &str);
   }
 

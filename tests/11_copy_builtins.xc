@@ -1,4 +1,4 @@
-func test_string_pass(str string) {
+func test_string_pass(str: string) {
   printf("passed string: {}\n");
 }
 
@@ -6,13 +6,13 @@ func test_string() {
   // ensure that strings are properly copied and not double-freed
   var s = stringf("hello {}", "world");
   var t = s;
-  println(t);
+  println(t); 
   test_string_pass(s);
 }
 
 func test_array() {
   // ensure that arrays are properly copied
-  var a Array<int> = {};
+  var a: Array<int> = {};
   a.add(1);
   a.add(2);
   var b = a;

@@ -1,12 +1,12 @@
 func main() {
-    var fib Fib = {12};
+    var fib: Fib = {12};
     printf("fib: {}\n", fib.calculate());
 }
 
 struct Fib {
-    n int;
+    n: int;
 
-    func new(n int) {
+    func new(n: int) {
         this.n = n;
     }
 
@@ -14,7 +14,7 @@ struct Fib {
         return this.fib(this.n);
     }
 
-    func fib(n int) int {
+    func fib(n: int) int {
         if n < 2 {
             return n;
         }

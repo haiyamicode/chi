@@ -1,5 +1,5 @@
 func switch_int() {
-  var levels Array<int> = {};
+  var levels: Array<int> = {};
   levels.add(1);
   levels.add(2);
   levels.add(3);

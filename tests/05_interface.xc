@@ -3,9 +3,9 @@ interface Animal {
 }
 
 struct AnimalBase: Animal {
-    id int;
+    id: int;
 
-    func new(id int) {
+    func new(id: int) {
         this.id = id;
     }
 
@@ -15,13 +15,13 @@ struct AnimalBase: Animal {
 };
 
 struct Ant {
-    base ...AnimalBase;
+    base: ...AnimalBase;
 }
 
 struct Sheep {
-    base ...AnimalBase;
+    base: ...AnimalBase;
 
-    func new(id int) {
+    func new(id: int) {
         this.base = {id};
     }
 
@@ -31,9 +31,9 @@ struct Sheep {
 };
 
 struct Cat: Animal {
-    id int;
+    id: int;
 
-    func new(id int) {
+    func new(id: int) {
         this.id = id;
     }
 
@@ -43,10 +43,10 @@ struct Cat: Animal {
 };
 
 func main() {
-    var sheep Sheep = {1};
-    var cat Cat = {2};
-    var ant Ant = {3};
-    var animal Animal = &sheep;
+    var sheep: Sheep = {1};
+    var cat: Cat = {2};
+    var ant: Ant = {3};
+    var animal: Animal = &sheep;
     animal.make_sound();
     animal = &cat;
     animal.make_sound();
