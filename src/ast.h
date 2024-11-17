@@ -50,6 +50,8 @@ struct Module {
     cx::Scope *scope = nullptr;
     optional<string> source = {};
     array<Module *> imports = {};
+    array<Token *> tokens = {};
+    bool broken = false;
 
     Module() = default;
     NO_COPY(Module);
@@ -365,6 +367,8 @@ struct Node {
     uint32_t id = 0;
     int index = 0;
     Node *parent = nullptr;
+    Token *start_token = nullptr;
+    Token *end_token = nullptr;
 
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;

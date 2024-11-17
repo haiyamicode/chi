@@ -182,10 +182,11 @@ class Resolver {
             return;
         }
 
-        auto pos = node->token->pos;
-        print("{}:{}:{}: error: {}\n", m_module->full_path(), pos.line_number(), pos.col_number(),
-              message);
-        exit(1);
+        // auto pos = node->token->pos;
+        // print("{}:{}:{}: error: {}\n", m_module->full_path(), pos.line_number(),
+        // pos.col_number(),
+        //       message);
+        // exit(1);
     }
 
   public:
@@ -270,7 +271,9 @@ class ScopeResolver {
 
     bool declare_symbol(const string &name, ast::Node *node);
 
-    ast::Node *find_symbol(const string &name);
+    ast::Node *find_symbol(const string &name, Scope *current_scope = nullptr);
+
+    array<ast::Node *> get_all_symbols(Scope *current_scope = nullptr);
 
     Scope *push_scope(ast::Node *owner);
 

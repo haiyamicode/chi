@@ -355,6 +355,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             type->data.pointer.elem = get_pointer_type(scope.parent_struct, TypeKind::Reference);
             return type;
         }
+        if (!data.decl) {
+            return create_type(TypeKind::Unknown);
+        }
         if (data.kind == ast::IdentifierKind::Value && scope.block) {
             auto replacement = scope.block->scope->find_one(data.decl->name);
             if (replacement && replacement->type == NodeType::VarDecl &&
@@ -567,6 +570,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.dot_expr;
         auto field_name = data.field->str;
         auto expr_type = resolve(data.expr, scope, flags);
+        if (field_name.empty()) {
+            return create_type(TypeKind::Unknown);
+        }
         if (expr_type->kind == TypeKind::Fn) {
             expr_type = get_lambda_for_fn(expr_type);
         } else if (expr_type->kind == TypeKind::Module) {
@@ -1081,6 +1087,8 @@ string Resolver::to_string(ChiType *type) {
     case TypeKind::Result:
         return fmt::format("Result<{},{}>", to_string(type->get_elem()),
                            to_string(type->data.result.error));
+    case TypeKind::Unknown:
+        return "unknown";
     default:
         break;
     }
@@ -1905,11 +1913,11 @@ bool ScopeResolver::declare_symbol(const string &name, ast::Node *node) {
     return true;
 }
 
-ast::Node *ScopeResolver::find_symbol(const string &name) {
+ast::Node *ScopeResolver::find_symbol(const string &name, Scope *current_scope) {
     if (auto builtin = m_resolver->get_builtin(name)) {
         return builtin;
     }
-    auto scope = m_current_scope;
+    auto scope = current_scope ? current_scope : m_current_scope;
     while (scope) {
         if (auto node = scope->find_one(name)) {
             return node;
@@ -1917,6 +1925,15 @@ ast::Node *ScopeResolver::find_symbol(const string &name) {
         scope = scope->parent;
     }
     return nullptr;
+}
+
+array<ast::Node *> ScopeResolver::get_all_symbols(Scope *current_scope) {
+    auto scope = current_scope ? current_scope : m_current_scope;
+    auto list = scope->get_all_recursive();
+    for (auto builtin : m_resolver->get_context()->builtins) {
+        list.add(builtin);
+    }
+    return list;
 }
 
 ScopeResolver::ScopeResolver(cx::Resolver *resolver) {

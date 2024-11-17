@@ -14,7 +14,7 @@ dep:
 	cd build && conan install $(BASE) --build=missing
 
 build:
-	cd $(BUILD_DIR) && cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=${BUILD_MODE} .. && $(MAKE)
+	cd $(BUILD_DIR) && cmake -G "Unix Makefiles" -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_BUILD_TYPE=${BUILD_MODE} .. && $(MAKE)
 
 install:
 	cd $(BUILD_DIR) && $(MAKE) install

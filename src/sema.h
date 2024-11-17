@@ -21,7 +21,7 @@ struct Context;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
           Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise,
-          Infer, Module, This)
+          Infer, Module, This, Unknown)
 
 MAKE_ENUM(Visibility, Public, Private)
 
@@ -307,11 +307,13 @@ struct Scope {
 
     explicit Scope(Scope *parent) { this->parent = parent; }
 
-    ast::Node *find_one(const string &symbol);
+    ast::Node *find_one(const string &symbol, bool recursive = false);
 
     ast::Node *find_export(const string &symbol);
 
     array<ast::Node *> get_all();
+
+    array<ast::Node *> get_all_recursive();
 
     void put(const string &name, ast::Node *node);
 

@@ -80,9 +80,12 @@ ChiStructMember *ChiTypeStruct::get_symbol(ChiType *type, IntrinsicSymbol symbol
 
 string ChiStructMember::get_name() { return node->name; }
 
-ast::Node *Scope::find_one(const string &symbol) {
+ast::Node *Scope::find_one(const string &symbol, bool recursive) {
     if (auto val = symbols.get(symbol)) {
         return *val;
+    }
+    if (parent && recursive) {
+        return parent->find_one(symbol, recursive);
     }
     return nullptr;
 }
@@ -99,6 +102,14 @@ array<ast::Node *> Scope::get_all() {
     array<ast::Node *> list = {};
     for (auto entry : symbols.data) {
         list.add(entry.second);
+    }
+    return list;
+}
+
+array<ast::Node *> Scope::get_all_recursive() {
+    auto list = get_all();
+    if (parent) {
+        list.add_all(parent->get_all_recursive());
     }
     return list;
 }

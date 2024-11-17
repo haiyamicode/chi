@@ -11,9 +11,9 @@
 #define BOOST_JSON_DETAIL_CONFIG_HPP
 
 #ifndef BOOST_JSON_STANDALONE
-#include <boost/assert.hpp>
-#include <boost/config.hpp>
-#include <boost/throw_exception.hpp>
+// #include <boost/assert.hpp>
+// #include <boost/config.hpp>
+// #include <boost/throw_exception.hpp>
 #else
 #include <cassert>
 #endif
@@ -179,7 +179,7 @@
 #if defined(BOOST_ALL_DYN_LINK) || defined(BOOST_JSON_DYN_LINK)
 #define BOOST_DYN_LINK
 #endif
-#include <boost/config/auto_link.hpp>
+// #include <boost/config/auto_link.hpp>
 #endif
 #endif
 #else
@@ -282,7 +282,7 @@ template <class... Ts> using void_t = typename make_void<Ts...>::type;
 template <class T>
 using remove_cvref = typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-template <class T, class U> T exchange(T &t, U u) noexcept {
+template <class T, class U> T exchange(T &t, U u) { 
     T v = std::move(t);
     t = std::move(u);
     return v;

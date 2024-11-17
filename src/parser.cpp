@@ -139,10 +139,11 @@ void Parser::unread() { m_toki--; }
 Token *Parser::get() { return lookahead(0); }
 
 Token *Parser::lookahead(int n) {
-    if (m_toki + n >= m_ctx->tokens.size) {
+    auto toki = m_toki + n;
+    if (toki < 0 || toki >= m_ctx->tokens.size) {
         return m_eof_token;
     }
-    return m_ctx->tokens.at(m_toki + n);
+    return m_ctx->tokens.at(toki);
 }
 
 bool Parser::at_comma(TokenType end_token) {
@@ -435,6 +436,7 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
     auto kind = parse_fn_identifier(&iden);
 
     auto fn = create_node(NodeType::FnDef, iden);
+    fn->start_token = iden;
     fn->name = iden->get_name();
     auto proto = parse_fn_proto(iden);
     fn->data.fn_def.fn_proto = proto;
@@ -465,6 +467,7 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
         }
     }
 
+    fn->end_token = lookahead(-1);
     add_to_scope(fn);
     return fn;
 }
@@ -499,6 +502,9 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
         consume();
     }
     auto iden = expect(TokenType::IDEN);
+    if (iden->type != TokenType::IDEN) {
+        return create_error_node();
+    }
     auto node = create_node(NodeType::VarDecl, iden);
     node->data.var_decl.identifier = iden;
     node->data.var_decl.is_const = is_const;
@@ -613,6 +619,7 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
 
     auto node = create_node(NodeType::Block, token);
     node->data.block.has_braces = has_braces;
+    node->start_token = token;
     if (arrow) {
         node->data.block.is_arrow = true;
     }
@@ -625,8 +632,11 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
 
     if (!has_braces) {
         bool as_expr = false;
+        auto start_token = token;
         auto stmt = parse_stmt(&as_expr);
         node->data.block.return_expr = stmt;
+        stmt->start_token = start_token;
+        stmt->end_token = lookahead(-1);
 
     } else {
         for (;;) {
@@ -637,15 +647,21 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
             }
             if (token->type == TokenType::RBRACE) {
                 consume();
+                node->end_token = token;
                 break;
             }
             bool as_expr = false;
+            auto start_token = token;
             auto stmt = parse_stmt(&as_expr);
             stmt->parent = node;
+            stmt->start_token = start_token;
+            stmt->end_token = lookahead(-1);
 
             if (as_expr) {
                 node->data.block.return_expr = stmt;
-                expect(TokenType::RBRACE);
+                auto rbrace = expect(TokenType::RBRACE);
+                node->end_token = rbrace;
+                node->data.block.statements.add(stmt);
                 break;
             } else {
                 stmt->index = node->data.block.statements.size;
@@ -1096,6 +1112,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
     auto kw = expect(keyword);
     auto iden = expect(TokenType::IDEN);
     Node *node = create_struct_node(kw, iden->str);
+    node->start_token = kw;
     node->data.struct_decl.decl_spec = decl_spec;
     auto &params = node->data.struct_decl.type_params;
     if (next_is(TokenType::LT)) {
@@ -1137,6 +1154,8 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
     if (next_is(TokenType::SEMICOLON)) {
         consume();
     }
+
+    node->end_token = lookahead(-1);
     add_to_scope(node);
     return node;
 }
@@ -1183,6 +1202,10 @@ void Parser::parse_struct_block(Node *node) {
         add_to_scope(param);
     }
     while (get()->type != TokenType::RBRACE) {
+        if (get()->type == TokenType::END) {
+            error(get(), errors::UNEXPECTED_EOF);
+            return;
+        }
         auto member = parse_struct_member(node->data.struct_decl.kind);
         node->data.struct_decl.members.add(member);
     }

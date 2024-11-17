@@ -8,7 +8,8 @@ namespace cx {
 enum ProcessingFlags : uint32_t {
     FLAG_NONE = 0,
     FLAG_PRINT_AST = 1 << 0,
-    FLAG_EXIT_ON_ERROR = 1 << 1
+    FLAG_EXIT_ON_ERROR = 1 << 1,
+    FLAG_SAVE_TOKENS = 1 << 2
 };
 
 struct CompilationContext : public Context {

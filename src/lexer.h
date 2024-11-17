@@ -90,11 +90,22 @@ struct Pos {
     long col = -1;
     long offset = -1;
 
+    static Pos from_offset(long offset) { return {-1, -1, offset}; }
+
     bool is_valid() const { return offset >= 0; }
 
     // get values starting at 1
     long line_number() const { return line + 1; }
     long col_number() const { return col + 1; }
+
+    bool operator<(const Pos &p) const { return offset < p.offset; }
+    bool operator<=(const Pos &p) const { return offset <= p.offset; }
+
+    bool is_in_range(Pos start, Pos end) { return start <= *this && *this <= end; }
+
+    Pos add_offset(long delta) const { return {0, 0, offset + delta}; }
+    Pos add_col(long delta) const { return {0, col + delta, -1}; }
+    Pos add_line(long delta) const { return {line + delta, 0, -1}; }
 };
 
 struct Token {
@@ -132,6 +143,19 @@ struct Token {
         default:
             break;
         }
+    }
+
+    bool is_identifier() const {
+        switch (type) {
+        case TokenType::IDEN:
+        case TokenType::KW_THIS:
+        case TokenType::KW_NEW:
+        case TokenType::KW_DELETE:
+            return true;
+        default:
+            break;
+        }
+        return false;
     }
 };
 

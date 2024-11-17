@@ -27,6 +27,8 @@
 static inline void backtrace() {}
 #endif // CHI_RUNTIME_HAS_BACKTRACE
 
+namespace fs = std::filesystem;
+
 namespace cx {
 using fmt::print;
 template <typename T> using func = std::function<T>;
@@ -35,7 +37,6 @@ using std::string;
 using stx::optional;
 using namespace mpark;
 using std::stringstream;
-namespace fs = std::filesystem;
 
 #define VARIANT_TRY(value, type, output)                                                           \
     const auto output(get_if<type>(&value));                                                       \
@@ -149,6 +150,13 @@ template <typename T> struct array {
         memset(&last(), 0, sizeof(T));
         last() = item;
         return &last();
+    }
+
+    void add_all(array<T> other) {
+        reserve(size + other.size);
+        for (auto &item : other) {
+            add(item);
+        }
     }
 
     T &operator[](size_t index) { return at(index); }

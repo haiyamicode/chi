@@ -32,3 +32,5 @@ target_include_directories(chi PUBLIC ${LLVM_INCLUDE_DIRS} ${PROJECT_BINARY_DIR}
 set(ASAN_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
 set_target_properties(chi PROPERTIES COMPILE_FLAGS_DEBUG "${ASAN_FLAGS}>")
 target_link_libraries(chi ${LIBS} "$<$<CONFIG:DEBUG>:${ASAN_FLAGS}>")
+
+add_subdirectory(support)

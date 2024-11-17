@@ -15,6 +15,8 @@
 
 using namespace cx::ast;
 
+const int MAX_ERRORS = 10;
+
 namespace cx {
 struct ParseContext {
     Module *module;
@@ -38,6 +40,7 @@ class Parser {
     size_t m_toki = 0;
     Token *m_eof_token;
     map<Node *, size_t> m_block_pos;
+    long m_error_count = 0;
 
     Token *next();
 
@@ -68,12 +71,20 @@ class Parser {
             (*fn)(error);
             return;
         }
+
         print("{}:{}:{}: error: {}\n", m_ctx->module->full_path(), token->pos.line_number(),
               token->pos.col_number(), message);
+
+        ++m_error_count;
+        if (m_error_count > MAX_ERRORS) {
+            print("too many errors\n");
+            exit(1);
+        }
+
         if (m_ctx->debug_mode) {
             panic("parser error");
         } else {
-            exit(1);
+            // exit(1);
         }
     }
 

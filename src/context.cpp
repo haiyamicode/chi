@@ -35,10 +35,18 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
                                                 const string &path) {
     auto module = module_from_path(package, path);
     bool exitOnError = flags & FLAG_EXIT_ON_ERROR;
+
     optional<ErrorHandler> error_handler = std::nullopt;
     if (!exitOnError) {
-        error_handler = [module](Error error) { module->errors.add(error); };
+        error_handler = [module](Error error) {
+            if (module->errors.size > MAX_ERRORS) {
+                module->broken = true;
+                return;
+            }
+            module->errors.add(error);
+        };
     }
+
     resolve_ctx.error_handler = error_handler;
 
     Tokenization tokenization;
@@ -68,15 +76,23 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     pc.error_handler = error_handler;
     Parser parser(&pc);
     parser.parse();
-    if (module->errors.size) {
+
+    if (FLAG_SAVE_TOKENS) {
+        module->tokens = pc.tokens;
+    }
+
+    if (module->broken) {
         return module;
     }
 
     if (flags & FLAG_PRINT_AST) {
+        if (module->errors.size) {
+            return module;
+        }
         print_ast(module->root);
     }
 
-    if (module->errors.size) {
+    if (module->broken) {
         return module;
     }
 

@@ -1,0 +1,9 @@
+CompileFlags:
+  Add:
+    - "-std=c++17"
+
+# Suppress warnings.
+Diagnostics:
+  Suppress:
+    - unused-includes
+    - misc-unused-alias-decls
