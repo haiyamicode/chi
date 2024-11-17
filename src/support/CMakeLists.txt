@@ -1,1 +1,1 @@
-add_subdirectory(vscode-binding)
+add_subdirectory(lsp-binding)
