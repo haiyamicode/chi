@@ -247,7 +247,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         if (!data.fields.size) {
             return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
         }
-        auto name = m_ctx->resolver.to_string(type);
+        auto name = m_ctx->resolver.to_string(type, true);
         auto file = llvm_db.createFile(llvm_cu.getFilename(), llvm_cu.getDirectory());
         auto line_no = 0;
         if (data.node) {
@@ -266,7 +266,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     default:
         auto size = llvm_type_size(compile_type(type));
-        return llvm_db.createBasicType(m_ctx->resolver.to_string(type), size,
+        return llvm_db.createBasicType(m_ctx->resolver.to_string(type, true), size,
                                        llvm::dwarf::DW_ATE_unsigned);
     }
 }
@@ -477,7 +477,7 @@ void Compiler::compile_vtables(ChiType *type) {
     auto vtable_data_l = llvm::ConstantArray::get(vtable_type_l, methods);
     auto global = new llvm::GlobalVariable(*m_ctx->llvm_module, vtable_type_l, true,
                                            llvm::GlobalValue::PrivateLinkage, vtable_data_l,
-                                           "vtables." + get_resolver()->to_string(type));
+                                           "vtables." + get_resolver()->to_string(type, true));
     for (auto &vtable : vtables) {
         m_ctx->vtable_table[vtable.impl] = global + vtable.offset;
     }
@@ -506,7 +506,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
                     typedata_arr_l});
     auto info_global =
         new llvm::GlobalVariable(llvm_module, ti_type_l, true, llvm::GlobalValue::PrivateLinkage,
-                                 info_l, "typeinfo." + get_resolver()->to_string(type));
+                                 info_l, "typeinfo." + get_resolver()->to_string(type, true));
     return info_global;
 }
 
@@ -1764,7 +1764,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt1Ty(llvm_ctx)); // bool has_value
         members.push_back(elem_type_l);                     // elem
-        return llvm::StructType::create(members, get_resolver()->to_string(type));
+        return llvm::StructType::create(members, get_resolver()->to_string(type, true));
     }
     case TypeKind::Array: {
         auto &data = type->data.array;
@@ -1774,7 +1774,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t size
         members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t capacity
         members.push_back(llvm::Type::getInt8Ty(llvm_ctx));  // uint8_t flags
-        return llvm::StructType::create(members, get_resolver()->to_string(type));
+        return llvm::StructType::create(members, get_resolver()->to_string(type, true));
     }
     case TypeKind::Any: {
         std::vector<llvm::Type *> members;
@@ -1793,7 +1793,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             members.push_back(get_llvm_ptr_type()); // typeinfo
             members.push_back(get_llvm_ptr_type()); // data
             members.push_back(get_llvm_ptr_type()); // vtable
-            return llvm::StructType::create(members, get_resolver()->to_string(type));
+            return llvm::StructType::create(members, get_resolver()->to_string(type, true));
         }
         if (!data.fields.size) {
             return compile_type(get_system_types()->void_);
@@ -1802,7 +1802,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         for (auto &member : data.fields) {
             members.push_back(compile_type(member->resolved_type));
         }
-        return llvm::StructType::create(members, get_resolver()->to_string(type));
+        return llvm::StructType::create(members, get_resolver()->to_string(type, true));
     }
     case TypeKind::Error: {
         // TODO: implement actual error type

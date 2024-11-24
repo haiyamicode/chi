@@ -1051,21 +1051,24 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
     return node->name;
 }
 
-string Resolver::to_string(ChiType *type) {
+string Resolver::to_string(ChiType *type, bool for_display) {
     assert(type);
     if (type->name) {
+        if (!for_display) {
+            return fmt::format("{}:{}", type->id, *type->name);
+        }
         return *type->name;
     }
-    if (type->display_name) {
+    if (type->display_name && for_display) {
         return *type->display_name;
     }
     switch (type->kind) {
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
         std::stringstream ss;
-        ss << to_string(data.generic) << "<";
+        ss << to_string(data.generic, for_display) << "<";
         for (int i = 0; i < data.args.size; i++) {
-            ss << to_string(data.args[i]);
+            ss << to_string(data.args[i], for_display);
             if (i < data.args.size - 1) {
                 ss << ",";
             }
@@ -1076,28 +1079,28 @@ string Resolver::to_string(ChiType *type) {
     case TypeKind::String:
         return "string";
     case TypeKind::Pointer:
-        return "*" + to_string(type->get_elem());
+        return "*" + to_string(type->get_elem(), for_display);
     case TypeKind::Reference:
-        return "&" + to_string(type->get_elem());
+        return "&" + to_string(type->get_elem(), for_display);
     case TypeKind::Optional:
-        return "?" + to_string(type->get_elem());
+        return "?" + to_string(type->get_elem(), for_display);
     case TypeKind::Box:
-        return "^" + to_string(type->get_elem());
+        return "^" + to_string(type->get_elem(), for_display);
     case TypeKind::Array:
-        return fmt::format("Array<{}>", to_string(type->get_elem()));
+        return fmt::format("Array<{}>", to_string(type->get_elem(), for_display));
     case TypeKind::Result:
-        return fmt::format("Result<{},{}>", to_string(type->get_elem()),
-                           to_string(type->data.result.error));
+        return fmt::format("Result<{},{}>", to_string(type->get_elem(), for_display),
+                           to_string(type->data.result.error, for_display));
     case TypeKind::Unknown:
         return "unknown";
     default:
         break;
     }
     assert(type->kind < TypeKind::__COUNT);
-    return to_string(type->kind, &type->data);
+    return to_string(type->kind, &type->data, for_display);
 }
 
-string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
+string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display) {
     switch (kind) {
     case TypeKind::Struct: {
         auto &struct_ = data->struct_;
@@ -1106,7 +1109,7 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
         if (struct_.type_params.size > 0) {
             ss << "<";
             for (int i = 0; i < struct_.type_params.size; i++) {
-                ss << to_string(struct_.type_params[i]);
+                ss << to_string(struct_.type_params[i], for_display);
                 if (i < struct_.type_params.size - 1) {
                     ss << ",";
                 }
@@ -1116,7 +1119,7 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
         ss << "{";
         for (int i = 0; i < struct_.members.size; i++) {
             auto &member = struct_.members[i];
-            ss << to_string(member->resolved_type);
+            ss << to_string(member->resolved_type, for_display);
             if (i < struct_.members.size - 1) {
                 ss << ",";
             }
@@ -1127,32 +1130,30 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
     case TypeKind::Fn: {
         auto &fn = data->fn;
         std::stringstream ss;
-        ss << "func(";
         if (fn.container_ref) {
-            ss << "this: ";
-            ss << to_string(fn.container_ref);
-            if (fn.params.size > 0) {
-                ss << ", ";
-            }
+            ss << "(";
+            ss << to_string(fn.container_ref, for_display);
+            ss << ") ";
         }
+        ss << "func(";
         for (int i = 0; i < fn.params.size; i++) {
             if (fn.is_variadic && i == fn.params.size - 1) {
                 ss << "...";
             }
-            ss << to_string(fn.params[i]);
+            ss << to_string(fn.params[i], for_display);
             if (i < fn.params.size - 1) {
                 ss << ",";
             }
         }
         ss << ")";
         if (fn.return_type) {
-            ss << " " << to_string(fn.return_type);
+            ss << " " << to_string(fn.return_type, for_display);
         }
         return ss.str();
     }
     case TypeKind::FnLambda: {
         auto &fn_lambda = data->fn_lambda;
-        return fmt::format("Lambda<{}>", to_string(fn_lambda.fn));
+        return fmt::format("Lambda<{}>", to_string(fn_lambda.fn, for_display));
     }
     default:
         break;
@@ -1533,7 +1534,7 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
 
     auto struct_type = create_type(TypeKind::Struct);
     auto &struct_ = struct_type->data.struct_;
-    struct_type->display_name = "Lambda<" + to_string(fn_type) + ">" + "::Internal";
+    struct_type->display_name = "Lambda<" + to_string(fn_type, true) + ">" + "::Internal";
 
     struct_.kind = ContainerKind::Struct;
     struct_.add_member(get_allocator(), "ptr", get_dummy_var("ptr"),

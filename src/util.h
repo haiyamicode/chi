@@ -42,10 +42,6 @@ using std::stringstream;
     const auto output(get_if<type>(&value));                                                       \
     output
 
-#define NO_COPY(type)                                                                              \
-    type(const type &) = delete;                                                                   \
-    type &operator=(const type &) = delete;
-
 template <typename... Args> static inline void panic(const char *format, const Args &...args) {
     fmt::print(format, args...);
     fmt::print("\n");

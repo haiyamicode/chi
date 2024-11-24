@@ -205,9 +205,9 @@ class Resolver {
 
     ChiType *node_get_type(ast::Node *node);
 
-    string to_string(ChiType *type);
+    string to_string(ChiType *type, bool for_display = false);
 
-    string to_string(TypeKind kind, ChiType::Data *data);
+    string to_string(TypeKind kind, ChiType::Data *data, bool for_display = false);
 
     string resolve_global_id(ast::Node *node);
 

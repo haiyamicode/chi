@@ -54,7 +54,8 @@ struct Module {
     bool broken = false;
 
     Module() = default;
-    NO_COPY(Module);
+    Module(const Module &) = delete;
+    Module &operator=(const Module &) = delete;
 
     string full_path() const { return (fs::path(path) / filename).string(); }
 
