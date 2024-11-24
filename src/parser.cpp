@@ -1230,7 +1230,7 @@ void Parser::parse_struct_block(Node *node) {
 
 Node *Parser::parse_construct_expr() {
     Node *node = create_node(NodeType::ConstructExpr, get());
-    if (next_is(TokenType::ADD) || next_is(TokenType::KW_NEW)) {
+    if (next_is(TokenType::KW_NEW)) {
         consume();
         node->data.construct_expr.is_new = true;
         if (!next_is(TokenType::LBRACE)) {
