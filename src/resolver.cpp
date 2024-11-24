@@ -591,6 +591,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         data.resolved_member = member;
         data.resolved_decl = member->node;
+        data.field->node = member->node;
         auto expr_struct = resolve_struct_type(expr_type);
         if (expr_struct->is_generic()) {
             data.should_resolve_variant = true;
@@ -1128,7 +1129,7 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data) {
         std::stringstream ss;
         ss << "func(";
         if (fn.container_ref) {
-            ss << "this ";
+            ss << "this: ";
             ss << to_string(fn.container_ref);
             if (fn.params.size > 0) {
                 ss << ", ";

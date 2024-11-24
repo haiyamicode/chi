@@ -145,7 +145,7 @@ static napi_value Method(napi_env env, napi_callback_info info) {
                 auto end_pos =
                     result.decl->end_token ? result.decl->end_token->pos : start_pos.add_line(1);
                 auto start = boost::json::object({
-                    {"character", start_pos.col},
+                    {"character", start_pos.col - 1},
                     {"line", start_pos.line},
                 });
                 auto end = boost::json::object({

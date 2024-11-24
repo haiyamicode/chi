@@ -68,10 +68,24 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
     // get info from token
     if (result.token && result.scope) {
         if (result.token->is_identifier()) {
-            auto name = result.token->str;
-            auto decl = scope_resolver.find_symbol(name, result.scope);
-            if (decl) {
-                result.decl = decl;
+            auto token_node = result.token->node;
+            // get associated decl from identifier
+            if (token_node) {
+                if (token_node->type == ast::NodeType::Identifier &&
+                    token_node->data.identifier.decl) {
+                    result.decl = token_node->data.identifier.decl;
+                } else {
+                    result.decl = token_node;
+                }
+            }
+
+            // resort to symbol lookup
+            if (!result.decl) {
+                auto name = result.token->str;
+                auto decl = scope_resolver.find_symbol(name, result.scope);
+                if (decl) {
+                    result.decl = decl;
+                }
             }
         }
     }

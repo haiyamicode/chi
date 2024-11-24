@@ -11,6 +11,10 @@
 
 namespace cx {
 
+namespace ast {
+struct Node; // forward declare
+}
+
 MAKE_ENUM(TokenType, END, IDEN, ERROR,
 
           // keywords
@@ -117,6 +121,7 @@ struct Token {
     string str = "";
     TokenType type = TokenType::ERROR;
     Pos pos = {};
+    ast::Node *node = nullptr; // identifier node associated with this token
 
     string to_string() const;
     string get_name() const;

@@ -163,6 +163,9 @@ Node *Parser::create_node(NodeType type, Token *token) {
     node->module = m_ctx->module;
     if (token->type == TokenType::IDEN) {
         node->name = token->str;
+        if (!token->node) {
+            token->node = node;
+        }
     }
     return node;
 }
@@ -172,7 +175,6 @@ Node *Parser::create_identifier_node(Token *iden, Node *decl) {
     node->data.identifier.decl = decl;
     if (decl) {
         node->data.identifier.kind = get_identifier_kind(decl);
-        ;
     }
     return node;
 }
@@ -398,6 +400,10 @@ Node *Parser::parse_type_expr(bool type_only) {
             Token *token;
             for (;;) {
                 token = get();
+                if (token->type == TokenType::END) {
+                    error(token, errors::UNEXPECTED_EOF);
+                    return node;
+                }
                 if (token->type == TokenType::GT) {
                     break;
                 }
@@ -573,6 +579,10 @@ bool Parser::parse_fn_params(NodeList *params) {
     Token *token;
     for (;;) {
         token = get();
+        if (token->type == TokenType::END) {
+            error(token, errors::UNEXPECTED_EOF);
+            return true;
+        }
         if (token->type == TokenType::RPAREN) {
             break;
         }
@@ -941,6 +951,10 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
 
     for (;;) {
         auto tok = get();
+        if (tok->type == TokenType::END) {
+            error(tok, errors::UNEXPECTED_EOF);
+            return node;
+        }
         if (tok->type == TokenType::RPAREN) {
             break;
         } else {
