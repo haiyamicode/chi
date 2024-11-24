@@ -84,7 +84,7 @@ class Parser {
         if (m_ctx->debug_mode) {
             panic("parser error");
         } else {
-            // exit(1);
+            exit(1);
         }
     }
 

@@ -182,11 +182,10 @@ class Resolver {
             return;
         }
 
-        // auto pos = node->token->pos;
-        // print("{}:{}:{}: error: {}\n", m_module->full_path(), pos.line_number(),
-        // pos.col_number(),
-        //       message);
-        // exit(1);
+        auto pos = node->token->pos;
+        print("{}:{}:{}: error: {}\n", m_module->full_path(), pos.line_number(), pos.col_number(),
+              message);
+        exit(1);
     }
 
   public:
@@ -240,7 +239,7 @@ class Resolver {
 
     ast::Node *get_dummy_var(const string &name, ast::Node *expr = nullptr);
 
-    ConstantValue resolve_constant_value(ast::Node *node);
+    optional<ConstantValue> resolve_constant_value(ast::Node *node);
 
     void resolve(ast::Package *package);
 

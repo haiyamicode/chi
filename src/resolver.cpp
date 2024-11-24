@@ -434,16 +434,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::BinOpExpr: {
         auto &data = node->data.bin_op_expr;
         auto op1_scope = scope;
-        if (data.op_type == TokenType::ASS) {
+        if (is_assignment_op(data.op_type)) {
             op1_scope = scope.set_is_lhs(true);
         }
         auto t1 = resolve(data.op1, op1_scope);
 
         ChiType *t2;
-        if (data.op_type == TokenType::ASS) {
+        if (is_assignment_op(data.op_type)) {
             auto var = data.op1->get_decl();
+            if (var && var->type == NodeType::VarDecl) {
+                if (var->data.var_decl.is_const) {
+                    error(node, errors::ASSIGNMENT_TO_CONST, var->name);
+                }
+            }
             if (var && var->type == NodeType::VarDecl && !var->data.var_decl.initialized_at) {
-                if (!var->data.var_decl.is_field || scope.parent_fn->name != "new") {
+                if (!var->data.var_decl.is_field ||
+                    scope.parent_fn->name != "new" && data.op_type == TokenType::ASS) {
                     var->data.var_decl.initialized_at = node;
                 }
             }
@@ -839,7 +845,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.value) {
             auto value_type = resolve(data.value, scope);
             check_assignment(data.value, value_type, get_system_types()->int_);
-            data.resolved_value = get<int64_t>(resolve_constant_value(data.value));
+            auto value = resolve_constant_value(data.value);
+            assert(value);
+            data.resolved_value = get<int64_t>(*value);
             scope.next_enum_value = data.resolved_value + 1;
         } else {
             data.resolved_value = scope.next_enum_value++;
@@ -1606,25 +1614,25 @@ ChiType *Resolver::create_float_type(int bit_count) {
     return type;
 }
 
-ConstantValue Resolver::resolve_constant_value(ast::Node *node) {
+optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
     switch (node->type) {
     case NodeType::LiteralExpr: {
         auto token = node->token;
         switch (token->type) {
         case TokenType::INT: {
-            return token->val.i;
+            return {token->val.i};
         }
         case TokenType::FLOAT: {
-            return token->val.d;
+            return {token->val.d};
         }
         case TokenType::STRING: {
-            return token->str;
+            return {token->str};
         }
         case TokenType::BOOL: {
-            return (int64_t)token->val.b;
+            return {(int64_t)token->val.b};
         }
         case TokenType::NULLP: {
-            return (int64_t)0;
+            return {(int64_t)0};
         }
         default:
             break;
@@ -1637,15 +1645,20 @@ ConstantValue Resolver::resolve_constant_value(ast::Node *node) {
 
     case NodeType::BinOpExpr: {
         auto &data = node->data.bin_op_expr;
-        auto a = resolve_constant_value(data.op1);
-        auto b = resolve_constant_value(data.op2);
+        auto a_val = resolve_constant_value(data.op1);
+        auto b_val = resolve_constant_value(data.op2);
+        if (!a_val.has_value() || !b_val.has_value()) {
+            return std::nullopt;
+        }
+        auto a = *a_val;
+        auto b = *b_val;
         switch (data.op_type) {
         case TokenType::ADD:
-            return _BIN_OP_INT(a, +, b);
+            return {_BIN_OP_INT(a, +, b)};
         case TokenType::SUB:
-            return _BIN_OP_INT(a, -, b);
+            return {_BIN_OP_INT(a, -, b)};
         case TokenType::LSHIFT:
-            return _BIN_OP_INT(a, <<, b);
+            return {_BIN_OP_INT(a, <<, b)};
         default:
             break;
         }
@@ -1661,7 +1674,10 @@ ConstantValue Resolver::resolve_constant_value(ast::Node *node) {
         switch (data.op_type) {
         case TokenType::SUB: {
             auto v = resolve_constant_value(data.op1);
-            return -get<const_int_t>(v);
+            if (!v.has_value()) {
+                return std::nullopt;
+            }
+            return -get<const_int_t>(*v);
         }
         default:
             break;
@@ -1676,15 +1692,14 @@ ConstantValue Resolver::resolve_constant_value(ast::Node *node) {
     }
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
-        if (data.is_const) {
+        if (data.is_const && data.resolved_value.has_value()) {
             return data.resolved_value;
         }
     }
     default:
         break;
     }
-    error(node, errors::VALUE_NOT_CONSTANT);
-    return {};
+    return std::nullopt;
 }
 
 bool Resolver::is_same_type(ChiType *a, ChiType *b) { return to_value_type(a) == to_value_type(b); }

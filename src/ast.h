@@ -170,7 +170,7 @@ struct VarDecl {
     bool is_field = false;
     bool is_embed = false;
     ChiStructMember *resolved_field = nullptr;
-    ConstantValue resolved_value = {};
+    optional<ConstantValue> resolved_value = std::nullopt;
     DeclSpec *decl_spec = {};
     bool is_generated = false;
     Node *initialized_at = nullptr;

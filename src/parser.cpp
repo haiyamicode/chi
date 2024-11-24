@@ -698,6 +698,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
         return parse_while_stmt();
 
     case TokenType::KW_VAR:
+    case TokenType::KW_CONST:
     case TokenType::KW_THIS:
     case TokenType::KW_NEW:
     case TokenType::KW_DELETE:
@@ -720,7 +721,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::DEC:
     case TokenType::KW_SWITCH:
     case TokenType::KW_TRY: {
-        if (next_is(TokenType::KW_VAR)) {
+        if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_CONST)) {
             return parse_var_decl(false);
         }
 
@@ -1027,7 +1028,7 @@ Node *Parser::parse_for_stmt() {
     if (!next_is(TokenType::LBRACE)) {
         Node *expr;
         ForLoopKind kind = ForLoopKind::Empty;
-        if (next_is(TokenType::KW_VAR)) {
+        if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_CONST)) {
             expr = parse_var_decl(false);
             kind = ForLoopKind::Ternary;
         } else {

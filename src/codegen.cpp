@@ -711,7 +711,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::LiteralExpr: {
         auto value = get_resolver()->resolve_constant_value(expr);
-        return compile_constant_value(fn, value, get_chitype(expr));
+        assert(value.has_value());
+        return compile_constant_value(fn, *value, get_chitype(expr));
     }
     case ast::NodeType::UnaryOpExpr: {
         auto &data = expr->data.unary_op_expr;
@@ -933,7 +934,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
             for (auto clause : scase->data.case_expr.clauses) {
                 auto clause_value = get_resolver()->resolve_constant_value(clause);
-                auto cond_value = (llvm::ConstantInt *)compile_constant_value(fn, clause_value,
+                assert(clause_value);
+                auto cond_value = (llvm::ConstantInt *)compile_constant_value(fn, *clause_value,
                                                                               get_chitype(clause));
                 switch_b->addCase(cond_value, label);
             }
@@ -1182,9 +1184,9 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     }
     if (data.decl->type == ast::NodeType::VarDecl) {
         auto &var = data.decl->data.var_decl;
-        if (var.is_const) {
+        if (var.is_const && var.resolved_value.has_value()) {
             return RefValue::from_value(
-                compile_constant_value(fn, var.resolved_value, get_chitype(data.decl)));
+                compile_constant_value(fn, *var.resolved_value, get_chitype(data.decl)));
         } else {
             goto normal;
         }
