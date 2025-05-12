@@ -34,6 +34,105 @@ extern "C" {
   func cx_map_find(data: *void, key: *HashBytes) *void;
   func cx_map_add(data: *void, key: *HashBytes, value: *void);
   func cx_map_remove(data: *void, key: *HashBytes);
+
+  func cx_parse_json(str: *string, result: *void);
+  func cx_json_value_delete(data: *void);
+  func cx_json_value_get(data: *void, key: *string, result: *void);
+  func cx_json_value_convert(data: *void, kind: uint32, result: *void);
+  func cx_json_array_index(data: *void, index: uint32, result: *void);
+  func cx_json_array_length(data: *void) uint32;
+  func cx_json_value_copy(data: *void, result: *void);
+
+  func cx_file_read(path: *string) string;
+}
+
+enum JsonKind {
+  Null,
+  Bool,
+  Int64,
+  Uint64,
+  Double,
+  String,
+  Array,
+  Object
+}
+
+struct JsonValue {
+  data: *void = null;
+  kind: JsonKind = JsonKind.Null;
+
+  func delete() {
+    cx_json_value_delete(this.data);
+  }
+
+  func get(key: string) JsonValue {
+    const new_value: JsonValue = {};
+    cx_json_value_get(this.data, &key, &new_value);
+    return new_value;
+  }
+
+  func assert_kind(kind: JsonKind) {
+    if (this.kind != kind) {
+      panic(stringf("expected {}, got {}",
+        json_kind_display(kind),
+        json_kind_display(this.kind)));
+    }
+  }
+
+  func to_string() string {
+    this.assert_kind(JsonKind.String);
+    const result = "";
+    cx_json_value_convert(this.data, JsonKind.String, &result);
+    return result;
+  }
+
+  func to_bool() bool {
+    this.assert_kind(JsonKind.Bool);
+    const result = false;
+    cx_json_value_convert(this.data, JsonKind.Bool, &result);
+    return result;
+  }
+
+  func to_int() int64 {
+    this.assert_kind(JsonKind.Int64);
+    const result: int64 = 0;
+    cx_json_value_convert(this.data, JsonKind.Int64, &result);
+    return result;
+  }
+
+  func length() uint32 {
+    return cx_json_array_length(this.data);
+  }
+
+  func to_array() Array<JsonValue> {
+    const result: Array<JsonValue> = {};
+    const len = this.length();
+    for var i=0; i<len; i++ {
+      const new_value: JsonValue = {};
+      cx_json_array_index(this.data, i, &new_value);
+      result.add(new_value);
+    }
+    return result;
+  }
+
+  @[std.ops.CopyFrom]
+  func copy(from: &JsonValue) {
+    // cx_json_value_copy(from.data, this);
+  }
+}
+
+func json_kind_display(kind: JsonKind) string {
+  return switch kind {
+    JsonKind.Null => "null",
+    JsonKind.Bool => "bool",
+    JsonKind.Int64 => "int64",
+    JsonKind.Uint64 => "uint64",
+    JsonKind.Double => "double",
+    JsonKind.String => "string",
+    JsonKind.Array => "array",
+    JsonKind.Object => "object",
+    else => "unknown",
+  };
 }
 
 func println(value: any) {
@@ -69,6 +168,16 @@ func assert(cond: bool, message: string) {
   if !cond {
     panic(stringf("assertion failed: {}", message));
   }
+}
+
+func json_parse(str: string) JsonValue {
+  const result: JsonValue = {};
+  cx_parse_json(&str, &result);
+  return result;
+}
+
+func fs_read(path: string) string {
+  return cx_file_read(&path);
 }
 
 struct Array<T> {

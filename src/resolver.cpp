@@ -1171,7 +1171,7 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display)
 
 void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type) {
     if (!can_assign(from_type, to_type)) {
-        error(value, errors::CANNOT_CONVERT, to_string(from_type), to_string(to_type));
+        error(value, errors::CANNOT_CONVERT, to_string(from_type, true), to_string(to_type, true));
     }
 }
 
@@ -1269,7 +1269,8 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
                 break;
             }
             if (!compare_impl_type(base_member->resolved_type, child_method->resolved_type)) {
-                error(base_node, errors::IMPLEMENT_NOT_MATCH, node->name, to_string(base_type));
+                error(base_node, errors::IMPLEMENT_NOT_MATCH, node->name,
+                      to_string(base_type, true));
                 break;
             }
             if (iface_impl) {
@@ -1307,7 +1308,8 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
         return;
     }
     if (current.kind != base.kind) {
-        error(base_node, errors::CANNOT_EMBED_INTO, to_string(em_type), to_string(struct_type));
+        error(base_node, errors::CANNOT_EMBED_INTO, to_string(em_type, true),
+              to_string(struct_type, true));
     }
     if (base.resolve_status < ResolveStatus::Done) {
         _resolve(base.node, parent_scope);
@@ -1662,6 +1664,19 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
         default:
             break;
         }
+    }
+
+    case NodeType::EnumMember: {
+        auto &data = node->data.enum_member;
+        return {data.resolved_value};
+    }
+
+    case NodeType::DotExpr: {
+        auto &data = node->data.dot_expr;
+        if (data.resolved_decl) {
+            return resolve_constant_value(data.resolved_decl);
+        }
+        return std::nullopt;
     }
 
     case NodeType::ParenExpr: {

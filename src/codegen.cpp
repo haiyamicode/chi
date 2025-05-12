@@ -253,8 +253,13 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         if (data.node) {
             line_no = data.node->token->pos.line_number();
         }
-        assert(m_ctx->dbg_scopes.size);
-        auto scope = m_ctx->dbg_scopes.last();
+        auto scope = m_ctx->dbg_scopes.size ? m_ctx->dbg_scopes.last() : nullptr;
+        if (!scope) {
+            auto dbg_builder = m_ctx->dbg_builder.get();
+            auto unit = dbg_builder->createFile(m_ctx->dbg_cu->getFilename(),
+                                                m_ctx->dbg_cu->getDirectory());
+            scope = unit;
+        }
         return llvm_db.createStructType(scope, name, file, line_no, 0, 0, llvm::DINode::FlagZero,
                                         nullptr, {});
     }
@@ -994,6 +999,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                                                                 dest,
                                                                 from_address,
                                                             });
+            emit_dbg_location(expr);
             return;
         }
         break;
@@ -1184,7 +1190,7 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     }
     if (data.decl->type == ast::NodeType::VarDecl) {
         auto &var = data.decl->data.var_decl;
-        if (var.is_const && var.resolved_value.has_value()) {
+        if (var.is_const && var.resolved_value.has_value() && !data.decl->parent_fn) {
             return RefValue::from_value(
                 compile_constant_value(fn, *var.resolved_value, get_chitype(data.decl)));
         } else {
@@ -1656,6 +1662,8 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
     auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, name,
                                        m_ctx->llvm_module.get());
+    fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
+                              llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
 
     // Set names for all arguments.
     for (int i = 0; i < fn_l->arg_size(); i++) {

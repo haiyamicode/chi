@@ -1,10 +1,11 @@
 set(CONAN_DISABLE_CHECK_COMPILER True CACHE BOOL "" FORCE)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "12" CACHE STRING "Minimum OS X deployment version")
+set(CMAKE_OSX_DEPLOYMENT_TARGET "14" CACHE STRING "Minimum OS X deployment version")
 
 cmake_minimum_required(VERSION 3.12)
 project(chi LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_OSX_DEPLOYMENT_TARGET 14)
 
 # Bundling libraries
 function(bundle_static_library tgt_name bundled_tgt_name)

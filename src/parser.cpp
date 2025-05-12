@@ -518,7 +518,7 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     node->data.var_decl.decl_spec = decl_spec;
     node->data.var_decl.is_embed = is_embed;
 
-    if (!is_const && !as_field) {
+    if (!as_field) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
         assert(node->parent_fn);
     }
@@ -1398,6 +1398,16 @@ Node *Parser::parse_switch_expr() {
             break;
         }
         consume();
+    }
+    bool has_else = false;
+    for (auto case_expr : node->data.switch_expr.cases) {
+        if (case_expr->data.case_expr.is_else) {
+            has_else = true;
+            break;
+        }
+    }
+    if (!has_else) {
+        error(kw, errors::SWITCH_EXPR_MUST_HAVE_ELSE);
     }
     expect(TokenType::RBRACE);
     m_ctx->resolver->pop_scope();

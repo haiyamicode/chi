@@ -50,6 +50,7 @@ constexpr auto UNINITIALIZED_FIELD = "field '{}' of type '{}' has not been initi
 constexpr auto INVALID_SWITCH_TYPE = "switch type {} must be an enum or integer";
 constexpr auto INVALID_VARIABLE_TYPE = "cannot declare variable of type {}";
 constexpr auto ASSIGNMENT_TO_CONST = "assignment to const value '{}'";
+constexpr auto SWITCH_EXPR_MUST_HAVE_ELSE = "switch expression must have an else clause";
 
 } // namespace errors
 } // namespace cx

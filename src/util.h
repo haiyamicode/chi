@@ -279,6 +279,12 @@ class Buffer {
         }
         return {};
     };
+
+    string read_all() {
+        std::stringstream ss;
+        ss << m_stream->rdbuf();
+        return ss.str();
+    }
 };
 
 struct CharBuf : public array<char> {

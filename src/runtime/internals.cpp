@@ -20,6 +20,9 @@ using namespace cx;
 #include <inttypes.h>
 #include <libunwind.h>
 
+#define BOOST_JSON_STANDALONE
+#include <boost/json/src.hpp>
+
 struct StackTrace {
     string message;
     char trace[8096];
@@ -178,7 +181,10 @@ CxString cx_string_format(CxString *format, CxSlice *values) {
     return s;
 }
 
-void cx_printf(CxString *format, CxSlice *values) { fmt::print(format_cstr(*format, *values)); }
+void cx_printf(CxString *format, CxSlice *values) {
+    auto str = format_cstr(*format, *values);
+    fmt::print("{}", str);
+}
 
 void cx_print(CxString str) {
     string s(str.data, str.size);
@@ -390,3 +396,83 @@ void cx_map_add(void *data, CxHash *key, void *value) {
 }
 
 void cx_map_remove(void *data, CxHash *key) {}
+
+static void create_cx_json_result(boost::json::value *data, void *result) {
+    auto result_p = (CxJsonValue *)result;
+    result_p->data = new boost::json::value(*data);
+    result_p->kind = (uint32_t)data->kind();
+}
+
+void cx_parse_json(CxString *str, void *result) {
+    string s(str->data, str->size);
+    auto value = boost::json::parse(s);
+    create_cx_json_result(&value, result);
+}
+
+void cx_json_value_delete(void *data) { delete (boost::json::value *)data; }
+void cx_json_value_get(void *data, char *key, void *result) {
+    auto value = (boost::json::value *)data;
+    auto ptr = value->at(key);
+    create_cx_json_result(&ptr, result);
+}
+
+void cx_json_value_convert(void *data, uint32_t kind, void *result) {
+    auto value = (boost::json::value *)data;
+    switch ((boost::json::kind)kind) {
+    case boost::json::kind::string: {
+        auto str = value->as_string();
+        *(CxString *)result = cx_string_from_chars(str.data(), str.size());
+        break;
+    }
+    case boost::json::kind::int64: {
+        auto i = value->as_int64();
+        *(int64_t *)result = i;
+        break;
+    }
+    case boost::json::kind::uint64: {
+        auto i = value->as_uint64();
+        *(uint64_t *)result = i;
+        break;
+    }
+    case boost::json::kind::double_: {
+        auto d = value->as_double();
+        *(double *)result = d;
+        break;
+    }
+    case boost::json::kind::null: {
+        *(bool *)result = true;
+        break;
+    }
+    case boost::json::kind::bool_: {
+        auto b = value->as_bool();
+        *(bool *)result = b;
+        break;
+    }
+    default:
+        *(bool *)result = false;
+        break;
+    }
+}
+
+void cx_json_array_index(void *data, uint32_t index, void *result) {
+    auto value = (boost::json::value *)data;
+    auto ptr = value->at(index);
+    *(boost::json::value *)result = ptr;
+}
+
+uint32_t cx_json_array_length(void *data) {
+    auto value = (boost::json::value *)data;
+    return value->as_array().size();
+}
+
+CxString cx_file_read(CxString *path) {
+    string s(path->data, path->size);
+    auto buf = io::Buffer::from_file(s);
+    auto str = buf.read_all();
+    return cx_string_from_chars(str.data(), str.size());
+}
+
+void cx_json_value_copy(void *data, void *result) {
+    auto value = (boost::json::value *)data;
+    create_cx_json_result(value, result);
+}
