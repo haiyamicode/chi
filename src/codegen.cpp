@@ -1,5 +1,7 @@
 #include "codegen.h"
 #include "context.h"
+#include "fmt/core.h"
+#include "resolver.h"
 
 namespace cx {
 namespace codegen {
@@ -321,6 +323,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         auto param = proto.params[idx];
         auto llvm_param = fn->llvm_fn->getArg(i);
         auto var = compile_alloc(fn, param);
+        emit_dbg_location(param);
         compile_copy(fn, llvm_param, var, get_chitype(param));
         add_var(param, var);
 
@@ -692,7 +695,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
         if (fn->get_def()->cleanup_vars.size) {
-            // return compile_fn_call(fn, expr);
             InvokeInfo invoke;
             auto next_label = fn->new_label("_invoke_next");
             invoke.normal = next_label;
@@ -977,16 +979,17 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         builder.CreateStore(src.value, dest);
         auto copy_fn = get_system_fn("cx_string_copy");
         builder.CreateCall(copy_fn->llvm_fn, {dest, dest});
+        emit_dbg_location(expr);
         return;
     }
     case TypeKind::Array:
     case TypeKind::Struct: {
         auto sty = get_resolver()->resolve_struct_type(type);
         auto &builder = *m_ctx->llvm_builder;
-        auto copy = sty->member_intrinsics[IntrinsicSymbol::CopyFrom];
-        if (copy) {
-            auto from_address =
-                src.address ? src.address : (expr ? compile_expr_ref(fn, expr).address : nullptr);
+        auto copyp = sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+        if (copyp) {
+            auto copy = *copyp;
+            auto from_address = src.address ? src.address : nullptr;
             if (!from_address) {
                 from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy_from");
                 builder.CreateStore(src.value, from_address);
@@ -995,10 +998,12 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             builder.CreateMemSet(
                 dest, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
                 size, {});
-            builder.CreateCall(get_fn(copy->node)->llvm_fn, {
-                                                                dest,
-                                                                from_address,
-                                                            });
+            auto loc = m_ctx->llvm_builder->getCurrentDebugLocation();
+            auto call = builder.CreateCall(get_fn(copy->node)->llvm_fn, {
+                                                                            dest,
+                                                                            from_address,
+                                                                        });
+
             emit_dbg_location(expr);
             return;
         }
@@ -1030,6 +1035,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
                 args.push_back(compile_expr(fn, arg));
             }
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
+            emit_dbg_location(expr);
         }
         break;
     }
@@ -1159,8 +1165,9 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto ref = compile_expr_ref(fn, data.expr);
             auto method = data.resolved_method;
             auto fn = get_fn(method->node);
-            return RefValue::from_address(
-                builder.CreateCall(fn->llvm_fn, {ref.address, subscript}));
+            auto call = builder.CreateCall(fn->llvm_fn, {ref.address, subscript});
+            emit_dbg_location(expr);
+            return RefValue::from_address(call);
         }
         default:
             panic("not implemented: {}", PRINT_ENUM(type->kind));
@@ -1172,6 +1179,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         auto ret = compile_fn_call(fn, expr);
         auto var = compile_alloc(fn, expr);
         builder.CreateStore(ret, var);
+        emit_dbg_location(expr);
         return RefValue::from_address(var);
     }
     default:
@@ -1446,10 +1454,15 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             auto ptr = compile_dot_ptr(fn, data.expr);
             assert(ptr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
-            auto begin = sty->member_intrinsics[IntrinsicSymbol::IterBegin];
-            auto end = sty->member_intrinsics[IntrinsicSymbol::IterEnd];
-            auto next = sty->member_intrinsics[IntrinsicSymbol::IterNext];
-            auto index = sty->member_intrinsics[IntrinsicSymbol::OpIndex];
+            auto beginp = sty->member_intrinsics.get(IntrinsicSymbol::IterBegin);
+            auto endp = sty->member_intrinsics.get(IntrinsicSymbol::IterEnd);
+            auto nextp = sty->member_intrinsics.get(IntrinsicSymbol::IterNext);
+            auto indexp = sty->member_intrinsics.get(IntrinsicSymbol::OpIndex);
+            assert(beginp && endp && nextp && indexp);
+            auto begin = *beginp;
+            auto end = *endp;
+            auto next = *nextp;
+            auto index = *indexp;
             llvm::Value *item_var = nullptr;
             if (data.bind) {
                 item_var = builder.CreateAlloca(compile_type(data.bind->resolved_type), nullptr,

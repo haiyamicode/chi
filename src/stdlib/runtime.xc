@@ -117,7 +117,7 @@ struct JsonValue {
 
   @[std.ops.CopyFrom]
   func copy(from: &JsonValue) {
-    // cx_json_value_copy(from.data, this);
+    cx_json_value_copy(from.data, this);
   }
 }
 
