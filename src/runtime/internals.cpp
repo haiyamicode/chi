@@ -59,6 +59,8 @@ void cx_string_delete(CxString *dest) {
 
 void cx_string_copy(CxString *dest, CxString *src) {
     if (src->is_static) {
+        dest->data = src->data;
+        dest->size = src->size;
         return;
     }
     string s(src->data, src->size);
@@ -456,8 +458,8 @@ void cx_json_value_convert(void *data, uint32_t kind, void *result) {
 
 void cx_json_array_index(void *data, uint32_t index, void *result) {
     auto value = (boost::json::value *)data;
-    auto ptr = value->at(index);
-    *(boost::json::value *)result = ptr;
+    auto item = value->at(index);
+    create_cx_json_result(&item, result);
 }
 
 uint32_t cx_json_array_length(void *data) {

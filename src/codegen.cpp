@@ -956,7 +956,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
 
         fn->use_label(done_label);
-        return expr_value;
+        return builder.CreateLoad(compile_type(ret_type), var);
     }
     default:
         panic("not implemented: {}", PRINT_ENUM(expr->type));
@@ -976,9 +976,13 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
 
     switch (type->kind) {
     case TypeKind::String: {
-        builder.CreateStore(src.value, dest);
+        auto from_address = src.address ? src.address : nullptr;
+        if (!from_address) {
+            from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_str_copy");
+            builder.CreateStore(src.value, from_address);
+        }
         auto copy_fn = get_system_fn("cx_string_copy");
-        builder.CreateCall(copy_fn->llvm_fn, {dest, dest});
+        builder.CreateCall(copy_fn->llvm_fn, {dest, from_address});
         emit_dbg_location(expr);
         return;
     }

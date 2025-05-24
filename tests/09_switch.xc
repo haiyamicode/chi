@@ -1,4 +1,4 @@
-func switch_int() {
+func switch_int() string {
   var levels: Array<int> = {};
   levels.add(1);
   levels.add(2);
@@ -16,8 +16,15 @@ func switch_int() {
     };
     println(label);
   }
+
+  return switch levels[0] {
+    1, 2 => "low",
+    3 => "medium",
+    else => "high"
+  };
 }
 
 func main() {
-  switch_int();
+  var result = switch_int();
+  printf("result for first level: {}\n", result);
 }
