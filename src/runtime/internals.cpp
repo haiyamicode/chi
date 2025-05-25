@@ -2,6 +2,9 @@
 // Created by haint on 11/25/18.
 //
 
+#include "fmt/core.h"
+#include <cstddef>
+#include <cstdint>
 #define CHI_RUNTIME_HAS_BACKTRACE 1
 #include <csignal>
 #include <sstream>
@@ -105,6 +108,26 @@ static std::string istringf(const CxAny &v) {
     return "";
 }
 
+static void **program_vtable;
+
+void cx_set_program_vtable(void *ptr) { program_vtable = (void **)ptr; }
+
+static void *get_typemeta_display_method(TypeInfo *type) {
+    if (type->meta_table_len == 0) {
+        return nullptr;
+    }
+
+    auto offset = (uintptr_t)(&type->meta_table) - (uintptr_t)(&type->kind);
+    auto table = (TypeMetaEntry *)((uintptr_t)type + offset);
+    for (int i = 0; i < type->meta_table_len; i++) {
+        auto entry = &table[i];
+        if (entry->symbol == IntrinsicSymbol::OpDisplay && entry->vtable_index >= 0) {
+            return program_vtable[entry->vtable_index];
+        }
+    }
+    return nullptr;
+}
+
 static std::string get_value_display(const CxAny &v) {
     switch ((TypeKind)v.type->kind) {
     case TypeKind::String: {
@@ -126,6 +149,21 @@ static std::string get_value_display(const CxAny &v) {
             return "null";
         }
         break;
+    }
+    case cx::TypeKind::Array:
+    case cx::TypeKind::Struct: {
+        auto display_method = get_typemeta_display_method(v.type);
+        if (display_method) {
+            auto fn = (CxString(*)(void *))display_method;
+            intptr_t p = v.inlined ? (intptr_t)v.data : *(intptr_t *)(v.data);
+            auto a = (CxArray *)v.data;
+            auto s = fn((void *)p);
+            auto str = string(s.data, s.size);
+            fmt::print("array: {}\n", a->size);
+            free(s.data);
+            return str;
+        }
+        return fmt::format("<{}>", PRINT_ENUM((TypeKind)v.type->kind));
     }
     default:
         return fmt::format("<{}>", PRINT_ENUM(v.type->kind));

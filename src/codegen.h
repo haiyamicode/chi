@@ -106,6 +106,7 @@ struct CodegenContext {
     array<llvm::Type *> types = {};
     array<box<string>> strings = {};
     array<Function *> pending_fns = {};
+    std::vector<llvm::Constant *> reflection_vtable = {};
 
     map<ast::Node *, llvm::Value *> var_table = {};
     map<TypeId, llvm::Type *> type_table = {};
@@ -114,7 +115,7 @@ struct CodegenContext {
     map<string, Function *> system_functions = {};
     map<ChiType *, llvm::Value *> typeinfo_table = {};
     map<string, llvm::Type *> anon_type_table = {};
-    map<InterfaceImpl *, llvm::Value *> vtable_table = {};
+    map<InterfaceImpl *, llvm::Value *> impl_table = {};
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx = {};
@@ -231,12 +232,14 @@ class Compiler {
 
     void compile_extern(ast::Node *node);
 
+    llvm::Value *compile_reflection_vtable();
+
     Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "");
     Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 
     Function *get_system_fn(const string &name);
 
-    void compile_vtables(ChiType *type);
+    void compile_struct_vtables(ChiType *type);
     llvm::Value *compile_type_info(ChiType *type);
 
     llvm::TypeSize llvm_type_size(llvm::Type *type);

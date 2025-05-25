@@ -86,6 +86,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.iter.Next"] = IntrinsicSymbol::IterNext;
     m_ctx->intrinsic_symbols["std.iter.End"] = IntrinsicSymbol::IterEnd;
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
+    m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::OpDisplay;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -1790,6 +1791,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type);
         if (member->symbol != IntrinsicSymbol::None) {
             scpy.member_intrinsics[member->symbol] = new_member;
+            new_member->symbol = member->symbol;
         }
         member->variants[subtype->id] = new_member;
         new_member->root_variant = member->root_variant ? member->root_variant : member;

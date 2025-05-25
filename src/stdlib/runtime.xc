@@ -19,6 +19,7 @@ extern "C" {
   func cx_free(address: *void);
   func cx_memset(address: *void, v: uint8, n: uint32);
   func cx_runtime_start(stack: *void);
+  func cx_set_program_vtable(ptr: *void);
   func cx_runtime_stop();
   func cx_panic(message: *string);
   func cx_personality(...) int32;
@@ -226,6 +227,7 @@ struct Array<T> {
     return index + 1;
   }
 
+  @[std.ops.Display]
   func display() string {
     var buf: Buffer = {};
     buf.write("[");

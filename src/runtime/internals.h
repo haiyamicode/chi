@@ -30,8 +30,9 @@ struct Data64ab {
 struct CxAny {
     TypeInfo *type;
 
-    // store 16 bytes of data
-    char data[16];
+    bool inlined = 0;
+    // store 23 bytes of data
+    char data[23];
 };
 
 struct CxArray {
@@ -66,6 +67,8 @@ struct CxJsonValue {
     void *data;
     uint32_t kind;
 };
+
+CHI_RT_EXPORT void cx_set_program_vtable(void *ptr);
 
 CHI_RT_EXPORT void cx_string_copy(CxString *dest, CxString *src);
 

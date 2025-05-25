@@ -25,7 +25,8 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Poin
 
 MAKE_ENUM(Visibility, Public, Private)
 
-MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable, CopyFrom)
+MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable, CopyFrom,
+          OpDisplay)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -64,17 +65,20 @@ struct ChiStructMember {
     ChiStructMember *root_variant = nullptr;
     map<TypeId, ChiStructMember *> variants = {};
     ChiStructMember *parent_member = nullptr;
+    long vtable_index = -1;
 
     string get_name();
 
     bool is_field() { return field_index > -1; }
     bool is_method() { return method_index > -1; }
+    bool is_reflected() { return symbol == IntrinsicSymbol::OpDisplay; }
 };
 
 typedef array<ChiStructMember *> ImplMembers;
 
 struct InterfaceImpl {
     ChiType *interface_type = nullptr;
+    IntrinsicSymbol inteface_symbol = IntrinsicSymbol::None;
     ChiType *impl_type = nullptr;
     ImplMembers impl_members = {};
     long itable_index = -1;
@@ -327,12 +331,25 @@ union TypeInfoData {
     ChiTypeInt int_;
 };
 
+#pragma pack(push, 1)
 struct TypeInfo {
     int32_t kind = 0;
     int32_t size = 0;
     TypeInfoData data;
-    int32_t vtable_len = 0;
+    int32_t meta_table_len = 0;
+    void *meta_table; // Dummy pointer, we store a variable amount of data for the
+                      // meta table, starting at this field, each item is a TypeVtableEntry
 };
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct TypeMetaEntry {
+    int32_t vtable_index = -1;
+    IntrinsicSymbol symbol = IntrinsicSymbol::None;
+    uint32_t name_len = 0;
+    char name[256];
+};
+#pragma pack(pop)
 
 enum LANG_FLAG : uint32_t {
     LANG_FLAG_NONE = 0,
