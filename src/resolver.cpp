@@ -672,6 +672,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.condition->type == NodeType::Identifier && cond_type->kind == TypeKind::Optional) {
             auto name = data.condition->token->get_name();
             auto expr = create_node(ast::NodeType::UnaryOpExpr);
+            expr->token = data.condition->token;
             expr->data.unary_op_expr.is_suffix = true;
             expr->data.unary_op_expr.op_type = TokenType::LNOT;
             expr->data.unary_op_expr.op1 = data.condition;
