@@ -159,7 +159,6 @@ static std::string get_value_display(const CxAny &v) {
             auto a = (CxArray *)v.data;
             auto s = fn((void *)p);
             auto str = string(s.data, s.size);
-            fmt::print("array: {}\n", a->size);
             free(s.data);
             return str;
         }
