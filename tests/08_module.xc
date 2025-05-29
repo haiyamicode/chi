@@ -1,5 +1,5 @@
-import "./module" as mod;
-import "./module" { Greeting, hello as test };
+import "./testdata/08_module" as mod;
+import "./testdata/08_module" { Greeting, hello as test, hello_sub as test2 };
 
 func main() {
   println("using function from module");
@@ -13,4 +13,7 @@ func main() {
   test();
   var g2: Greeting = {"Xenia"};
   g2.hello();
+
+  println("using imported members from sub-module");
+  test2();
 }

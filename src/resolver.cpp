@@ -7,6 +7,9 @@
 
 #include "resolver.h"
 #include "errors.h"
+#include "lexer.h"
+#include "sema.h"
+#include "util.h"
 
 using namespace cx;
 
@@ -944,14 +947,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         node->resolved_type = get_system_types()->void_;
         return node->resolved_type;
     }
-    case NodeType::ImportDecl: {
-        auto &data = node->data.import_decl;
-        auto path = m_ctx->allocator->find_module_path(data.path->str, scope.module->path);
-        if (path.empty()) {
+    case NodeType::ImportDecl:
+    case NodeType::ExportDecl: {
+        auto is_export = node->type == NodeType::ExportDecl;
+        auto &data = is_export ? node->data.export_decl : node->data.import_decl;
+        auto path_info = m_ctx->allocator->find_module_path(data.path->str, scope.module->path);
+        if (!path_info) {
             error(node, errors::MODULE_NOT_FOUND, data.path->str);
             return nullptr;
         }
 
+        if (path_info->is_directory && !path_info->entry_path.size()) {
+            error(node, errors::MODULE_INDEX_NOT_FOUND, data.path->str);
+            return nullptr;
+        }
+
+        auto path = path_info->entry_path;
         auto src = io::Buffer::from_file(path);
         auto module = m_ctx->allocator->process_source(scope.module->package, &src, path);
         Resolver resolver(m_ctx);
@@ -960,10 +971,34 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         data.resolved_module = module;
         auto type = create_type(TypeKind::Module);
         type->name = "Module:" + module->full_path();
-        type->data.module.scope = module->scope;
-        scope.module->imports.add(module);
+        type->data.module.scope = m_ctx->allocator->create_scope(nullptr);
 
-        for (auto symbol : data.symbols) {
+        if (is_export) {
+            // array<ast::Node *> symbols = {};
+            if (data.match_all) {
+                for (auto item : module->exports) {
+                    scope.module->exports.add(item);
+                    scope.module->import_scope->put(item->name, item);
+                }
+            } else {
+                throw std::runtime_error("not implemented");
+            }
+        } else {
+            scope.module->imports.add(module);
+            if (data.alias) {
+                for (auto item : module->exports) {
+                    type->data.module.scope->put(item->name, item);
+                }
+            } else {
+                for (auto symbol : data.symbols) {
+                    auto item_type = resolve(symbol, scope);
+                    auto &item_data = symbol->data.import_symbol;
+                    assert(item_data.resolved_decl);
+                    auto name =
+                        item_data.alias ? item_data.alias->get_name() : item_data.name->get_name();
+                    type->data.module.scope->put(name, item_data.resolved_decl);
+                }
+            }
         }
         return type;
     }
@@ -973,7 +1008,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::ImportSymbol: {
         auto &data = node->data.import_symbol;
         auto module = data.import->data.import_decl.resolved_module;
-        auto decl = module->scope->find_one(data.name->get_name());
+        auto decl = module->import_scope->find_one(data.name->get_name());
         if (!decl) {
             error(node, errors::SYMBOL_NOT_FOUND_MODULE, data.name->get_name(), module->path);
             return nullptr;

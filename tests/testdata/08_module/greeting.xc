@@ -1,3 +1,5 @@
+export "./subgreeting" *; 
+
 struct Greeting {
   name: string;
 
@@ -11,5 +13,5 @@ struct Greeting {
 }
 
 func hello() {
-  println("hello from another module");
+  println("hello from module");
 }

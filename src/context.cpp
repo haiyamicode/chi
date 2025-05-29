@@ -1,6 +1,7 @@
 #include "context.h"
 #include "ast_printer.h"
 #include "parser.h"
+#include <filesystem>
 
 using namespace cx;
 
@@ -16,19 +17,35 @@ ast::Module *CompilationContext::module_from_path(ast::Package *package, const s
     return module;
 }
 
-string CompilationContext::find_module_path(const string &path, const string &base_path) {
+optional<ModulePathInfo> CompilationContext::find_module_path(const string &path,
+                                                              const string &base_path) {
     auto fs_path = fs::path(path);
     if (base_path.size() && path.size() && path[0] == '.') {
         fs_path = fs::path(base_path) / path.substr(2);
     }
+
+    // directory import
+    if (fs::is_directory(fs_path)) {
+        string index_path = "";
+        for (auto &ext : file_extensions) {
+            auto file = fs_path / ("_index." + ext);
+            if (fs::exists(file)) {
+                index_path = file.string();
+                break;
+            }
+        }
+        return {{fs_path.string(), true, index_path}};
+    }
+
     for (auto &ext : file_extensions) {
         auto file = fs_path;
         file.replace_extension(ext);
         if (fs::exists(file)) {
-            return file.string();
+            return {{file.string(), false, file.string()}};
         }
     }
-    return "";
+
+    return std::nullopt;
 }
 
 ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffer *src,
@@ -66,6 +83,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     auto resolver = create_resolver();
     ScopeResolver scope_resolver(&resolver);
     module->scope = scope_resolver.get_scope();
+    module->import_scope = create_scope(module->scope);
 
     // parse the source
     ParseContext pc;

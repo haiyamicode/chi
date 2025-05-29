@@ -123,6 +123,10 @@ void Compiler::compile_module(ast::Module *module) {
             compile_extern(decl);
             break;
         case ast::NodeType::ImportDecl:
+            compile_module(decl->data.import_decl.resolved_module);
+            break;
+        case ast::NodeType::ExportDecl:
+            compile_module(decl->data.export_decl.resolved_module);
             break;
         default:
             panic("not implemented: {}", PRINT_ENUM(decl->type));

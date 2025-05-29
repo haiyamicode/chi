@@ -320,6 +320,7 @@ struct Scope {
     array<ast::Node *> get_all_recursive();
 
     void put(const string &name, ast::Node *node);
+    void check_put(const string &name, ast::Node *node);
 
     ast::Node *find_parent(ast::NodeType type);
 

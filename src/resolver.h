@@ -11,6 +11,13 @@
 #include "sema.h"
 
 namespace cx {
+
+struct ModulePathInfo {
+    string path = "";
+    bool is_directory = false;
+    string entry_path = "";
+};
+
 struct Context {
     virtual ast::Node *create_node(ast::NodeType type) = 0;
     virtual ast::DeclSpec *create_decl_spec() = 0;
@@ -24,7 +31,8 @@ struct Context {
                                           const string &base_path = "", bool import = false) = 0;
     virtual ast::Module *process_source(ast::Package *package, io::Buffer *src,
                                         const string &file_name) = 0;
-    virtual string find_module_path(const string &path, const string &base_path = "") = 0;
+    virtual optional<ModulePathInfo> find_module_path(const string &path,
+                                                      const string &base_path = "") = 0;
     virtual string get_stdlib_path(string path) = 0;
 };
 

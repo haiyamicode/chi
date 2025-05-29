@@ -8,6 +8,7 @@
 #include "parser.h"
 #include "ast.h"
 #include "errors.h"
+#include "lexer.h"
 
 using namespace cx;
 using namespace cx::ast;
@@ -293,6 +294,8 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
         return parse_extern_decl();
     case TokenType::KW_IMPORT:
         return parse_import_decl();
+    case TokenType::KW_EXPORT:
+        return parse_export_decl();
     default:
         unexpected(token);
         return create_error_node();
@@ -1378,6 +1381,39 @@ Node *Parser::parse_import_decl() {
             add_to_scope(member, name_iden->get_name());
         }
         expect(TokenType::RBRACE);
+    }
+
+    expect(TokenType::SEMICOLON);
+    return node;
+}
+
+Node *Parser::parse_export_decl() {
+    auto kw = expect(TokenType::KW_EXPORT);
+    auto node = create_node(NodeType::ExportDecl, kw);
+    node->data.export_decl = {};
+    node->data.export_decl.path = expect(TokenType::STRING);
+
+    if (next_is(TokenType::MUL)) {
+        auto ellipsis = get();
+        consume();
+        node->data.export_decl.match_all = ellipsis;
+    } else if (next_is(TokenType::LBRACE)) {
+        consume();
+        while (!next_is(TokenType::RBRACE)) {
+            auto iden = expect(TokenType::IDEN);
+            auto member = create_node(NodeType::ImportSymbol, iden);
+            member->data.import_symbol.name = iden;
+            auto name_iden = iden;
+            if (!next_is(TokenType::RBRACE)) {
+                expect(TokenType::COMMA);
+            }
+            node->data.export_decl.symbols.add(member);
+            member->data.import_symbol.import = node;
+            add_to_scope(member, name_iden->get_name());
+        }
+        expect(TokenType::RBRACE);
+    } else {
+        error(get(), errors::EXPORT_DECL_MUST_HAVE_SYMBOLS);
     }
 
     expect(TokenType::SEMICOLON);

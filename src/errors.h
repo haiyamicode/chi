@@ -40,17 +40,22 @@ constexpr auto NON_INTERFACE_IMPL_TYPE =
 constexpr auto VARIADIC_NOT_FINAL = "cannot use ... with non-final parameter '{}'";
 constexpr auto TRY_NOT_CALL = "try must be used with a function call expression";
 constexpr auto MODULE_NOT_FOUND = "module '{}' not found";
+constexpr auto MODULE_INDEX_NOT_FOUND = "module '{}' has no index file (_index.xc or _index.x)";
 constexpr auto INVALID_ATTRIBUTE_TERM = "invalid attribute term '{}'";
 constexpr auto IMPLEMENT_NOT_MATCH = "member '{}' does not match definition from interface of {}";
 constexpr auto FOR_EXPR_NOT_ITERABLE = "for expression must be an iterable, got {}";
 constexpr auto CANNOT_INDEX = "cannot perform index operation on type {}";
 constexpr auto SYMBOL_NOT_FOUND_MODULE = "symbol '{}' not found in module '{}'";
+constexpr auto DUPLICATE_EXPORT_SYMBOL = "duplicate export symbol '{}' in module '{}'";
 constexpr auto VARIABLE_USED_BEFORE_INITIALIZED = "variable '{}' used before initialized";
 constexpr auto UNINITIALIZED_FIELD = "field '{}' of type '{}' has not been initialized";
 constexpr auto INVALID_SWITCH_TYPE = "switch type {} must be an enum or integer";
 constexpr auto INVALID_VARIABLE_TYPE = "cannot declare variable of type {}";
 constexpr auto ASSIGNMENT_TO_CONST = "assignment to const value '{}'";
 constexpr auto SWITCH_EXPR_MUST_HAVE_ELSE = "switch expression must have an else clause";
+constexpr auto EXPORT_DECL_MUST_HAVE_SYMBOLS =
+    "export declaration must have at least one symbol, use ellipsis (...) to export all, "
+    "or braces for specific symbols";
 
 } // namespace errors
 } // namespace cx

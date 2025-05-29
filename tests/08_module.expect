@@ -1,7 +1,9 @@
 using function from module
-hello from another module
+hello from module
 using type from module
 hello, Lila
 using imported members from module
-hello from another module
+hello from module
 hello, Xenia
+using imported members from sub-module
+hello from sub-module

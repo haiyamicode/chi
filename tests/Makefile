@@ -1,7 +1,7 @@
 SHELL=/bin/bash 
 BASE=..
 BUILD_DIR=$(BASE)/build
-TESTS = 00_fib.test \
+TESTS_LIST = 00_fib.test \
     01_fib_struct.test \
     02_generics.test \
     03_destructors.test \
@@ -13,7 +13,7 @@ TESTS = 00_fib.test \
 		09_switch.test \
 		10_copy.test \
 		11_copy_builtins.test
-
+TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
 OUTPUT_DIR = $(BUILD_DIR)/tests

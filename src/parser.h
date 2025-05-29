@@ -216,6 +216,8 @@ class Parser {
 
     Node *parse_import_decl();
 
+    Node *parse_export_decl();
+
     Node *parse_switch_expr();
 
     Node *parse_case_expr();

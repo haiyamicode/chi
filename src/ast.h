@@ -21,7 +21,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
           ExternDecl, TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          SwitchExpr, CaseExpr, ImportSymbol);
+          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -48,6 +48,7 @@ struct Module {
     array<Node *> exports = {};
     array<Error> errors = {};
     cx::Scope *scope = nullptr;
+    cx::Scope *import_scope = nullptr;
     optional<string> source = {};
     array<Module *> imports = {};
     array<Token *> tokens = {};
@@ -336,9 +337,12 @@ struct SizeofExpr {
 struct ImportDecl {
     Token *path = nullptr;
     Token *alias = nullptr;
+    Token *match_all = nullptr;
     array<Node *> symbols = {};
     ast::Module *resolved_module = nullptr;
 };
+
+typedef ImportDecl ExportDecl;
 
 struct ImportSymbol {
     Token *name = nullptr;
@@ -405,6 +409,7 @@ struct Node {
         PrefixExpr prefix_expr;
         ExternDecl extern_decl;
         ImportDecl import_decl;
+        ExportDecl export_decl;
         ImportSymbol import_symbol;
         DeclAttribute decl_attribute;
         SwitchExpr switch_expr;
@@ -437,6 +442,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_INITIALIZE_FIELD(extern_decl, ExternDecl)
             _AST_CASE_INITIALIZE_FIELD(import_decl, ImportDecl)
+            _AST_CASE_INITIALIZE_FIELD(export_decl, ExportDecl)
             _AST_CASE_INITIALIZE_FIELD(decl_attribute, DeclAttribute)
             _AST_CASE_INITIALIZE_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_INITIALIZE_FIELD(case_expr, CaseExpr)
@@ -464,6 +470,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_DESTROY_FIELD(extern_decl, ExternDecl)
             _AST_CASE_DESTROY_FIELD(import_decl, ImportDecl)
+            _AST_CASE_DESTROY_FIELD(export_decl, ExportDecl)
             _AST_CASE_DESTROY_FIELD(decl_attribute, DeclAttribute)
             _AST_CASE_DESTROY_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_DESTROY_FIELD(case_expr, CaseExpr)

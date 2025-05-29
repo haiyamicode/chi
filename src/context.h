@@ -59,7 +59,7 @@ struct CompilationContext : public Context {
     ast::Module *module_from_path(ast::Package *package, const string &path,
                                   const string &base_path = "", bool import = false);
 
-    string find_module_path(const string &path, const string &base_path = "");
+    optional<ModulePathInfo> find_module_path(const string &path, const string &base_path = "");
 
     ast::Module *process_source(ast::Package *package, io::Buffer *src, const string &file_name);
 
