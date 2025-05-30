@@ -62,7 +62,7 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
-        if (data.is_type_expr && !data.params.size && !data.return_type) {
+        if (data.is_type_expr && !data.params.len && !data.return_type) {
             print("func");
             return;
         }
@@ -116,10 +116,12 @@ void AstPrinter::print_node(Node *node) {
         }
 
         if (data.return_expr) {
-            if (data.statements.size) {
-                print_indent(m_indent);
+            if (data.statements.len) {
+                print_node_list(&data.statements);
             }
+            print_indent(m_indent);
             print_node(data.return_expr);
+            print("\n");
         }
 
         if (data.has_braces) {
@@ -155,19 +157,19 @@ void AstPrinter::print_node(Node *node) {
         if (!node->name.empty()) {
             print("{}", node->name);
         }
-        if (data.type_params.size) {
+        if (data.type_params.len) {
             print("<");
             print_node_list(&data.type_params);
             print(">");
         }
-        if (data.implements.size) {
+        if (data.implements.len) {
             print(": ");
             print_node_list(&data.implements);
         }
         print(" {{");
 
         NodeType member_type = NodeType::Error;
-        if (data.members.size) {
+        if (data.members.len) {
             print("\n");
             m_indent++;
             size_t i = 0;
@@ -183,7 +185,7 @@ void AstPrinter::print_node(Node *node) {
                 } else if (member->type == NodeType::FnDef) {
                     print("\n");
                 } else if (member->type == NodeType::EnumMember) {
-                    if (i != data.members.size - 1) {
+                    if (i != data.members.len - 1) {
                         print(",\n");
                     } else {
                         print("\n");
@@ -398,10 +400,29 @@ void AstPrinter::print_node(Node *node) {
         if (data.alias) {
             print(" as {}", data.alias->to_string());
         }
-        if (data.symbols.size) {
+        if (data.symbols.len) {
             print(" {{");
             print_node_list(&data.symbols);
             print("}}");
+        }
+        print(";\n");
+        break;
+    }
+    case NodeType::ExportDecl: {
+        auto &data = node->data.import_decl;
+        print("export ");
+        print(data.path->to_string());
+        if (data.alias) {
+            print(" as {}", data.alias->to_string());
+        }
+        if (data.match_all) {
+            print(" *");
+        } else {
+            if (data.symbols.len) {
+                print(" {{");
+                print_node_list(&data.symbols);
+                print("}}");
+            }
         }
         print(";\n");
         break;
@@ -425,11 +446,11 @@ void AstPrinter::print_node(Node *node) {
         print("switch ");
         print_node(data.expr);
         print(" {{\n");
-        for (int i = 0; i < data.cases.size; i++) {
+        for (int i = 0; i < data.cases.len; i++) {
             auto case_node = data.cases.at(i);
             print_indent(m_indent + 1);
             print_node(case_node);
-            if (i < data.cases.size - 1) {
+            if (i < data.cases.len - 1) {
                 print(",");
             }
             print("\n");
@@ -444,10 +465,10 @@ void AstPrinter::print_node(Node *node) {
         if (data.is_else) {
             print("else");
         } else {
-            for (int i = 0; i < data.clauses.size; i++) {
+            for (int i = 0; i < data.clauses.len; i++) {
                 auto clause = data.clauses.at(i);
                 print_node(clause);
-                if (i < data.clauses.size - 1) {
+                if (i < data.clauses.len - 1) {
                     print(", ");
                 }
             }
@@ -469,9 +490,9 @@ void AstPrinter::print_indent(int level) {
 }
 
 void AstPrinter::print_node_list(array<Node *> *list) {
-    for (int i = 0; i < list->size; i++) {
+    for (int i = 0; i < list->len; i++) {
         print_node(list->at(i));
-        if (i < list->size - 1) {
+        if (i < list->len - 1) {
             print(", ");
         }
     }

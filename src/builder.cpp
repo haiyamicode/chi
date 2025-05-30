@@ -39,6 +39,8 @@ ast::Module *Builder::build_runtime() {
     auto package = add_package();
     package->kind = PackageKind::BUILTIN;
     auto rt_path = m_ctx.get_stdlib_path("runtime.xc");
+    package->path = fs::path(rt_path).parent_path().string();
+    package->id_path = "";
     auto rt_source = io::Buffer::from_file(rt_path);
     auto module = process_source(package, &rt_source, rt_path);
     resolver.context_init_builtins(module);
@@ -50,6 +52,8 @@ void Builder::build_single_file(const string &file_name) {
 
     auto package = add_package();
     package->name = "__main";
+    package->id_path = ".";
+
     auto module = process_file(package, file_name);
     if (m_ctx.flags & FLAG_PRINT_AST) {
         return;

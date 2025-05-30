@@ -53,9 +53,7 @@ constexpr auto INVALID_SWITCH_TYPE = "switch type {} must be an enum or integer"
 constexpr auto INVALID_VARIABLE_TYPE = "cannot declare variable of type {}";
 constexpr auto ASSIGNMENT_TO_CONST = "assignment to const value '{}'";
 constexpr auto SWITCH_EXPR_MUST_HAVE_ELSE = "switch expression must have an else clause";
-constexpr auto EXPORT_DECL_MUST_HAVE_SYMBOLS =
-    "export declaration must have at least one symbol, use ellipsis (...) to export all, "
-    "or braces for specific symbols";
+constexpr auto EXPORT_DECL_MUST_HAVE_SYMBOLS = "export declaration must have symbol or alias";
 
 } // namespace errors
 } // namespace cx

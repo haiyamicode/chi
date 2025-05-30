@@ -221,6 +221,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         scope.skip_fn_bodies = true;
         for (auto decl : data.top_level_decls) {
             resolve(decl, scope);
+
             if (decl->type == NodeType::FnDef && decl->name == "main") {
                 node->module->package->entry_fn = decl;
                 decl->data.fn_def.decl_spec->flags |= ast::DECL_IS_ENTRY;
@@ -251,9 +252,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // final pass: ensure subtypes are resolved
         for (auto decl : data.top_level_decls) {
-            if (decl->type == NodeType::StructDecl && decl->data.struct_decl.type_params.size > 0) {
+            if (decl->type == NodeType::StructDecl && decl->data.struct_decl.type_params.len > 0) {
                 auto &struct_ = decl->data.struct_decl;
-                if (struct_.type_params.size > 0) {
+                if (struct_.type_params.len > 0) {
                     auto struct_type = to_value_type(decl->resolved_type);
                     for (auto subtype : struct_type->data.struct_.subtypes) {
                         resolve_subtype(subtype);
@@ -289,7 +290,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             bstruct->display_name = fmt::format("__lambda_{}::Bind", proto->id);
             auto &bstruct_data = bstruct->data.struct_;
             bstruct_data.kind = ContainerKind::Struct;
-            for (int i = 0; i < data.captures.size; i++) {
+            for (int i = 0; i < data.captures.len; i++) {
                 auto capture = data.captures[i];
                 auto name = fmt::format("capture_{}", i);
                 bstruct_data.add_member(
@@ -329,10 +330,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.is_vararg) {
             is_variadic = true;
         }
-        for (int i = 0; i < data.params.size; i++) {
+        for (int i = 0; i < data.params.len; i++) {
             auto param = data.params[i];
             auto &pdata = param->data.param_decl;
-            auto is_last = i == data.params.size - 1;
+            auto is_last = i == data.params.len - 1;
             if (pdata.is_variadic && !is_last) {
                 error(param, errors::VARIADIC_NOT_FINAL, param->name);
                 return create_type(TypeKind::Fn);
@@ -380,7 +381,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 // deduplicate captures by the declaration
                 auto existing = capture_map.get(data.decl);
                 if (!existing) {
-                    auto idx = captures.size;
+                    auto idx = captures.len;
                     data.decl->escape.local_index = idx;
                     captures.add(data.decl);
                     capture_map[data.decl] = idx;
@@ -637,8 +638,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             resolve_fn_call(node, scope, &fn_type, &data.items);
         } else {
             if (result_type->kind == TypeKind::Optional) {
-                if (data.items.size != 1) {
-                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 1, data.items.size);
+                if (data.items.len != 1) {
+                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 1, data.items.len);
                     return nullptr;
                 }
                 auto item = data.items[0];
@@ -646,8 +647,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 check_assignment(item, item_type, result_type->get_elem());
                 return result_type;
             } else {
-                if (data.items.size != 0) {
-                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.size);
+                if (data.items.len != 0) {
+                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.len);
                     return nullptr;
                 }
             }
@@ -725,6 +726,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!node->resolved_type) {
             struct_type = create_type(TypeKind::Struct);
             struct_type->name = node->name;
+            struct_type->global_id = resolve_global_id(node);
             struct_ = &struct_type->data.struct_;
             struct_->node = node;
             struct_->kind = data.kind;
@@ -798,17 +800,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto type = to_value_type(resolve(data.type, scope));
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional ||
             type->kind == TypeKind::Box || type->kind == TypeKind::Promise) {
-            if (data.args.size != 1) {
+            if (data.args.len != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
-                      to_string(get_system_type(type->kind)), 1, data.args.size);
+                      to_string(get_system_type(type->kind)), 1, data.args.len);
             }
             auto elem_type = to_value_type(resolve(data.args[0], scope));
             return get_wrapped_type(elem_type, type->kind);
         }
         auto &params = type->data.struct_.type_params;
-        if (params.size != data.args.size) {
-            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, to_string(type), params.size,
-                  data.args.size);
+        if (params.len != data.args.len) {
+            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, to_string(type), params.len,
+                  data.args.len);
             return nullptr;
         }
         array<ChiType *> args;
@@ -974,14 +976,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         type->data.module.scope = m_ctx->allocator->create_scope(nullptr);
 
         if (is_export) {
-            // array<ast::Node *> symbols = {};
             if (data.match_all) {
                 for (auto item : module->exports) {
                     scope.module->exports.add(item);
                     scope.module->import_scope->put(item->name, item);
                 }
             } else {
-                throw std::runtime_error("not implemented");
+                if (data.alias) {
+                    for (auto item : module->exports) {
+                        type->data.module.scope->put(item->name, item);
+                    }
+                    scope.module->exports.add(node);
+                } else {
+                    for (auto symbol : data.symbols) {
+                        auto item_type = resolve(symbol, scope);
+                        auto &item_data = symbol->data.import_symbol;
+                        assert(item_data.resolved_decl);
+                        auto name = item_data.output_name();
+                        scope.module->exports.add(item_data.resolved_decl);
+                        scope.module->import_scope->put(name, item_data.resolved_decl);
+                    }
+                }
             }
         } else {
             scope.module->imports.add(module);
@@ -994,8 +1009,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto item_type = resolve(symbol, scope);
                     auto &item_data = symbol->data.import_symbol;
                     assert(item_data.resolved_decl);
-                    auto name =
-                        item_data.alias ? item_data.alias->get_name() : item_data.name->get_name();
+                    auto name = item_data.output_name();
                     type->data.module.scope->put(name, item_data.resolved_decl);
                 }
             }
@@ -1063,8 +1077,19 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
     if (cached) {
         return cached;
     }
+
     auto result = _resolve(node, scope, flags);
     node->resolved_type = result;
+    if (!node->name.empty()) {
+        node->global_id = resolve_global_id(node);
+    }
+
+    if (auto declspec_p = node->get_declspec()) {
+        auto symbol_p = m_ctx->intrinsic_symbols.get(node->global_id);
+        if (symbol_p) {
+            declspec_p->symbol = *symbol_p;
+        }
+    }
 
     if (node->type == NodeType::VarDecl || node->type == NodeType::ParamDecl) {
         if (scope.parent_fn_node && should_destroy(node)) {
@@ -1077,7 +1102,7 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
 }
 
 string Resolver::resolve_global_id(ast::Node *node) {
-    return fmt::format("{}:{}", node->id, resolve_qualified_name(node));
+    return fmt::format("{}.{}", node->module->global_id(), resolve_qualified_name(node));
 }
 
 string Resolver::resolve_qualified_name(ast::Node *node) {
@@ -1100,9 +1125,9 @@ string Resolver::to_string(ChiType *type, bool for_display) {
     assert(type);
     if (type->name) {
         if (!for_display) {
-            return fmt::format("{}:{}", type->id, *type->name);
+            return *type->name;
         }
-        return *type->name;
+        return !type->global_id.empty() ? type->global_id : *type->name;
     }
     if (type->display_name && for_display) {
         return *type->display_name;
@@ -1112,9 +1137,9 @@ string Resolver::to_string(ChiType *type, bool for_display) {
         auto &data = type->data.subtype;
         std::stringstream ss;
         ss << to_string(data.generic, for_display) << "<";
-        for (int i = 0; i < data.args.size; i++) {
+        for (int i = 0; i < data.args.len; i++) {
             ss << to_string(data.args[i], for_display);
-            if (i < data.args.size - 1) {
+            if (i < data.args.len - 1) {
                 ss << ",";
             }
         }
@@ -1151,21 +1176,21 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display)
         auto &struct_ = data->struct_;
         std::stringstream ss;
         ss << "struct ";
-        if (struct_.type_params.size > 0) {
+        if (struct_.type_params.len > 0) {
             ss << "<";
-            for (int i = 0; i < struct_.type_params.size; i++) {
+            for (int i = 0; i < struct_.type_params.len; i++) {
                 ss << to_string(struct_.type_params[i], for_display);
-                if (i < struct_.type_params.size - 1) {
+                if (i < struct_.type_params.len - 1) {
                     ss << ",";
                 }
             }
             ss << ">";
         }
         ss << "{";
-        for (int i = 0; i < struct_.members.size; i++) {
+        for (int i = 0; i < struct_.members.len; i++) {
             auto &member = struct_.members[i];
             ss << to_string(member->resolved_type, for_display);
-            if (i < struct_.members.size - 1) {
+            if (i < struct_.members.len - 1) {
                 ss << ",";
             }
         }
@@ -1181,12 +1206,12 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display)
             ss << ") ";
         }
         ss << "func(";
-        for (int i = 0; i < fn.params.size; i++) {
-            if (fn.is_variadic && i == fn.params.size - 1) {
+        for (int i = 0; i < fn.params.len; i++) {
+            if (fn.is_variadic && i == fn.params.len - 1) {
                 ss << "...";
             }
             ss << to_string(fn.params[i], for_display);
-            if (i < fn.params.size - 1) {
+            if (i < fn.params.len - 1) {
                 ss << ",";
             }
         }
@@ -1264,7 +1289,7 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         node->data.var_decl.resolved_field = member;
     } else if (node->type == NodeType::FnDef) {
         member->resolved_type = resolve(node, scope);
-        for (auto attr : node->get_declspec().attributes) {
+        for (auto attr : node->declspec().attributes) {
             auto term_string = resolve_term_string(attr->data.decl_attribute.term);
             auto sym = m_ctx->intrinsic_symbols.get(term_string);
             if (sym) {
@@ -1288,13 +1313,18 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
     auto &base = base_type->data.struct_;
     auto &derived = derived_type->data.struct_;
     InterfaceImpl *iface_impl = nullptr;
+    auto trait_symbol = base.node->declspec().symbol;
     if (base.kind == ContainerKind::Interface) {
         iface_impl = derived.add_interface(get_allocator(), base_type, derived_type);
     }
+
     for (auto &base_member : base.members) {
         auto node = base_member->node;
         if (base_member->is_method()) {
             auto child_method = derived.find_member(node->name);
+            if (trait_symbol != IntrinsicSymbol::None) {
+                child_method->symbol = trait_symbol;
+            }
             if (node->data.fn_def.body) {
                 if (!child_method) {
                     child_method = derived.add_member(get_allocator(), node->name, node,
@@ -1464,8 +1494,8 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
 
 void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,
                                NodeList *args) {
-    auto n_args = args->size;
-    auto n_params = fn->params.size;
+    auto n_args = args->len;
+    auto n_params = fn->params.len;
     auto params_required = n_params - (fn->is_variadic ? 1 : 0);
     bool ok = fn->is_variadic ? n_args >= params_required : n_args == n_params;
     if (!ok) {
@@ -1510,7 +1540,7 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     auto stype = create_type(TypeKind::Struct);
     auto &struct_ = stype->data.struct_;
     struct_.add_member(get_allocator(), "data", get_dummy_var("data"), get_pointer_type(elem));
-    struct_.add_member(get_allocator(), "size", get_dummy_var("size"), get_system_types()->uint32);
+    struct_.add_member(get_allocator(), "len", get_dummy_var("len"), get_system_types()->uint32);
     struct_.add_member(get_allocator(), "capacity", get_dummy_var("capacity"),
                        get_system_types()->uint32);
     struct_.add_member(get_allocator(), "flags", get_dummy_var("flags"), get_system_types()->uint8);
@@ -1762,11 +1792,11 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
     for (auto subtype : gen.subtypes) {
         assert(subtype->kind == TypeKind::Subtype);
         auto &subtype_data = subtype->data.subtype;
-        if (subtype_data.args.size != type_args->size) {
+        if (subtype_data.args.len != type_args->len) {
             continue;
         }
         bool matches = true;
-        for (size_t i = 0; i < type_args->size; i++) {
+        for (size_t i = 0; i < type_args->len; i++) {
             auto a = type_args->at(i);
             auto b = subtype_data.args[i];
             if (!is_same_type(a, b)) {
@@ -1945,10 +1975,10 @@ bool Resolver::compare_impl_type(ChiType *base, ChiType *impl) {
         return true;
     }
     if (base->kind == TypeKind::Fn) {
-        if (base->data.fn.params.size != impl->data.fn.params.size) {
+        if (base->data.fn.params.len != impl->data.fn.params.len) {
             return false;
         }
-        for (int i = 0; i < base->data.fn.params.size; ++i) {
+        for (int i = 0; i < base->data.fn.params.len; ++i) {
             if (!compare_impl_type(base->data.fn.params[i], impl->data.fn.params[i])) {
                 return false;
             }

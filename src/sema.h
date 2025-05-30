@@ -71,7 +71,6 @@ struct ChiStructMember {
 
     bool is_field() { return field_index > -1; }
     bool is_method() { return method_index > -1; }
-    bool is_reflected() { return symbol == IntrinsicSymbol::OpDisplay; }
 };
 
 typedef array<ChiStructMember *> ImplMembers;
@@ -113,7 +112,7 @@ struct ChiTypeStruct {
 
     InterfaceImpl *add_interface(Context *allocator, ChiType *trait, ChiType *impl);
 
-    bool is_generic() { return type_params.size > 0; }
+    bool is_generic() { return type_params.len > 0; }
 
     static bool is_interface(ChiType *type);
 
@@ -179,6 +178,7 @@ struct ChiType {
     bool is_placeholder = false;
     TypeId id = 0;
     optional<string> display_name = {};
+    string global_id = "";
 
     ChiType() = delete;
     ChiType(const ChiType &) = delete;

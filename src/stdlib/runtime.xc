@@ -1,3 +1,6 @@
+import "./std" as std;
+export "./std" as std;
+
 struct HashBytes {
   data: *void = null;
   size: uint32 = 0;
@@ -181,9 +184,9 @@ func fs_read(path: string) string {
   return cx_file_read(&path);
 }
 
-struct Array<T> {
+struct Array<T>: std.ops.Display {
   data: *T = null;
-	size: uint32 = 0;
+	len: uint32 = 0;
 	capacity: uint32 = 0;
 
 	func new() {
@@ -208,7 +211,7 @@ struct Array<T> {
 
   @[std.ops.Index]
 	func index(index: uint32) &T {
-		assert(index < this.size, "index out of bounds");
+		assert(index < this.len, "index out of bounds");
 		return &this.data[index];
 	}
 
@@ -219,7 +222,7 @@ struct Array<T> {
 
   @[std.iter.End]
   func end() uint32 {
-    return this.size;
+    return this.len;
   }
 
   @[std.iter.Next]
@@ -227,7 +230,6 @@ struct Array<T> {
     return index + 1;
   }
 
-  @[std.ops.Display]
   func display() string {
     var buf: Buffer = {};
     buf.write("[");
@@ -300,6 +302,6 @@ struct Buffer {
   }
 
   func to_string() string {
-    return cx_string_from_chars(this.bytes.data, this.bytes.size);
+    return cx_string_from_chars(this.bytes.data, this.bytes.len);
   }
 }

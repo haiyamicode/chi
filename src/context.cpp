@@ -1,19 +1,24 @@
 #include "context.h"
 #include "ast_printer.h"
 #include "parser.h"
+#include "util.h"
 #include <filesystem>
 
 using namespace cx;
 
 ast::Module *CompilationContext::module_from_path(ast::Package *package, const string &path,
-                                                  const string &base_path, bool import) {
+                                                  bool import) {
     auto fs_path = fs::path(path);
+    auto extension = fs_path.extension().string();
+    auto rel_path = fs::relative(fs_path, package->path).string();
+    auto module_path = rel_path.substr(0, rel_path.size() - extension.size());
     auto module = package->add_module();
     module->package = package;
     module->path = fs_path.parent_path().string();
+    module->id_path = string_join(string_split(module_path, "/"), ".");
     module->filename = fs::absolute(fs_path).string();
     module->name = fs_path.stem().string();
-    module->kind = ast::Module::kind_from_extension(fs_path.extension().string());
+    module->kind = ast::Module::kind_from_extension(extension);
     return module;
 }
 
@@ -56,15 +61,28 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     optional<ErrorHandler> error_handler = std::nullopt;
     if (!exitOnError) {
         error_handler = [module](Error error) {
-            if (module->errors.size > MAX_ERRORS) {
+            if (module->errors.len > MAX_ERRORS) {
                 module->broken = true;
                 return;
             }
             module->errors.add(error);
         };
     }
-
     resolve_ctx.error_handler = error_handler;
+
+    if (module_map.has_key(module->global_id())) {
+        if (exitOnError) {
+            print("{}:{}:{}: error: module {} already exists\n", module->path, 1, 1,
+                  module->global_id());
+            exit(1);
+        } else {
+            module->errors.add({
+                fmt::format("module {} already exists", module->global_id()),
+                {1, 1},
+            });
+            return module;
+        }
+    }
 
     Tokenization tokenization;
     Lexer lexer(src, &tokenization);
@@ -104,7 +122,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     }
 
     if (flags & FLAG_PRINT_AST) {
-        if (module->errors.size) {
+        if (module->errors.len) {
             return module;
         }
         print_ast(module->root);

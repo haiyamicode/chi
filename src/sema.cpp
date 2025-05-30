@@ -21,7 +21,7 @@ ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &nam
     if (node->type == ast::NodeType::FnDef) {
         member->method_index = vtable_size++;
     } else {
-        member->field_index = fields.size;
+        member->field_index = fields.len;
         fields.add(member);
     }
     member_table[name] = member;
@@ -47,7 +47,7 @@ bool ChiTypeStruct::is_interface(ChiType *type) {
 }
 
 bool ChiTypeStruct::is_generic(ChiType *type) {
-    return type->kind == TypeKind::Struct && type->data.struct_.type_params.size > 0;
+    return type->kind == TypeKind::Struct && type->data.struct_.type_params.len > 0;
 }
 
 bool ChiTypeStruct::is_pointer_type(ChiType *type) {
@@ -92,7 +92,7 @@ ast::Node *Scope::find_one(const string &symbol, bool recursive) {
 
 ast::Node *Scope::find_export(const string &symbol) {
     auto node = find_one(symbol);
-    if (!node || !node->get_declspec().is_exported()) {
+    if (!node || !node->declspec().is_exported()) {
         return nullptr;
     }
     return node;
@@ -132,7 +132,7 @@ ChiType *ChiTypeFn::get_param_at(size_t index) {
     return index < get_va_start() ? params[index] : params.last()->get_elem();
 }
 
-int ChiTypeFn::get_va_start() { return params.size - (int)is_variadic; }
+int ChiTypeFn::get_va_start() { return params.len - (int)is_variadic; }
 
 ChiType *ChiType::get_elem() {
     switch (kind) {

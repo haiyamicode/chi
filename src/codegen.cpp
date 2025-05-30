@@ -133,7 +133,7 @@ void Compiler::compile_module(ast::Module *module) {
         }
     }
 
-    while (m_ctx->pending_fns.size) {
+    while (m_ctx->pending_fns.len) {
         auto list = m_ctx->pending_fns;
         m_ctx->pending_fns.clear();
         for (auto fn : list) {
@@ -204,12 +204,12 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         }
     }
 
-    if (struct_type->data.struct_.interfaces.size) {
+    if (struct_type->data.struct_.interfaces.len) {
         compile_struct_vtables(struct_type);
     }
 
     for (auto member : struct_type->data.struct_.members) {
-        if (member->is_method() && member->is_reflected()) {
+        if (member->is_method()) {
             auto method_fn = get_fn(member->node);
             member->vtable_index = m_ctx->reflection_vtable.size();
             m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);
@@ -277,7 +277,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     case TypeKind::Struct: {
         auto &data = type->data.struct_;
-        if (!data.fields.size) {
+        if (!data.fields.len) {
             return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
         }
         auto name = m_ctx->resolver.to_string(type, true);
@@ -286,7 +286,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         if (data.node) {
             line_no = data.node->token->pos.line_number();
         }
-        auto scope = m_ctx->dbg_scopes.size ? m_ctx->dbg_scopes.last() : nullptr;
+        auto scope = m_ctx->dbg_scopes.len ? m_ctx->dbg_scopes.last() : nullptr;
         if (!scope) {
             auto dbg_builder = m_ctx->dbg_builder.get();
             auto unit = dbg_builder->createFile(m_ctx->dbg_cu->getFilename(),
@@ -617,7 +617,7 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     auto data_gep = builder.CreateStructGEP(struct_type_l, var, 2);
 
     // load captures
-    if (captures && captures->size) {
+    if (captures && captures->len) {
         auto bstruct = lambda_type->data.fn_lambda.bind_struct;
         assert(bstruct);
         auto bstruct_l = compile_type(bstruct);
@@ -794,7 +794,7 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op) {
 llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
-        if (fn->get_def()->cleanup_vars.size) {
+        if (fn->get_def()->cleanup_vars.len) {
             InvokeInfo invoke;
             auto next_label = fn->new_label("_invoke_next");
             invoke.normal = next_label;
@@ -1031,7 +1031,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &builder = *m_ctx->llvm_builder;
         auto default_label = fn->new_label("_switch_default");
 
-        auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.size);
+        auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.len);
 
         auto done_label = fn->new_label("_switch_done");
 
@@ -1051,7 +1051,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             case_labels.add(label);
         }
 
-        for (int i = 0; i < data.cases.size; i++) {
+        for (int i = 0; i < data.cases.len; i++) {
             fn->use_label(case_labels[i]);
             auto scase = data.cases[i];
             compile_block(fn, scase, scase->data.case_expr.body, done_label, var);
@@ -1157,7 +1157,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
     }
     case TypeKind::Optional: {
         assert(expr->type == ast::NodeType::ConstructExpr &&
-               expr->data.construct_expr.items.size == 1);
+               expr->data.construct_expr.items.len == 1);
         auto value = expr->data.construct_expr.items[0];
         auto opt_type = get_chitype(expr);
         auto has_value_p = builder.CreateStructGEP(compile_type(opt_type), dest, 0);
@@ -1353,7 +1353,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto bind_ptr = builder.CreateLoad(lambda_type_l->elements()[2], bind_gep);
         args.push_back(bind_ptr);
 
-        for (int i = 0; i < data.args.size; i++) {
+        for (int i = 0; i < data.args.len; i++) {
             auto arg = data.args[i];
             auto param_type = fn_spec.get_param_at(i);
             args.push_back(compile_assignment_to_type(fn, arg, param_type));
@@ -1420,7 +1420,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         callee = callee_fn->llvm_fn;
     }
 
-    for (int i = 0; i < data.args.size; i++) {
+    for (int i = 0; i < data.args.len; i++) {
         if (is_variadic && i >= va_start) {
             emit_dbg_location(data.args[i]);
             auto add_fn = get_system_fn("cx_array_add");
@@ -1932,7 +1932,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             members.push_back(get_llvm_ptr_type()); // vtable
             return llvm::StructType::create(members, get_resolver()->to_string(type, true));
         }
-        if (!data.fields.size) {
+        if (!data.fields.len) {
             return compile_type(get_system_types()->void_);
         }
         std::vector<llvm::Type *> members;
@@ -1968,7 +1968,7 @@ void Compiler::emit_dbg_location(ast::Node *node) {
     assert(node->token);
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     llvm::DIScope *scope = m_ctx->dbg_cu;
-    if (m_ctx->dbg_scopes.size) {
+    if (m_ctx->dbg_scopes.len) {
         scope = m_ctx->dbg_scopes.last();
     }
     auto line_no = node->token->pos.line_number();

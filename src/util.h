@@ -59,18 +59,6 @@ static inline T *reallocate_nonzero(T *old, size_t old_count, size_t new_count) 
 
 static inline void unreachable() { panic("unreachable"); }
 
-static inline std::vector<string> string_split(string str, string sep) {
-    char *cstr = const_cast<char *>(str.c_str());
-    char *current;
-    std::vector<string> arr;
-    current = strtok(cstr, sep.c_str());
-    while (current != NULL) {
-        arr.push_back(current);
-        current = strtok(NULL, sep.c_str());
-    }
-    return arr;
-}
-
 static inline std::string string_replace(std::string subject, const std::string &search,
                                          const std::string &replace) {
     size_t pos = 0;
@@ -82,7 +70,7 @@ static inline std::string string_replace(std::string subject, const std::string 
 }
 
 template <typename T> struct array {
-    size_t size = 0;
+    size_t len = 0;
     size_t capacity = 0;
     T *items = nullptr;
 
@@ -90,7 +78,7 @@ template <typename T> struct array {
         if (!items) {
             return;
         }
-        for (size_t i = 0; i < size; i++) {
+        for (size_t i = 0; i < len; i++) {
             items[i].~T();
         }
         free(items);
@@ -100,24 +88,24 @@ template <typename T> struct array {
     array() {}
 
     array(const array<T> &other) {
-        size = 0;
-        reserve(other.size);
-        for (size_t i = 0; i < other.size; i++) {
+        len = 0;
+        reserve(other.len);
+        for (size_t i = 0; i < other.len; i++) {
             add(other.items[i]);
         }
     }
 
     array(array<T> &&other) {
-        size = other.size;
+        len = other.len;
         capacity = other.capacity;
         items = other.items;
         other.items = nullptr;
     }
 
     void operator=(const array<T> &other) {
-        size = 0;
-        reserve(other.size);
-        for (size_t i = 0; i < other.size; i++) {
+        len = 0;
+        reserve(other.len);
+        for (size_t i = 0; i < other.len; i++) {
             add(other.items[i]);
         }
     }
@@ -130,26 +118,26 @@ template <typename T> struct array {
     }
 
     template <typename... Args> T *emplace(Args &&...args) {
-        resize(size + 1);
+        resize(len + 1);
         return new (&last()) T(std::forward<Args>(args)...);
     }
 
     T *add(T &&item) {
-        resize(size + 1);
+        resize(len + 1);
         memset(&last(), 0, sizeof(T));
         last() = item;
         return &last();
     }
 
     T *add(const T &item) {
-        resize(size + 1);
+        resize(len + 1);
         memset(&last(), 0, sizeof(T));
         last() = item;
         return &last();
     }
 
     void add_all(array<T> other) {
-        reserve(size + other.size);
+        reserve(len + other.len);
         for (auto &item : other) {
             add(item);
         }
@@ -161,42 +149,42 @@ template <typename T> struct array {
 
     T *begin() { return items; }
 
-    T *end() { return items + size; }
+    T *end() { return items + len; }
 
     const T &at(size_t index) const {
         assert(index != SIZE_MAX);
-        assert(index < size);
+        assert(index < len);
         return items[index];
     }
 
     T &at(size_t index) {
         assert(index != SIZE_MAX);
-        assert(index < size);
+        assert(index < len);
         return items[index];
     }
 
     T pop() {
-        assert(size >= 1);
-        return items[--size];
+        assert(len >= 1);
+        return items[--len];
     }
 
     const T &last() const {
-        assert(size >= 1);
-        return items[size - 1];
+        assert(len >= 1);
+        return items[len - 1];
     }
 
     T &last() {
-        assert(size >= 1);
-        return items[size - 1];
+        assert(len >= 1);
+        return items[len - 1];
     }
 
     void resize(size_t new_length) {
         assert(new_length != SIZE_MAX);
         reserve(new_length);
-        size = new_length;
+        len = new_length;
     }
 
-    void clear() { size = 0; }
+    void clear() { len = 0; }
 
     void reserve(size_t new_capacity) {
         if (capacity >= new_capacity)
@@ -245,6 +233,28 @@ template <typename K, typename V> struct map {
     size_t size() { return data.size(); }
 };
 
+static inline array<string> string_split(string str, string sep) {
+    char *cstr = const_cast<char *>(str.c_str());
+    char *current;
+    array<string> arr;
+    current = strtok(cstr, sep.c_str());
+    while (current != NULL) {
+        arr.add(current);
+        current = strtok(NULL, sep.c_str());
+    }
+    return arr;
+}
+
+static inline string string_join(array<string> arr, string sep) {
+    string str;
+    for (size_t i = 0; i < arr.len; i++) {
+        if (i != 0)
+            str += sep;
+        str += arr[i];
+    }
+    return str;
+}
+
 namespace io {
 enum class Error : int { unknown, eof };
 
@@ -291,7 +301,7 @@ struct CharBuf : public array<char> {
     char *write(const string &s) {
         if (s.empty())
             return 0;
-        auto old_size = size;
+        auto old_size = len;
         for (char ch : s) {
             add(ch);
         }

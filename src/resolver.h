@@ -28,7 +28,7 @@ struct Context {
     virtual InterfaceImpl *create_interface_impl() = 0;
 
     virtual ast::Module *module_from_path(ast::Package *package, const string &path,
-                                          const string &base_path = "", bool import = false) = 0;
+                                          bool import = false) = 0;
     virtual ast::Module *process_source(ast::Package *package, io::Buffer *src,
                                         const string &file_name) = 0;
     virtual optional<ModulePathInfo> find_module_path(const string &path,

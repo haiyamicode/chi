@@ -125,7 +125,7 @@ void Parser::unexpected(Token *token) {
 }
 
 Token *Parser::next() {
-    if (m_toki >= m_ctx->tokens.size) {
+    if (m_toki >= m_ctx->tokens.len) {
         return m_eof_token;
     }
     return m_ctx->tokens.at(m_toki++);
@@ -141,7 +141,7 @@ Token *Parser::get() { return lookahead(0); }
 
 Token *Parser::lookahead(int n) {
     auto toki = m_toki + n;
-    if (toki < 0 || toki >= m_ctx->tokens.size) {
+    if (toki < 0 || toki >= m_ctx->tokens.len) {
         return m_eof_token;
     }
     return m_ctx->tokens.at(toki);
@@ -420,7 +420,7 @@ Node *Parser::parse_type_expr(bool type_only) {
             expect(TokenType::GT);
         }
     }
-    for (int i = int(sigil_nodes.size) - 1; i >= 0; --i) {
+    for (int i = int(sigil_nodes.len) - 1; i >= 0; --i) {
         auto parent = sigil_nodes[i];
         parent->data.sigil_type.type = node;
         node = parent;
@@ -674,10 +674,10 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
                 node->data.block.return_expr = stmt;
                 auto rbrace = expect(TokenType::RBRACE);
                 node->end_token = rbrace;
-                node->data.block.statements.add(stmt);
+                // node->data.block.statements.add(stmt);
                 break;
             } else {
-                stmt->index = node->data.block.statements.size;
+                stmt->index = node->data.block.statements.len;
                 node->data.block.statements.add(stmt);
             }
         }
@@ -950,7 +950,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
 Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
     auto node = create_node(NodeType::FnCallExpr, fn_expr->token);
     node->data.fn_call_expr.fn_ref_expr = fn_expr;
-    assert(fn_expr && node->data.fn_call_expr.args.size == 0);
+    assert(fn_expr && node->data.fn_call_expr.args.len == 0);
     expect(TokenType::LPAREN);
 
     for (;;) {
@@ -1150,7 +1150,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
             if (!next_is(TokenType::COMMA) && !next_is(TokenType::GT)) {
                 param_node->data.type_param.type = parse_type_expr();
             }
-            param_node->data.type_param.index = params.size;
+            param_node->data.type_param.index = params.len;
             params.add(param_node);
             if (!at_comma(TokenType::GT)) {
                 break;
@@ -1280,6 +1280,10 @@ Node *Parser::parse_dot_expr(Node *expr) {
     auto node = create_node(NodeType::DotExpr, dot);
     node->data.dot_expr.expr = expr;
     node->data.dot_expr.field = expect_identifier();
+
+    if (next_is(TokenType::DOT)) {
+        return parse_dot_expr(node);
+    }
     return node;
 }
 
@@ -1392,28 +1396,41 @@ Node *Parser::parse_export_decl() {
     auto node = create_node(NodeType::ExportDecl, kw);
     node->data.export_decl = {};
     node->data.export_decl.path = expect(TokenType::STRING);
+    node->data.export_decl.decl_spec = m_ctx->allocator->create_decl_spec();
 
-    if (next_is(TokenType::MUL)) {
-        auto ellipsis = get();
+    if (next_is(TokenType::KW_AS)) {
         consume();
-        node->data.export_decl.match_all = ellipsis;
-    } else if (next_is(TokenType::LBRACE)) {
-        consume();
-        while (!next_is(TokenType::RBRACE)) {
-            auto iden = expect(TokenType::IDEN);
-            auto member = create_node(NodeType::ImportSymbol, iden);
-            member->data.import_symbol.name = iden;
-            auto name_iden = iden;
-            if (!next_is(TokenType::RBRACE)) {
-                expect(TokenType::COMMA);
-            }
-            node->data.export_decl.symbols.add(member);
-            member->data.import_symbol.import = node;
-            add_to_scope(member, name_iden->get_name());
-        }
-        expect(TokenType::RBRACE);
+        auto name_iden = expect(TokenType::IDEN);
+        node->data.export_decl.alias = name_iden;
+        node->name = name_iden->get_name();
     } else {
-        error(get(), errors::EXPORT_DECL_MUST_HAVE_SYMBOLS);
+        if (next_is(TokenType::MUL)) {
+            auto ellipsis = get();
+            consume();
+            node->data.export_decl.match_all = ellipsis;
+        } else if (next_is(TokenType::LBRACE)) {
+            consume();
+            while (!next_is(TokenType::RBRACE)) {
+                auto iden = expect(TokenType::IDEN);
+                auto member = create_node(NodeType::ImportSymbol, iden);
+                member->data.import_symbol.name = iden;
+                auto name_iden = iden;
+                if (next_is(TokenType::KW_AS)) {
+                    consume();
+                    name_iden = expect(TokenType::IDEN);
+                    member->data.import_symbol.alias = name_iden;
+                }
+                if (!next_is(TokenType::RBRACE)) {
+                    expect(TokenType::COMMA);
+                }
+                node->data.export_decl.symbols.add(member);
+                member->data.import_symbol.import = node;
+                add_to_scope(member, name_iden->get_name());
+            }
+            expect(TokenType::RBRACE);
+        } else {
+            error(get(), errors::EXPORT_DECL_MUST_HAVE_SYMBOLS);
+        }
     }
 
     expect(TokenType::SEMICOLON);

@@ -43,6 +43,7 @@ struct Module {
     Node *root = nullptr;
     Package *package = nullptr;
     string path = "";
+    string id_path = "";
     string name = "";
     string filename = "";
     array<Node *> exports = {};
@@ -59,6 +60,7 @@ struct Module {
     Module &operator=(const Module &) = delete;
 
     string full_path() const { return (fs::path(path) / filename).string(); }
+    string global_id() const;
 
     static ModuleKind kind_from_extension(const string &ext) {
         if (ext == ".xc") {
@@ -84,8 +86,8 @@ enum class PackageKind { BUILTIN, DEFAULT };
 struct Package {
     array<box<Module>> modules = {};
     Node *entry_fn = nullptr;
-    string root_src_dir = "";
-    string root_src_path = "";
+    string path = "";
+    string id_path = "";
     PackageKind kind = PackageKind::DEFAULT;
     string name = "";
 
@@ -99,6 +101,7 @@ struct Root {
 struct DeclSpec {
     uint32_t flags = DECL_NONE;
     array<Node *> attributes = {};
+    IntrinsicSymbol symbol = IntrinsicSymbol::None;
 
     Visibility get_visibility() const {
         if (flags & DECL_PRIVATE) {
@@ -136,7 +139,7 @@ struct FnDef {
         return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
     }
 
-    bool has_try_or_cleanup() { return has_try || cleanup_vars.size; }
+    bool has_try_or_cleanup() { return has_try || cleanup_vars.len; }
 };
 
 struct ParamDecl {
@@ -340,6 +343,7 @@ struct ImportDecl {
     Token *match_all = nullptr;
     array<Node *> symbols = {};
     ast::Module *resolved_module = nullptr;
+    DeclSpec *decl_spec = {};
 };
 
 typedef ImportDecl ExportDecl;
@@ -349,6 +353,8 @@ struct ImportSymbol {
     Token *alias = nullptr;
     Node *import = nullptr;
     Node *resolved_decl = nullptr;
+
+    string output_name() { return alias ? alias->get_name() : name->get_name(); }
 };
 
 struct DeclAttribute {
@@ -374,6 +380,7 @@ struct Node {
     Node *parent = nullptr;
     Token *start_token = nullptr;
     Token *end_token = nullptr;
+    string global_id = "";
 
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;
@@ -551,6 +558,8 @@ struct Node {
         }
         case NodeType::ImportSymbol:
             return data.import_symbol.resolved_decl;
+        case NodeType::ExportDecl:
+            return this;
         case NodeType::FnDef:
             return this;
         case NodeType::UnaryOpExpr:
@@ -561,19 +570,28 @@ struct Node {
         return nullptr;
     }
 
-    DeclSpec &get_declspec() {
+    DeclSpec *get_declspec() {
         switch (type) {
         case NodeType::FnDef:
-            return *data.fn_def.decl_spec;
+            return data.fn_def.decl_spec;
         case NodeType::VarDecl:
-            return *data.var_decl.decl_spec;
+            return data.var_decl.decl_spec;
         case NodeType::StructDecl:
-            return *data.struct_decl.decl_spec;
+            return data.struct_decl.decl_spec;
+        case NodeType::ExportDecl:
+            return data.export_decl.decl_spec;
         default:
-            panic("node type {} does not have declspec", PRINT_ENUM(type));
-        };
-        return *data.fn_def.decl_spec;
+            return nullptr;
+        }
     }
+
+    DeclSpec &declspec() {
+        auto ptr = get_declspec();
+        if (!ptr) {
+            panic("node type {} does not have declspec", PRINT_ENUM(type));
+        }
+        return *ptr;
+    };
 
     bool can_escape() {
         if (type == NodeType::Identifier) {
@@ -584,7 +602,7 @@ struct Node {
 
     bool is_last_stmt() {
         return parent && parent->type == NodeType::Block &&
-               index == parent->data.block.statements.size - 1;
+               index == parent->data.block.statements.len - 1;
     }
 };
 } // namespace ast

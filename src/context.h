@@ -28,6 +28,7 @@ struct CompilationContext : public Context {
     string root_path = "";
     array<box<ast::Package>> packages = {};
     ResolveContext resolve_ctx;
+    map<string, ast::Module *> module_map = {};
 
     explicit CompilationContext() : resolve_ctx(this) {
         auto rootenv = std::getenv("CHI_ROOT");
@@ -38,14 +39,14 @@ struct CompilationContext : public Context {
 
     ast::Node *create_node(ast::NodeType type) {
         auto node = ast_nodes.emplace(new ast::Node(type))->get();
-        node->id = ast_nodes.size;
+        node->id = ast_nodes.len;
         return node;
     }
 
     ast::DeclSpec *create_decl_spec() { return decl_specs.emplace(new ast::DeclSpec())->get(); }
 
     ChiType *create_type(TypeKind kind) {
-        return types.emplace(new ChiType(kind, types.size + 1))->get();
+        return types.emplace(new ChiType(kind, types.len + 1))->get();
     }
 
     Scope *create_scope(Scope *parent) { return scopes.emplace(new Scope(parent))->get(); }
@@ -56,8 +57,7 @@ struct CompilationContext : public Context {
 
     Token *create_token() { return tokens.emplace(new Token())->get(); }
 
-    ast::Module *module_from_path(ast::Package *package, const string &path,
-                                  const string &base_path = "", bool import = false);
+    ast::Module *module_from_path(ast::Package *package, const string &path, bool import = false);
 
     optional<ModulePathInfo> find_module_path(const string &path, const string &base_path = "");
 
