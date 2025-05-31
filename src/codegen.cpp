@@ -199,7 +199,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
                 fn->container_type = subtype;
             } else {
                 fn->container_type = type;
-            }
+            };
             m_ctx->pending_fns.add(fn);
         }
     }
@@ -1565,10 +1565,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             auto ptr = compile_dot_ptr(fn, data.expr);
             assert(ptr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
-            auto beginp = sty->member_intrinsics.get(IntrinsicSymbol::IterBegin);
-            auto endp = sty->member_intrinsics.get(IntrinsicSymbol::IterEnd);
-            auto nextp = sty->member_intrinsics.get(IntrinsicSymbol::IterNext);
-            auto indexp = sty->member_intrinsics.get(IntrinsicSymbol::OpIndex);
+            auto beginp = sty->member_table.get("begin");
+            auto endp = sty->member_table.get("end");
+            auto nextp = sty->member_table.get("next");
+            auto indexp = sty->member_table.get("index");
             assert(beginp && endp && nextp && indexp);
             auto begin = *beginp;
             auto end = *endp;

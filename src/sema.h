@@ -25,8 +25,7 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Poin
 
 MAKE_ENUM(Visibility, Public, Private)
 
-MAKE_ENUM(IntrinsicSymbol, None, OpIndex, IterAt, IterBegin, IterEnd, IterNext, Iterable, CopyFrom,
-          OpDisplay)
+MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display)
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -99,6 +98,7 @@ struct ChiTypeStruct {
     array<InterfaceImpl *> interfaces = {};
     map<string, ChiStructMember *> member_table = {};
     map<ChiType *, InterfaceImpl *> interface_table = {};
+    optional<string> display_name = std::nullopt;
 
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
@@ -115,6 +115,7 @@ struct ChiTypeStruct {
     bool is_generic() { return type_params.len > 0; }
 
     static bool is_interface(ChiType *type);
+    static bool is_interface(ChiTypeStruct *type) { return type->kind == ContainerKind::Interface; }
 
     static bool is_pointer_type(ChiType *type);
 

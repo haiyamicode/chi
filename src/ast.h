@@ -101,7 +101,6 @@ struct Root {
 struct DeclSpec {
     uint32_t flags = DECL_NONE;
     array<Node *> attributes = {};
-    IntrinsicSymbol symbol = IntrinsicSymbol::None;
 
     Visibility get_visibility() const {
         if (flags & DECL_PRIVATE) {
@@ -381,6 +380,7 @@ struct Node {
     Token *start_token = nullptr;
     Token *end_token = nullptr;
     string global_id = "";
+    IntrinsicSymbol symbol = IntrinsicSymbol::None;
 
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;

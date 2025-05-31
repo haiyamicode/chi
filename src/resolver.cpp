@@ -7,6 +7,7 @@
 
 #include "resolver.h"
 #include "errors.h"
+#include "fmt/core.h"
 #include "lexer.h"
 #include "sema.h"
 #include "util.h"
@@ -83,13 +84,10 @@ void Resolver::context_init_primitives() {
     add_primitive("Promise", system_types.promise);
 
     // intrinsic symbols
-    m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::OpIndex;
-    m_ctx->intrinsic_symbols["std.iter.At"] = IntrinsicSymbol::IterAt;
-    m_ctx->intrinsic_symbols["std.iter.Begin"] = IntrinsicSymbol::IterBegin;
-    m_ctx->intrinsic_symbols["std.iter.Next"] = IntrinsicSymbol::IterNext;
-    m_ctx->intrinsic_symbols["std.iter.End"] = IntrinsicSymbol::IterEnd;
-    m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
-    m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::OpDisplay;
+    m_ctx->intrinsic_symbols["std.lang.Index"] = IntrinsicSymbol::Index;
+    m_ctx->intrinsic_symbols["std.lang.IndexIterable"] = IntrinsicSymbol::IndexInterable;
+    m_ctx->intrinsic_symbols["std.lang.CopyFrom"] = IntrinsicSymbol::CopyFrom;
+    m_ctx->intrinsic_symbols["std.lang.Display"] = IntrinsicSymbol::Display;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -726,10 +724,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!node->resolved_type) {
             struct_type = create_type(TypeKind::Struct);
             struct_type->name = node->name;
+            struct_type->display_name = node->name;
             struct_type->global_id = resolve_global_id(node);
             struct_ = &struct_type->data.struct_;
             struct_->node = node;
             struct_->kind = data.kind;
+            struct_->display_name = struct_type->name;
 
             // first pass, all members are skipped
             for (auto param : data.type_params) {
@@ -760,12 +760,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     resolve_struct_embed(struct_type, member, scope);
                 }
             }
+
             for (auto implement : data.implements) {
                 auto impl_trait = resolve_value(implement, scope);
-                if (!ChiTypeStruct::is_interface(impl_trait)) {
+                auto trait_struct = resolve_struct_type(impl_trait);
+                if (!ChiTypeStruct::is_interface(trait_struct)) {
                     error(implement, errors::NON_INTERFACE_IMPL_TYPE, to_string(impl_trait));
                 }
+
                 resolve_vtable(impl_trait, struct_type, implement);
+                if (struct_->is_generic()) {
+                    for (auto subtype : struct_->subtypes) {
+                        if (subtype->is_placeholder) {
+                            continue;
+                        }
+                        resolve_vtable(impl_trait, subtype, implement);
+                    }
+                }
             }
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
         } else {
@@ -831,7 +842,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             break;
         case TypeKind::Struct:
         case TypeKind::Subtype: {
-            auto method = ChiTypeStruct::get_symbol(expr_type, IntrinsicSymbol::OpIndex);
+            auto method = ChiTypeStruct::get_symbol(expr_type, IntrinsicSymbol::Index);
             if (!method) {
                 error(node, errors::CANNOT_SUBSCRIPT, to_string(expr_type));
                 return nullptr;
@@ -876,13 +887,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.expr) {
             auto expr_type = resolve(data.expr, scope);
             auto sty = resolve_struct_type(expr_type);
-            if (!sty || !sty->intrinsics.get(IntrinsicSymbol::Iterable)) {
+            if (!sty || !sty->member_intrinsics.get(IntrinsicSymbol::IndexInterable)) {
                 error(node, errors::FOR_EXPR_NOT_ITERABLE, to_string(expr_type));
                 return nullptr;
             }
 
             if (data.bind) {
-                auto index_fn = sty->member_intrinsics.get(IntrinsicSymbol::OpIndex);
+                auto index_fn = sty->member_table.get("index");
                 if (!index_fn) {
                     error(node, errors::CANNOT_INDEX, to_string(expr_type));
                     return nullptr;
@@ -1084,13 +1095,6 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
         node->global_id = resolve_global_id(node);
     }
 
-    if (auto declspec_p = node->get_declspec()) {
-        auto symbol_p = m_ctx->intrinsic_symbols.get(node->global_id);
-        if (symbol_p) {
-            declspec_p->symbol = *symbol_p;
-        }
-    }
-
     if (node->type == NodeType::VarDecl || node->type == NodeType::ParamDecl) {
         if (scope.parent_fn_node && should_destroy(node)) {
             scope.parent_fn_def()->cleanup_vars.add(node);
@@ -1133,6 +1137,8 @@ string Resolver::to_string(ChiType *type, bool for_display) {
         return *type->display_name;
     }
     switch (type->kind) {
+    case TypeKind::This:
+        return to_string(type->get_elem(), for_display);
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
         std::stringstream ss;
@@ -1280,10 +1286,25 @@ string Resolver::resolve_term_string(ast::Node *term) {
     return "";
 }
 
+IntrinsicSymbol Resolver::resolve_intrinsic_symbol(ast::Node *node) {
+    if (node->symbol != IntrinsicSymbol::None) {
+        return node->symbol;
+    }
+
+    auto sym_p = m_ctx->intrinsic_symbols.get(resolve_global_id(node));
+    if (sym_p) {
+        return *sym_p;
+    }
+
+    return IntrinsicSymbol::None;
+}
+
 ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node *node,
                                                  ResolveScope &scope) {
     auto &struct_ = struct_type->data.struct_;
     auto member = struct_.add_member(get_allocator(), node->name, node, nullptr);
+    member->symbol = resolve_intrinsic_symbol(struct_.node);
+
     if (node->type == NodeType::VarDecl) {
         member->resolved_type = resolve(node, scope);
         node->data.var_decl.resolved_field = member;
@@ -1295,9 +1316,6 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
             if (sym) {
                 member->symbol = *sym;
                 struct_.member_intrinsics[member->symbol] = member;
-                if (*sym == IntrinsicSymbol::IterBegin) {
-                    struct_.intrinsics[IntrinsicSymbol::Iterable] = true;
-                }
             } else {
                 error(node, errors::INVALID_ATTRIBUTE_TERM, term_string);
                 continue;
@@ -1310,10 +1328,10 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
 }
 
 void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node) {
-    auto &base = base_type->data.struct_;
-    auto &derived = derived_type->data.struct_;
+    auto &base = *resolve_struct_type(base_type);
+    auto &derived = *resolve_struct_type(derived_type);
     InterfaceImpl *iface_impl = nullptr;
-    auto trait_symbol = base.node->declspec().symbol;
+    auto trait_symbol = resolve_intrinsic_symbol(base.node);
     if (base.kind == ContainerKind::Interface) {
         iface_impl = derived.add_interface(get_allocator(), base_type, derived_type);
     }
@@ -1322,9 +1340,7 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
         auto node = base_member->node;
         if (base_member->is_method()) {
             auto child_method = derived.find_member(node->name);
-            if (trait_symbol != IntrinsicSymbol::None) {
-                child_method->symbol = trait_symbol;
-            }
+
             if (node->data.fn_def.body) {
                 if (!child_method) {
                     child_method = derived.add_member(get_allocator(), node->name, node,
@@ -1343,6 +1359,15 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
             if (iface_impl) {
                 assert(child_method);
                 iface_impl->impl_members.add(child_method);
+
+                if (trait_symbol != IntrinsicSymbol::None) {
+                    child_method->symbol = trait_symbol;
+                } else if (base_member->symbol != IntrinsicSymbol::None) {
+                    child_method->symbol = base_member->symbol;
+                }
+                if (child_method->symbol != IntrinsicSymbol::None) {
+                    derived.member_intrinsics[child_method->symbol] = child_method;
+                }
             }
         }
         if (base_member->is_field()) {
@@ -1472,7 +1497,8 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
         if (auto underlying_type = sty->data.type_symbol.underlying_type) {
             sty = underlying_type;
         }
-    } else if (sty->kind == TypeKind::Subtype) {
+    }
+    if (sty->kind == TypeKind::Subtype) {
         sty = resolve_subtype(sty);
     }
     if (sty->kind != TypeKind::Struct) {
@@ -1836,6 +1862,9 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     auto &scpy = sty->data.struct_;
     scpy.kind = base.kind;
     scpy.node = base.node;
+    scpy.display_name = sty->name;
+    auto base_symbol = resolve_intrinsic_symbol(base.node);
+
     for (auto member : base.members) {
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);

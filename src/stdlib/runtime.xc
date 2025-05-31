@@ -1,5 +1,4 @@
-import "./std" as std;
-export "./std" as std;
+import "./std/lang" as lang;
 
 struct HashBytes {
   data: *void = null;
@@ -119,7 +118,7 @@ struct JsonValue {
     return result;
   }
 
-  @[std.ops.CopyFrom]
+  @[std.lang.CopyFrom]
   func copy(from: &JsonValue) {
     cx_json_value_copy(from.data, this);
   }
@@ -184,7 +183,12 @@ func fs_read(path: string) string {
   return cx_file_read(&path);
 }
 
-struct Array<T>: std.ops.Display {
+struct Array<T>:
+  lang.Index<uint32, T>,
+  lang.IndexIterable<uint32, T>,
+  lang.CopyFrom<Array<T>>,
+  lang.Display
+{
   data: *T = null;
 	len: uint32 = 0;
 	capacity: uint32 = 0;
@@ -209,23 +213,19 @@ struct Array<T>: std.ops.Display {
     cx_array_new(this);
   }
 
-  @[std.ops.Index]
 	func index(index: uint32) &T {
 		assert(index < this.len, "index out of bounds");
 		return &this.data[index];
 	}
 
-  @[std.iter.Begin]
   func begin() uint32 {
     return 0;
   }
 
-  @[std.iter.End]
   func end() uint32 {
     return this.len;
   }
 
-  @[std.iter.Next]
   func next(index: uint32) uint32 {
     return index + 1;
   }
@@ -240,8 +240,7 @@ struct Array<T>: std.ops.Display {
     return buf.to_string();
   }
 
-  @[std.ops.CopyFrom]
-  func copy(from: &Array<T>) {
+  func copy_from(from: &Array<T>) {
     this.clear();
     for from => item {
       this.add(item);
@@ -249,7 +248,7 @@ struct Array<T>: std.ops.Display {
   }
 }
 
-struct Map<K, V> {
+struct Map<K, V>: lang.Index<K, V> {
   data: *void;
 
   func new() {
@@ -277,7 +276,6 @@ struct Map<K, V> {
     return null;
   }
 
-  @[std.ops.Index]
   func index(key: K) &V {
     var k: any = key;
     var h = cx_hbytes(&k);

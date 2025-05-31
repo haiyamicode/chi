@@ -397,9 +397,10 @@ Node *Parser::parse_type_expr(bool type_only) {
 
         if (next_is(TokenType::LT)) {
             consume();
+            auto base_type_node = node;
             node = create_node(NodeType::SubtypeExpr, iden->token);
             auto &subtype = node->data.subtype_expr;
-            subtype.type = iden;
+            subtype.type = base_type_node;
             Token *token;
             for (;;) {
                 token = get();
@@ -1152,6 +1153,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
             }
             param_node->data.type_param.index = params.len;
             params.add(param_node);
+
             if (!at_comma(TokenType::GT)) {
                 break;
             }
@@ -1195,6 +1197,10 @@ Node *Parser::parse_struct_member(ContainerKind container_kind) {
 }
 
 void Parser::parse_struct_block(Node *node) {
+    m_ctx->resolver->push_scope(node);
+    for (auto param : node->data.struct_decl.type_params) {
+        add_to_scope(param);
+    }
     if (next_is(TokenType::COLON)) {
         consume();
         for (;;) {
@@ -1215,10 +1221,6 @@ void Parser::parse_struct_block(Node *node) {
         }
     }
     expect(TokenType::LBRACE);
-    m_ctx->resolver->push_scope(node);
-    for (auto param : node->data.struct_decl.type_params) {
-        add_to_scope(param);
-    }
     while (get()->type != TokenType::RBRACE) {
         if (get()->type == TokenType::END) {
             error(get(), errors::UNEXPECTED_EOF);

@@ -121,7 +121,7 @@ static void *get_typemeta_display_method(TypeInfo *type) {
     auto table = (TypeMetaEntry *)((uintptr_t)type + offset);
     for (int i = 0; i < type->meta_table_len; i++) {
         auto entry = &table[i];
-        if (entry->symbol == IntrinsicSymbol::OpDisplay && entry->vtable_index >= 0) {
+        if (entry->symbol == IntrinsicSymbol::Display && entry->vtable_index >= 0) {
             return program_vtable[entry->vtable_index];
         }
     }

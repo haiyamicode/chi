@@ -43,7 +43,7 @@ InterfaceImpl *ChiTypeStruct::add_interface(Context *allocator, ChiType *iface, 
 }
 
 bool ChiTypeStruct::is_interface(ChiType *type) {
-    return type->kind == TypeKind::Struct && type->data.struct_.kind == ContainerKind::Interface;
+    return type->kind == TypeKind::Struct && is_interface(&type->data.struct_);
 }
 
 bool ChiTypeStruct::is_generic(ChiType *type) {
