@@ -85,7 +85,7 @@ static napi_value Method(napi_env env, napi_callback_info info) {
 
     // process source code
     analyzer.build_runtime();
-    auto pkg = analyzer.get_context()->add_package();
+    auto pkg = analyzer.get_context()->add_package(".");
     auto module = analyzer.process_source(pkg, &src, input_file);
 
     // collect errors
@@ -180,7 +180,8 @@ static napi_value Method(napi_env env, napi_callback_info info) {
 
 static napi_value Method(napi_env env, napi_callback_info info);
 
-#define DECLARE_NAPI_METHOD(name, func) {name, 0, func, 0, 0, 0, napi_default, 0}
+#define DECLARE_NAPI_METHOD(name, func)                                                            \
+    { name, 0, func, 0, 0, 0, napi_default, 0 }
 
 static napi_value Init(napi_env env, napi_value exports) {
     napi_status status;

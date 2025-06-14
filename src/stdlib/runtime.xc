@@ -1,4 +1,4 @@
-import "./std/lang" as lang;
+import "std/lang" as lang;
 
 struct HashBytes {
   data: *void = null;
@@ -27,11 +27,11 @@ extern "C" {
   func cx_personality(...) int32;
   func cx_timeout(delay: uint64, callback: *void);
   func cx_call(fn: *void);
-  func cx_string_format(format: *string, values: *void) string;
-  func cx_string_from_chars(data: *void, size: uint32) string;
+  func cx_string_format(format: *string, values: *void, str: *string);
+  func cx_string_from_chars(data: *void, size: uint32, str: *string);
   func cx_string_delete(dest: *string);
   func cx_string_copy(dest: *string, src: *string);
-  func cx_hbytes(value: *any) HashBytes;
+  func cx_hbytes(value: *any, result: *HashBytes);
   func cx_map_new() *void;
   func cx_map_delete(data: *void);
   func cx_map_find(data: *void, key: *HashBytes) *void;
@@ -46,7 +46,7 @@ extern "C" {
   func cx_json_array_length(data: *void) uint32;
   func cx_json_value_copy(data: *void, result: *void);
 
-  func cx_file_read(path: *string) string;
+  func cx_file_read(path: *string, result: *string); 
 }
 
 enum JsonKind {
@@ -164,7 +164,9 @@ func timeout(delay: uint64, callback: func) {
 }
 
 func stringf(format: string, ...values: any) string {
-  return cx_string_format(&format, &values);
+  var str: string = "";
+  cx_string_format(&format, &values, &str);
+  return str;
 }
 
 func assert(cond: bool, message: string) {
@@ -180,7 +182,9 @@ func json_parse(str: string) JsonValue {
 }
 
 func fs_read(path: string) string {
-  return cx_file_read(&path);
+  var result: string = "";
+  cx_file_read(&path, &result);
+  return result;
 }
 
 struct Array<T>:
@@ -262,13 +266,15 @@ struct Map<K, V>: lang.Index<K, V> {
 
   func remove(key: K) {
     var k: any = key;
-    var h = cx_hbytes(&k);
+    var h: HashBytes = {};
+    cx_hbytes(&k, &h);
     cx_map_remove(this.data, &h);
   }
 
   func find(key: K) ?&V {
     var k: any = key;
-    var h = cx_hbytes(&k);
+    var h: HashBytes = {};
+    cx_hbytes(&k, &h);
     var p = cx_map_find(this.data, &h) as *V;
     if p {
       return {p};
@@ -278,7 +284,8 @@ struct Map<K, V>: lang.Index<K, V> {
 
   func index(key: K) &V {
     var k: any = key;
-    var h = cx_hbytes(&k);
+    var h: HashBytes = {};
+    cx_hbytes(&k, &h);
     var p = cx_map_find(this.data, &h) as *V;
     if !p {
       p = new V{};
@@ -300,6 +307,8 @@ struct Buffer {
   }
 
   func to_string() string {
-    return cx_string_from_chars(this.bytes.data, this.bytes.len);
+    var str: string = "";
+    cx_string_from_chars(this.bytes.data, this.bytes.len, &str);
+    return str;
   }
 }

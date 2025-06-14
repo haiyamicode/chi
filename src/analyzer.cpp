@@ -26,11 +26,9 @@ void Analyzer::build_runtime() {
     auto resolver = m_ctx.create_resolver();
     resolver.context_init_primitives();
 
-    auto package = m_ctx.add_package();
-    package->kind = PackageKind::BUILTIN;
-    auto rt_path = m_ctx.get_stdlib_path("runtime.xc");
-    auto rt_source = io::Buffer::from_file(rt_path);
-    auto module = process_source(package, &rt_source, rt_path);
+    auto rt_file_path = m_ctx.init_rt_stdlib();
+    auto rt_source = io::Buffer::from_file(rt_file_path);
+    auto module = process_source(m_ctx.rt_package, &rt_source, rt_file_path);
     resolver.context_init_builtins(module);
 }
 
@@ -40,7 +38,7 @@ ast::Module *Analyzer::analyze_package_file(ast::Package *package, const string 
 }
 
 ast::Module *Analyzer::analyze_file(const string &entry_file_name) {
-    return analyze_package_file(m_ctx.add_package(), entry_file_name);
+    return analyze_package_file(m_ctx.add_package("."), entry_file_name);
 }
 
 ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {

@@ -153,7 +153,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
     case TypeKind::Int:
         return type_is_int(from_type);
     case TypeKind::Any:
-        return from_type->kind != TypeKind::Struct || ChiTypeStruct::is_interface(from_type);
+        return true;
     case TypeKind::Struct: {
         if (from_type == to_type) {
             return true;
@@ -345,7 +345,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             param_types.add(param_type);
         }
 
-        auto fn_type = get_fn_type(return_type, &param_types, is_variadic, scope.parent_struct);
+        auto is_extern = node->get_declspec() ? node->get_declspec()->is_extern() : false;
+        auto fn_type =
+            get_fn_type(return_type, &param_types, is_variadic, scope.parent_struct, is_extern);
         if (!is_fn_decl) {
             return get_lambda_for_fn(fn_type);
         }
@@ -842,11 +844,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             break;
         case TypeKind::Struct:
         case TypeKind::Subtype: {
-            auto method = ChiTypeStruct::get_symbol(expr_type, IntrinsicSymbol::Index);
-            if (!method) {
+            auto struct_ = resolve_struct_type(expr_type);
+            auto has_index = has_interface_impl(struct_, "std.lang.Index");
+            if (!has_index) {
                 error(node, errors::CANNOT_SUBSCRIPT, to_string(expr_type));
                 return nullptr;
             }
+
+            auto method_p = struct_->member_table.get("index");
+            assert(method_p);
+            auto method = *method_p;
+
             auto index_type = method->resolved_type->data.fn.get_param_at(0);
             check_assignment(data.subscript, subscript_type, index_type);
             data.resolved_method = method;
@@ -975,9 +983,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        auto target_package = m_ctx->allocator->get_or_create_package(path_info->package_id_path);
         auto path = path_info->entry_path;
         auto src = io::Buffer::from_file(path);
-        auto module = m_ctx->allocator->process_source(scope.module->package, &src, path);
+        auto module = m_ctx->allocator->process_source(target_package, &src, path);
         Resolver resolver(m_ctx);
         resolver.resolve(module);
 
@@ -1109,6 +1118,15 @@ string Resolver::resolve_global_id(ast::Node *node) {
     return fmt::format("{}.{}", node->module->global_id(), resolve_qualified_name(node));
 }
 
+bool Resolver::has_interface_impl(ChiTypeStruct *struct_type, string interface_id) {
+    for (auto &i : struct_type->interfaces) {
+        if (i->inteface_symbol == IntrinsicSymbol::Index) {
+            return true;
+        }
+    }
+    return false;
+}
+
 string Resolver::resolve_qualified_name(ast::Node *node) {
     switch (node->type) {
     case NodeType::FnDef:
@@ -1206,6 +1224,9 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display)
     case TypeKind::Fn: {
         auto &fn = data->fn;
         std::stringstream ss;
+        if (fn.is_extern) {
+            ss << "extern ";
+        }
         if (fn.container_ref) {
             ss << "(";
             ss << to_string(fn.container_ref, for_display);
@@ -1368,6 +1389,7 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
                 if (child_method->symbol != IntrinsicSymbol::None) {
                     derived.member_intrinsics[child_method->symbol] = child_method;
                 }
+                iface_impl->inteface_symbol = base_member->symbol;
             }
         }
         if (base_member->is_field()) {
@@ -1459,7 +1481,8 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
         auto return_type = type_placeholders_sub(data.return_type, subs);
         array<ChiType *> params = {};
         type_placeholders_sub_each(&data.params, subs, &params);
-        return get_fn_type(return_type, &params, data.is_variadic, data.container_ref->get_elem());
+        return get_fn_type(return_type, &params, data.is_variadic, data.container_ref->get_elem(),
+                           data.is_extern);
     }
     default:
         return type;
@@ -1604,12 +1627,13 @@ ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
     return node;
 }
 
-ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
-                               ChiType *container) {
+ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic, ChiType *container,
+                               bool is_extern) {
     ChiTypeFn fn;
     fn.return_type = ret;
     fn.is_variadic = is_variadic;
     fn.params = *params;
+    fn.is_extern = is_extern;
     if (container) {
         fn.container_ref = get_pointer_type(container, TypeKind::Reference);
     }
@@ -1898,8 +1922,8 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         }
     }
 
-    scpy.intrinsics = base.intrinsics;
     data.resolved_struct = sty;
+    scpy.interfaces = base.interfaces;
     return sty;
 }
 

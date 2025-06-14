@@ -198,6 +198,29 @@ template <typename T> struct array {
         items = reallocate_nonzero(items, capacity, better_capacity);
         capacity = better_capacity;
     }
+
+    array<T> slice(size_t start, int32_t n = -1) const {
+        auto length = n >= 0 ? n : this->len - start;
+
+        if (start >= len || length == 0) {
+            return array<T>(); // Return empty array
+        }
+
+        size_t end = start + length;
+        if (end > len) {
+            end = len;
+        }
+
+        array<T> result;
+        size_t actual_length = end - start;
+        result.reserve(actual_length);
+
+        for (size_t i = start; i < end; i++) {
+            result.add(items[i]);
+        }
+
+        return result;
+    }
 };
 
 template <typename K, typename V> struct map {

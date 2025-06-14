@@ -204,8 +204,10 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         }
     }
 
-    if (struct_type->data.struct_.interfaces.len) {
-        compile_struct_vtables(struct_type);
+    if (!subtype) {
+        if (struct_type->data.struct_.interfaces.len) {
+            compile_struct_vtables(struct_type);
+        }
     }
 
     for (auto member : struct_type->data.struct_.members) {
@@ -341,7 +343,14 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
     auto &proto = fn_def.fn_proto->data.fn_proto;
     int skip = fn->bind_offset;
+    llvm::Value *sret_arg = nullptr;
     for (uint32_t i = 0; i < fn->llvm_fn->arg_size(); i++) {
+        if (i == fn->sret_offset) {
+            auto llvm_param = fn->llvm_fn->getArg(i);
+            sret_arg = llvm_param;
+            continue;
+        }
+
         if (i < fn->bind_offset) {
             auto llvm_param = fn->llvm_fn->getArg(i);
             auto var = builder.CreateAlloca(llvm_param->getType(), nullptr, llvm_param->getName());
@@ -373,7 +382,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     auto return_type = fn_type->data.fn.return_type;
     auto return_type_l = compile_type(return_type);
     if (return_type->kind != TypeKind::Void) {
-        fn->return_value = builder.CreateAlloca(return_type_l, nullptr, "_fn_ret");
+        fn->return_value =
+            sret_arg ? sret_arg : builder.CreateAlloca(return_type_l, nullptr, "_fn_ret");
     }
 
     // main function initialization
@@ -419,7 +429,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
     }
-    if (return_type->kind == TypeKind::Void) {
+    if (return_type->kind == TypeKind::Void || fn->use_sret()) {
         builder.CreateRetVoid();
     } else {
         auto value = builder.CreateLoad(return_type_l, fn->return_value);
@@ -471,9 +481,19 @@ llvm::Value *Compiler::compile_string_literal(Function *fn, const string &str) {
                                                llvm::GlobalValue::PrivateLinkage, str_value, "str");
     auto str_len = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), str.size());
     auto str_type_l = compile_type(get_resolver()->get_system_types()->string);
-    auto one = llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1);
-    auto str_struct =
-        llvm::ConstantStruct::get((llvm::StructType *)str_type_l, {str_global, str_len, one});
+    auto one = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), 1);
+    // auto padding =
+    //     llvm::ConstantArray::get(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), 3),
+    //                              {
+    //                                  llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
+    //                                  llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
+    //                                  llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
+    //                              });
+    auto str_struct = llvm::ConstantStruct::get((llvm::StructType *)str_type_l, {
+                                                                                    str_global,
+                                                                                    str_len,
+                                                                                    one,
+                                                                                });
     return str_struct;
 }
 
@@ -795,6 +815,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
         if (fn->get_def()->cleanup_vars.len) {
+            auto &builder = *m_ctx->llvm_builder.get();
             InvokeInfo invoke;
             auto next_label = fn->new_label("_invoke_next");
             invoke.normal = next_label;
@@ -805,6 +826,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto result = compile_fn_call(fn, expr, &invoke);
             fn->use_label(next_label);
             fn->has_cleanup_invoke = true;
+            if (invoke.sret) {
+                return builder.CreateLoad(invoke.sret_type, invoke.sret);
+            }
             return result;
         }
         return compile_fn_call(fn, expr);
@@ -1301,7 +1325,7 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     auto &data = iden->data.identifier;
 
     if (data.kind == ast::IdentifierKind::This) {
-        return RefValue::from_value(fn->llvm_fn->getArg(0));
+        return RefValue::from_value(fn->get_this_arg());
     }
     if (data.decl->type == ast::NodeType::VarDecl) {
         auto &var = data.decl->data.var_decl;
@@ -1336,7 +1360,6 @@ normal:
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke) {
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
-    emit_dbg_location(expr);
 
     if (data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda) {
         auto ref = compile_expr_ref(fn, data.fn_ref_expr);
@@ -1441,11 +1464,36 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         fn->vararg_pointers.add(va_ptr);
     }
 
-    emit_dbg_location(data.fn_ref_expr);
-    if (invoke) {
-        return builder.CreateInvoke(callee, invoke->normal, invoke->landing, args);
+    emit_dbg_location(expr);
+    auto return_type = fn_type->data.fn.return_type;
+    auto sret_type = fn_type->data.fn.should_use_sret() ? compile_type(return_type) : nullptr;
+    return create_fn_call_invoke(callee, args, sret_type, invoke);
+}
+
+llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
+                                             std::vector<llvm::Value *> args, llvm::Type *sret_type,
+                                             InvokeInfo *invoke) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+    llvm::Value *sret_var = nullptr;
+    if (sret_type) {
+        sret_var = builder.CreateAlloca(sret_type, nullptr, "sret");
+        args.insert(args.begin(), sret_var);
     }
-    return builder.CreateCall(callee, args);
+
+    llvm::Value *ret = nullptr;
+    if (invoke) {
+        ret = builder.CreateInvoke(callee, invoke->normal, invoke->landing, args);
+        if (sret_type) {
+            invoke->sret = sret_var;
+            invoke->sret_type = sret_type;
+            return ret;
+        }
+    } else {
+        ret = builder.CreateCall(callee, args);
+    }
+
+    return sret_type ? builder.CreateLoad(sret_type, sret_var) : ret;
 }
 
 llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new) {
@@ -1766,7 +1814,7 @@ Function *Compiler::get_fn(ast::Node *node) {
 }
 
 Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
-    auto flags = fn->data.fn_def.decl_spec->flags;
+    auto declspec = fn->declspec();
     auto ftype = get_chitype(fn);
     int bind_offset = 0;
     string bind_name = "";
@@ -1791,10 +1839,20 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
                               llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
 
+    // sret mechanism
+    auto sret_offset = -1;
+    if (ftype->data.fn.should_use_sret() && !declspec.is_extern()) {
+        bind_offset++;
+        sret_offset = 0;
+    }
+
     // Set names for all arguments.
     for (int i = 0; i < fn_l->arg_size(); i++) {
-        if (i == 0 && bind_offset) {
-            fn_l->arg_begin()->setName(bind_name);
+        if (i == sret_offset) {
+            fn_l->getArg(i)->setName("sret");
+            // fn_l->getArg(i)->addAttr(llvm::Attribute::StructRet);
+        } else if (i == bind_offset - 1) {
+            fn_l->getArg(i)->setName(bind_name);
         } else {
             auto index = i - bind_offset;
             auto arg = fn_l->arg_begin() + i;
@@ -1804,6 +1862,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     auto new_fn = add_fn(fn_l, fn, ftype);
     new_fn->bind_offset = bind_offset;
+    new_fn->sret_offset = sret_offset;
     new_fn->llvm_fn->setName(new_fn->get_llvm_name());
     return new_fn;
 }
@@ -1847,7 +1906,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     switch (type->kind) {
     case TypeKind::This: {
         if (m_fn && m_fn->container_subtype) {
-            return m_fn->llvm_fn->getArg(0)->getType();
+            return m_fn->get_this_arg()->getType();
         }
         return compile_type(type->get_elem());
     }
@@ -1868,7 +1927,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             {
                 compile_type(get_resolver()->get_system_types()->str_lit),
                 llvm::Type::getInt32Ty(llvm_ctx),
-                compile_type(get_system_types()->bool_),
+                llvm::Type::getInt32Ty(llvm_ctx),
             },
             "String");
     }
@@ -1879,6 +1938,10 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         auto &data = type->data.fn;
         auto ret_type_l = compile_type(data.return_type);
         std::vector<llvm::Type *> param_types = {};
+        if (data.should_use_sret()) {
+            param_types.push_back(ret_type_l->getPointerTo());
+            ret_type_l = llvm::Type::getVoidTy(llvm_ctx);
+        }
         if (data.container_ref) {
             param_types.push_back(compile_type(data.container_ref));
         }
@@ -2039,8 +2102,7 @@ Function *Compiler::get_system_fn(const string &name) {
     if (m_ctx->system_functions.has_key(name)) {
         return m_ctx->system_functions.at(name);
     }
-    auto runtime_pkg = m_ctx->compilation_ctx->packages[0].get();
-    assert(runtime_pkg->kind == ast::PackageKind::BUILTIN);
+    auto runtime_pkg = m_ctx->compilation_ctx->rt_package;
     auto module = runtime_pkg->modules[0].get();
     auto list = module->scope->get_all();
     auto node = module->scope->find_one(name);

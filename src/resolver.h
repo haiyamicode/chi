@@ -16,6 +16,7 @@ struct ModulePathInfo {
     string path = "";
     bool is_directory = false;
     string entry_path = "";
+    string package_id_path = "";
 };
 
 struct Context {
@@ -34,6 +35,7 @@ struct Context {
     virtual optional<ModulePathInfo> find_module_path(const string &path,
                                                       const string &base_path = "") = 0;
     virtual string get_stdlib_path(string path) = 0;
+    virtual ast::Package *get_or_create_package(const string &id_path) = 0;
 };
 
 struct SystemTypes {
@@ -220,6 +222,8 @@ class Resolver {
 
     string resolve_global_id(ast::Node *node);
 
+    bool has_interface_impl(ChiTypeStruct *struct_type, string interface_id);
+
     string resolve_qualified_name(ast::Node *node);
 
     ChiType *to_value_type(ChiType *type);
@@ -237,7 +241,7 @@ class Resolver {
     ChiType *get_promise_type(ChiType *value);
 
     ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
-                         ChiType *container = nullptr);
+                         ChiType *container = nullptr, bool is_extern = false);
 
     ChiType *get_lambda_for_fn(ChiType *fn);
 

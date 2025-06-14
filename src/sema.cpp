@@ -11,6 +11,8 @@
 
 using namespace cx;
 
+bool ChiTypeFn::should_use_sret() { return !return_type->is_primitive_abi_type() && !is_extern; }
+
 ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &name, ast::Node *node,
                                            ChiType *resolved_type) {
     auto member = allocator->create_struct_member();
@@ -64,16 +66,6 @@ ChiStructMember *ChiTypeStruct::get_constructor(ChiType *type) {
 ChiStructMember *ChiTypeStruct::get_destructor(ChiType *type) {
     if (type->kind == TypeKind::Struct) {
         return type->data.struct_.find_member("delete");
-    }
-    return nullptr;
-}
-
-ChiStructMember *ChiTypeStruct::get_symbol(ChiType *type, IntrinsicSymbol symbol) {
-    if (type->kind == TypeKind::Subtype) {
-        return get_symbol(type->data.subtype.resolved_struct, symbol);
-    } else if (type->kind == TypeKind::Struct) {
-        auto it = type->data.struct_.member_intrinsics.get(symbol);
-        return it ? *it : nullptr;
     }
     return nullptr;
 }

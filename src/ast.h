@@ -86,7 +86,7 @@ enum class PackageKind { BUILTIN, DEFAULT };
 struct Package {
     array<box<Module>> modules = {};
     Node *entry_fn = nullptr;
-    string path = "";
+    string src_path = "";
     string id_path = "";
     PackageKind kind = PackageKind::DEFAULT;
     string name = "";
@@ -111,6 +111,7 @@ struct DeclSpec {
 
     bool is_exported() const { return get_visibility() == Visibility::Public; }
     bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
+    bool is_extern() const { return has_flag(DECL_EXTERN); }
 };
 
 struct FnProto {
@@ -580,6 +581,11 @@ struct Node {
             return data.struct_decl.decl_spec;
         case NodeType::ExportDecl:
             return data.export_decl.decl_spec;
+        case NodeType::FnProto:
+            if (!data.fn_proto.fn_def_node) {
+                return nullptr;
+            }
+            return data.fn_proto.fn_def_node->get_declspec();
         default:
             return nullptr;
         }

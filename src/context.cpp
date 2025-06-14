@@ -3,18 +3,27 @@
 #include "parser.h"
 #include "util.h"
 #include <filesystem>
+#include <functional>
 
 using namespace cx;
+
+CompilationContext::CompilationContext() : resolve_ctx(this) {
+    auto rootenv = std::getenv("CHI_ROOT");
+    if (rootenv) {
+        root_path = rootenv;
+    }
+    auto root_src_path = (fs::path(root_path) / "src/stdlib").string();
+}
 
 ast::Module *CompilationContext::module_from_path(ast::Package *package, const string &path,
                                                   bool import) {
     auto fs_path = fs::path(path);
     auto extension = fs_path.extension().string();
-    auto rel_path = fs::relative(fs_path, package->path).string();
+    auto rel_path = fs::relative(fs_path, package->src_path).string();
     auto module_path = rel_path.substr(0, rel_path.size() - extension.size());
     auto module = package->add_module();
     module->package = package;
-    module->path = fs_path.parent_path().string();
+    module->path = fs::absolute(fs_path).parent_path().string();
     module->id_path = string_join(string_split(module_path, "/"), ".");
     module->filename = fs::absolute(fs_path).string();
     module->name = fs_path.stem().string();
@@ -25,9 +34,47 @@ ast::Module *CompilationContext::module_from_path(ast::Package *package, const s
 optional<ModulePathInfo> CompilationContext::find_module_path(const string &path,
                                                               const string &base_path) {
     auto fs_path = fs::path(path);
+    bool is_relative = false;
+    string package_id_path = "";
+
+    // relative import
     if (base_path.size() && path.size() && path[0] == '.') {
-        fs_path = fs::path(base_path) / path.substr(2);
+        fs_path = fs::path(base_path) / path;
+        package_id_path = ".";
+        is_relative = true;
+    } else {
+        auto [package_path, module_path] = parse_import_path(path);
+        auto package_p = package_map.get(package_path);
+        if (!package_p) {
+            return std::nullopt;
+        }
+        auto package = *package_p;
+        fs_path = fs::path(package->src_path) / module_path;
+        package_id_path = package->id_path;
     }
+
+    return find_module_at_path(fs_path.string(), package_id_path);
+}
+
+std::pair<string, string> CompilationContext::parse_import_path(const string &path) {
+    auto segments = string_split(path, "/");
+    if (!segments.len) {
+        return {"", ""};
+    }
+
+    auto first_segment = segments[0];
+    if (first_segment == "std") {
+        return {"std", string_join(segments.slice(1), "/")};
+    }
+
+    auto package_path = string_join(segments.slice(0, 2), "/");
+    auto module_path = string_join(segments.slice(2), ".");
+    return {package_path, module_path};
+}
+
+optional<ModulePathInfo> CompilationContext::find_module_at_path(const string &path,
+                                                                 const string &package_path) {
+    auto fs_path = fs::path(path);
 
     // directory import
     if (fs::is_directory(fs_path)) {
@@ -39,18 +86,34 @@ optional<ModulePathInfo> CompilationContext::find_module_path(const string &path
                 break;
             }
         }
-        return {{fs_path.string(), true, index_path}};
+        return {{fs_path.string(), true, index_path, package_path}};
     }
 
     for (auto &ext : file_extensions) {
         auto file = fs_path;
         file.replace_extension(ext);
         if (fs::exists(file)) {
-            return {{file.string(), false, file.string()}};
+            return {{file.string(), false, file.string(), package_path}};
         }
     }
 
     return std::nullopt;
+}
+
+string CompilationContext::init_rt_stdlib() {
+    // initialize std package
+    auto std = add_package("std");
+    std->kind = PackageKind::BUILTIN;
+    std->src_path = get_stdlib_path("std");
+    stdlib_package = std;
+
+    // initialize runtime package
+    auto rt = add_package("");
+    rt->kind = PackageKind::BUILTIN;
+    auto rt_path = get_stdlib_path("runtime.xc");
+    rt->src_path = fs::path(rt_path).parent_path().string();
+    rt_package = rt;
+    return rt_path;
 }
 
 ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffer *src,

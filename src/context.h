@@ -27,15 +27,15 @@ struct CompilationContext : public Context {
     array<string> file_extensions = {"xc", "x"};
     string root_path = "";
     array<box<ast::Package>> packages = {};
+    map<string, ast::Package *> package_map = {};
     ResolveContext resolve_ctx;
     map<string, ast::Module *> module_map = {};
 
-    explicit CompilationContext() : resolve_ctx(this) {
-        auto rootenv = std::getenv("CHI_ROOT");
-        if (rootenv) {
-            root_path = rootenv;
-        }
-    }
+    // default packages
+    ast::Package *stdlib_package = nullptr;
+    ast::Package *rt_package = nullptr;
+
+    explicit CompilationContext();
 
     ast::Node *create_node(ast::NodeType type) {
         auto node = ast_nodes.emplace(new ast::Node(type))->get();
@@ -51,7 +51,14 @@ struct CompilationContext : public Context {
 
     Scope *create_scope(Scope *parent) { return scopes.emplace(new Scope(parent))->get(); }
 
-    ast::Package *add_package() { return packages.emplace(new ast::Package())->get(); }
+    ast::Package *add_package(string id_path) {
+        auto package = packages.emplace(new ast::Package())->get();
+        package->id_path = id_path;
+        package_map[id_path] = package;
+        return package;
+    }
+
+    string init_rt_stdlib();
 
     Resolver create_resolver() { return {&resolve_ctx}; }
 
@@ -60,6 +67,18 @@ struct CompilationContext : public Context {
     ast::Module *module_from_path(ast::Package *package, const string &path, bool import = false);
 
     optional<ModulePathInfo> find_module_path(const string &path, const string &base_path = "");
+
+    ast::Package *get_or_create_package(const string &id_path) {
+        auto p = package_map.get(id_path);
+        if (p) {
+            return *p;
+        }
+        return add_package(id_path);
+    }
+
+    std::pair<string, string> parse_import_path(const string &path);
+
+    optional<ModulePathInfo> find_module_at_path(const string &path, const string &package_path);
 
     ast::Module *process_source(ast::Package *package, io::Buffer *src, const string &file_name);
 

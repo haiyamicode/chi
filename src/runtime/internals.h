@@ -19,7 +19,7 @@ extern "C" {
 struct CxString {
     char *data;
     uint32_t size;
-    uint8_t is_static;
+    uint32_t is_static;
 };
 
 struct Data64ab {
@@ -74,9 +74,9 @@ CHI_RT_EXPORT void cx_string_copy(CxString *dest, CxString *src);
 
 CHI_RT_EXPORT void cx_string_delete(CxString *dest);
 
-CHI_RT_EXPORT CxString cx_string_format(CxString *format, CxSlice *values);
+CHI_RT_EXPORT void cx_string_format(CxString *format, CxSlice *values, CxString *str);
 
-CHI_RT_EXPORT CxString cx_string_from_chars(const char *data, uint32_t size);
+CHI_RT_EXPORT void cx_string_from_chars(const char *data, uint32_t size, CxString *str);
 
 CHI_RT_EXPORT void cx_printf(CxString *format, CxSlice *values);
 
@@ -119,7 +119,7 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
 CHI_RT_EXPORT void cx_timeout(uint64_t delay, CxLambda *callback);
 CHI_RT_EXPORT void cx_call(CxLambda *callback);
 
-CHI_RT_EXPORT CxHash cx_hbytes(CxAny *value);
+CHI_RT_EXPORT void cx_hbytes(CxAny *value, CxHash *result);
 CHI_RT_EXPORT void *cx_map_new();
 CHI_RT_EXPORT void cx_map_delete(void *data);
 CHI_RT_EXPORT void *cx_map_find(void *data, CxHash *key);
@@ -134,7 +134,7 @@ CHI_RT_EXPORT void cx_json_array_index(void *data, uint32_t index, void *result)
 CHI_RT_EXPORT uint32_t cx_json_array_length(void *data);
 CHI_RT_EXPORT void cx_json_value_copy(void *data, void *result);
 
-CHI_RT_EXPORT CxString cx_file_read(CxString *path);
+CHI_RT_EXPORT void cx_file_read(CxString *path, CxString *result);
 
 #ifdef __cplusplus
 }

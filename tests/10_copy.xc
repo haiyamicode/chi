@@ -1,4 +1,6 @@
-struct Foo {
+import "std/lang" as lang;
+
+struct Foo: lang.CopyFrom<Foo> {
   p: *int = null;
   id: string;
 
@@ -9,7 +11,6 @@ struct Foo {
     printf("creating {}\n", this.id);
   }
 
-  @[std.ops.CopyFrom]
   func copy_from(b: &Foo) {
     this.new(stringf("{}_copy", b.id));
     this.p! = b.p!;

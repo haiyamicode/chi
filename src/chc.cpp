@@ -145,7 +145,7 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < N_TIMES; i++) {
             Analyzer analyzer;
             analyzer.build_runtime();
-            auto pkg = analyzer.add_package();
+            auto pkg = analyzer.add_package(".");
             analyzer.process_file(pkg, file_name);
         }
     } else {

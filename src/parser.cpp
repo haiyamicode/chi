@@ -436,6 +436,7 @@ Node *Parser::parse_fn_lambda() {
     fn->name = "";
     fn->data.fn_def.fn_kind = FnKind::Lambda;
     fn->data.fn_def.fn_proto = proto;
+    proto->data.fn_proto.fn_def_node = fn;
     parse_fn_block(fn);
     return fn;
 }
@@ -449,6 +450,7 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
     fn->start_token = iden;
     fn->name = iden->get_name();
     auto proto = parse_fn_proto(iden);
+    proto->data.fn_proto.fn_def_node = fn;
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
     fn->data.fn_def.decl_spec = decl_spec;

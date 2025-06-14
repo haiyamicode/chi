@@ -33,7 +33,7 @@ class Builder {
 
     CompilationContext *get_context() { return &m_ctx; }
 
-    ast::Package *add_package() { return m_ctx.add_package(); }
+    ast::Package *add_package(string id_path) { return m_ctx.add_package(id_path); }
 
     ast::Module *process_source(ast::Package *package, io::Buffer *src, const string &file_name);
     ast::Module *process_file(ast::Package *package, const string &file_name);

@@ -51,12 +51,15 @@ struct Function {
     std::list<LoopLabels> loop_labels;
     bool has_cleanup_invoke = false;
     int bind_offset = 0;
+    int sret_offset = -1;
     llvm::Value *bind_ptr = nullptr;
 
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
 
     string get_llvm_name() const { return qualified_name; }
+    bool use_sret() { return sret_offset >= 0; }
+    llvm::Value *get_this_arg() { return llvm_fn->getArg(use_sret() ? 1 : 0); }
 
     unknown_t get_null_constant();
     BlockScope *push_scope() {
@@ -92,6 +95,8 @@ struct CompilationSettings {
 struct InvokeInfo {
     label_t *normal = nullptr;
     label_t *landing = nullptr;
+    llvm::Value *sret = nullptr;
+    llvm::Type *sret_type = nullptr;
 };
 
 struct CodegenContext {
@@ -206,6 +211,10 @@ class Compiler {
     RefValue compile_iden_ref(Function *fn, ast::Node *iden);
 
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr);
+
+    llvm::Value *create_fn_call_invoke(llvm::FunctionCallee callee, std::vector<llvm::Value *> args,
+                                       llvm::Type *sret_type = nullptr,
+                                       InvokeInfo *invoke = nullptr);
 
     llvm::Value *compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 

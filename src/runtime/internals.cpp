@@ -44,6 +44,7 @@ void cx_string_set_data(CxString *dest, const char *data) {
         dest->size = 0;
         dest->data = NULL;
     }
+    dest->is_static = false;
 }
 
 void cx_string_concat(CxString *dest, CxString s1, CxString s2) {
@@ -51,6 +52,7 @@ void cx_string_concat(CxString *dest, CxString s1, CxString s2) {
     dest->data = (char *)malloc(dest->size + 1);
     memcpy(dest->data, s1.data, s1.size + 1);
     strncat(dest->data, s2.data, s2.size);
+    dest->is_static = false;
 }
 
 void cx_string_delete(CxString *dest) {
@@ -61,11 +63,14 @@ void cx_string_delete(CxString *dest) {
 }
 
 void cx_string_copy(CxString *dest, CxString *src) {
+    dest->is_static = src->is_static;
+
     if (src->is_static) {
         dest->data = src->data;
         dest->size = src->size;
         return;
     }
+
     string s(src->data, src->size);
     dest->data = (char *)malloc(s.size());
     memcpy(dest->data, s.data(), s.size());
@@ -154,12 +159,14 @@ static std::string get_value_display(const CxAny &v) {
     case cx::TypeKind::Struct: {
         auto display_method = get_typemeta_display_method(v.type);
         if (display_method) {
-            auto fn = (CxString(*)(void *))display_method;
+            auto fn = (void (*)(void *a, void *b))display_method;
             intptr_t p = v.inlined ? (intptr_t)v.data : *(intptr_t *)(v.data);
             auto a = (CxArray *)v.data;
-            auto s = fn((void *)p);
+            CxString s;
+            fmt::print("s: {}\n", (void *)&s);
+            fn(&s, (void *)p);
             auto str = string(s.data, s.size);
-            free(s.data);
+            cx_string_delete(&s);
             return str;
         }
         return fmt::format("<{}>", PRINT_ENUM((TypeKind)v.type->kind));
@@ -210,14 +217,13 @@ static string format_cstr(CxString &format, const CxSlice &values) {
     return ss.str();
 }
 
-CxString cx_string_format(CxString *format, CxSlice *values) {
-    CxString s;
-    auto str = format_cstr(*format, *values);
-    s.size = (uint32_t)str.size();
-    s.data = (char *)malloc(str.size());
+void cx_string_format(CxString *format, CxSlice *values, CxString *str) {
+    auto &s = *str;
+    auto cstr = format_cstr(*format, *values);
+    s.size = (uint32_t)cstr.size();
+    s.data = (char *)malloc(cstr.size());
     s.is_static = false;
-    memcpy(s.data, str.data(), s.size);
-    return s;
+    memcpy(s.data, cstr.data(), s.size);
 }
 
 void cx_printf(CxString *format, CxSlice *values) {
@@ -270,13 +276,12 @@ void cx_array_write_str(CxArray *dest, CxString *str) {
     dest->size = (uint32_t)new_size;
 }
 
-CxString cx_string_from_chars(const char *data, uint32_t size) {
-    CxString s;
+void cx_string_from_chars(const char *data, uint32_t size, CxString *str) {
+    auto &s = *str;
     s.size = size;
     s.data = (char *)malloc(size);
     s.is_static = false;
     memcpy(s.data, data, size);
-    return s;
 }
 
 void cx_print_string(CxString *message) {
@@ -388,7 +393,7 @@ void cx_timeout(uint64_t delay, CxLambda *callback) {
         delay, 0);
 }
 
-CxHash cx_hbytes(CxAny *v) {
+static CxHash get_hbytes(CxAny *v) {
     switch ((TypeKind)v->type->kind) {
     case TypeKind::String: {
         auto s = (CxString *)v->data;
@@ -399,6 +404,8 @@ CxHash cx_hbytes(CxAny *v) {
     }
     return {v->data, (uint32_t)v->type->size};
 }
+
+void cx_hbytes(CxAny *v, CxHash *result) { *result = get_hbytes(v); }
 
 void cx_call(CxLambda *fn) {
     auto fn_ptr = (void (*)(void *))fn->ptr;
@@ -460,7 +467,9 @@ void cx_json_value_convert(void *data, uint32_t kind, void *result) {
     switch ((boost::json::kind)kind) {
     case boost::json::kind::string: {
         auto str = value->as_string();
-        *(CxString *)result = cx_string_from_chars(str.data(), str.size());
+        CxString s;
+        cx_string_from_chars(str.data(), str.size(), &s);
+        *(CxString *)result = s;
         break;
     }
     case boost::json::kind::int64: {
@@ -504,11 +513,11 @@ uint32_t cx_json_array_length(void *data) {
     return value->as_array().size();
 }
 
-CxString cx_file_read(CxString *path) {
+void cx_file_read(CxString *path, CxString *result) {
     string s(path->data, path->size);
     auto buf = io::Buffer::from_file(s);
     auto str = buf.read_all();
-    return cx_string_from_chars(str.data(), str.size());
+    return cx_string_from_chars(str.data(), str.size(), result);
 }
 
 void cx_json_value_copy(void *data, void *result) {

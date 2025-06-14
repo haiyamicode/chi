@@ -49,9 +49,11 @@ struct ChiTypeFn {
     array<ChiType *> params = {};
     bool is_variadic = false;
     ChiType *container_ref = nullptr;
+    bool is_extern = false;
 
     ChiType *get_param_at(size_t index);
     int get_va_start();
+    bool should_use_sret();
 };
 
 struct ChiStructMember {
@@ -103,7 +105,6 @@ struct ChiTypeStruct {
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
     map<IntrinsicSymbol, ChiStructMember *> member_intrinsics = {};
-    map<IntrinsicSymbol, bool> intrinsics = {};
 
     ChiStructMember *add_member(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type);
@@ -123,7 +124,6 @@ struct ChiTypeStruct {
 
     static ChiStructMember *get_constructor(ChiType *type);
     static ChiStructMember *get_destructor(ChiType *type);
-    static ChiStructMember *get_symbol(ChiType *type, IntrinsicSymbol symbol);
 };
 
 struct ChiTypePointer {
@@ -300,6 +300,21 @@ struct ChiType {
             return get_elem();
         }
         return this;
+    }
+
+    bool is_primitive_abi_type() {
+        switch (kind) {
+        case TypeKind::Int:
+        case TypeKind::Float:
+        case TypeKind::This:
+        case TypeKind::Pointer:
+        case TypeKind::Reference:
+        case TypeKind::Bool:
+        case TypeKind::Void:
+            return true;
+        default:
+            return false;
+        }
     }
 };
 
