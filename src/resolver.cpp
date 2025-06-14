@@ -84,10 +84,10 @@ void Resolver::context_init_primitives() {
     add_primitive("Promise", system_types.promise);
 
     // intrinsic symbols
-    m_ctx->intrinsic_symbols["std.lang.Index"] = IntrinsicSymbol::Index;
-    m_ctx->intrinsic_symbols["std.lang.IndexIterable"] = IntrinsicSymbol::IndexInterable;
-    m_ctx->intrinsic_symbols["std.lang.CopyFrom"] = IntrinsicSymbol::CopyFrom;
-    m_ctx->intrinsic_symbols["std.lang.Display"] = IntrinsicSymbol::Display;
+    m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
+    m_ctx->intrinsic_symbols["std.ops.IndexIterable"] = IntrinsicSymbol::IndexInterable;
+    m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
+    m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -845,7 +845,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TypeKind::Struct:
         case TypeKind::Subtype: {
             auto struct_ = resolve_struct_type(expr_type);
-            auto has_index = has_interface_impl(struct_, "std.lang.Index");
+            auto has_index = has_interface_impl(struct_, "std.ops.Index");
             if (!has_index) {
                 error(node, errors::CANNOT_SUBSCRIPT, to_string(expr_type));
                 return nullptr;

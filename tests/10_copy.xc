@@ -1,6 +1,6 @@
-import "std/lang" as lang;
+import "std/ops" as ops;
 
-struct Foo: lang.CopyFrom<Foo> {
+struct Foo: ops.CopyFrom<Foo> {
   p: *int = null;
   id: string;
 

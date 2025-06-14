@@ -1,4 +1,4 @@
-import "std/lang" as lang;
+import "std/ops" as ops;
 
 struct HashBytes {
   data: *void = null;
@@ -60,7 +60,7 @@ enum JsonKind {
   Object
 }
 
-struct JsonValue {
+struct JsonValue: ops.CopyFrom<JsonValue> {
   data: *void = null;
   kind: JsonKind = JsonKind.Null;
 
@@ -118,8 +118,7 @@ struct JsonValue {
     return result;
   }
 
-  @[std.lang.CopyFrom]
-  func copy(from: &JsonValue) {
+  func copy_from(from: &JsonValue) {
     cx_json_value_copy(from.data, this);
   }
 }
@@ -188,10 +187,10 @@ func fs_read(path: string) string {
 }
 
 struct Array<T>:
-  lang.Index<uint32, T>,
-  lang.IndexIterable<uint32, T>,
-  lang.CopyFrom<Array<T>>,
-  lang.Display
+  ops.Index<uint32, T>,
+  ops.IndexIterable<uint32, T>,
+  ops.CopyFrom<Array<T>>,
+  ops.Display
 {
   data: *T = null;
 	len: uint32 = 0;
@@ -252,7 +251,7 @@ struct Array<T>:
   }
 }
 
-struct Map<K, V>: lang.Index<K, V> {
+struct Map<K, V>: ops.Index<K, V> {
   data: *void;
 
   func new() {
