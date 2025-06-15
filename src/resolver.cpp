@@ -653,6 +653,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
         }
+
+        for (auto field_init : data.field_inits) {
+            auto &data = field_init->data.field_init_expr;
+            auto init_value_type = resolve(data.value, scope);
+            auto field_member = get_struct_member(value_type, data.field->str);
+            if (!field_member) {
+                error(node, errors::MEMBER_NOT_FOUND, data.field->str, to_string(value_type));
+                return nullptr;
+            }
+            data.resolved_field = field_member;
+            check_assignment(data.value, init_value_type, field_member->resolved_type);
+        }
         return result_type;
     }
     case NodeType::FnCallExpr: {

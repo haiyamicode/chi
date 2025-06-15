@@ -1,10 +1,11 @@
 func main() {
-    var fib: Fib = {12};
-    printf("fib: {}\n", fib.calculate());
+    var fib: Fib = {12, .name = "test"};
+    printf("fib {}: {}\n", fib.name, fib.calculate());
 }
 
 struct Fib {
     n: int;
+    name: string = "";
 
     func new(n: int) {
         this.n = n;

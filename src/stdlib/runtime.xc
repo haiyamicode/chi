@@ -192,7 +192,7 @@ struct Array<T> implements
   ops.CopyFrom<Array<T>>,
   ops.Display
 {
-  data: *T = null;
+  private data: *T = null;
 	len: uint32 = 0;
 	capacity: uint32 = 0;
 

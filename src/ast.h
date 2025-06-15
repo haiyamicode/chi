@@ -21,7 +21,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
           ExternDecl, TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl);
+          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -222,10 +222,18 @@ struct ExternDecl {
     array<Node *> members = {};
 };
 
+struct FieldInitExpr {
+    Token *token = nullptr;
+    Token *field = nullptr;
+    Node *value = nullptr;
+    ChiStructMember *resolved_field = nullptr;
+};
+
 // composite literal
 struct ConstructExpr {
     bool is_new = false;
     array<Node *> items = {};
+    array<Node *> field_inits = {};
     Node *type = nullptr;
     Node *resolved_outlet = nullptr;
 };
@@ -422,6 +430,7 @@ struct Node {
         DeclAttribute decl_attribute;
         SwitchExpr switch_expr;
         CaseExpr case_expr;
+        FieldInitExpr field_init_expr;
 
         NodeData() {}
 
@@ -454,6 +463,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(decl_attribute, DeclAttribute)
             _AST_CASE_INITIALIZE_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_INITIALIZE_FIELD(case_expr, CaseExpr)
+            _AST_CASE_INITIALIZE_FIELD(field_init_expr, FieldInitExpr)
         default:
             break;
         }
@@ -482,6 +492,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(decl_attribute, DeclAttribute)
             _AST_CASE_DESTROY_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_DESTROY_FIELD(case_expr, CaseExpr)
+            _AST_CASE_DESTROY_FIELD(field_init_expr, FieldInitExpr)
         default:
             memset(&data, 0, sizeof(data));
             break;
@@ -521,6 +532,7 @@ struct Node {
             _AST_CASE_CLONE_FIELD(decl_attribute, DeclAttribute)
             _AST_CASE_CLONE_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_CLONE_FIELD(case_expr, CaseExpr)
+            _AST_CASE_CLONE_FIELD(field_init_expr, FieldInitExpr)
         default:
             memcpy(&b->data, &data, sizeof(data));
             break;

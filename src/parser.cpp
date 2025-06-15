@@ -1246,6 +1246,7 @@ Node *Parser::parse_construct_expr() {
     }
     expect(TokenType::LBRACE);
     Token *token;
+    bool field_started = false;
     for (;;) {
         token = get();
         if (token->type == TokenType::END) {
@@ -1255,8 +1256,27 @@ Node *Parser::parse_construct_expr() {
         if (token->type == TokenType::RBRACE) {
             break;
         }
-        auto expr = parse_expr();
-        node->data.construct_expr.items.add(expr);
+
+        if (token->type == TokenType::DOT) {
+            // field initializer
+            field_started = true;
+            consume();
+            auto field = expect_identifier();
+            expect(TokenType::ASS);
+            auto value = parse_expr();
+            auto field_init = create_node(NodeType::FieldInitExpr, field);
+            field_init->data.field_init_expr.token = token;
+            field_init->data.field_init_expr.field = field;
+            field_init->data.field_init_expr.value = value;
+            node->data.construct_expr.field_inits.add(field_init);
+        } else {
+            // argument value
+            if (field_started) {
+                unexpected(token);
+            }
+            auto expr = parse_expr();
+            node->data.construct_expr.items.add(expr);
+        }
         if (!at_comma(TokenType::RBRACE)) {
             break;
         }

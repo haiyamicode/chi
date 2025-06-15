@@ -1168,6 +1168,15 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
             emit_dbg_location(expr);
         }
+
+        for (auto field_init : expr->data.construct_expr.field_inits) {
+            auto &data = field_init->data.field_init_expr;
+            auto field_gep =
+                builder.CreateStructGEP(compile_type(type), dest, data.resolved_field->field_index);
+            auto value =
+                compile_assignment_to_type(fn, data.value, data.resolved_field->resolved_type);
+            builder.CreateStore(value, field_gep);
+        }
         break;
     }
     case TypeKind::String: {
