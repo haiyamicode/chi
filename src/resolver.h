@@ -158,6 +158,8 @@ class Resolver {
 
     bool is_addressable(ast::Node *node);
 
+    bool is_ref_mutable(ast::Node *node, ResolveScope &scope);
+
     void check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type);
 
     ChiType *resolve_value(ast::Node *node, ResolveScope &scope);
@@ -271,6 +273,10 @@ class Resolver {
     bool compare_impl_type(ChiType *base, ChiType *impl);
 
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
+    ChiStructMember *get_struct_member_access(ast::Node *node, ChiType *struct_type,
+                                              const string &field_name, bool is_internal,
+                                              bool is_write);
+    bool is_same_struct(ChiType *a, ChiType *b);
 };
 
 class ScopeResolver {

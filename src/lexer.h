@@ -18,11 +18,11 @@ struct Node; // forward declare
 MAKE_ENUM(TokenType, END, IDEN, ERROR,
 
           // keywords
-          KW_BREAK, KW_CASE, KW_VAR, KW_CONST, KW_CONTINUE, KW_ELSE, KW_ENUM, KW_FOR, KW_FUNC,
-          KW_GOTO, KW_WHILE, KW_IF, KW_PRIVATE, KW_RETURN, KW_SELECT, KW_STATIC, KW_STRUCT,
-          KW_INTERFACE, KW_SWITCH, KW_TYPEDEF, KW_TYPEOF, KW_NEW, KW_DELETE, KW_THIS, KW_EXTERN,
-          KW_INLINE, KW_UNION, KW_TEMPLATE, KW_TRY, KW_IMPORT, KW_AS, KW_SIZEOF, KW_EXPORT,
-          KW_IMPLEMENTS,
+          KW_BREAK, KW_CASE, KW_VAR, KW_LET, KW_CONTINUE, KW_ELSE, KW_ENUM, KW_FOR, KW_FUNC,
+          KW_GOTO, KW_WHILE, KW_IF, KW_PRIVATE, KW_PROTECTED, KW_RETURN, KW_SELECT, KW_STATIC,
+          KW_STRUCT, KW_INTERFACE, KW_SWITCH, KW_TYPEDEF, KW_TYPEOF, KW_NEW, KW_DELETE, KW_THIS,
+          KW_EXTERN, KW_INLINE, KW_UNION, KW_TEMPLATE, KW_TRY, KW_IMPORT, KW_AS, KW_SIZEOF,
+          KW_EXPORT, KW_IMPLEMENTS, KW_MUT,
 
           // literals
           BOOL,   // true / false
@@ -53,6 +53,7 @@ MAKE_ENUM(TokenType, END, IDEN, ERROR,
           GE,     // >=
           EQ,     // ==
           NE,     // !=
+          MUTREF, // &mut
 
           // assignment
           ASS,        // =

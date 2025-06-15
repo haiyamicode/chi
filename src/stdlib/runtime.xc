@@ -1,8 +1,8 @@
 import "std/ops" as ops;
 
 struct HashBytes {
-  data: *void = null;
-  size: uint32 = 0;
+  private data: *void = null;
+  protected size: uint32 = 0;
 }
 
 extern "C" {
@@ -61,15 +61,15 @@ enum JsonKind {
 }
 
 struct JsonValue implements ops.CopyFrom<JsonValue> {
-  data: *void = null;
-  kind: JsonKind = JsonKind.Null;
+  private data: *void = null;
+  protected kind: JsonKind = JsonKind.Null;
 
   func delete() {
     cx_json_value_delete(this.data);
   }
 
   func get(key: string) JsonValue {
-    const new_value: JsonValue = {};
+    let new_value: JsonValue = {};
     cx_json_value_get(this.data, &key, &new_value);
     return new_value;
   }
@@ -84,21 +84,21 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
 
   func to_string() string {
     this.assert_kind(JsonKind.String);
-    const result = "";
+    let result = "";
     cx_json_value_convert(this.data, JsonKind.String, &result);
     return result;
   }
 
   func to_bool() bool {
     this.assert_kind(JsonKind.Bool);
-    const result = false;
+    let result = false;
     cx_json_value_convert(this.data, JsonKind.Bool, &result);
     return result;
   }
 
   func to_int() int64 {
     this.assert_kind(JsonKind.Int64);
-    const result: int64 = 0;
+    let result: int64 = 0;
     cx_json_value_convert(this.data, JsonKind.Int64, &result);
     return result;
   }
@@ -108,10 +108,10 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
   }
 
   func to_array() Array<JsonValue> {
-    const result: Array<JsonValue> = {};
-    const len = this.length();
+    let result: Array<JsonValue> = {};
+    let len = this.length();
     for var i=0; i<len; i++ {
-      const new_value: JsonValue = {};
+      let new_value: JsonValue = {};
       cx_json_array_index(this.data, i, &new_value);
       result.add(new_value);
     }
@@ -175,7 +175,7 @@ func assert(cond: bool, message: string) {
 }
 
 func json_parse(str: string) JsonValue {
-  const result: JsonValue = {};
+  let result: JsonValue = {};
   cx_parse_json(&str, &result);
   return result;
 }
@@ -193,8 +193,8 @@ struct Array<T> implements
   ops.Display
 {
   private data: *T = null;
-	len: uint32 = 0;
-	capacity: uint32 = 0;
+	protected len: uint32 = 0;
+	protected capacity: uint32 = 0;
 
 	func new() {
 		cx_array_new(this);
@@ -206,7 +206,7 @@ struct Array<T> implements
 
 	func add(item: T) {
 		var ptr = cx_array_add(this, sizeof T) as *T;
-		*ptr = item;
+		ptr! = item;
 	}
 
   func clear() {
@@ -216,7 +216,7 @@ struct Array<T> implements
     cx_array_new(this);
   }
 
-	func index(index: uint32) &T {
+	func index(index: uint32) Mut<&T> {
 		assert(index < this.len, "index out of bounds");
 		return &this.data[index];
 	}
@@ -249,10 +249,14 @@ struct Array<T> implements
       this.add(item);
     }
   }
+
+  func raw_data() &T {
+    return this.data;
+  }
 }
 
 struct Map<K, V> implements ops.Index<K, V> {
-  data: *void;
+  private data: *void;
 
   func new() {
     this.data = cx_map_new();
@@ -295,7 +299,7 @@ struct Map<K, V> implements ops.Index<K, V> {
 }
 
 struct Buffer {
-  bytes: Array<char>;
+  private bytes: Array<char>;
 
   func new() {
     this.bytes = {};
@@ -307,7 +311,7 @@ struct Buffer {
 
   func to_string() string {
     var str: string = "";
-    cx_string_from_chars(this.bytes.data, this.bytes.len, &str);
+    cx_string_from_chars(this.bytes.raw_data(), this.bytes.len, &str);
     return str;
   }
 }

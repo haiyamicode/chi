@@ -18,12 +18,13 @@ struct ChiType;
 struct Scope;
 struct ChiTypeSubtype;
 struct Context;
+struct ChiTypeStruct;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
-          Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda, Promise,
-          Infer, Module, This, Unknown)
+          MutRef, Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda,
+          Promise, Infer, Module, This, Unknown)
 
-MAKE_ENUM(Visibility, Public, Private)
+MAKE_ENUM(Visibility, Public, Private, Protected)
 
 MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display)
 
@@ -60,6 +61,7 @@ struct ChiStructMember {
     ast::Node *node = nullptr;
     ChiType *orig_parent = nullptr;
     ChiType *resolved_type = nullptr;
+    ChiTypeStruct *parent_struct = nullptr;
     long field_index = -1;
     long method_index = -1;
     IntrinsicSymbol symbol = IntrinsicSymbol::None;
@@ -69,6 +71,8 @@ struct ChiStructMember {
     long vtable_index = -1;
 
     string get_name();
+    Visibility get_visibility();
+    bool check_access(bool is_internal, bool is_write);
 
     bool is_field() { return field_index > -1; }
     bool is_method() { return method_index > -1; }
@@ -101,6 +105,8 @@ struct ChiTypeStruct {
     map<string, ChiStructMember *> member_table = {};
     map<ChiType *, InterfaceImpl *> interface_table = {};
     optional<string> display_name = std::nullopt;
+    string global_id = "";
+    ChiType *type = nullptr;
 
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
@@ -119,6 +125,7 @@ struct ChiTypeStruct {
     static bool is_interface(ChiTypeStruct *type) { return type->kind == ContainerKind::Interface; }
 
     static bool is_pointer_type(ChiType *type);
+    static bool is_mutable_pointer(ChiType *type);
 
     static bool is_generic(ChiType *type);
 
@@ -286,7 +293,9 @@ struct ChiType {
 
     bool is_raw_pointer() { return kind == TypeKind::Pointer; }
 
-    bool is_pointer() { return kind == TypeKind::Reference || kind == TypeKind::Pointer; }
+    bool is_pointer() {
+        return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::MutRef;
+    }
 
     string get_display_name() {
         if (display_name) {
@@ -309,6 +318,7 @@ struct ChiType {
         case TypeKind::This:
         case TypeKind::Pointer:
         case TypeKind::Reference:
+        case TypeKind::MutRef:
         case TypeKind::Bool:
         case TypeKind::Void:
             return true;

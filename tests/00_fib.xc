@@ -1,6 +1,6 @@
 func main() {
-	var n: int = 10;
-	var value = fib(n);
+	let n: int = 10;
+	let value = fib(n);
 	printf("fib: {}\n", value);
 }
 

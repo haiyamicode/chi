@@ -6,6 +6,7 @@
  */
 
 #include "resolver.h"
+#include "ast.h"
 #include "errors.h"
 #include "fmt/core.h"
 #include "lexer.h"
@@ -82,6 +83,7 @@ void Resolver::context_init_primitives() {
     add_primitive("Result", system_types.result);
     add_primitive("Error", system_types.error);
     add_primitive("Promise", system_types.promise);
+    add_primitive("Mut", system_types.void_ptr);
 
     // intrinsic symbols
     m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
@@ -146,7 +148,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
         return from_type->kind == TypeKind::Array &&
                can_assign(from_type->get_elem(), to_type->get_elem());
     case TypeKind::Pointer:
-    case TypeKind::Reference: {
+    case TypeKind::Reference:
+    case TypeKind::MutRef: {
         return from_type->kind == TypeKind::Pointer ||
                can_assign(from_type, get_system_types()->int_);
     }
@@ -390,6 +393,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
         }
+
         if (data.decl->type == NodeType::VarDecl && !scope.is_lhs) {
             auto init_at = data.decl->data.var_decl.initialized_at;
             if (!init_at || init_at->token->pos.offset > node->token->pos.offset) {
@@ -401,7 +405,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         auto type = resolve_value(data.type, scope);
-        return create_type_symbol({}, get_pointer_type(type, get_sigil_type_kind(data.sigil)));
+        if (data.sigil == ast::SigilKind::Mut) {
+            if (type->kind != TypeKind::Reference) {
+                error(node, errors::INVALID_MUT_TYPE, to_string(type));
+            }
+            type = type->data.pointer.elem;
+        }
+        auto final_type = get_pointer_type(type, get_sigil_type_kind(data.sigil));
+        return create_type_symbol({}, final_type);
     }
     case NodeType::ParamDecl: {
         auto &data = node->data.param_decl;
@@ -478,6 +489,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
+        if (data.op_type == TokenType::MUTREF) {
+            scope = scope.set_is_lhs(true);
+        }
         auto t = resolve(data.op1, scope);
         switch (auto tt = data.op_type) {
         case TokenType::SUB:
@@ -487,16 +501,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.op1, t, get_system_types()->int_);
             return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
         case TokenType::MUL: {
-            if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
-                return t->get_elem();
-            } else {
-                goto invalid;
-            }
+            error(data.op1, errors::C_STYLE_DEREFERENCE_DEPRECATED);
             break;
         }
         case TokenType::LNOT: {
             if (data.is_suffix) {
                 if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
+                    if (scope.is_lhs && !ChiTypeStruct::is_mutable_pointer(t)) {
+                        error(data.op1, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, to_string(t),
+                              to_string(t));
+                        return nullptr;
+                    }
                     return t->get_elem();
                 } else if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
@@ -510,7 +525,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             break;
         }
-        case TokenType::AND: {
+        case TokenType::AND:
+        case TokenType::MUTREF: {
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
@@ -522,7 +538,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     decl->escape.escaped = false;
                 }
             }
-            return get_pointer_type(t, TypeKind::Reference);
+            return get_pointer_type(t, data.op_type == TokenType::MUTREF ? TypeKind::MutRef
+                                                                         : TypeKind::Reference);
         }
         default:
             unreachable();
@@ -595,9 +612,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.resolved_decl = symbol;
             return symbol->resolved_type;
         }
-        auto member = get_struct_member(expr_type, field_name);
+
+        auto is_internal = scope.parent_struct && is_same_struct(scope.parent_struct, expr_type);
+        auto member =
+            get_struct_member_access(node, expr_type, field_name, is_internal, scope.is_lhs);
         if (!member) {
-            error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type));
             return nullptr;
         }
         data.resolved_member = member;
@@ -657,9 +676,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         for (auto field_init : data.field_inits) {
             auto &data = field_init->data.field_init_expr;
             auto init_value_type = resolve(data.value, scope);
-            auto field_member = get_struct_member(value_type, data.field->str);
+            auto field_member =
+                get_struct_member_access(field_init, value_type, data.field->str, false, true);
             if (!field_member) {
-                error(node, errors::MEMBER_NOT_FOUND, data.field->str, to_string(value_type));
                 return nullptr;
             }
             data.resolved_field = field_member;
@@ -669,7 +688,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::FnCallExpr: {
         auto &data = node->data.fn_call_expr;
-        auto fn_type = resolve(data.fn_ref_expr, scope);
+        auto fn_ref_scope = scope.set_is_lhs(false);
+        auto fn_type = resolve(data.fn_ref_expr, fn_ref_scope);
         if (fn_type->kind != TypeKind::Fn && fn_type->kind != TypeKind::FnLambda) {
             error(data.fn_ref_expr, errors::CANNOT_CALL_NON_FUNCTION);
             return nullptr;
@@ -741,9 +761,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             struct_type->display_name = node->name;
             struct_type->global_id = resolve_global_id(node);
             struct_ = &struct_type->data.struct_;
+            struct_->type = struct_type;
             struct_->node = node;
             struct_->kind = data.kind;
             struct_->display_name = struct_type->name;
+            struct_->global_id = struct_type->global_id;
 
             // first pass, all members are skipped
             for (auto param : data.type_params) {
@@ -1157,14 +1179,14 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
 
 string Resolver::to_string(ChiType *type, bool for_display) {
     assert(type);
+    if (type->display_name && for_display) {
+        return *type->display_name;
+    }
     if (type->name) {
         if (!for_display) {
             return *type->name;
         }
         return !type->global_id.empty() ? type->global_id : *type->name;
-    }
-    if (type->display_name && for_display) {
-        return *type->display_name;
     }
     switch (type->kind) {
     case TypeKind::This:
@@ -1188,6 +1210,8 @@ string Resolver::to_string(ChiType *type, bool for_display) {
         return "*" + to_string(type->get_elem(), for_display);
     case TypeKind::Reference:
         return "&" + to_string(type->get_elem(), for_display);
+    case TypeKind::MutRef:
+        return "Mut<&" + to_string(type->get_elem(), for_display) + ">";
     case TypeKind::Optional:
         return "?" + to_string(type->get_elem(), for_display);
     case TypeKind::Box:
@@ -1293,6 +1317,20 @@ bool Resolver::is_addressable(ast::Node *node) {
 
     default:
         return false;
+    }
+}
+
+bool Resolver::is_ref_mutable(ast::Node *node, ResolveScope &scope) {
+    switch (node->type) {
+    case NodeType::Identifier: {
+        auto decl = node->get_decl();
+        if (!decl) {
+            return false;
+        }
+        return decl->is_mutable();
+    }
+    default:
+        return true;
     }
 }
 
@@ -1478,6 +1516,7 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
 
     case TypeKind::Pointer:
     case TypeKind::Reference:
+    case TypeKind::MutRef:
     case TypeKind::Optional:
     case TypeKind::Box:
         return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->kind);
@@ -1506,6 +1545,7 @@ bool Resolver::is_struct_type(ChiType *type) {
     case TypeKind::This:
     case TypeKind::Pointer:
     case TypeKind::Reference:
+    case TypeKind::MutRef:
         return false;
     default:
         return (bool)resolve_struct_type(type);
@@ -1551,6 +1591,35 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
         return nullptr;
     }
     return sty->find_member(field_name);
+}
+
+ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *struct_type,
+                                                    const string &field_name, bool is_internal,
+                                                    bool is_write) {
+    auto field_member = get_struct_member(struct_type, field_name);
+    if (!field_member) {
+        error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(struct_type));
+        return nullptr;
+    }
+    if (is_write && struct_type->kind == TypeKind::Reference) {
+        error(node, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, to_string(struct_type));
+        return nullptr;
+    }
+    if (!field_member->check_access(is_internal, is_write)) {
+        if (field_member->get_visibility() == Visibility::Protected) {
+            error(node, errors::PROTECTED_MEMBER_NOT_WRITABLE, field_name, to_string(struct_type));
+        } else {
+            error(node, errors::PRIVATE_MEMBER_NOT_ACCESSIBLE, field_name, to_string(struct_type));
+        }
+        return nullptr;
+    }
+    return field_member;
+}
+
+bool Resolver::is_same_struct(ChiType *a, ChiType *b) {
+    auto a_sty = resolve_struct_type(a);
+    auto b_sty = resolve_struct_type(b);
+    return a_sty->global_id == b_sty->global_id;
 }
 
 void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,
@@ -1986,6 +2055,7 @@ ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
     switch (kind) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
+    case TypeKind::MutRef:
     case TypeKind::Optional:
     case TypeKind::Box:
         return get_pointer_type(elem, kind);
@@ -2005,6 +2075,8 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
         return TypeKind::Pointer;
     case ast::SigilKind::Reference:
         return TypeKind::Reference;
+    case ast::SigilKind::Mut:
+        return TypeKind::MutRef;
     case ast::SigilKind::Optional:
         return TypeKind::Optional;
     case ast::SigilKind::Box:

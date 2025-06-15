@@ -265,7 +265,8 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         return llvm_db.createSubroutineType(llvm_db.getOrCreateTypeArray(types));
     }
     case TypeKind::Pointer:
-    case TypeKind::Reference: {
+    case TypeKind::Reference:
+    case TypeKind::MutRef: {
         auto &data = type->data.pointer;
         auto elem_type = compile_di_type(data.elem);
         auto size = llvm_type_size(compile_type(data.elem));
@@ -885,7 +886,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     value, llvm::ConstantInt::getTrue(compile_type(get_system_types()->bool_)));
             }
         }
-        case TokenType::AND: {
+        case TokenType::AND:
+        case TokenType::MUTREF: {
             auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
             return ref.address;
@@ -1960,7 +1962,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return llvm::FunctionType::get(ret_type_l, param_types, false);
     }
     case TypeKind::Pointer:
-    case TypeKind::Reference: {
+    case TypeKind::Reference:
+    case TypeKind::MutRef: {
         auto &data = type->data.pointer;
         return get_llvm_ptr_type();
         // auto elem_type_l = compile_type(data.elem);

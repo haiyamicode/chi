@@ -9,7 +9,7 @@ struct Arr<T> {
 
 	func add(item: T) {
 		var ptr = cx_array_add(this, sizeof T) as *T;
-		*ptr = item;
+		ptr! = item;
 	}
 
 	func delete() {

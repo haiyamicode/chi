@@ -24,9 +24,14 @@ constexpr auto SUBTYPE_WRONG_NUMBER_OF_ARGS =
     "wrong number of type arguments for {}, expected {}, got {}";
 constexpr auto CANNOT_CALL_NON_FUNCTION = "cannot call non-function value";
 constexpr auto MEMBER_NOT_FOUND = "member '{}' not found for type {}";
+constexpr auto PRIVATE_MEMBER_NOT_ACCESSIBLE =
+    "private member '{}' is not accessible from this scope";
+constexpr auto PROTECTED_MEMBER_NOT_WRITABLE = "protected member '{}' is not writable in this "
+                                               "scope";
 constexpr auto CONSTRUCT_CANNOT_INFER_TYPE = "cannot infer type for construct expression";
 constexpr auto CANNOT_SUBSCRIPT = "cannot perform array subscript on type {}";
 constexpr auto INVALID_OPERATOR = "invalid operator {} on type {}";
+constexpr auto CANNOT_MODIFY_IMMUTABLE_REFERENCE = "immutable reference {} cannot be modified";
 constexpr auto STMT_NOT_WITHIN_LOOP = "{} statement not within a loop";
 constexpr auto INVALID_EMBED = "invalid embed, can only embed an interface or struct";
 constexpr auto CANNOT_EMBED_INTO = "cannot embed '{}' into '{}'";
@@ -34,6 +39,8 @@ constexpr auto METHOD_NOT_IMPLEMENTED = "interface method '{}' has not been impl
 constexpr auto MISSING_TYPE_ARGUMENTS = "type arguments are required for generic type '{}'";
 constexpr auto CANNOT_GET_POINTER_UNADDRESSABLE = "cannot get pointer of unaddressable value";
 constexpr auto CANNOT_GET_REFERENCE_UNADDRESSABLE = "cannot take reference of unaddressable value";
+constexpr auto C_STYLE_DEREFERENCE_DEPRECATED = "C-style dereference syntax is deprecated, please "
+                                                "use unwrap operator (e.g: 'p!' instead of '*p')";
 constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant expression";
 constexpr auto NON_INTERFACE_IMPL_TYPE =
     "cannot use non-interface type '{}' in struct implement list";
@@ -54,6 +61,8 @@ constexpr auto INVALID_VARIABLE_TYPE = "cannot declare variable of type {}";
 constexpr auto ASSIGNMENT_TO_CONST = "assignment to const value '{}'";
 constexpr auto SWITCH_EXPR_MUST_HAVE_ELSE = "switch expression must have an else clause";
 constexpr auto EXPORT_DECL_MUST_HAVE_SYMBOLS = "export declaration must have symbol or alias";
+constexpr auto CANNOT_MODIFY_CONST = "cannot modify immutable constant '{}'";
+constexpr auto INVALID_MUT_TYPE = "Mut can only be used for reference type, got '{}'";
 
 } // namespace errors
 } // namespace cx

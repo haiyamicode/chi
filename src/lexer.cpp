@@ -6,6 +6,7 @@
  */
 
 #include "lexer.h"
+#include "fmt/core.h"
 
 using namespace cx;
 
@@ -33,7 +34,7 @@ void Lexer::setup_keywords() {
     s_keywords["var"] = TokenType::KW_VAR;
     s_keywords["break"] = TokenType::KW_BREAK;
     s_keywords["case"] = TokenType::KW_CASE;
-    s_keywords["const"] = TokenType::KW_CONST;
+    s_keywords["let"] = TokenType::KW_LET;
     s_keywords["continue"] = TokenType::KW_CONTINUE;
     s_keywords["else"] = TokenType::KW_ELSE;
     s_keywords["enum"] = TokenType::KW_ENUM;
@@ -43,6 +44,7 @@ void Lexer::setup_keywords() {
     s_keywords["while"] = TokenType::KW_WHILE;
     s_keywords["if"] = TokenType::KW_IF;
     s_keywords["private"] = TokenType::KW_PRIVATE;
+    s_keywords["protected"] = TokenType::KW_PROTECTED;
     s_keywords["return"] = TokenType::KW_RETURN;
     s_keywords["static"] = TokenType::KW_STATIC;
     s_keywords["select"] = TokenType::KW_SELECT;
@@ -63,6 +65,7 @@ void Lexer::setup_keywords() {
     s_keywords["extern"] = TokenType::KW_EXTERN;
     s_keywords["export"] = TokenType::KW_EXPORT;
     s_keywords["implements"] = TokenType::KW_IMPLEMENTS;
+    s_keywords["mut"] = TokenType::KW_MUT;
 
     // bool
     s_keywords["true"] = TokenType::BOOL;

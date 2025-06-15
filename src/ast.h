@@ -36,6 +36,7 @@ enum DeclFlag : uint32_t {
     DECL_PRIVATE = 1 << 0,
     DECL_EXTERN = 1 << 1,
     DECL_IS_ENTRY = 1 << 2,
+    DECL_PROTECTED = 1 << 3,
 };
 
 struct Module {
@@ -105,6 +106,9 @@ struct DeclSpec {
     Visibility get_visibility() const {
         if (flags & DECL_PRIVATE) {
             return Visibility::Private;
+        }
+        if (flags & DECL_PROTECTED) {
+            return Visibility::Protected;
         }
         return Visibility::Public;
     }
@@ -281,7 +285,7 @@ struct CastExpr {
 
 MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short)
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, Box)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, Box, Mut)
 
 struct SigilExpr {
     SigilKind sigil = SigilKind::None;
@@ -581,6 +585,15 @@ struct Node {
             break;
         }
         return nullptr;
+    }
+
+    bool is_mutable() {
+        switch (type) {
+        case NodeType::VarDecl:
+            return !data.var_decl.is_const;
+        default:
+            return false;
+        }
     }
 
     DeclSpec *get_declspec() {

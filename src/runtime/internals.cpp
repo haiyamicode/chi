@@ -145,6 +145,7 @@ static std::string get_value_display(const CxAny &v) {
         return istringf(v);
     case TypeKind::Pointer:
     case TypeKind::Reference:
+    case TypeKind::MutRef:
         return fmt::format("{:#x}", *(intptr_t *)&v.data);
     case TypeKind::Optional: {
         auto has_value = *(bool *)&v.data;

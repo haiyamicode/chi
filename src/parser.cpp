@@ -244,6 +244,11 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         spec->flags |= DECL_PRIVATE;
         break;
     }
+    case TokenType::KW_PROTECTED: {
+        consume();
+        spec->flags |= DECL_PROTECTED;
+        break;
+    }
     default:
         break;
     }
@@ -275,6 +280,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     switch (token->type) {
     case TokenType::AT:
     case TokenType::KW_PRIVATE:
+    case TokenType::KW_PROTECTED:
         return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
@@ -285,7 +291,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::KW_TYPEDEF:
         return parse_typedef();
     case TokenType::KW_VAR:
-    case TokenType::KW_CONST:
+    case TokenType::KW_LET:
         return parse_var_decl(false);
     case TokenType::KW_FUNC: {
         return parse_fn_decl(FN_BODY_REQUIRED, decl_spec);
@@ -396,6 +402,16 @@ Node *Parser::parse_type_expr(bool type_only) {
         }
 
         if (next_is(TokenType::LT)) {
+            if (iden->name == "Mut") {
+                consume();
+                auto type = parse_type_expr(true);
+                node = create_node(NodeType::TypeSigil, iden->token);
+                auto &sigil = node->data.sigil_type;
+                sigil.sigil = SigilKind::Mut;
+                sigil.type = type;
+                expect(TokenType::GT);
+                return node;
+            }
             consume();
             auto base_type_node = node;
             node = create_node(NodeType::SubtypeExpr, iden->token);
@@ -500,7 +516,7 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
     bool is_const = false;
     if (!as_field) {
-        if (next_is(TokenType::KW_CONST)) {
+        if (next_is(TokenType::KW_LET)) {
             is_const = true;
             consume();
         } else {
@@ -704,7 +720,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
         return parse_while_stmt();
 
     case TokenType::KW_VAR:
-    case TokenType::KW_CONST:
+    case TokenType::KW_LET:
     case TokenType::KW_THIS:
     case TokenType::KW_NEW:
     case TokenType::KW_DELETE:
@@ -727,7 +743,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::DEC:
     case TokenType::KW_SWITCH:
     case TokenType::KW_TRY: {
-        if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_CONST)) {
+        if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_LET)) {
             return parse_var_decl(false);
         }
 
@@ -855,6 +871,12 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
     case TokenType::DEC: {
         consume();
         auto node = create_unary_expr_node(token);
+
+        if (token->type == TokenType::AND && get()->type == TokenType::KW_MUT) {
+            consume();
+            node->data.unary_op_expr.op_type = TokenType::MUTREF;
+        }
+
         node->data.unary_op_expr.op1 = parse_child_expr(lhs, parent);
         return node;
     }
@@ -1034,7 +1056,7 @@ Node *Parser::parse_for_stmt() {
     if (!next_is(TokenType::LBRACE)) {
         Node *expr;
         ForLoopKind kind = ForLoopKind::Empty;
-        if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_CONST)) {
+        if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_LET)) {
             expr = parse_var_decl(false);
             kind = ForLoopKind::Ternary;
         } else {

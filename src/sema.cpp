@@ -8,6 +8,7 @@
 #include "sema.h"
 #include "ast.h"
 #include "context.h"
+#include "errors.h"
 
 using namespace cx;
 
@@ -18,6 +19,7 @@ ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &nam
     auto member = allocator->create_struct_member();
     member->node = node;
     member->resolved_type = resolved_type;
+    member->parent_struct = this;
     members.add(member);
 
     if (node->type == ast::NodeType::FnDef) {
@@ -53,7 +55,12 @@ bool ChiTypeStruct::is_generic(ChiType *type) {
 }
 
 bool ChiTypeStruct::is_pointer_type(ChiType *type) {
-    return type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference;
+    return type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
+           type->kind == TypeKind::MutRef;
+}
+
+bool ChiTypeStruct::is_mutable_pointer(ChiType *type) {
+    return type->kind == TypeKind::Pointer || type->kind == TypeKind::MutRef;
 }
 
 ChiStructMember *ChiTypeStruct::get_constructor(ChiType *type) {
@@ -71,6 +78,24 @@ ChiStructMember *ChiTypeStruct::get_destructor(ChiType *type) {
 }
 
 string ChiStructMember::get_name() { return node->name; }
+Visibility ChiStructMember::get_visibility() {
+    auto declspec = node->get_declspec();
+    if (!declspec) {
+        return Visibility::Public;
+    }
+    return declspec->get_visibility();
+}
+
+bool ChiStructMember::check_access(bool is_internal, bool is_write) {
+    auto visibility = get_visibility();
+    if (visibility == Visibility::Private) {
+        return is_internal;
+    }
+    if (visibility == Visibility::Protected) {
+        return is_internal || !is_write;
+    }
+    return true;
+}
 
 ast::Node *Scope::find_one(const string &symbol, bool recursive) {
     if (auto val = symbols.get(symbol)) {
@@ -131,6 +156,7 @@ ChiType *ChiType::get_elem() {
     case TypeKind::Pointer:
     case TypeKind::Optional:
     case TypeKind::Reference:
+    case TypeKind::MutRef:
     case TypeKind::Box:
         return data.pointer.elem;
     case TypeKind::Array:
