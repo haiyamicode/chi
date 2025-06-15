@@ -163,7 +163,6 @@ static std::string get_value_display(const CxAny &v) {
             intptr_t p = v.inlined ? (intptr_t)v.data : *(intptr_t *)(v.data);
             auto a = (CxArray *)v.data;
             CxString s;
-            fmt::print("s: {}\n", (void *)&s);
             fn(&s, (void *)p);
             auto str = string(s.data, s.size);
             cx_string_delete(&s);
