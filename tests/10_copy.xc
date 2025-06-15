@@ -1,6 +1,6 @@
 import "std/ops" as ops;
 
-struct Foo: ops.CopyFrom<Foo> {
+struct Foo implements ops.CopyFrom<Foo> {
   p: *int = null;
   id: string;
 

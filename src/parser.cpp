@@ -1163,7 +1163,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
         }
         expect(TokenType::GT);
     }
-    if (next_is(TokenType::COLON)) {
+    if (next_is(TokenType::KW_IMPLEMENTS)) {
         save_block_pos(node);
         consume();
         while (get()->type != TokenType::LBRACE) {
@@ -1203,7 +1203,7 @@ void Parser::parse_struct_block(Node *node) {
     for (auto param : node->data.struct_decl.type_params) {
         add_to_scope(param);
     }
-    if (next_is(TokenType::COLON)) {
+    if (next_is(TokenType::KW_IMPLEMENTS)) {
         consume();
         for (;;) {
             auto token = get();

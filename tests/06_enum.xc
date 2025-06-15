@@ -4,7 +4,7 @@ enum Key {
     Ctrl = 10,
     Alt,
     Delete
-}
+};
 
 func main() {
     printf("enter_key_value: {}\n", Key.Enter); 

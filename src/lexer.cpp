@@ -62,6 +62,7 @@ void Lexer::setup_keywords() {
     s_keywords["sizeof"] = TokenType::KW_SIZEOF;
     s_keywords["extern"] = TokenType::KW_EXTERN;
     s_keywords["export"] = TokenType::KW_EXPORT;
+    s_keywords["implements"] = TokenType::KW_IMPLEMENTS;
 
     // bool
     s_keywords["true"] = TokenType::BOOL;

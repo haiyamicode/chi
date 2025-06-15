@@ -2,7 +2,7 @@ interface Animal {
     func make_sound();
 }
 
-struct AnimalBase: Animal {
+struct AnimalBase implements Animal {
     id: int;
 
     func new(id: int) {
@@ -30,7 +30,7 @@ struct Sheep {
     }
 };
 
-struct Cat: Animal {
+struct Cat implements Animal {
     id: int;
 
     func new(id: int) {

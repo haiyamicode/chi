@@ -60,7 +60,7 @@ enum JsonKind {
   Object
 }
 
-struct JsonValue: ops.CopyFrom<JsonValue> {
+struct JsonValue implements ops.CopyFrom<JsonValue> {
   data: *void = null;
   kind: JsonKind = JsonKind.Null;
 
@@ -186,7 +186,7 @@ func fs_read(path: string) string {
   return result;
 }
 
-struct Array<T>:
+struct Array<T> implements
   ops.Index<uint32, T>,
   ops.IndexIterable<uint32, T>,
   ops.CopyFrom<Array<T>>,
@@ -251,7 +251,7 @@ struct Array<T>:
   }
 }
 
-struct Map<K, V>: ops.Index<K, V> {
+struct Map<K, V> implements ops.Index<K, V> {
   data: *void;
 
   func new() {
