@@ -12,7 +12,8 @@ TESTS_LIST = 00_fib.test \
 		08_module.test \
 		09_switch.test \
 		10_copy.test \
-		11_copy_builtins.test
+		11_copy_builtins.test \
+		12_references.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

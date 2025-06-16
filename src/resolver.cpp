@@ -1631,6 +1631,15 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
         }
         return nullptr;
     }
+
+    if (field_member->is_method()) {
+        auto is_mutable = field_member->node->declspec().is_mutable();
+        if (is_mutable && !is_struct_access_mutable(struct_type)) {
+            error(node, errors::MUTATING_METHOD_ON_IMMUTABLE_REFERENCE, field_name,
+                  to_string(struct_type));
+            return nullptr;
+        }
+    }
     return field_member;
 }
 
