@@ -20,6 +20,8 @@ string get_sigil_symbol(SigilKind sigil) {
         return "&";
     case SigilKind::Box:
         return "^";
+    case SigilKind::MutRef:
+        return "&mut";
     default:
         panic("unknown sigil {}", PRINT_ENUM(sigil));
         return "";
@@ -287,7 +289,13 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         print("{}", get_sigil_symbol(data.sigil));
+        if (data.has_wrapping && data.sigil == SigilKind::MutRef) {
+            print("<");
+        }
         print_node(data.type);
+        if (data.has_wrapping && data.sigil == SigilKind::MutRef) {
+            print(">");
+        }
         break;
     }
     case NodeType::TypedefDecl: {

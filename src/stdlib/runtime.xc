@@ -216,7 +216,7 @@ struct Array<T> implements
     cx_array_new(this);
   }
 
-	func index(index: uint32) Mut<&T> {
+	func index(index: uint32) &mut<T> {
 		assert(index < this.len, "index out of bounds");
 		return &this.data[index];
 	}

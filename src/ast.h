@@ -285,7 +285,7 @@ struct CastExpr {
 
 MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short)
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, Box, Mut)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, Box, MutRef)
 
 struct SigilExpr {
     SigilKind sigil = SigilKind::None;
@@ -324,6 +324,7 @@ struct TypeSigil {
     Node *type = nullptr;
     SigilKind sigil = SigilKind::None;
     Node *etype = nullptr;
+    bool has_wrapping = false;
 };
 
 struct EnumMember {

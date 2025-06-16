@@ -379,11 +379,26 @@ Node *Parser::parse_type_expr(bool type_only) {
     array<Node *> sigil_nodes;
     for (;;) {
         auto token = get();
+        auto has_wrapping = false;
         if (auto sigil_kind = get_sigil_kind(token->type)) {
             consume();
+
+            if (sigil_kind == SigilKind::Reference && next_is(TokenType::KW_MUT)) {
+                consume();
+                expect(TokenType::LT);
+                has_wrapping = true;
+                sigil_kind = SigilKind::MutRef;
+            }
+
+            if (next_is(TokenType::LT)) {
+                has_wrapping = true;
+                consume();
+            }
             auto node = create_node(NodeType::TypeSigil, token);
             node->data.sigil_type.sigil = *sigil_kind;
+            node->data.sigil_type.has_wrapping = has_wrapping;
             sigil_nodes.add(node);
+
         } else {
             break;
         }
@@ -402,16 +417,6 @@ Node *Parser::parse_type_expr(bool type_only) {
         }
 
         if (next_is(TokenType::LT)) {
-            if (iden->name == "Mut") {
-                consume();
-                auto type = parse_type_expr(true);
-                node = create_node(NodeType::TypeSigil, iden->token);
-                auto &sigil = node->data.sigil_type;
-                sigil.sigil = SigilKind::Mut;
-                sigil.type = type;
-                expect(TokenType::GT);
-                return node;
-            }
             consume();
             auto base_type_node = node;
             node = create_node(NodeType::SubtypeExpr, iden->token);
@@ -437,11 +442,17 @@ Node *Parser::parse_type_expr(bool type_only) {
             expect(TokenType::GT);
         }
     }
+
     for (int i = int(sigil_nodes.len) - 1; i >= 0; --i) {
         auto parent = sigil_nodes[i];
         parent->data.sigil_type.type = node;
         node = parent;
+
+        if (parent->data.sigil_type.has_wrapping) {
+            expect(TokenType::GT);
+        }
     }
+
     return node;
 }
 

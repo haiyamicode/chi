@@ -405,12 +405,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         auto type = resolve_value(data.type, scope);
-        if (data.sigil == ast::SigilKind::Mut) {
-            if (type->kind != TypeKind::Reference) {
-                error(node, errors::INVALID_MUT_TYPE, to_string(type));
-            }
-            type = type->data.pointer.elem;
-        }
         auto final_type = get_pointer_type(type, get_sigil_type_kind(data.sigil));
         return create_type_symbol({}, final_type);
     }
@@ -1211,7 +1205,7 @@ string Resolver::to_string(ChiType *type, bool for_display) {
     case TypeKind::Reference:
         return "&" + to_string(type->get_elem(), for_display);
     case TypeKind::MutRef:
-        return "Mut<&" + to_string(type->get_elem(), for_display) + ">";
+        return "&mut<" + to_string(type->get_elem(), for_display) + ">";
     case TypeKind::Optional:
         return "?" + to_string(type->get_elem(), for_display);
     case TypeKind::Box:
@@ -2075,7 +2069,7 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
         return TypeKind::Pointer;
     case ast::SigilKind::Reference:
         return TypeKind::Reference;
-    case ast::SigilKind::Mut:
+    case ast::SigilKind::MutRef:
         return TypeKind::MutRef;
     case ast::SigilKind::Optional:
         return TypeKind::Optional;
