@@ -300,7 +300,7 @@ struct ForStmt {
     Node *body = nullptr;
     Node *bind = nullptr;
     Node *expr = nullptr;
-    bool is_ref = false;
+    SigilKind bind_sigil = SigilKind::None;
 };
 
 struct WhileStmt {

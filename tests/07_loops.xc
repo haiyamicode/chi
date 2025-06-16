@@ -15,14 +15,17 @@ func for_in() {
     list.add(3);
 
     println("print from 1 to 3");
-    for &list => item {
+    for &item in list {
         printf("{}\n", item!);
+    }
+    println("");
+
+    println("modify the list and print again");
+    for &mut item in list {
         item! = item! + 1;
     }
-
-    println("print from 2 to 4");
-    for list => item {
-        printf("{}\n", item);
+    for item in list {
+        printf("{}\n", item);   
     }
     println("");
 }

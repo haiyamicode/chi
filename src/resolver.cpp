@@ -935,7 +935,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     return nullptr;
                 }
                 auto ref_type = (*index_fn)->resolved_type->data.fn.return_type;
-                auto value_type = data.is_ref ? ref_type : ref_type->get_elem();
+                auto value_type = ref_type->get_elem();
+                switch (data.bind_sigil) {
+                case ast::SigilKind::Reference:
+                    value_type = get_pointer_type(value_type, TypeKind::Reference);
+                    break;
+                case ast::SigilKind::MutRef:
+                    value_type = get_pointer_type(value_type, TypeKind::MutRef);
+                    break;
+                default:
+                    break;
+                }
                 auto bind_scope = scope.set_value_type(value_type);
                 resolve(data.bind, bind_scope);
             }

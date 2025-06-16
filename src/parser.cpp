@@ -1071,16 +1071,34 @@ Node *Parser::parse_for_stmt() {
             expr = parse_var_decl(false);
             kind = ForLoopKind::Ternary;
         } else {
+            bool is_range = false;
             if (next_is(TokenType::AND)) {
-                node->data.for_stmt.is_ref = true;
+                node->data.for_stmt.bind_sigil = SigilKind::Reference;
                 consume();
+
+                if (next_is(TokenType::KW_MUT)) {
+                    consume();
+                    node->data.for_stmt.bind_sigil = SigilKind::MutRef;
+                }
+
+                is_range = true;
             }
-            expr = parse_expr();
-            if (next_is(TokenType::SEMICOLON)) {
-                consume();
-                kind = ForLoopKind::Ternary;
-            } else {
+
+            // Check the 'in' keyword for for in loop, or fallback to ternary
+            if (is_range || lookahead(1)->type == TokenType::KW_IN) {
+                auto iden = expect(TokenType::IDEN);
+                auto bind = create_node(NodeType::BindIdentifier, iden);
+                node->data.for_stmt.bind = bind;
                 kind = ForLoopKind::Range;
+                expect(TokenType::KW_IN);
+            } else {
+                expr = parse_expr();
+                if (next_is(TokenType::SEMICOLON)) {
+                    consume();
+                    kind = ForLoopKind::Ternary;
+                } else {
+                    unexpected(get());
+                }
             }
         }
 
@@ -1096,13 +1114,10 @@ Node *Parser::parse_for_stmt() {
             }
         }
         if (kind == ForLoopKind::Range) {
-            node->data.for_stmt.expr = expr;
-            if (next_is(TokenType::ARROW)) {
-                consume();
-                auto iden = expect(TokenType::IDEN);
-                auto bind = create_node(NodeType::BindIdentifier, iden);
-                node->data.for_stmt.bind = bind;
-                add_to_scope(bind, iden->get_name());
+            node->data.for_stmt.expr = parse_expr();
+            auto bind = node->data.for_stmt.bind;
+            if (node->data.for_stmt.bind->name != "_") {
+                add_to_scope(bind, bind->name);
             }
         }
     }

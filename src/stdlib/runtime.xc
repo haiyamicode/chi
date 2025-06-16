@@ -236,7 +236,7 @@ struct Array<T> implements
   func display() string {
     var buf: Buffer = {};
     buf.write("[");
-    for this => item {
+    for item in this {
       buf.write(stringf("{}, ", item));
     }
     buf.write("]");
@@ -245,7 +245,7 @@ struct Array<T> implements
 
   func copy_from(from: &Array<T>) {
     this.clear();
-    for from => item {
+    for item in from {
       this.add(item);
     }
   }

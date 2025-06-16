@@ -1663,7 +1663,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto item_ref =
                     builder.CreateCall(get_fn(index->node)->llvm_fn,
                                        {ptr, builder.CreateLoad(iter_type_l, it)}, "_iter_item");
-                if (data.is_ref) {
+                if (data.bind_sigil != ast::SigilKind::None) {
                     builder.CreateStore(item_ref, item_var);
                 } else {
                     auto value = builder.CreateLoad(compile_type(data.bind->resolved_type),

@@ -5,7 +5,7 @@ func switch_int() string {
   levels.add(3);
   levels.add(4);
 
-  for levels => item {
+  for item in levels {
     var label = switch item {
       1, 2 => "low",
       3 => "medium",
