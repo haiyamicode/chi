@@ -3,7 +3,7 @@ export "./subgreeting" *;
 struct Greeting {
   name: string;
 
-  func new(name: string) {
+  mut func new(name: string) {
     this.name = name;
   }
 

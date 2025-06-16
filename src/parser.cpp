@@ -249,6 +249,11 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         spec->flags |= DECL_PROTECTED;
         break;
     }
+    case TokenType::KW_MUT: {
+        consume();
+        spec->flags |= DECL_MUTABLE;
+        break;
+    }
     default:
         break;
     }

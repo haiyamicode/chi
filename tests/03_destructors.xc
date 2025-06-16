@@ -1,6 +1,10 @@
 struct Bar {
     id: int = 0;
-    func new(id: int) { this.id = id; }
+
+    mut func new(id: int) {
+        this.id = id;
+    }
+    
     func delete() {
         printf("delete bar {}\n", this.id);
     }
@@ -11,7 +15,7 @@ struct Foo {
     bar1: Bar;
     bar2: Bar;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         this.bar1 = {id * 10 + 1};
         this.bar2 = {id * 10 + 2};

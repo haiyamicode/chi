@@ -258,11 +258,11 @@ struct Array<T> implements
 struct Map<K, V> implements ops.Index<K, V> {
   private data: *void;
 
-  func new() {
+  mut func new() {
     this.data = cx_map_new();
   }
 
-  func delete() {
+  mut func delete() {
     cx_map_delete(this.data);
     this.data = null;
   }
@@ -301,7 +301,7 @@ struct Map<K, V> implements ops.Index<K, V> {
 struct Buffer {
   private bytes: Array<char>;
 
-  func new() {
+  mut func new() {
     this.bytes = {};
   }
 

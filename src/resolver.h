@@ -160,6 +160,8 @@ class Resolver {
 
     bool is_ref_mutable(ast::Node *node, ResolveScope &scope);
 
+    bool is_struct_access_mutable(ChiType *type);
+
     void check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type);
 
     ChiType *resolve_value(ast::Node *node, ResolveScope &scope);

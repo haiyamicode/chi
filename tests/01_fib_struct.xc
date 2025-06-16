@@ -7,7 +7,7 @@ struct Fib {
     n: int;
     name: string = "";
 
-    func new(n: int) {
+    mut func new(n: int) {
         this.n = n;
     }
 

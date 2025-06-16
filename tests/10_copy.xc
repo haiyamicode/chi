@@ -4,14 +4,14 @@ struct Foo implements ops.CopyFrom<Foo> {
   p: *int = null;
   id: string;
 
-  func new(id: string) {
+  mut func new(id: string) {
     this.id = id;
     this.p = cx_malloc(sizeof int, null);
     cx_memset(this.p, 0, sizeof int);
     printf("creating {}\n", this.id);
   }
 
-  func copy_from(b: &Foo) {
+  mut func copy_from(b: &Foo) {
     this.new(stringf("{}_copy", b.id));
     this.p! = b.p!;
     printf("copied {}, p = {}\n", this.id, b.p!);

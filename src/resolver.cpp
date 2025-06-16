@@ -360,7 +360,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.identifier;
         if (data.kind == ast::IdentifierKind::This) {
             auto type = create_type(TypeKind::This);
-            type->data.pointer.elem = get_pointer_type(scope.parent_struct, TypeKind::Reference);
+            auto is_mut =
+                scope.parent_fn_node && scope.parent_fn_node->get_declspec()->is_mutable();
+            type->data.pointer.elem = get_pointer_type(
+                scope.parent_struct, is_mut ? TypeKind::MutRef : TypeKind::Reference);
             return type;
         }
         if (!data.decl) {
@@ -1586,6 +1589,17 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
     return &sty->data.struct_;
 }
 
+bool Resolver::is_struct_access_mutable(ChiType *type) {
+    auto sty = type;
+    if (sty->kind == TypeKind::This) {
+        return is_struct_access_mutable(sty->get_elem());
+    }
+    if (sty->is_pointer()) {
+        return ChiTypeStruct::is_mutable_pointer(sty);
+    }
+    return true;
+}
+
 ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string &field_name) {
     if (!struct_type) {
         return nullptr;
@@ -1605,7 +1619,7 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
         error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(struct_type));
         return nullptr;
     }
-    if (is_write && struct_type->kind == TypeKind::Reference) {
+    if (is_write && !is_struct_access_mutable(struct_type)) {
         error(node, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, to_string(struct_type));
         return nullptr;
     }

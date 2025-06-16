@@ -37,6 +37,7 @@ enum DeclFlag : uint32_t {
     DECL_EXTERN = 1 << 1,
     DECL_IS_ENTRY = 1 << 2,
     DECL_PROTECTED = 1 << 3,
+    DECL_MUTABLE = 1 << 4,
 };
 
 struct Module {
@@ -114,6 +115,7 @@ struct DeclSpec {
     }
 
     bool is_exported() const { return get_visibility() == Visibility::Public; }
+    bool is_mutable() const { return has_flag(DECL_MUTABLE); }
     bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
     bool is_extern() const { return has_flag(DECL_EXTERN); }
 };

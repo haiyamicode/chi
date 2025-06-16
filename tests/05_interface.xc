@@ -5,7 +5,7 @@ interface Animal {
 struct AnimalBase implements Animal {
     id: int;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
     }
 
@@ -21,7 +21,7 @@ struct Ant {
 struct Sheep {
     ...base: AnimalBase;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.base = {id};
     }
 
@@ -33,7 +33,7 @@ struct Sheep {
 struct Cat implements Animal {
     id: int;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
     }
 
