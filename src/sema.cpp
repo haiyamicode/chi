@@ -63,9 +63,11 @@ bool ChiTypeStruct::is_mutable_pointer(ChiType *type) {
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::MutRef;
 }
 
+ChiStructMember *ChiTypeStruct::get_constructor() { return find_member("new"); }
+
 ChiStructMember *ChiTypeStruct::get_constructor(ChiType *type) {
     if (type->kind == TypeKind::Struct) {
-        return type->data.struct_.find_member("new");
+        return type->data.struct_.get_constructor();
     }
     return nullptr;
 }

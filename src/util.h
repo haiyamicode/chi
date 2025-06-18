@@ -254,6 +254,7 @@ template <typename K, typename V> struct map {
 
     void clear() { data.clear(); }
     size_t size() { return data.size(); }
+    Map get() { return data; }
 };
 
 static inline array<string> string_split(string str, string sep) {

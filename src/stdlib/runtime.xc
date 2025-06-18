@@ -196,8 +196,15 @@ struct Array<T> implements
 	protected len: uint32 = 0;
 	protected capacity: uint32 = 0;
 
-	func new() {
+	func new(...values: T) {
 		cx_array_new(this);
+
+    if (values.len > 0) {
+      cx_array_reserve(this, sizeof T, values.len);
+      for value in values {
+        this.add(value);
+      }
+    }
 	}
 
   func delete() {

@@ -129,6 +129,7 @@ struct ChiTypeStruct {
 
     static bool is_generic(ChiType *type);
 
+    ChiStructMember *get_constructor();
     static ChiStructMember *get_constructor(ChiType *type);
     static ChiStructMember *get_destructor(ChiType *type);
 };

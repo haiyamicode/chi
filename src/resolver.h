@@ -77,6 +77,7 @@ struct ResolveContext {
     map<string, ChiType *> composite_types = {};
     map<ChiType *, ChiType *> promise_of = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
+    ChiType *rt_array_type = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
@@ -278,7 +279,7 @@ class Resolver {
     ChiStructMember *get_struct_member_access(ast::Node *node, ChiType *struct_type,
                                               const string &field_name, bool is_internal,
                                               bool is_write);
-    bool is_same_struct(ChiType *a, ChiType *b);
+    bool is_friend_struct(ChiType *a, ChiType *b);
 };
 
 class ScopeResolver {

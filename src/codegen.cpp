@@ -1,4 +1,5 @@
 #include "codegen.h"
+#include "ast.h"
 #include "context.h"
 #include "enum.h"
 #include "fmt/core.h"
@@ -75,6 +76,9 @@ Compiler::Compiler(CodegenContext *ctx) : m_ctx(ctx) {}
 ChiType *Compiler::eval_type(ChiType *type) {
     if (type->is_placeholder && m_fn && m_fn->container_subtype) {
         type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+    }
+    if (type->kind == TypeKind::Array && type->data.array.elem->is_placeholder) {
+        return get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
     }
     if (type->kind == TypeKind::Subtype) {
         return type->data.subtype.resolved_struct;
@@ -1164,9 +1168,9 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto constructor_type = get_chitype(constructor->node);
             auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
             auto args = std::vector<llvm::Value *>{dest};
-            for (auto arg : expr->data.construct_expr.items) {
-                args.push_back(compile_expr(fn, arg));
-            }
+            auto remaining_args =
+                compile_fn_args(fn, constructor_fn, expr->data.construct_expr.items, expr);
+            args.insert(args.end(), remaining_args.begin(), remaining_args.end());
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
             emit_dbg_location(expr);
         }
@@ -1366,6 +1370,50 @@ normal:
         return RefValue::from_address(ref);
     }
     return RefValue::from_address(get_var(data.decl));
+}
+
+std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *callee,
+                                                     array<ast::Node *> args, ast::Node *fn_call) {
+    std::vector<llvm::Value *> call_args = {};
+    auto &builder = *m_ctx->llvm_builder.get();
+    llvm::Value *va_ptr = nullptr;
+    ChiType *va_type = nullptr;
+    auto &fn_spec = callee->fn_type->data.fn;
+    auto va_start = fn_spec.get_va_start();
+
+    bool is_variadic = callee->fn_type->data.fn.is_variadic;
+    if (is_variadic) {
+        auto array_type = fn_spec.params.last();
+        va_type = array_type->get_elem();
+        va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
+        emit_dbg_location(fn_call);
+        auto init_fn = get_system_fn("cx_array_new");
+        builder.CreateCall(init_fn->llvm_fn, {va_ptr});
+    }
+
+    for (int i = 0; i < args.len; i++) {
+        if (is_variadic && i >= va_start) {
+            emit_dbg_location(args[i]);
+            auto add_fn = get_system_fn("cx_array_add");
+            auto arg = compile_assignment_to_type(fn, args[i], va_type);
+            auto tsize =
+                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
+            auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
+            auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
+            builder.CreateStore(arg, ptr);
+            continue;
+        }
+        auto arg = args[i];
+        auto param_type = fn_spec.get_param_at(i);
+        call_args.push_back(compile_assignment_to_type(fn, arg, param_type));
+    }
+
+    if (va_ptr) {
+        call_args.push_back(builder.CreateLoad(compile_type(fn_spec.params.last()), va_ptr));
+        fn->vararg_pointers.add(va_ptr);
+    }
+
+    return call_args;
 }
 
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke) {

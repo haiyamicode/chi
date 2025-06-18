@@ -83,7 +83,6 @@ void Resolver::context_init_primitives() {
     add_primitive("Result", system_types.result);
     add_primitive("Error", system_types.error);
     add_primitive("Promise", system_types.promise);
-    add_primitive("Mut", system_types.void_ptr);
 
     // intrinsic symbols
     m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
@@ -130,6 +129,10 @@ void Resolver::resolve(ast::Module *module) {
     m_module = module;
     auto module_scope = scope.set_module(module);
     resolve(module->root, module_scope);
+
+    for (const auto &pair : m_ctx->array_of.get()) {
+        resolve_struct_type(pair.second);
+    }
 }
 
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
@@ -610,7 +613,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return symbol->resolved_type;
         }
 
-        auto is_internal = scope.parent_struct && is_same_struct(scope.parent_struct, expr_type);
+        auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, expr_type);
         auto member =
             get_struct_member_access(node, expr_type, field_name, is_internal, scope.is_lhs);
         if (!member) {
@@ -648,7 +651,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             value_type = data.is_new ? result_type->get_elem() : result_type;
         }
-        auto constructor = ChiTypeStruct::get_constructor(value_type);
+        auto struct_type = resolve_struct_type(value_type);
+        auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
         if (constructor) {
             auto &fn_type = constructor->resolved_type->data.fn;
             resolve_fn_call(node, scope, &fn_type, &data.items);
@@ -772,6 +776,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             type_sym = create_type_symbol(node->name, struct_type);
             if (data.kind == ContainerKind::Enum) {
                 type_sym->data.type_symbol.giving_type = get_system_types()->int_;
+            }
+            if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
+                if (node->name == "Array") {
+                    m_ctx->rt_array_type = struct_type;
+                }
             }
             return type_sym;
         }
@@ -1526,6 +1535,7 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
     case TypeKind::MutRef:
     case TypeKind::Optional:
     case TypeKind::Box:
+    case TypeKind::Array:
         return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->kind);
 
     case TypeKind::Subtype: {
@@ -1568,7 +1578,18 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
         sty = sty->get_elem();
     }
     if (sty->kind == TypeKind::Array) {
-        sty = sty->data.array.internal;
+        if (!sty->data.array.internal) {
+            auto array = m_ctx->rt_array_type;
+            assert(array);
+            auto sub = create_type(TypeKind::Subtype);
+            sub->data.subtype.generic = to_value_type(array);
+            sub->data.subtype.args.add(sty->data.array.elem);
+            auto astype = resolve_subtype(sub);
+            sty->data.array.internal = astype;
+            sty = astype;
+        } else {
+            sty = sty->data.array.internal;
+        }
     } else if (sty->kind == TypeKind::Result) {
         sty = sty->data.result.internal;
     } else if (sty->kind == TypeKind::FnLambda) {
@@ -1643,7 +1664,10 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
     return field_member;
 }
 
-bool Resolver::is_same_struct(ChiType *a, ChiType *b) {
+bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
+    if (a->kind == TypeKind::Array || b->kind == TypeKind::Array) {
+        return b->kind == a->kind;
+    }
     auto a_sty = resolve_struct_type(a);
     auto b_sty = resolve_struct_type(b);
     return a_sty->global_id == b_sty->global_id;
@@ -1690,21 +1714,11 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     if (auto cached = m_ctx->array_of.get(elem)) {
         return *cached;
     }
+
     auto type = create_type(TypeKind::Array);
     type->data.array.elem = elem;
     m_ctx->array_of[elem] = type;
-
-    auto stype = create_type(TypeKind::Struct);
-    auto &struct_ = stype->data.struct_;
-    struct_.add_member(get_allocator(), "data", get_dummy_var("data"), get_pointer_type(elem));
-    struct_.add_member(get_allocator(), "len", get_dummy_var("len"), get_system_types()->uint32);
-    struct_.add_member(get_allocator(), "capacity", get_dummy_var("capacity"),
-                       get_system_types()->uint32);
-    struct_.add_member(get_allocator(), "flags", get_dummy_var("flags"), get_system_types()->uint8);
-
-    struct_.kind = ContainerKind::Struct;
-    type->data.promise.internal = stype;
-
+    type->data.array.internal = nullptr;
     return type;
 }
 
