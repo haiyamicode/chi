@@ -192,9 +192,13 @@ class Parser {
 
     void skip_block();
 
-    Node *parse_struct_member(ContainerKind container_kind);
+    Node *parse_struct_member(ContainerKind container_kind, Node *parent);
+
+    void parse_enum_block(Node *node);
 
     void parse_struct_block(Node *node);
+
+    Node *parse_enum_decl(DeclSpec *decl_spec = nullptr);
 
     Node *parse_struct_decl(TokenType keyword, DeclSpec *decl_spec = nullptr);
 
@@ -210,7 +214,7 @@ class Parser {
 
     Node *parse_typedef();
 
-    Node *parse_enum_member();
+    Node *parse_enum_member(Node *parent);
 
     Node *parse_extern_decl();
 

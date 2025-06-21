@@ -2,6 +2,7 @@
 
 #include "ast.h"
 #include "resolver.h"
+#include "sema.h"
 
 namespace cx {
 
@@ -22,6 +23,7 @@ struct CompilationContext : public Context {
     array<box<Scope>> scopes = {};
     array<box<ast::DeclSpec>> decl_specs = {};
     array<box<ChiStructMember>> struct_members = {};
+    array<box<ChiEnumMember>> enum_members = {};
     array<box<InterfaceImpl>> interface_impls = {};
     uint32_t flags = 0;
     array<string> file_extensions = {"xc", "x"};
@@ -89,6 +91,8 @@ struct CompilationContext : public Context {
     ChiStructMember *create_struct_member() {
         return struct_members.emplace(new ChiStructMember())->get();
     }
+
+    ChiEnumMember *create_enum_member() { return enum_members.emplace(new ChiEnumMember())->get(); }
 
     InterfaceImpl *create_interface_impl() {
         return interface_impls.emplace(new InterfaceImpl())->get();

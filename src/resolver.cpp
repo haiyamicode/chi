@@ -196,6 +196,10 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
             return to_string(from_type) == to_string(to_type->data.fn_lambda.fn);
         }
         return from_type->kind == TypeKind::FnLambda && to_string(from_type) == to_string(to_type);
+    case TypeKind::EnumValue:
+        return from_type->kind == TypeKind::EnumValue &&
+               is_same_type(from_type->data.enum_value.enum_type,
+                            to_type->data.enum_value.enum_type);
     default:
         break;
     }
@@ -234,14 +238,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // second pass: resolve struct members
         for (auto decl : data.top_level_decls) {
-            if (decl->type == NodeType::StructDecl) {
+            if (decl->type == NodeType::StructDecl || decl->type == NodeType::EnumDecl) {
                 _resolve(decl, scope);
             }
         }
 
         // third pass: resolve struct embeds
         for (auto decl : data.top_level_decls) {
-            if (decl->type == NodeType::StructDecl) {
+            if (decl->type == NodeType::StructDecl || decl->type == NodeType::EnumDecl) {
                 _resolve(decl, scope);
             }
         }
@@ -249,7 +253,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // fourth pass: resolve function and method bodies
         scope.skip_fn_bodies = false;
         for (auto decl : data.top_level_decls) {
-            if (decl->type == NodeType::StructDecl || decl->type == NodeType::FnDef) {
+            if (decl->type == NodeType::StructDecl || decl->type == NodeType::EnumDecl ||
+                decl->type == NodeType::FnDef) {
                 _resolve(decl, scope);
             }
         }
@@ -477,6 +482,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         check_assignment(data.op2, t2, t1);
         switch (data.op_type) {
         case TokenType::EQ:
+        case TokenType::NE:
         case TokenType::LT:
         case TokenType::LE:
         case TokenType::GT:
@@ -613,16 +619,40 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return symbol->resolved_type;
         }
 
-        auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, expr_type);
-        auto member =
-            get_struct_member_access(node, expr_type, field_name, is_internal, scope.is_lhs);
+        if (expr_type->kind == TypeKind::TypeSymbol) {
+            auto underlying_type = expr_type->data.type_symbol.underlying_type;
+            switch (underlying_type->kind) {
+            case TypeKind::Enum: {
+                auto member = underlying_type->data.enum_.find_member(field_name);
+                if (!member) {
+                    error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(underlying_type));
+                    return nullptr;
+                }
+                data.resolved_decl = member->node;
+                data.field->node = member->node;
+                data.resolved_dot_kind = DotKind::EnumVariant;
+                return member->resolved_type;
+            }
+            default:
+                error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(underlying_type));
+                return nullptr;
+            }
+        }
+
+        auto stype = eval_struct_type(expr_type);
+        if (!stype) {
+            error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type));
+            return nullptr;
+        }
+        auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
+        auto member = get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs);
         if (!member) {
             return nullptr;
         }
-        data.resolved_member = member;
+        data.resolved_struct_member = member;
         data.resolved_decl = member->node;
         data.field->node = member->node;
-        auto expr_struct = resolve_struct_type(expr_type);
+        auto expr_struct = resolve_struct_type(stype);
         if (expr_struct->is_generic()) {
             data.should_resolve_variant = true;
         }
@@ -751,6 +781,61 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         return get_system_types()->void_;
     }
+    case NodeType::EnumDecl: {
+        auto &data = node->data.enum_decl;
+        ChiType *type_sym;
+        ChiType *enum_type;
+        if (!node->resolved_type) {
+            enum_type = create_type(TypeKind::Enum);
+            enum_type->name = node->name;
+            enum_type->display_name = node->name;
+            enum_type->global_id = resolve_global_id(node);
+            enum_type->data.enum_.discriminator = m_ctx->system_types.int_;
+            enum_type->data.enum_.node = node;
+            type_sym = create_type_symbol(node->name, enum_type);
+            auto value_type = create_type(TypeKind::EnumValue);
+            type_sym->data.type_symbol.giving_type = value_type;
+            type_sym->data.type_symbol.underlying_type = enum_type;
+            value_type->data.enum_value.enum_type = enum_type;
+            string discriminator_field = "value";
+            value_type->data.enum_value.discriminator_field = discriminator_field;
+
+            // Create internal resolved struct for enum value
+            auto vstruct = create_type(TypeKind::Struct);
+            vstruct->name = node->name;
+            vstruct->display_name = fmt::format("{}.InternalStruct", node->name);
+            auto &vstruct_data = vstruct->data.struct_;
+            vstruct_data.display_name = vstruct->display_name;
+            vstruct_data.node = node;
+            vstruct_data.add_member(get_allocator(), discriminator_field,
+                                    get_dummy_var(discriminator_field),
+                                    enum_type->data.enum_.discriminator);
+            vstruct_data.add_member(
+                get_allocator(), "display_name", get_dummy_var("display_name"),
+                get_pointer_type(get_system_types()->string, TypeKind::Reference));
+            value_type->data.enum_value.resolved_struct = vstruct;
+            return type_sym;
+        }
+
+        type_sym = node->resolved_type;
+        enum_type = type_sym->data.type_symbol.underlying_type;
+        assert(enum_type->kind == TypeKind::Enum);
+        auto &enum_data = enum_type->data.enum_;
+        if (enum_data.resolve_status == ResolveStatus::None) {
+            scope.next_enum_value = 0;
+            // second pass
+            for (auto member : data.members) {
+                auto &member_data = member->data.enum_member;
+                auto member_type = resolve(member, scope);
+                auto new_member =
+                    enum_data.add_member(get_allocator(), member->name, member, member_type);
+
+                new_member->value = member_data.resolved_value;
+            }
+            enum_data.resolve_status = ResolveStatus::Done;
+        }
+        return type_sym;
+    }
     case NodeType::StructDecl: {
         auto &data = node->data.struct_decl;
         ChiType *type_sym;
@@ -774,9 +859,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             struct_->resolve_status = ResolveStatus::None;
             type_sym = create_type_symbol(node->name, struct_type);
-            if (data.kind == ContainerKind::Enum) {
-                type_sym->data.type_symbol.giving_type = get_system_types()->int_;
-            }
             if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
                 if (node->name == "Array") {
                     m_ctx->rt_array_type = struct_type;
@@ -790,7 +872,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto struct_scope = scope.set_parent_struct(struct_type);
         if (struct_->resolve_status == ResolveStatus::None) {
             // second pass
-            scope.next_enum_value = 0;
             for (auto member : data.members) {
                 resolve_struct_member(struct_type, member, struct_scope);
             }
@@ -908,6 +989,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::EnumMember: {
         auto &data = node->data.enum_member;
+        if (data.resolved_type) {
+            return data.resolved_type;
+        }
+        auto enum_value = create_type(TypeKind::EnumValue);
+        auto variant_name = data.name->to_string();
+        enum_value->display_name = fmt::format("{}.{}", data.parent->name, variant_name);
+        auto enum_symbol = resolve(data.parent, scope);
+        assert(enum_symbol->kind == TypeKind::TypeSymbol);
+        assert(enum_symbol->data.type_symbol.giving_type->kind == TypeKind::EnumValue);
+        auto enum_type = enum_symbol->data.type_symbol.underlying_type;
+
+        // copy the prototype from parent and modify the resolved member
+        enum_value->data.enum_value = enum_symbol->data.type_symbol.giving_type->data.enum_value;
+
+        auto &type_data = enum_value->data.enum_value;
         if (data.value) {
             auto value_type = resolve(data.value, scope);
             check_assignment(data.value, value_type, get_system_types()->int_);
@@ -918,7 +1014,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         } else {
             data.resolved_value = scope.next_enum_value++;
         }
-        return get_system_types()->int_;
+        return enum_value;
     }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
@@ -1116,7 +1212,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto clause_type = resolve(clause, scope);
                     resolve_constant_value(clause);
                     check_assignment(clause, clause_type, expr_type);
-                    if (clause_type->kind != TypeKind::Int) {
+                    if (clause_type->kind != TypeKind::Int && clause_type->kind != TypeKind::Enum &&
+                        clause_type->kind != TypeKind::EnumValue) {
                         error(clause, errors::INVALID_SWITCH_TYPE, to_string(clause_type));
                     }
                 }
@@ -1408,8 +1505,6 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
                 continue;
             }
         }
-    } else if (node->type == NodeType::EnumMember) {
-        member->resolved_type = resolve(node, scope);
     }
     return member;
 }
@@ -1570,6 +1665,11 @@ bool Resolver::is_struct_type(ChiType *type) {
 }
 
 ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
+    auto stype = eval_struct_type(type);
+    return stype ? &stype->data.struct_ : nullptr;
+}
+
+ChiType *Resolver::eval_struct_type(ChiType *type) {
     auto sty = type;
     if (sty->kind == TypeKind::This) {
         sty = sty->get_elem();
@@ -1592,6 +1692,8 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
         }
     } else if (sty->kind == TypeKind::Result) {
         sty = sty->data.result.internal;
+    } else if (sty->kind == TypeKind::EnumValue) {
+        sty = sty->data.enum_value.resolved_struct;
     } else if (sty->kind == TypeKind::FnLambda) {
         sty = sty->data.fn_lambda.internal;
     } else if (sty->kind == TypeKind::Promise) {
@@ -1607,7 +1709,7 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
     if (sty->kind != TypeKind::Struct) {
         return nullptr;
     }
-    return &sty->data.struct_;
+    return sty;
 }
 
 bool Resolver::is_struct_access_mutable(ChiType *type) {

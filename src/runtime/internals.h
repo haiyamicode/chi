@@ -68,6 +68,11 @@ struct CxJsonValue {
     uint32_t kind;
 };
 
+struct CxEnumValue {
+    int32_t value;
+    CxString *display_name;
+};
+
 CHI_RT_EXPORT void cx_set_program_vtable(void *ptr);
 
 CHI_RT_EXPORT void cx_string_copy(CxString *dest, CxString *src);

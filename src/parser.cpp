@@ -228,6 +228,9 @@ void Parser::parse_top_level_decls(NodeList *decls) {
         } else if (decl->type == NodeType::StructDecl) {
             jump_to(m_block_pos[decl]);
             parse_struct_block(decl);
+        } else if (decl->type == NodeType::EnumDecl) {
+            jump_to(m_block_pos[decl]);
+            parse_enum_block(decl);
         }
     }
 }
@@ -289,10 +292,11 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
         return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
-    case TokenType::KW_ENUM:
     case TokenType::KW_INTERFACE: {
         return parse_struct_decl(token->type, decl_spec);
     }
+    case TokenType::KW_ENUM:
+        return parse_enum_decl(decl_spec);
     case TokenType::KW_TYPEDEF:
         return parse_typedef();
     case TokenType::KW_VAR:
@@ -1181,6 +1185,26 @@ Node *Parser::create_struct_node(Token *keyword, const string &name) {
     return node;
 }
 
+Node *Parser::parse_enum_decl(DeclSpec *decl_spec) {
+    decl_spec = parse_decl_spec(decl_spec);
+    auto kw = expect(TokenType::KW_ENUM);
+    auto iden = expect(TokenType::IDEN);
+    Node *node = create_node(NodeType::EnumDecl, iden);
+    node->start_token = kw;
+    node->data.enum_decl.decl_spec = decl_spec;
+
+    save_block_pos(node);
+    skip_block();
+
+    if (next_is(TokenType::SEMICOLON)) {
+        consume();
+    }
+
+    node->end_token = lookahead(-1);
+    add_to_scope(node);
+    return node;
+}
+
 Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
     auto kw = expect(keyword);
@@ -1235,10 +1259,8 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
     return node;
 }
 
-Node *Parser::parse_struct_member(ContainerKind container_kind) {
+Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
     switch (container_kind) {
-    case ContainerKind::Enum:
-        return parse_enum_member();
     case ContainerKind::Interface: {
         return parse_fn_decl(0);
     }
@@ -1249,6 +1271,21 @@ Node *Parser::parse_struct_member(ContainerKind container_kind) {
         }
         return parse_var_decl(true, spec);
     }
+}
+
+void Parser::parse_enum_block(Node *node) {
+    m_ctx->resolver->push_scope(node);
+    expect(TokenType::LBRACE);
+    while (get()->type != TokenType::RBRACE) {
+        if (get()->type == TokenType::END) {
+            error(get(), errors::UNEXPECTED_EOF);
+            return;
+        }
+        auto member = parse_enum_member(node);
+        node->data.enum_decl.members.add(member);
+    }
+    m_ctx->resolver->pop_scope();
+    expect(TokenType::RBRACE);
 }
 
 void Parser::parse_struct_block(Node *node) {
@@ -1281,7 +1318,7 @@ void Parser::parse_struct_block(Node *node) {
             error(get(), errors::UNEXPECTED_EOF);
             return;
         }
-        auto member = parse_struct_member(node->data.struct_decl.kind);
+        auto member = parse_struct_member(node->data.struct_decl.kind, node);
         node->data.struct_decl.members.add(member);
     }
     m_ctx->resolver->pop_scope();
@@ -1385,16 +1422,35 @@ Node *Parser::parse_typedef() {
     return node;
 }
 
-Node *Parser::parse_enum_member() {
+Node *Parser::parse_enum_member(Node *parent) {
     auto iden = expect(TokenType::IDEN);
     auto node = create_node(NodeType::EnumMember, iden);
+    node->data.enum_member.name = iden;
+    node->data.enum_member.parent = parent;
+    if (next_is(TokenType::LBRACE)) {
+        consume();
+        auto struct_node = create_node(NodeType::StructDecl, iden);
+        node->data.enum_member.struct_body = struct_node;
+        while (get()->type != TokenType::RBRACE) {
+            if (get()->type == TokenType::END) {
+                error(get(), errors::UNEXPECTED_EOF);
+                break;
+            }
+            auto member = parse_struct_member(node->data.struct_decl.kind, struct_node);
+            struct_node->data.struct_decl.members.add(member);
+        }
+        expect(TokenType::RBRACE);
+    }
+
     if (next_is(TokenType::ASS)) {
         consume();
         node->data.enum_member.value = parse_expr_clause(false);
     }
+
     if (!next_is(TokenType::RBRACE)) {
         expect(TokenType::COMMA);
     }
+
     return node;
 }
 

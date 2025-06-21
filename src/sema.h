@@ -19,14 +19,17 @@ struct Scope;
 struct ChiTypeSubtype;
 struct Context;
 struct ChiTypeStruct;
+struct ChiTypeEnum;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
-          MutRef, Array, Enum, Any, Subtype, Placeholder, Optional, Box, Result, Error, FnLambda,
-          Promise, Infer, Module, This, Unknown)
+          MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box, Result, Error,
+          FnLambda, Promise, Infer, Module, This, Unknown)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
 MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display)
+
+MAKE_ENUM(DotKind, Field, EnumVariant);
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -156,6 +159,37 @@ struct ChiTypeSubtype {
     ChiType *resolved_struct = nullptr;
 };
 
+struct ChiEnumMember {
+    int index = -1;
+    ast::Node *node = nullptr;
+    ChiTypeEnum *enum_ = nullptr;
+    ChiType *resolved_type = nullptr;
+    long value = -1;
+    string name = "";
+};
+
+struct ChiTypeEnum {
+    ast::Node *node = nullptr;
+    ChiType *discriminator = nullptr;
+    ChiType *base_struct = nullptr;
+    ResolveStatus resolve_status = ResolveStatus::None;
+
+    array<ChiEnumMember *> members = {};
+    map<string, ChiEnumMember *> member_table = {};
+
+    ChiEnumMember *add_member(Context *allocator, const string &name, ast::Node *node,
+                              ChiType *resolved_type);
+    ChiEnumMember *find_member(const string &name);
+};
+
+struct ChiTypeEnumValue {
+    ChiType *enum_type = nullptr;
+    ChiType *struct_ = nullptr;
+    ChiEnumMember *member = nullptr;
+    string discriminator_field = "value";
+    ChiType *resolved_struct = nullptr;
+};
+
 struct ChiTypePlaceholder {
     ChiType *trait = nullptr;
     long index = 0;
@@ -207,6 +241,8 @@ struct ChiType {
         ChiTypeFnLambda fn_lambda;
         ChiTypePromise promise;
         ChiTypeModule module;
+        ChiTypeEnum enum_;
+        ChiTypeEnumValue enum_value;
 
         Data() {}
 
@@ -237,6 +273,8 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_INIT_FIELD(promise, Promise, ChiTypePromise)
             CHITYPE_CASE_INIT_FIELD(module, Module, ChiTypeModule)
+            CHITYPE_CASE_INIT_FIELD(enum_, Enum, ChiTypeEnum)
+            CHITYPE_CASE_INIT_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
         default:
             break;
         }
@@ -261,6 +299,8 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_DESTROY_FIELD(promise, Promise, ChiTypePromise)
             CHITYPE_CASE_DESTROY_FIELD(module, Module, ChiTypeModule)
+            CHITYPE_CASE_DESTROY_FIELD(enum_, Enum, ChiTypeEnum)
+            CHITYPE_CASE_DESTROY_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
         default:
             break;
         }
@@ -285,6 +325,8 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_CLONE_FIELD(promise, Promise, ChiTypePromise)
             CHITYPE_CASE_CLONE_FIELD(module, Module, ChiTypeModule)
+            CHITYPE_CASE_CLONE_FIELD(enum_, Enum, ChiTypeEnum)
+            CHITYPE_CASE_CLONE_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
         default:
             break;
         }

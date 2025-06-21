@@ -169,10 +169,15 @@ static std::string get_value_display(const CxAny &v) {
             cx_string_delete(&s);
             return str;
         }
-        return fmt::format("<{}>", PRINT_ENUM((TypeKind)v.type->kind));
+        return fmt::format("<TypeKind:{}>", PRINT_ENUM((TypeKind)v.type->kind));
+    }
+    case cx::TypeKind::EnumValue: {
+        auto ev = (CxEnumValue *)v.data;
+        string display_name(ev->display_name->data, ev->display_name->size);
+        return fmt::format("{}", display_name);
     }
     default:
-        return fmt::format("<{}>", PRINT_ENUM(v.type->kind));
+        return fmt::format("<TypeKind:{}>", PRINT_ENUM(v.type->kind));
     }
 }
 

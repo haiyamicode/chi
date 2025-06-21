@@ -132,6 +132,9 @@ void Compiler::compile_module(ast::Module *module) {
         case ast::NodeType::ExportDecl:
             compile_module(decl->data.export_decl.resolved_module);
             break;
+        case ast::NodeType::EnumDecl:
+            compile_enum(decl);
+            break;
         default:
             panic("not implemented: {}", PRINT_ENUM(decl->type));
         }
@@ -220,6 +223,31 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             member->vtable_index = m_ctx->reflection_vtable.size();
             m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);
         }
+    }
+}
+
+void Compiler::compile_enum(ast::Node *node) {
+    for (auto member : node->data.enum_decl.members) {
+        auto member_type_l = compile_type(member->resolved_type);
+        auto member_display_name = member->resolved_type->get_display_name();
+        auto display_name_str = (llvm::Constant *)compile_string_literal(member_display_name);
+        auto display_name_var =
+            new llvm::GlobalVariable(*m_ctx->llvm_module, display_name_str->getType(), true,
+                                     llvm::GlobalValue::InternalLinkage, display_name_str,
+                                     fmt::format("{}.display_name", member_display_name));
+        auto member_value = llvm::ConstantStruct::get(
+            (llvm::StructType *)member_type_l,
+            {
+                llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
+                                       member->data.enum_member.resolved_value),
+                display_name_var,
+            });
+        auto var = new llvm::GlobalVariable(*m_ctx->llvm_module, member_type_l, true,
+                                            llvm::GlobalValue::InternalLinkage, member_value,
+                                            fmt::format("{}.display_name", member_display_name));
+
+        auto member_type = member->resolved_type->data.enum_value.member;
+        m_ctx->enum_member_table[member->data.enum_member.resolved_enum_member] = var;
     }
 }
 
@@ -460,8 +488,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 }
 
 llvm::Value *Compiler::compile_constant_value(Function *fn, const ConstantValue &value,
-                                              ChiType *type) {
-    auto t = compile_type(type);
+                                              ChiType *type, llvm::Type *llvm_type) {
+    auto t = llvm_type ? llvm_type : compile_type(type);
     if (type->is_pointer()) {
         return llvm::ConstantPointerNull::get((llvm::PointerType *)t);
     }
@@ -470,12 +498,12 @@ llvm::Value *Compiler::compile_constant_value(Function *fn, const ConstantValue 
     } else if (VARIANT_TRY(value, const_float_t, v)) {
         return llvm::ConstantFP::get(t, *v);
     } else if (VARIANT_TRY(value, string, v)) {
-        return compile_string_literal(fn, *v);
+        return compile_string_literal(*v);
     }
     return nullptr;
 }
 
-llvm::Value *Compiler::compile_string_literal(Function *fn, const string &str) {
+llvm::Value *Compiler::compile_string_literal(const string &str) {
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto &llvm_module = *(m_ctx->llvm_module.get());
     auto &llvm_builder = *(m_ctx->llvm_builder.get());
@@ -704,15 +732,19 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
     }
     case TypeKind::Bool: {
         auto &builder = *m_ctx->llvm_builder;
-        if (from_type->kind == TypeKind::Optional) {
+        switch (from_type->kind) {
+        case TypeKind::Optional: {
             auto from_type_l = compile_type(from_type);
             auto has_value = builder.CreateExtractValue(value, {0}, "has_value");
             return has_value;
-        } else if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference) {
+        }
+        case TypeKind::Pointer:
+        case TypeKind::Reference: {
             return builder.CreateICmp(
                 llvm::CmpInst::Predicate::ICMP_NE, value,
                 llvm::ConstantPointerNull::get((llvm::PointerType *)compile_type(from_type)));
-        } else {
+        }
+        default:
             return builder.CreateIntCast(value, compile_type(to_type), false);
         }
         break;
@@ -873,7 +905,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     emit_dbg_location(expr);
                     auto value = builder.CreateCall(
                         assert->llvm_fn,
-                        {has_value, compile_string_literal(fn, "unwrapping null optional")});
+                        {has_value, compile_string_literal("unwrapping null optional")});
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
@@ -920,8 +952,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::GE:
         case TokenType::EQ:
         case TokenType::NE: {
-            auto lhs = compile_expr(fn, data.op1);
-            auto rhs = compile_expr(fn, data.op2);
+            auto lhs = compile_comparator(fn, data.op1);
+            auto rhs = compile_comparator(fn, data.op2);
             auto cmpop = get_cmpop(data.op_type, get_chitype(expr));
             return builder.CreateCmp(cmpop, lhs, rhs);
         }
@@ -984,11 +1016,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return result_var;
     }
     case ast::NodeType::DotExpr: {
-        auto member = expr->data.dot_expr.resolved_member;
-        if (member->node->type == ast::NodeType::EnumMember) {
-            return compile_constant_value(fn, member->node->data.enum_member.resolved_value,
-                                          get_chitype(expr));
-        }
+        auto member = expr->data.dot_expr.resolved_struct_member;
         auto ref = compile_expr_ref(fn, expr);
         assert(ref.address);
         auto &builder = *m_ctx->llvm_builder.get();
@@ -1048,7 +1076,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::SwitchExpr: {
         auto &data = expr->data.switch_expr;
-        auto expr_value = compile_expr(fn, data.expr);
+        auto expr_value = compile_comparator(fn, data.expr);
+        auto comparator_type = expr_value->getType();
         auto ret_type = get_chitype(expr);
         llvm::Value *var = nullptr;
         if (ret_type->kind != TypeKind::Void) {
@@ -1074,8 +1103,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             for (auto clause : scase->data.case_expr.clauses) {
                 auto clause_value = get_resolver()->resolve_constant_value(clause);
                 assert(clause_value);
-                auto cond_value = (llvm::ConstantInt *)compile_constant_value(fn, *clause_value,
-                                                                              get_chitype(clause));
+                auto cond_value = (llvm::ConstantInt *)compile_constant_value(
+                    fn, *clause_value, get_chitype(clause), comparator_type);
                 switch_b->addCase(cond_value, label);
             }
             case_labels.add(label);
@@ -1094,6 +1123,24 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         panic("not implemented: {}", PRINT_ENUM(expr->type));
     }
     return nullptr;
+}
+
+llvm::Value *Compiler::compile_comparator(Function *fn, ast::Node *expr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto type = get_chitype(expr);
+    switch (type->kind) {
+    case TypeKind::EnumValue: {
+        auto ref = compile_expr_ref(fn, expr);
+        assert(ref.address);
+        auto gep = builder.CreateStructGEP(compile_type(type), ref.address, 0);
+        return builder.CreateLoad(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx), gep,
+                                  "_load_enum_value");
+    }
+    default: {
+        return compile_expr(fn, expr);
+        break;
+    }
+    }
 }
 
 void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type,
@@ -1186,7 +1233,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         break;
     }
     case TypeKind::String: {
-        auto value = compile_string_literal(fn, "");
+        auto value = compile_string_literal("");
         builder.CreateStore(value, dest);
         break;
     }
@@ -1245,10 +1292,27 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     case ast::NodeType::Identifier:
         return compile_iden_ref(fn, expr);
     case ast::NodeType::DotExpr: {
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+
         auto &data = expr->data.dot_expr;
         auto type = get_chitype(data.expr);
+
         llvm::Value *ptr = nullptr;
-        if (type->is_pointer()) {
+        if (data.resolved_dot_kind == DotKind::EnumVariant) {
+            auto evalue_type = get_chitype(expr);
+            assert(evalue_type->kind == TypeKind::EnumValue);
+            auto evalue_type_l = compile_type(evalue_type);
+            auto resolved_member = evalue_type->data.enum_value.member;
+            if (resolved_member) {
+                auto member_var = m_ctx->enum_member_table.get(resolved_member);
+                assert(member_var);
+                return RefValue::from_address(*member_var);
+            } else {
+                panic("not implemented");
+                return RefValue();
+            }
+        } else if (type->is_pointer()) {
             type = type->get_elem();
             ptr = compile_expr(fn, data.expr);
         } else {
@@ -1261,8 +1325,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         }
 
         assert(ptr);
-        auto &builder = *m_ctx->llvm_builder.get();
-        auto gep = compile_dot_access(fn, ptr, type, data.resolved_member);
+        auto gep = compile_dot_access(fn, ptr, type, data.resolved_struct_member);
         return RefValue::from_address(gep);
     }
     case ast::NodeType::UnaryOpExpr: {
@@ -1485,7 +1548,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             auto vtable_ptr = builder.CreateLoad(ctn_type_l->getStructElementType(2), vtable_gep);
             ctn_ptr = data_ptr;
             auto index = llvm::ConstantInt::get(
-                *m_ctx->llvm_ctx, llvm::APInt(32, dot_expr.resolved_member->method_index));
+                *m_ctx->llvm_ctx, llvm::APInt(32, dot_expr.resolved_struct_member->method_index));
             auto fn_gep = builder.CreateGEP(
                 llvm::PointerType::get(compile_type(get_system_types()->void_ptr), 0), vtable_ptr,
                 {index});
@@ -2077,6 +2140,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Placeholder: {
         return compile_type(get_system_types()->void_);
     }
+    case TypeKind::EnumValue:
+        return compile_type(type->data.enum_value.resolved_struct);
     default:
         panic("not implemented");
     }

@@ -79,6 +79,29 @@ ChiStructMember *ChiTypeStruct::get_destructor(ChiType *type) {
     return nullptr;
 }
 
+ChiEnumMember *ChiTypeEnum::add_member(Context *allocator, const string &name, ast::Node *node,
+                                       ChiType *resolved_type) {
+    auto member = allocator->create_enum_member();
+    member->node = node;
+    member->resolved_type = resolved_type;
+    member->enum_ = this;
+    members.add(member);
+
+    member->index = members.len;
+    member_table[name] = member;
+
+    assert(resolved_type->kind == TypeKind::EnumValue);
+    resolved_type->data.enum_value.member = member;
+    assert(node->type == ast::NodeType::EnumMember);
+    node->data.enum_member.resolved_enum_member = member;
+    return member;
+}
+
+ChiEnumMember *ChiTypeEnum::find_member(const string &name) {
+    auto found = member_table.get(name);
+    return found ? *found : nullptr;
+}
+
 string ChiStructMember::get_name() { return node->name; }
 Visibility ChiStructMember::get_visibility() {
     auto declspec = node->get_declspec();

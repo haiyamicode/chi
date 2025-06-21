@@ -85,21 +85,21 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
   func to_string() string {
     this.assert_kind(JsonKind.String);
     let result = "";
-    cx_json_value_convert(this.data, JsonKind.String, &result);
+    cx_json_value_convert(this.data, JsonKind.String.value, &result);
     return result;
   }
 
   func to_bool() bool {
     this.assert_kind(JsonKind.Bool);
     let result = false;
-    cx_json_value_convert(this.data, JsonKind.Bool, &result);
+    cx_json_value_convert(this.data, JsonKind.Bool.value, &result);
     return result;
   }
 
   func to_int() int64 {
     this.assert_kind(JsonKind.Int64);
     let result: int64 = 0;
-    cx_json_value_convert(this.data, JsonKind.Int64, &result);
+    cx_json_value_convert(this.data, JsonKind.Int64.value, &result);
     return result;
   }
 

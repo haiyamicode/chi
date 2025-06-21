@@ -27,6 +27,7 @@ struct Context {
     virtual Token *create_token() = 0;
     virtual ChiStructMember *create_struct_member() = 0;
     virtual InterfaceImpl *create_interface_impl() = 0;
+    virtual ChiEnumMember *create_enum_member() = 0;
 
     virtual ast::Module *module_from_path(ast::Package *package, const string &path,
                                           bool import = false) = 0;
@@ -237,6 +238,7 @@ class Resolver {
 
     bool is_struct_type(ChiType *type);
 
+    ChiType *eval_struct_type(ChiType *type);
     ChiTypeStruct *resolve_struct_type(ChiType *type);
 
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);

@@ -21,7 +21,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumMember, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
           ExternDecl, TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr);
+          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -252,10 +252,12 @@ struct TypedefDecl {
 struct DotExpr {
     Node *expr = nullptr;
     Token *field = nullptr;
-    ChiStructMember *resolved_member = nullptr;
+    ChiStructMember *resolved_struct_member = nullptr;
     int64_t resolved_value = 0;
     Node *resolved_decl = nullptr;
     bool should_resolve_variant = false;
+    DotKind resolved_dot_kind = DotKind::Field;
+    int resolved_index = -1;
 };
 
 struct SubtypeExpr {
@@ -330,8 +332,13 @@ struct TypeSigil {
 };
 
 struct EnumMember {
+    Node *parent = nullptr;
+    Token *name = nullptr;
     Node *value = nullptr;
-    int64_t resolved_value = 0;
+    int64_t resolved_value = -1;
+    Node *struct_body = nullptr;
+    ChiType *resolved_type = nullptr;
+    ChiEnumMember *resolved_enum_member = nullptr;
 };
 
 struct PrefixExpr {
@@ -379,6 +386,11 @@ struct DeclAttribute {
 struct ExprInfo {
     Node *decl = nullptr;
     ChiStructMember *member = nullptr;
+};
+
+struct EnumDecl {
+    DeclSpec *decl_spec = {};
+    array<Node *> members = {};
 };
 
 struct Node {
@@ -438,6 +450,7 @@ struct Node {
         SwitchExpr switch_expr;
         CaseExpr case_expr;
         FieldInitExpr field_init_expr;
+        EnumDecl enum_decl;
 
         NodeData() {}
 
@@ -471,6 +484,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_INITIALIZE_FIELD(case_expr, CaseExpr)
             _AST_CASE_INITIALIZE_FIELD(field_init_expr, FieldInitExpr)
+            _AST_CASE_INITIALIZE_FIELD(enum_decl, EnumDecl)
         default:
             break;
         }
@@ -500,6 +514,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_DESTROY_FIELD(case_expr, CaseExpr)
             _AST_CASE_DESTROY_FIELD(field_init_expr, FieldInitExpr)
+            _AST_CASE_DESTROY_FIELD(enum_decl, EnumDecl)
         default:
             memset(&data, 0, sizeof(data));
             break;
@@ -540,6 +555,7 @@ struct Node {
             _AST_CASE_CLONE_FIELD(switch_expr, SwitchExpr)
             _AST_CASE_CLONE_FIELD(case_expr, CaseExpr)
             _AST_CASE_CLONE_FIELD(field_init_expr, FieldInitExpr)
+            _AST_CASE_CLONE_FIELD(enum_decl, EnumDecl)
         default:
             memcpy(&b->data, &data, sizeof(data));
             break;
@@ -558,9 +574,9 @@ struct Node {
             if (data.dot_expr.should_resolve_variant && container_type_id.has_value()) {
                 auto parent_id = *container_type_id;
                 auto member_name = data.dot_expr.field->get_name();
-                auto base_member = data.dot_expr.resolved_member->root_variant;
+                auto base_member = data.dot_expr.resolved_struct_member->root_variant;
                 if (!base_member) {
-                    base_member = data.dot_expr.resolved_member;
+                    base_member = data.dot_expr.resolved_struct_member;
                 }
 
                 assert(base_member);

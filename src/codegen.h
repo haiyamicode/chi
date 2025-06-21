@@ -9,6 +9,7 @@
 
 #include <list>
 
+#include "ast.h"
 #include "llvm.h"
 #include "resolver.h"
 #include "runtime/internals.h"
@@ -121,6 +122,7 @@ struct CodegenContext {
     map<ChiType *, llvm::Value *> typeinfo_table = {};
     map<string, llvm::Type *> anon_type_table = {};
     map<InterfaceImpl *, llvm::Value *> impl_table = {};
+    map<ChiEnumMember *, llvm::Value *> enum_member_table = {};
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx = {};
@@ -182,7 +184,7 @@ class Compiler {
 
     void compile_construction(Function *fn, llvm::Value *dest, ChiType *type, ast::Node *expr);
 
-    llvm::Value *compile_string_literal(Function *fn, const string &str);
+    llvm::Value *compile_string_literal(const string &str);
 
     Function *get_fn(ast::Node *node);
 
@@ -191,6 +193,8 @@ class Compiler {
     void add_var(ast::Node *node, llvm::Value *value) { m_ctx->var_table[node] = value; }
 
     llvm::Value *&get_var(ast::Node *node) { return m_ctx->var_table.at(node); }
+
+    llvm::Value *compile_comparator(Function *fn, ast::Node *expr);
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
 
@@ -228,7 +232,8 @@ class Compiler {
     llvm::Value *compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                     ChiType *to_type);
 
-    llvm::Value *compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type);
+    llvm::Value *compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type,
+                                        llvm::Type *llvm_type = nullptr);
 
     void _compile_struct(ast::Node *node, ChiType *struct_type);
 
@@ -240,6 +245,8 @@ class Compiler {
                                label_t *end_label, llvm::Value *var = nullptr);
 
     void compile_struct(ast::Node *node);
+
+    void compile_enum(ast::Node *node);
 
     void compile_extern(ast::Node *node);
 
