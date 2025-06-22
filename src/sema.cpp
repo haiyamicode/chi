@@ -14,6 +14,11 @@ using namespace cx;
 
 bool ChiTypeFn::should_use_sret() { return !return_type->is_primitive_abi_type() && !is_extern; }
 
+ChiTypeEnum *ChiTypeEnumValue::parent_enum() {
+    assert(enum_type->kind == TypeKind::Enum);
+    return &enum_type->data.enum_;
+}
+
 ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &name, ast::Node *node,
                                            ChiType *resolved_type) {
     auto member = allocator->create_struct_member();

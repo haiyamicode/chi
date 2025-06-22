@@ -706,12 +706,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         for (auto field_init : data.field_inits) {
             auto &data = field_init->data.field_init_expr;
-            auto init_value_type = resolve(data.value, scope);
             auto field_member =
                 get_struct_member_access(field_init, value_type, data.field->str, false, true);
             if (!field_member) {
                 return nullptr;
             }
+
+            auto inner_scope = scope.set_value_type(field_member->resolved_type);
+            auto init_value_type = resolve(data.value, inner_scope);
             data.resolved_field = field_member;
             check_assignment(data.value, init_value_type, field_member->resolved_type);
         }
@@ -797,8 +799,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             type_sym->data.type_symbol.giving_type = value_type;
             type_sym->data.type_symbol.underlying_type = enum_type;
             value_type->data.enum_value.enum_type = enum_type;
+            value_type->name = node->name;
+            value_type->display_name = node->name;
             string discriminator_field = "value";
             value_type->data.enum_value.discriminator_field = discriminator_field;
+            enum_type->data.enum_.base_value_type = value_type;
 
             // Create internal resolved struct for enum value
             auto vstruct = create_type(TypeKind::Struct);
@@ -807,11 +812,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto &vstruct_data = vstruct->data.struct_;
             vstruct_data.display_name = vstruct->display_name;
             vstruct_data.node = node;
-            vstruct_data.add_member(get_allocator(), discriminator_field,
+            auto allocator = get_allocator();
+            vstruct_data.add_member(allocator, discriminator_field,
                                     get_dummy_var(discriminator_field),
                                     enum_type->data.enum_.discriminator);
             vstruct_data.add_member(
-                get_allocator(), "display_name", get_dummy_var("display_name"),
+                allocator, "__display_name", get_dummy_var("__display_name"),
                 get_pointer_type(get_system_types()->string, TypeKind::Reference));
             value_type->data.enum_value.resolved_struct = vstruct;
             return type_sym;
@@ -992,8 +998,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.resolved_type) {
             return data.resolved_type;
         }
+
         auto enum_value = create_type(TypeKind::EnumValue);
         auto variant_name = data.name->to_string();
+        enum_value->name = variant_name;
         enum_value->display_name = fmt::format("{}.{}", data.parent->name, variant_name);
         auto enum_symbol = resolve(data.parent, scope);
         assert(enum_symbol->kind == TypeKind::TypeSymbol);
@@ -1002,6 +1010,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // copy the prototype from parent and modify the resolved member
         enum_value->data.enum_value = enum_symbol->data.type_symbol.giving_type->data.enum_value;
+        if (data.struct_body) {
+            auto inner_struct_type = resolve(data.struct_body, scope);
+            for (int i = 0; i < (int)ResolveStatus::MemberTypesKnown; i++) {
+                _resolve(data.struct_body, scope);
+            }
+            auto inner_struct = eval_struct_type(to_value_type(inner_struct_type));
+            enum_value->data.enum_value.inner_struct = inner_struct;
+
+            // create final resolved struct value by deriving from parent and inner body
+            auto parent_struct = enum_value->data.enum_value.resolved_struct;
+            auto vstruct = create_type(TypeKind::Struct);
+            copy_struct_members(parent_struct, vstruct);
+            auto data_member = vstruct->data.struct_.add_member(
+                get_allocator(), "__data", get_dummy_var("__data"), inner_struct);
+            copy_struct_members(inner_struct, vstruct, data_member);
+            enum_value->data.enum_value.resolved_struct = vstruct;
+        }
 
         auto &type_data = enum_value->data.enum_value;
         if (data.value) {
@@ -1401,6 +1426,23 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display)
         auto &fn_lambda = data->fn_lambda;
         return fmt::format("Lambda<{}>", to_string(fn_lambda.fn, for_display));
     }
+    case TypeKind::Enum: {
+        auto &enum_ = data->enum_;
+        std::stringstream ss;
+        ss << "enum ";
+        for (int i = 0; i < enum_.members.len; i++) {
+            auto &member = enum_.members[i];
+            ss << member->name;
+            auto &enum_value = member->resolved_type->data.enum_value;
+            if (member->resolved_type->data.enum_value.inner_struct) {
+                ss << "{" << to_string(enum_value.inner_struct, for_display) << "}";
+            }
+            if (i < enum_.members.len - 1) {
+                ss << ",";
+            }
+        }
+        return ss.str();
+    }
     default:
         break;
     }
@@ -1710,6 +1752,18 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
         return nullptr;
     }
     return sty;
+}
+
+void Resolver::copy_struct_members(ChiType *from, ChiType *to, ChiStructMember *parent_member) {
+    assert(from->kind == TypeKind::Struct && to->kind == TypeKind::Struct);
+    for (auto member : from->data.struct_.members) {
+        auto new_member = to->data.struct_.add_member(get_allocator(), member->get_name(),
+                                                      member->node, member->resolved_type);
+        if (parent_member) {
+            new_member->parent_member = parent_member;
+            new_member->field_index = member->field_index;
+        }
+    }
 }
 
 bool Resolver::is_struct_access_mutable(ChiType *type) {

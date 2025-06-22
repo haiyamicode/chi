@@ -198,7 +198,6 @@ struct Array<T> implements
 
 	func new(...values: T) {
 		cx_array_new(this);
-
     if (values.len > 0) {
       cx_array_reserve(this, sizeof T, values.len);
       for value in values {

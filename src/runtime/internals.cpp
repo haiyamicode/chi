@@ -242,9 +242,10 @@ void cx_print(CxString str) {
 }
 
 void cx_array_new(CxArray *dest) {
+    memset(dest, 0, sizeof(CxArray));
     dest->size = 0;
     dest->capacity = 0;
-    dest->data = NULL;
+    dest->data = 0;
 }
 
 void cx_array_delete(CxArray *dest) {

@@ -23,7 +23,7 @@ struct ChiTypeEnum;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
           MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box, Result, Error,
-          FnLambda, Promise, Infer, Module, This, Unknown)
+          FnLambda, Promise, Infer, Module, This, Unknown, Bytes)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
@@ -173,6 +173,8 @@ struct ChiTypeEnum {
     ChiType *discriminator = nullptr;
     ChiType *base_struct = nullptr;
     ResolveStatus resolve_status = ResolveStatus::None;
+    int compiled_data_size = 0;
+    ChiType *base_value_type = nullptr;
 
     array<ChiEnumMember *> members = {};
     map<string, ChiEnumMember *> member_table = {};
@@ -184,10 +186,12 @@ struct ChiTypeEnum {
 
 struct ChiTypeEnumValue {
     ChiType *enum_type = nullptr;
-    ChiType *struct_ = nullptr;
+    ChiType *inner_struct = nullptr;
     ChiEnumMember *member = nullptr;
     string discriminator_field = "value";
     ChiType *resolved_struct = nullptr;
+
+    ChiTypeEnum *parent_enum();
 };
 
 struct ChiTypePlaceholder {

@@ -239,7 +239,10 @@ class Resolver {
     bool is_struct_type(ChiType *type);
 
     ChiType *eval_struct_type(ChiType *type);
+
     ChiTypeStruct *resolve_struct_type(ChiType *type);
+
+    void copy_struct_members(ChiType *from, ChiType *to, ChiStructMember *parent_member = nullptr);
 
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
 
