@@ -101,15 +101,21 @@ ChiType *Compiler::get_chitype(ast::Node *node) {
     return eval_type(node->resolved_type);
 }
 
+llvm::DICompileUnit *Compiler::get_module_cu(ast::Module *module) {
+    return m_ctx->module_cu_table[module->global_id()];
+}
+
 void Compiler::compile_module(ast::Module *module) {
     for (auto import : module->imports) {
         compile_module(import);
     }
 
-    m_ctx->dbg_cu = m_ctx->dbg_builder->createCompileUnit(
+    auto module_cu = m_ctx->dbg_builder->createCompileUnit(
         llvm::dwarf::DW_LANG_C,
         m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
         "Chi Compiler", 0, "", 0);
+    m_ctx->module_cu_table[module->global_id()] = module_cu;
+    m_ctx->dbg_cu = module_cu;
 
     m_ctx->pending_fns.clear();
     auto &root = module->root->data.root;
@@ -227,33 +233,54 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
 }
 
 void Compiler::compile_enum(ast::Node *node) {
-    int data_size = 0;
     auto enum_type = get_chitype(node)->data.type_symbol.underlying_type;
     assert(enum_type->kind == TypeKind::Enum);
-    for (auto member : node->data.enum_decl.members) {
-        auto member_type_l = compile_type(member->resolved_type);
-        auto member_display_name = member->resolved_type->get_display_name();
-        auto display_name_str = (llvm::Constant *)compile_string_literal(member_display_name);
+    if (enum_type->data.enum_.compiled_data_size >= 0) {
+        return;
+    }
+
+    int data_size = 0;
+    for (auto variant : node->data.enum_decl.variants) {
+        auto enum_value_type = variant->resolved_type;
+        assert(enum_value_type->kind == TypeKind::EnumValue);
+        if (auto inner_struct = enum_value_type->data.enum_value.variant_struct) {
+            data_size = std::max(data_size, (int)llvm_type_size(compile_type(inner_struct)));
+        }
+    }
+    enum_type->data.enum_.compiled_data_size = data_size;
+
+    auto header_type_l = compile_type(enum_type->data.enum_.enum_header_struct);
+    for (auto variant : node->data.enum_decl.variants) {
+        auto variant_display_name = variant->resolved_type->get_display_name();
+        auto display_name_str = (llvm::Constant *)compile_string_literal(variant_display_name);
         auto display_name_var =
             new llvm::GlobalVariable(*m_ctx->llvm_module, display_name_str->getType(), true,
                                      llvm::GlobalValue::InternalLinkage, display_name_str,
-                                     fmt::format("{}.display_name", member_display_name));
-        auto member_value = llvm::ConstantStruct::get(
-            (llvm::StructType *)member_type_l,
+                                     fmt::format("{}.display_name", variant_display_name));
+        auto variant_value = llvm::ConstantStruct::get(
+            (llvm::StructType *)header_type_l,
             {
                 llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
-                                       member->data.enum_member.resolved_value),
+                                       variant->data.enum_variant.resolved_value),
                 display_name_var,
             });
-        auto var = new llvm::GlobalVariable(*m_ctx->llvm_module, member_type_l, true,
-                                            llvm::GlobalValue::InternalLinkage, member_value,
-                                            fmt::format("{}.display_name", member_display_name));
-
-        auto member_type = member->resolved_type->data.enum_value.member;
-        m_ctx->enum_member_table[member->data.enum_member.resolved_enum_member] = var;
-        data_size += llvm_type_size(member_type_l);
+        auto var = new llvm::GlobalVariable(*m_ctx->llvm_module, header_type_l, true,
+                                            llvm::GlobalValue::InternalLinkage, variant_value,
+                                            fmt::format("{}.constant", variant_display_name));
+        auto member_type = variant->resolved_type->data.enum_value.member;
+        m_ctx->enum_variant_table[variant->data.enum_variant.resolved_enum_variant] = var;
     }
-    enum_type->data.enum_.compiled_data_size = data_size;
+
+    // compile base struct methods
+    if (auto base_struct = enum_type->data.enum_.base_struct) {
+        for (auto member : base_struct->data.struct_.members) {
+            if (member->is_method()) {
+                auto fn_node = member->node;
+                auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node);
+                m_ctx->pending_fns.add(fn);
+            }
+        }
+    }
 }
 
 llvm::DISubroutineType *Compiler::compile_di_fn_type(Function *fn) {
@@ -320,8 +347,15 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         if (!data.fields.len) {
             return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
         }
+        auto cu = &llvm_cu;
+        auto module = data.node ? data.node->module : nullptr;
+        if (module) {
+            if (auto p = m_ctx->module_cu_table.get(module->global_id())) {
+                cu = *p;
+            }
+        }
         auto name = m_ctx->resolver.to_string(type, true);
-        auto file = llvm_db.createFile(llvm_cu.getFilename(), llvm_cu.getDirectory());
+        auto file = llvm_db.createFile(cu->getFilename(), cu->getDirectory());
         auto line_no = 0;
         if (data.node) {
             line_no = data.node->token->pos.line_number();
@@ -329,8 +363,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         auto scope = m_ctx->dbg_scopes.len ? m_ctx->dbg_scopes.last() : nullptr;
         if (!scope) {
             auto dbg_builder = m_ctx->dbg_builder.get();
-            auto unit = dbg_builder->createFile(m_ctx->dbg_cu->getFilename(),
-                                                m_ctx->dbg_cu->getDirectory());
+            auto unit = dbg_builder->createFile(cu->getFilename(), cu->getDirectory());
             scope = unit;
         }
         return llvm_db.createStructType(scope, name, file, line_no, 0, 0, llvm::DINode::FlagZero,
@@ -361,13 +394,14 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
     // debug info
     auto name = fn->qualified_name;
+    auto cu = get_module_cu(fn->node->module);
+    assert(cu);
     auto dbg_builder = m_ctx->dbg_builder.get();
-    auto unit =
-        dbg_builder->createFile(m_ctx->dbg_cu->getFilename(), m_ctx->dbg_cu->getDirectory());
-    llvm::DIScope *dctx = unit;
+    auto file = dbg_builder->createFile(cu->getFilename(), cu->getDirectory());
+    llvm::DIScope *dctx = file;
     auto line_no = fn_def.fn_proto->token->pos.line_number();
     auto sp = dbg_builder->createFunction(
-        dctx, name, llvm::StringRef(), unit, 0, compile_di_fn_type(fn), line_no,
+        dctx, name, llvm::StringRef(), file, 0, compile_di_fn_type(fn), line_no,
         llvm::DINode::FlagPrototyped, llvm::DISubprogram::SPFlagDefinition);
     fn->llvm_fn->setSubprogram(sp);
     m_ctx->dbg_scopes.add(sp);
@@ -408,7 +442,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         // debug info
         auto param_line_no = param->token->pos.line_number();
         auto dbg_var = dbg_builder->createParameterVariable(sp, llvm_param->getName(), i + skip + 1,
-                                                            unit, param_line_no,
+                                                            file, param_line_no,
                                                             compile_di_type(get_chitype(param)));
         dbg_builder->insertDeclare(var, dbg_var, dbg_builder->createExpression(),
                                    llvm::DILocation::get(sp->getContext(), param_line_no, 0, sp),
@@ -1130,16 +1164,23 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     return nullptr;
 }
 
-llvm::Value *Compiler::compile_comparator(Function *fn, ast::Node *expr) {
+llvm::Value *Compiler::compile_comparator(Function *fn, ast::Node *expr, ChiType *type) {
     auto &builder = *m_ctx->llvm_builder;
-    auto type = get_chitype(expr);
+    if (!type) {
+        type = get_chitype(expr);
+    }
     switch (type->kind) {
     case TypeKind::EnumValue: {
         auto ref = compile_expr_ref(fn, expr);
-        assert(ref.address);
-        auto gep = builder.CreateStructGEP(compile_type(type), ref.address, 0);
+        auto address = ref.address ? ref.address : ref.value;
+        auto gep = builder.CreateStructGEP(compile_type(type), address, 0);
         return builder.CreateLoad(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx), gep,
                                   "_load_enum_value");
+    }
+    case TypeKind::Reference:
+    case TypeKind::MutRef:
+    case TypeKind::Pointer: {
+        return compile_comparator(fn, expr, type->get_elem());
     }
     default: {
         return compile_expr(fn, expr);
@@ -1215,25 +1256,30 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
     case TypeKind::EnumValue: {
         auto &type_data = type->data.enum_value;
         assert(type->data.enum_value.member);
-        auto enum_member = type_data.member;
-        auto enum_member_value_p = m_ctx->enum_member_table.get(enum_member);
-        assert(enum_member_value_p);
-        auto enum_member_value = *enum_member_value_p;
-        auto copy_size = llvm_type_size(enum_member_value->getType());
+        auto enum_variant = type_data.member;
+        auto enum_variant_p = m_ctx->enum_variant_table.get(enum_variant);
+        assert(enum_variant_p);
+        auto enum_var = *enum_variant_p;
+        auto copy_size = llvm_type_size(((llvm::GlobalVariable *)enum_var)->getValueType());
         auto full_size = llvm_type_size(compile_type(type));
         auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0);
         builder.CreateMemSet(dest, zero, full_size, {});
-        builder.CreateMemCpy(dest, {}, enum_member_value, {}, copy_size);
+        builder.CreateMemCpy(dest, {}, enum_var, {}, copy_size);
 
         for (auto field_init : expr->data.construct_expr.field_inits) {
             auto &data = field_init->data.field_init_expr;
             auto gep = compile_dot_access(fn, dest, type, data.resolved_field);
+            data.compiled_field_address = gep;
             auto value =
                 compile_assignment_to_type(fn, data.value, data.resolved_field->resolved_type);
             builder.CreateStore(value, gep);
             emit_dbg_location(expr);
         }
         break;
+    }
+    case TypeKind::Array: {
+        auto array_struct_type = get_resolver()->eval_struct_type(type);
+        return compile_construction(fn, dest, array_struct_type, expr);
     }
     case TypeKind::Struct: {
         auto &data = type->data.struct_;
@@ -1319,6 +1365,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         return RefValue::from_address(get_var(expr));
     case ast::NodeType::Identifier:
         return compile_iden_ref(fn, expr);
+    case ast::NodeType::FieldInitExpr: {
+        auto &data = expr->data.field_init_expr;
+        auto field_address = (llvm::Value *)data.compiled_field_address;
+        assert(data.compiled_field_address);
+        return RefValue::from_address(field_address);
+    }
     case ast::NodeType::DotExpr: {
         auto &builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
@@ -1333,7 +1385,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto evalue_type_l = compile_type(evalue_type);
             auto resolved_member = evalue_type->data.enum_value.member;
             if (resolved_member) {
-                auto member_var = m_ctx->enum_member_table.get(resolved_member);
+                auto member_var = m_ctx->enum_variant_table.get(resolved_member);
                 assert(member_var);
                 return RefValue::from_address(*member_var);
             } else {
@@ -2033,6 +2085,7 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
             return compile_type(type->data.enum_value.parent_enum()->base_value_type);
         }
     }
+
     type = eval_type(type);
     if (!type->name) {
         auto stringid = get_resolver()->to_string(type);
@@ -2122,14 +2175,15 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return llvm::StructType::create(members, get_resolver()->to_string(type, true));
     }
     case TypeKind::Array: {
-        auto &data = type->data.array;
-        auto elem_type_l = compile_type(data.elem);
-        std::vector<llvm::Type *> members;
-        members.push_back(get_llvm_ptr_type());              // void *data
-        members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t size
-        members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t capacity
-        members.push_back(llvm::Type::getInt8Ty(llvm_ctx));  // uint8_t flags
-        return llvm::StructType::create(members, get_resolver()->to_string(type, true));
+        return compile_type(type->data.array.internal);
+        // auto &data = type->data.array;
+        // auto elem_type_l = compile_type(data.elem);
+        // std::vector<llvm::Type *> members;
+        // members.push_back(get_llvm_ptr_type());              // void *data
+        // members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t size
+        // members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t capacity
+        // members.push_back(llvm::Type::getInt8Ty(llvm_ctx));  // uint8_t flags
+        // return llvm::StructType::create(members, get_resolver()->to_string(type, true));
     }
     case TypeKind::Any: {
         std::vector<llvm::Type *> members;
@@ -2173,18 +2227,35 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Placeholder: {
         return compile_type(get_system_types()->void_);
     }
+    case TypeKind::Enum: {
+        return _compile_type(type->data.enum_.base_value_type);
+    }
     case TypeKind::EnumValue: {
-        auto struct_type = type->data.enum_value.resolved_struct;
-        auto enum_ = type->data.enum_value.parent_enum();
-        std::vector<llvm::Type *> members;
-        for (auto &member : struct_type->data.struct_.fields) {
-            // skip variant data field
-            if (member->get_name() == "__data") {
-                continue;
-            }
-            members.push_back(compile_type(member->resolved_type));
+        if (type->data.enum_value.member) {
+            return compile_type(type->data.enum_value.parent_enum()->base_value_type);
         }
-        // variant data field as a byte array
+
+        auto enum_ = type->data.enum_value.parent_enum();
+        if (enum_->compiled_data_size < 0) {
+            compile_enum(enum_->node);
+            assert(enum_->compiled_data_size >= 0);
+        }
+        auto base_value_struct = enum_->base_value_type->data.enum_value.resolved_struct;
+        std::vector<llvm::Type *> members;
+        for (auto member : base_value_struct->data.struct_.members) {
+            if (member->is_field()) {
+                members.push_back(compile_type(member->resolved_type));
+            }
+        }
+        if (enum_->base_struct) {
+            for (auto member : enum_->base_struct->data.struct_.members) {
+                if (member->is_field()) {
+                    members.push_back(compile_type(member->resolved_type));
+                }
+            }
+        }
+
+        // variant data field
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx),
                                                std::max(enum_->compiled_data_size, 1)));
         return llvm::StructType::create(members, get_resolver()->to_string(type, true));

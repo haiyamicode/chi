@@ -47,6 +47,21 @@ extern "C" {
   func cx_json_value_copy(data: *void, result: *void);
 
   func cx_file_read(path: *string, result: *string); 
+  func cx_debug(ptr: *void);
+}
+
+struct __CxEnumBase implements ops.Display {
+  private __value: int = 0;
+  private __display_name: *string = null;
+
+  func display() string {
+    var s = this.__display_name!;
+    return stringf("{}", s);
+  }
+ 
+  func discriminator() uint32 {
+    return this.__value;
+  }
 }
 
 enum JsonKind {

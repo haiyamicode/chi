@@ -84,26 +84,26 @@ ChiStructMember *ChiTypeStruct::get_destructor(ChiType *type) {
     return nullptr;
 }
 
-ChiEnumMember *ChiTypeEnum::add_member(Context *allocator, const string &name, ast::Node *node,
-                                       ChiType *resolved_type) {
+ChiEnumVariant *ChiTypeEnum::add_variant(Context *allocator, const string &name, ast::Node *node,
+                                         ChiType *resolved_type) {
     auto member = allocator->create_enum_member();
     member->node = node;
     member->resolved_type = resolved_type;
     member->enum_ = this;
-    members.add(member);
+    variants.add(member);
 
-    member->index = members.len;
-    member_table[name] = member;
+    member->index = variants.len;
+    variant_table[name] = member;
 
     assert(resolved_type->kind == TypeKind::EnumValue);
     resolved_type->data.enum_value.member = member;
-    assert(node->type == ast::NodeType::EnumMember);
-    node->data.enum_member.resolved_enum_member = member;
+    assert(node->type == ast::NodeType::EnumVariant);
+    node->data.enum_variant.resolved_enum_variant = member;
     return member;
 }
 
-ChiEnumMember *ChiTypeEnum::find_member(const string &name) {
-    auto found = member_table.get(name);
+ChiEnumVariant *ChiTypeEnum::find_member(const string &name) {
+    auto found = variant_table.get(name);
     return found ? *found : nullptr;
 }
 

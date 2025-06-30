@@ -159,7 +159,7 @@ struct ChiTypeSubtype {
     ChiType *resolved_struct = nullptr;
 };
 
-struct ChiEnumMember {
+struct ChiEnumVariant {
     int index = -1;
     ast::Node *node = nullptr;
     ChiTypeEnum *enum_ = nullptr;
@@ -173,23 +173,25 @@ struct ChiTypeEnum {
     ChiType *discriminator = nullptr;
     ChiType *base_struct = nullptr;
     ResolveStatus resolve_status = ResolveStatus::None;
-    int compiled_data_size = 0;
+    int compiled_data_size = -1;
+    ChiType *enum_header_struct = nullptr;
     ChiType *base_value_type = nullptr;
 
-    array<ChiEnumMember *> members = {};
-    map<string, ChiEnumMember *> member_table = {};
+    array<ChiEnumVariant *> variants = {};
+    map<string, ChiEnumVariant *> variant_table = {};
 
-    ChiEnumMember *add_member(Context *allocator, const string &name, ast::Node *node,
-                              ChiType *resolved_type);
-    ChiEnumMember *find_member(const string &name);
+    ChiEnumVariant *add_variant(Context *allocator, const string &name, ast::Node *node,
+                                ChiType *resolved_type);
+    ChiEnumVariant *find_member(const string &name);
 };
 
 struct ChiTypeEnumValue {
     ChiType *enum_type = nullptr;
-    ChiType *inner_struct = nullptr;
-    ChiEnumMember *member = nullptr;
+    ChiType *variant_struct = nullptr;
+    ChiEnumVariant *member = nullptr;
     string discriminator_field = "value";
     ChiType *resolved_struct = nullptr;
+    ChiType *discriminator_type = nullptr;
 
     ChiTypeEnum *parent_enum();
 };

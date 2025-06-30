@@ -19,7 +19,7 @@ struct Scope;
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
-          TypeSigil, EnumMember, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
+          TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
           ExternDecl, TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl);
 
@@ -233,6 +233,7 @@ struct FieldInitExpr {
     Token *field = nullptr;
     Node *value = nullptr;
     ChiStructMember *resolved_field = nullptr;
+    void *compiled_field_address = nullptr;
 };
 
 // composite literal
@@ -331,14 +332,15 @@ struct TypeSigil {
     bool has_wrapping = false;
 };
 
-struct EnumMember {
+struct EnumVariant {
     Node *parent = nullptr;
     Token *name = nullptr;
     Node *value = nullptr;
     int64_t resolved_value = -1;
     Node *struct_body = nullptr;
     ChiType *resolved_type = nullptr;
-    ChiEnumMember *resolved_enum_member = nullptr;
+    ChiEnumVariant *resolved_enum_variant = nullptr;
+    ResolveStatus resolve_status = ResolveStatus::None;
 };
 
 struct PrefixExpr {
@@ -390,7 +392,8 @@ struct ExprInfo {
 
 struct EnumDecl {
     DeclSpec *decl_spec = {};
-    array<Node *> members = {};
+    array<Node *> variants = {};
+    Node *base_struct = nullptr;
 };
 
 struct Node {
@@ -435,7 +438,7 @@ struct Node {
         IndexExpr index_expr;
         TypedefDecl typedef_decl;
         TypeSigil sigil_type;
-        EnumMember enum_member;
+        EnumVariant enum_variant;
         VarIdentifier var_identifier;
         CastExpr cast_expr;
         ForStmt for_stmt;
@@ -474,7 +477,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(fn_call_expr, FnCallExpr)
             _AST_CASE_INITIALIZE_FIELD(struct_decl, StructDecl)
             _AST_CASE_INITIALIZE_FIELD(typedef_decl, TypedefDecl)
-            _AST_CASE_INITIALIZE_FIELD(enum_member, EnumMember)
+            _AST_CASE_INITIALIZE_FIELD(enum_variant, EnumVariant)
             _AST_CASE_INITIALIZE_FIELD(construct_expr, ConstructExpr)
             _AST_CASE_INITIALIZE_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_INITIALIZE_FIELD(extern_decl, ExternDecl)
@@ -504,7 +507,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(fn_call_expr, FnCallExpr)
             _AST_CASE_DESTROY_FIELD(struct_decl, StructDecl)
             _AST_CASE_DESTROY_FIELD(typedef_decl, TypedefDecl)
-            _AST_CASE_DESTROY_FIELD(enum_member, EnumMember)
+            _AST_CASE_DESTROY_FIELD(enum_variant, EnumVariant)
             _AST_CASE_DESTROY_FIELD(construct_expr, ConstructExpr)
             _AST_CASE_DESTROY_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_DESTROY_FIELD(extern_decl, ExternDecl)
@@ -546,7 +549,7 @@ struct Node {
             _AST_CASE_CLONE_FIELD(fn_call_expr, FnCallExpr)
             _AST_CASE_CLONE_FIELD(struct_decl, StructDecl)
             _AST_CASE_CLONE_FIELD(typedef_decl, TypedefDecl)
-            _AST_CASE_CLONE_FIELD(enum_member, EnumMember)
+            _AST_CASE_CLONE_FIELD(enum_variant, EnumVariant)
             _AST_CASE_CLONE_FIELD(construct_expr, ConstructExpr)
             _AST_CASE_CLONE_FIELD(subtype_expr, SubtypeExpr)
             _AST_CASE_CLONE_FIELD(extern_decl, ExternDecl)

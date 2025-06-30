@@ -122,7 +122,8 @@ struct CodegenContext {
     map<ChiType *, llvm::Value *> typeinfo_table = {};
     map<string, llvm::Type *> anon_type_table = {};
     map<InterfaceImpl *, llvm::Value *> impl_table = {};
-    map<ChiEnumMember *, llvm::Value *> enum_member_table = {};
+    map<ChiEnumVariant *, llvm::Value *> enum_variant_table = {};
+    map<string, llvm::DICompileUnit *> module_cu_table = {};
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx = {};
@@ -194,7 +195,7 @@ class Compiler {
 
     llvm::Value *&get_var(ast::Node *node) { return m_ctx->var_table.at(node); }
 
-    llvm::Value *compile_comparator(Function *fn, ast::Node *expr);
+    llvm::Value *compile_comparator(Function *fn, ast::Node *expr, ChiType *type = nullptr);
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
 
@@ -271,6 +272,7 @@ class Compiler {
 
     TypeInfo *get_type_info(ChiType *type);
 
+    llvm::DICompileUnit *get_module_cu(ast::Module *module);
     void compile_module(ast::Module *module);
 
     llvm::Type *compile_type(ChiType *type);

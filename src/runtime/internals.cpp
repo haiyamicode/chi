@@ -34,6 +34,11 @@ struct StackTrace {
 static tgc_t gc;
 static thread_local StackTrace st;
 
+static void *get_any_data(const CxAny *v) {
+    auto p = v->inlined ? (intptr_t)v->data : *(intptr_t *)(v->data);
+    return (void *)p;
+}
+
 void cx_string_set_data(CxString *dest, const char *data) {
     if (data) {
         dest->size = (uint32_t)strlen(data);
@@ -136,7 +141,8 @@ static void *get_typemeta_display_method(TypeInfo *type) {
 static std::string get_value_display(const CxAny &v) {
     switch ((TypeKind)v.type->kind) {
     case TypeKind::String: {
-        auto s = (CxString *)&v.data;
+        auto data_p = get_any_data(&v);
+        auto s = (CxString *)data_p;
         return string(s->data, s->size);
     }
     case TypeKind::Bool:
@@ -148,7 +154,8 @@ static std::string get_value_display(const CxAny &v) {
     case TypeKind::MutRef:
         return fmt::format("{:#x}", *(intptr_t *)&v.data);
     case TypeKind::Optional: {
-        auto has_value = *(bool *)&v.data;
+        auto data_p = get_any_data(&v);
+        auto has_value = *(bool *)data_p;
         if (has_value) {
             return "<optional>";
         } else {
@@ -161,7 +168,7 @@ static std::string get_value_display(const CxAny &v) {
         auto display_method = get_typemeta_display_method(v.type);
         if (display_method) {
             auto fn = (void (*)(void *a, void *b))display_method;
-            intptr_t p = v.inlined ? (intptr_t)v.data : *(intptr_t *)(v.data);
+            auto p = get_any_data(&v);
             auto a = (CxArray *)v.data;
             CxString s;
             fn(&s, (void *)p);
@@ -172,7 +179,8 @@ static std::string get_value_display(const CxAny &v) {
         return fmt::format("<TypeKind:{}>", PRINT_ENUM((TypeKind)v.type->kind));
     }
     case cx::TypeKind::EnumValue: {
-        auto ev = (CxEnumValue *)v.data;
+        auto data_p = get_any_data(&v);
+        auto ev = (CxEnumValue *)data_p;
         string display_name(ev->display_name->data, ev->display_name->size);
         return fmt::format("{}", display_name);
     }
@@ -324,6 +332,14 @@ void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
 void *cx_malloc(uint32_t size, void *_ignored) { return malloc(size); }
 
 void cx_free(void *address) { return free(address); }
+
+void cx_debug(void *ptr) {
+    auto p = (CxAny *)ptr;
+    auto data_p = get_any_data(p);
+    auto v_p = (CxEnumValue *)data_p;
+    fmt::print("{}\n", data_p);
+    // to be implemented
+}
 
 void cx_memset(void *dest, uint8_t value, uint32_t size) { memset(dest, value, size); }
 

@@ -1,0 +1,6 @@
+node.ret: int
+node.name: f
+greeting: hello, f
+discriminator value: 1
+is_callable: true
+type_name: Node.FnDef

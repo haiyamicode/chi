@@ -27,7 +27,7 @@ struct Context {
     virtual Token *create_token() = 0;
     virtual ChiStructMember *create_struct_member() = 0;
     virtual InterfaceImpl *create_interface_impl() = 0;
-    virtual ChiEnumMember *create_enum_member() = 0;
+    virtual ChiEnumVariant *create_enum_member() = 0;
 
     virtual ast::Module *module_from_path(ast::Package *package, const string &path,
                                           bool import = false) = 0;
@@ -79,6 +79,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> promise_of = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
     ChiType *rt_array_type = nullptr;
+    ast::Node *rt_enum_base = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
@@ -187,6 +188,8 @@ class Resolver {
     bool should_resolve_fn_body(ResolveScope &scope);
 
     bool should_destroy(ast::Node *node);
+
+    ChiType *resolve_comparator(ChiType *type, ResolveScope &scope);
 
     ChiType *resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
 

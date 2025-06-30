@@ -8,6 +8,7 @@
 #include "parser.h"
 #include "ast.h"
 #include "errors.h"
+#include "fmt/core.h"
 #include "lexer.h"
 
 using namespace cx;
@@ -1276,13 +1277,28 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
 void Parser::parse_enum_block(Node *node) {
     m_ctx->resolver->push_scope(node);
     expect(TokenType::LBRACE);
+    bool variants_ended = false;
     while (get()->type != TokenType::RBRACE) {
         if (get()->type == TokenType::END) {
             error(get(), errors::UNEXPECTED_EOF);
             return;
         }
-        auto member = parse_enum_member(node);
-        node->data.enum_decl.members.add(member);
+        if (get()->type == TokenType::SEMICOLON) {
+            consume();
+            variants_ended = true;
+        }
+        if (variants_ended) {
+            if (get()->type == (TokenType::KW_STRUCT)) {
+                consume();
+                auto struct_node = create_node(NodeType::StructDecl, get());
+                struct_node->name = fmt::format("{}.BaseStruct", node->name);
+                node->data.enum_decl.base_struct = struct_node;
+                parse_struct_block(node->data.enum_decl.base_struct);
+            }
+        } else {
+            auto member = parse_enum_member(node);
+            node->data.enum_decl.variants.add(member);
+        }
     }
     m_ctx->resolver->pop_scope();
     expect(TokenType::RBRACE);
@@ -1424,13 +1440,13 @@ Node *Parser::parse_typedef() {
 
 Node *Parser::parse_enum_member(Node *parent) {
     auto iden = expect(TokenType::IDEN);
-    auto node = create_node(NodeType::EnumMember, iden);
-    node->data.enum_member.name = iden;
-    node->data.enum_member.parent = parent;
+    auto node = create_node(NodeType::EnumVariant, iden);
+    node->data.enum_variant.name = iden;
+    node->data.enum_variant.parent = parent;
     if (next_is(TokenType::LBRACE)) {
         consume();
         auto struct_node = create_node(NodeType::StructDecl, iden);
-        node->data.enum_member.struct_body = struct_node;
+        node->data.enum_variant.struct_body = struct_node;
         while (get()->type != TokenType::RBRACE) {
             if (get()->type == TokenType::END) {
                 error(get(), errors::UNEXPECTED_EOF);
@@ -1444,10 +1460,10 @@ Node *Parser::parse_enum_member(Node *parent) {
 
     if (next_is(TokenType::ASS)) {
         consume();
-        node->data.enum_member.value = parse_expr_clause(false);
+        node->data.enum_variant.value = parse_expr_clause(false);
     }
 
-    if (!next_is(TokenType::RBRACE)) {
+    if (!next_is(TokenType::RBRACE) && !next_is(TokenType::SEMICOLON) && !next_is(TokenType::END)) {
         expect(TokenType::COMMA);
     }
 

@@ -186,7 +186,7 @@ void AstPrinter::print_node(Node *node) {
                     print(";\n");
                 } else if (member->type == NodeType::FnDef) {
                     print("\n");
-                } else if (member->type == NodeType::EnumMember) {
+                } else if (member->type == NodeType::EnumVariant) {
                     if (i != data.members.len - 1) {
                         print(",\n");
                     } else {
@@ -306,8 +306,8 @@ void AstPrinter::print_node(Node *node) {
         print_node(data.type);
         break;
     }
-    case NodeType::EnumMember: {
-        auto &data = node->data.enum_member;
+    case NodeType::EnumVariant: {
+        auto &data = node->data.enum_variant;
         print("{}", node->name);
         if (data.value) {
             print(" = ");
