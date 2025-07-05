@@ -573,6 +573,9 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
                                                   ChiType *dest_type) {
     auto src_value = compile_expr(fn, expr);
     auto src_type = get_chitype(expr);
+    if (src_type->kind == TypeKind::Undefined) {
+        return nullptr;
+    }
     if (expr->type == ast::NodeType::ConstructExpr && src_type == dest_type) {
         return src_value;
     }
@@ -1742,8 +1745,9 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &llvm_module = *m_ctx->llvm_module.get();
         auto var = compile_alloc(fn, stmt);
         add_var(stmt, var);
-        auto value = compile_assignment_to_type(fn, data.expr, get_chitype(stmt));
-        if (!data.expr->escape.moved) {
+        auto var_type = get_chitype(stmt);
+        auto value = compile_assignment_to_type(fn, data.expr, var_type);
+        if (value && !data.expr->escape.moved) {
             compile_copy(fn, value, var, get_chitype(stmt), data.expr);
         }
         break;
@@ -2259,6 +2263,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx),
                                                std::max(enum_->compiled_data_size, 1)));
         return llvm::StructType::create(members, get_resolver()->to_string(type, true));
+    }
+    case TypeKind::Undefined: {
+        return get_llvm_ptr_type();
     }
     default:
         panic("not implemented");

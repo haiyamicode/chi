@@ -67,6 +67,7 @@ void Lexer::setup_keywords() {
     s_keywords["implements"] = TokenType::KW_IMPLEMENTS;
     s_keywords["mut"] = TokenType::KW_MUT;
     s_keywords["in"] = TokenType::KW_IN;
+    s_keywords["undefined"] = TokenType::KW_UNDEFINED;
 
     // bool
     s_keywords["true"] = TokenType::BOOL;

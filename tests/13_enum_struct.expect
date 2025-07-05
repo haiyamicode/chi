@@ -1,3 +1,5 @@
+node.type: 1
+node.discriminator: 1
 node.ret: int
 node.name: f
 greeting: hello, f

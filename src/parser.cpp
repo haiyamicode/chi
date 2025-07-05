@@ -965,6 +965,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     case TokenType::INT:
     case TokenType::BOOL:
     case TokenType::NULLP:
+    case TokenType::KW_UNDEFINED:
     case TokenType::FLOAT:
     case TokenType::CHAR:
     case TokenType::STRING: {
@@ -1193,6 +1194,16 @@ Node *Parser::parse_enum_decl(DeclSpec *decl_spec) {
     Node *node = create_node(NodeType::EnumDecl, iden);
     node->start_token = kw;
     node->data.enum_decl.decl_spec = decl_spec;
+
+    if (next_is(TokenType::LPAREN)) {
+        consume();
+        auto iden = expect(TokenType::IDEN);
+        node->data.enum_decl.discriminator_field = iden;
+        expect(TokenType::COLON);
+        auto type = parse_type_expr(true);
+        node->data.enum_decl.discriminator_type = type;
+        expect(TokenType::RPAREN);
+    }
 
     save_block_pos(node);
     skip_block();

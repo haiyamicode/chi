@@ -62,6 +62,7 @@ struct SystemTypes {
     ChiType *result = nullptr;
     ChiType *error = nullptr;
     ChiType *promise = nullptr;
+    ChiType *undefined = nullptr;
 };
 
 struct ResolveContext {

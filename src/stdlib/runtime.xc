@@ -50,16 +50,16 @@ extern "C" {
   func cx_debug(ptr: *void);
 }
 
-struct __CxEnumBase implements ops.Display {
-  private __value: int = 0;
-  private __display_name: *string = null;
+struct __CxEnumBase<T> implements ops.Display {
+  private __value: T = undefined;
+  private __display_name: *string = undefined;
 
   func display() string {
     var s = this.__display_name!;
     return stringf("{}", s);
   }
  
-  func discriminator() uint32 {
+  func discriminator() T {
     return this.__value;
   }
 }
@@ -100,21 +100,21 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
   func to_string() string {
     this.assert_kind(JsonKind.String);
     let result = "";
-    cx_json_value_convert(this.data, JsonKind.String.value, &result);
+    cx_json_value_convert(this.data, JsonKind.String.discriminator(), &result);
     return result;
   }
 
   func to_bool() bool {
     this.assert_kind(JsonKind.Bool);
     let result = false;
-    cx_json_value_convert(this.data, JsonKind.Bool.value, &result);
+    cx_json_value_convert(this.data, JsonKind.Bool.discriminator(), &result);
     return result;
   }
 
   func to_int() int64 {
     this.assert_kind(JsonKind.Int64);
     let result: int64 = 0;
-    cx_json_value_convert(this.data, JsonKind.Int64.value, &result);
+    cx_json_value_convert(this.data, JsonKind.Int64.discriminator(), &result);
     return result;
   }
 

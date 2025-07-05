@@ -23,7 +23,7 @@ struct ChiTypeEnum;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
           MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box, Result, Error,
-          FnLambda, Promise, Infer, Module, This, Unknown, Bytes)
+          FnLambda, Promise, Infer, Module, This, Unknown, Bytes, Undefined)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
@@ -189,7 +189,7 @@ struct ChiTypeEnumValue {
     ChiType *enum_type = nullptr;
     ChiType *variant_struct = nullptr;
     ChiEnumVariant *member = nullptr;
-    string discriminator_field = "value";
+    string discriminator_field = "__value";
     ChiType *resolved_struct = nullptr;
     ChiType *discriminator_type = nullptr;
 

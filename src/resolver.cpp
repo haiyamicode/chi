@@ -59,6 +59,7 @@ void Resolver::context_init_primitives() {
     system_types.result = create_type(TypeKind::Result);
     system_types.error = create_type(TypeKind::Error);
     system_types.promise = create_type(TypeKind::Promise);
+    system_types.undefined = create_type(TypeKind::Undefined);
 
     add_primitive("bool", system_types.bool_);
     add_primitive("string", system_types.string);
@@ -435,6 +436,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
             if (var_type) {
+                if (expr_type->kind == TypeKind::Undefined) {
+                    return var_type;
+                }
                 if (data.expr->type != NodeType::ConstructExpr ||
                     data.expr->data.construct_expr.type) {
                     check_assignment(data.expr, expr_type, var_type);
@@ -582,6 +586,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_system_types()->string;
         case TokenType::FLOAT:
             return get_system_types()->float_;
+        case TokenType::KW_UNDEFINED:
+            return get_system_types()->undefined;
         default:
             unreachable();
         }
@@ -794,7 +800,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             enum_type->name = node->name;
             enum_type->display_name = node->name;
             enum_type->global_id = resolve_global_id(node);
-            enum_type->data.enum_.discriminator = m_ctx->system_types.int_;
             enum_type->data.enum_.node = node;
             type_sym = create_type_symbol(node->name, enum_type);
             auto value_type = create_type(TypeKind::EnumValue);
@@ -803,9 +808,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             value_type->data.enum_value.enum_type = enum_type;
             value_type->name = node->name;
             value_type->display_name = node->name;
-            string discriminator_field = "value";
+            string discriminator_field = data.get_discriminator_field();
             value_type->data.enum_value.discriminator_field = discriminator_field;
-            value_type->data.enum_value.discriminator_type = m_ctx->system_types.int_;
+            auto discriminator_type = data.discriminator_type
+                                          ? to_value_type(resolve(data.discriminator_type, scope))
+                                          : m_ctx->system_types.int_;
+            enum_type->data.enum_.discriminator = discriminator_type;
+            value_type->data.enum_value.discriminator_type = discriminator_type;
             enum_type->data.enum_.base_value_type = value_type;
 
             // Create internal resolved struct for enum value
@@ -817,8 +826,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             vstruct_data.node = node;
             auto allocator = get_allocator();
             vstruct_data.add_member(allocator, discriminator_field,
-                                    get_dummy_var(discriminator_field),
-                                    enum_type->data.enum_.discriminator);
+                                    get_dummy_var(discriminator_field), discriminator_type);
             vstruct_data.add_member(
                 allocator, "__display_name", get_dummy_var("__display_name"),
                 get_pointer_type(get_system_types()->string, TypeKind::Reference));
@@ -873,10 +881,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (!cx_enum_base) {
                     panic("__CxEnumBase not found in runtime");
                 }
-                assert(cx_enum_base->type == NodeType::StructDecl);
-                auto enum_base_struct = resolve_struct_type(cx_enum_base->resolved_type);
+
+                TypeList args = {enum_data.discriminator};
+                auto subtype = get_subtype(to_value_type(cx_enum_base->resolved_type), &args);
+                auto enum_base_struct = eval_struct_type(resolve_subtype(subtype));
+
                 auto base_value_struct = resolve_struct_type(enum_data.base_value_type);
-                for (auto base_member : enum_base_struct->members) {
+                for (auto base_member : enum_base_struct->data.struct_.members) {
                     if (base_member->is_method()) {
                         auto copy_node = create_node(NodeType::FnDef);
                         base_member->node->clone(copy_node);
@@ -1463,6 +1474,8 @@ string Resolver::to_string(ChiType *type, bool for_display) {
                            to_string(type->data.result.error, for_display));
     case TypeKind::Unknown:
         return "unknown";
+    case TypeKind::Undefined:
+        return "undefined";
     default:
         break;
     }
@@ -2135,6 +2148,8 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
         case TokenType::NULLP: {
             return {(int64_t)0};
         }
+        case TokenType::KW_UNDEFINED:
+            return {(int64_t)0};
         default:
             break;
         }

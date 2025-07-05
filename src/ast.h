@@ -394,6 +394,12 @@ struct EnumDecl {
     DeclSpec *decl_spec = {};
     array<Node *> variants = {};
     Node *base_struct = nullptr;
+    Token *discriminator_field = nullptr;
+    Node *discriminator_type = nullptr;
+
+    string get_discriminator_field() {
+        return discriminator_field ? discriminator_field->get_name() : "__value";
+    }
 };
 
 struct Node {

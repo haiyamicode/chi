@@ -1,4 +1,4 @@
-enum Node {
+enum Node (type: uint64) {
   VarDecl,
   FnDef {
     params: Array<string>;
@@ -33,6 +33,8 @@ func main() {
   };
 
 
+  printf("node.type: {}\n", node.type);
+  printf("node.discriminator: {}\n", node.discriminator());
   printf("node.ret: {}\n", node.ret);
   printf("node.name: {}\n", node.name);
   printf("greeting: {}\n", node.greeting());
