@@ -25,20 +25,33 @@ ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &nam
     member->node = node;
     member->resolved_type = resolved_type;
     member->parent_struct = this;
-    members.add(member);
+    auto is_static = node->declspec().is_static();
 
-    if (node->type == ast::NodeType::FnDef) {
-        member->method_index = vtable_size++;
+    if (is_static) {
+        static_members.add(member);
+        static_member_table[name] = member;
+        member->method_index = -1;
     } else {
-        member->field_index = fields.len;
-        fields.add(member);
+        members.add(member);
+        if (node->type == ast::NodeType::FnDef) {
+            member->method_index = vtable_size++;
+        } else {
+            member->field_index = fields.len;
+            fields.add(member);
+        }
+        member_table[name] = member;
     }
-    member_table[name] = member;
+
     return member;
 }
 
 ChiStructMember *ChiTypeStruct::find_member(const string &name) {
     auto found = member_table.get(name);
+    return found ? *found : nullptr;
+}
+
+ChiStructMember *ChiTypeStruct::find_static_member(const string &name) {
+    auto found = static_member_table.get(name);
     return found ? *found : nullptr;
 }
 
@@ -139,7 +152,7 @@ ast::Node *Scope::find_one(const string &symbol, bool recursive) {
 
 ast::Node *Scope::find_export(const string &symbol) {
     auto node = find_one(symbol);
-    if (!node || !node->declspec().is_exported()) {
+    if (!node || !node->declspec_ref().is_exported()) {
         return nullptr;
     }
     return node;

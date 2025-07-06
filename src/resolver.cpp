@@ -136,13 +136,14 @@ void Resolver::resolve(ast::Module *module) {
     }
 }
 
-bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
+bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit) {
     from_type = from_type->eval();
     to_type = to_type->eval();
 
     if (is_same_type(from_type, to_type)) {
         return true;
     }
+
     switch (to_type->kind) {
     case TypeKind::Void:
         return from_type->kind == TypeKind::Void;
@@ -150,15 +151,23 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type) {
         return from_type->kind == TypeKind::String || from_type == get_system_types()->str_lit;
     case TypeKind::Array:
         return from_type->kind == TypeKind::Array &&
-               can_assign(from_type->get_elem(), to_type->get_elem());
+               can_assign(from_type->get_elem(), to_type->get_elem(), is_explicit);
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef: {
         return from_type->kind == TypeKind::Pointer ||
-               can_assign(from_type, get_system_types()->int_);
+               can_assign(from_type, get_system_types()->int_, is_explicit);
     }
     case TypeKind::Int:
+        if (from_type->kind == TypeKind::Float) {
+            return is_explicit;
+        }
         return type_is_int(from_type);
+    case TypeKind::Float:
+        if (from_type->kind == TypeKind::Int) {
+            return is_explicit;
+        }
+        return from_type->kind == TypeKind::Float;
     case TypeKind::Any:
         return true;
     case TypeKind::Struct: {
@@ -336,6 +345,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.return_type ? resolve_value(data.return_type, scope) : get_system_types()->void_;
         TypeList param_types;
         bool is_variadic = false;
+        bool is_static = node->declspec().is_static();
+        auto container = is_static ? nullptr : scope.parent_struct;
 
         if (data.is_vararg) {
             is_variadic = true;
@@ -358,8 +369,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto is_extern = node->get_declspec() ? node->get_declspec()->is_extern() : false;
-        auto fn_type =
-            get_fn_type(return_type, &param_types, is_variadic, scope.parent_struct, is_extern);
+        auto fn_type = get_fn_type(return_type, &param_types, is_variadic, container, is_extern);
         if (!is_fn_decl) {
             return get_lambda_for_fn(fn_type);
         }
@@ -368,9 +378,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::Identifier: {
         auto &data = node->data.identifier;
         if (data.kind == ast::IdentifierKind::This) {
+            auto declspec =
+                scope.parent_fn_node ? scope.parent_fn_node->declspec() : ast::DeclSpec();
+            auto is_static = declspec.is_static();
+
+            if (!scope.parent_struct) {
+                error(node, errors::INVALID_THIS);
+                return create_type(TypeKind::Unknown);
+            }
+
+            if (is_static) {
+                assert(scope.parent_type_symbol);
+                return scope.parent_type_symbol;
+            }
+
             auto type = create_type(TypeKind::This);
-            auto is_mut =
-                scope.parent_fn_node && scope.parent_fn_node->get_declspec()->is_mutable();
+            auto is_mut = declspec.is_mutable();
             type->data.pointer.elem = get_pointer_type(
                 scope.parent_struct, is_mut ? TypeKind::MutRef : TypeKind::Reference);
             return type;
@@ -613,6 +636,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (field_name.empty()) {
             return create_type(TypeKind::Unknown);
         }
+
         if (expr_type->kind == TypeKind::Fn) {
             expr_type = get_lambda_for_fn(expr_type);
         } else if (expr_type->kind == TypeKind::Module) {
@@ -638,6 +662,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.resolved_decl = member->node;
                 data.field->node = member->node;
                 data.resolved_dot_kind = DotKind::EnumVariant;
+                return member->resolved_type;
+            }
+            case TypeKind::Struct: {
+                auto member = underlying_type->data.struct_.find_static_member(field_name);
+                if (!member) {
+                    error(node, errors::MEMBER_NOT_FOUND, field_name,
+                          to_string(underlying_type, true));
+                    return nullptr;
+                }
+                data.resolved_decl = member->node;
+                data.field->node = member->node;
                 return member->resolved_type;
             }
             default:
@@ -953,7 +988,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         type_sym = node->resolved_type;
         struct_type = type_sym->data.type_symbol.underlying_type;
         struct_ = &struct_type->data.struct_;
-        auto struct_scope = scope.parent_struct ? scope : scope.set_parent_struct(struct_type);
+
+        auto struct_scope =
+            scope.parent_struct
+                ? scope
+                : scope.set_parent_struct(struct_type).set_parent_type_symbol(type_sym);
+
         if (struct_->resolve_status == ResolveStatus::None) {
             // second pass
             for (auto member : data.members) {
@@ -1564,8 +1604,17 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display)
     return PRINT_ENUM(kind);
 }
 
-void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type) {
-    if (!can_assign(from_type, to_type)) {
+void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type,
+                                bool is_explicit) {
+    if (!can_assign(from_type, to_type, is_explicit)) {
+        if (!is_explicit) {
+            auto can_convert_explitcitly = can_assign(from_type, to_type, true);
+            if (can_convert_explitcitly) {
+                error(value, errors::CANNOT_CONVERT_IMPLICIT, to_string(from_type, true),
+                      to_string(to_type, true));
+                return;
+            }
+        }
         error(value, errors::CANNOT_CONVERT, to_string(from_type, true), to_string(to_type, true));
     }
 }
@@ -1605,7 +1654,7 @@ bool Resolver::is_ref_mutable(ast::Node *node, ResolveScope &scope) {
 }
 
 void Resolver::check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type) {
-    check_assignment(value, from_type, to_type);
+    check_assignment(value, from_type, to_type, true);
 }
 
 void Resolver::context_init_builtins(ast::Module *builtin_module) {
@@ -1651,7 +1700,7 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         node->data.var_decl.resolved_field = member;
     } else if (node->type == NodeType::FnDef) {
         member->resolved_type = resolve(node, scope);
-        for (auto attr : node->declspec().attributes) {
+        for (auto attr : node->declspec_ref().attributes) {
             auto term_string = resolve_term_string(attr->data.decl_attribute.term);
             auto sym = m_ctx->intrinsic_symbols.get(term_string);
             if (sym) {
@@ -1927,7 +1976,7 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
     }
 
     if (field_member->is_method()) {
-        auto is_mutable = field_member->node->declspec().is_mutable();
+        auto is_mutable = field_member->node->declspec_ref().is_mutable();
         if (is_mutable && !is_struct_access_mutable(struct_type)) {
             error(node, errors::MUTATING_METHOD_ON_IMMUTABLE_REFERENCE, field_name,
                   to_string(struct_type, true));
@@ -2334,7 +2383,7 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
         ok = type_is_int(type) || type->kind == TypeKind::String;
         break;
     default:
-        ok = type_is_int(type);
+        ok = type_is_int(type) || type->kind == TypeKind::Float;
         break;
     }
     if (!ok) {
@@ -2503,6 +2552,10 @@ ResolveScope ResolveScope::set_parent_fn(ChiType *fn) const { RS_SET_PROP_COPY(p
 
 ResolveScope ResolveScope::set_parent_struct(ChiType *struct_) const {
     RS_SET_PROP_COPY(parent_struct, struct_);
+}
+
+ResolveScope ResolveScope::set_parent_type_symbol(ChiType *symbol) const {
+    RS_SET_PROP_COPY(parent_type_symbol, symbol);
 }
 
 ResolveScope ResolveScope::set_value_type(ChiType *value_type) const {

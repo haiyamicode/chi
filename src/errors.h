@@ -18,6 +18,7 @@ constexpr auto UNEXPECTED_EOF = "unexpected end-of-file";
 constexpr auto REDECLARED = "'{}' redeclared";
 constexpr auto UNDECLARED = "undeclared identifier '{}'";
 constexpr auto CANNOT_CONVERT = "cannot convert from {} to {}";
+constexpr auto CANNOT_CONVERT_IMPLICIT = "conversion from {} to {} requires an explicit cast";
 constexpr auto CALL_WRONG_NUMBER_OF_ARGS =
     "wrong number of arguments for function call, expected {}, got {}";
 constexpr auto SUBTYPE_WRONG_NUMBER_OF_ARGS =
@@ -65,6 +66,7 @@ constexpr auto CANNOT_MODIFY_CONST = "cannot modify immutable constant '{}'";
 constexpr auto INVALID_MUT_TYPE = "Mut can only be used for reference type, got '{}'";
 constexpr auto MUTATING_METHOD_ON_IMMUTABLE_REFERENCE =
     "cannot access mutating method '{}' on immutable reference {}";
+constexpr auto INVALID_THIS = "'this' keyword can only be used in a method scope";
 
 } // namespace errors
 } // namespace cx

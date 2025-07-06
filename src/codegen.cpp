@@ -738,6 +738,54 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     return builder.CreateLoad(struct_type_l, var);
 }
 
+llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *value,
+                                                 ChiType *from_type, ChiType *to_type) {
+    if (from_type->kind == TypeKind::Int && to_type->kind == TypeKind::Float) {
+        auto &builder = *m_ctx->llvm_builder;
+        bool is_unsigned = from_type->data.int_.is_unsigned;
+        auto from_type_l = compile_type(from_type);
+        auto to_type_l = compile_type(to_type);
+        if (is_unsigned) {
+            return builder.CreateUIToFP(value, to_type_l);
+        } else {
+            return builder.CreateSIToFP(value, to_type_l);
+        }
+    } else if (from_type->kind == TypeKind::Float && to_type->kind == TypeKind::Int) {
+        auto &builder = *m_ctx->llvm_builder;
+        bool is_unsigned = to_type->data.int_.is_unsigned;
+        auto from_type_l = compile_type(from_type);
+        auto to_type_l = compile_type(to_type);
+        if (is_unsigned) {
+            return builder.CreateFPToUI(value, to_type_l);
+        } else {
+            return builder.CreateFPToSI(value, to_type_l);
+        }
+    } else if (from_type->kind == TypeKind::Int && to_type->kind == TypeKind::Int) {
+        auto &builder = *m_ctx->llvm_builder;
+        auto from_type_l = compile_type(from_type);
+        auto to_type_l = compile_type(to_type);
+        auto is_signed = !from_type->data.int_.is_unsigned;
+        return builder.CreateIntCast(value, to_type_l, is_signed);
+
+    } else if (from_type->kind == TypeKind::Float && to_type->kind == TypeKind::Float) {
+        auto &builder = *m_ctx->llvm_builder;
+        auto from_type_l = compile_type(from_type);
+        auto from_size = llvm_type_size(from_type_l);
+        auto to_type_l = compile_type(to_type);
+        auto to_size = llvm_type_size(to_type_l);
+        if (from_size < to_size) {
+            return builder.CreateFPExt(value, to_type_l);
+        } else if (from_size > to_size) {
+            return builder.CreateFPTrunc(value, to_type_l);
+        } else {
+            return value;
+        }
+    }
+
+    panic("unreachable");
+    return nullptr;
+}
+
 llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                           ChiType *to_type) {
     switch (to_type->kind) {
@@ -792,11 +840,17 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         break;
     }
     case TypeKind::Int: {
+        if (from_type->kind == TypeKind::Float) {
+            return compile_number_conversion(fn, value, from_type, to_type);
+        }
         if (from_type->kind == TypeKind::Pointer) {
             return m_ctx->llvm_builder->CreatePtrToInt(value, compile_type(to_type));
         } else {
-            return m_ctx->llvm_builder->CreateIntCast(value, compile_type(to_type), false);
+            return compile_number_conversion(fn, value, from_type, to_type);
         }
+    }
+    case TypeKind::Float: {
+        return compile_number_conversion(fn, value, from_type, to_type);
     }
     case TypeKind::FnLambda: {
         if (from_type->kind == TypeKind::Fn) {
@@ -862,7 +916,22 @@ static llvm::CmpInst::Predicate get_cmpop(TokenType op, ChiType *type) {
     return llvm::CmpInst::Predicate::BAD_ICMP_PREDICATE;
 }
 
-static llvm::BinaryOperator::BinaryOps get_binop(TokenType op) {
+static llvm::BinaryOperator::BinaryOps get_binop(TokenType op, ChiType *type) {
+    if (type->kind == TypeKind::Float) {
+        switch (op) {
+        case TokenType::ADD:
+            return llvm::BinaryOperator::BinaryOps::FAdd;
+        case TokenType::SUB:
+            return llvm::BinaryOperator::BinaryOps::FSub;
+        case TokenType::MUL:
+            return llvm::BinaryOperator::BinaryOps::FMul;
+        case TokenType::DIV:
+            return llvm::BinaryOperator::BinaryOps::FDiv;
+        default:
+            panic("not implemented: {}", PRINT_ENUM(op));
+        }
+        return llvm::BinaryOperator::BinaryOps::FAdd;
+    }
     switch (op) {
     case TokenType::ADD:
         return llvm::BinaryOperator::BinaryOps::Add;
@@ -1009,9 +1078,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             return value;
         }
         default: {
-            auto llvm_op = get_binop(data.op_type);
             auto lhs = compile_expr(fn, data.op1);
             auto rhs = compile_expr(fn, data.op2);
+            auto target_type = get_chitype(expr);
+            auto llvm_op = get_binop(data.op_type, target_type);
             return builder.CreateBinOp(llvm_op, lhs, rhs);
         }
         };
@@ -1106,7 +1176,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::CastExpr: {
         auto &data = expr->data.cast_expr;
-        return compile_expr(fn, data.expr);
+        auto from_value = compile_expr(fn, data.expr);
+        auto from_type = get_chitype(data.expr);
+        return compile_conversion(fn, from_value, from_type, get_chitype(expr));
     }
     case ast::NodeType::IndexExpr: {
         auto &builder = *m_ctx->llvm_builder;
@@ -2020,7 +2092,7 @@ Function *Compiler::get_fn(ast::Node *node) {
 }
 
 Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
-    auto declspec = fn->declspec();
+    auto declspec = fn->declspec_ref();
     auto ftype = get_chitype(fn);
     int bind_offset = 0;
     string bind_name = "";

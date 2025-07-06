@@ -98,6 +98,7 @@ struct ResolveScope {
     ast::Node *move_outlet = nullptr;
     ast::Block *block = nullptr;
     bool is_lhs = false;
+    ChiType *parent_type_symbol = nullptr;
 
     ast::FnDef *parent_fn_def() {
         assert(parent_fn_node);
@@ -108,6 +109,8 @@ struct ResolveScope {
     ResolveScope set_parent_fn(ChiType *fn) const;
 
     ResolveScope set_parent_struct(ChiType *struct_) const;
+
+    ResolveScope set_parent_type_symbol(ChiType *symbol) const;
 
     ResolveScope set_value_type(ChiType *value_type) const;
 
@@ -150,13 +153,14 @@ class Resolver {
 
     ast::Node *add_primitive(const string &name, ChiType *type);
 
-    bool can_assign(ChiType *from_type, ChiType *to_type);
+    bool can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit = false);
 
     bool is_same_type(ChiType *a, ChiType *b);
 
     TypeKind get_sigil_type_kind(ast::SigilKind sigil);
 
-    void check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type);
+    void check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type,
+                          bool is_explicit = false);
 
     void check_binary_op(ast::Node *node, TokenType op_type, ChiType *type);
 

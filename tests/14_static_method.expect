@@ -1,0 +1,8 @@
+a: rgb(0,0,0)
+b: rgb(153,153,153)
+c: rgb(255,255,255)
+d: rgb(255,0,0)
+a.brightness = 0
+b.brightness = 0.6
+c.brightness = 1
+d.brightness = 0.33333334

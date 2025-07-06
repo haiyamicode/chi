@@ -258,6 +258,11 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         spec->flags |= DECL_MUTABLE;
         break;
     }
+    case TokenType::KW_STATIC: {
+        consume();
+        spec->flags |= DECL_STATIC;
+        break;
+    }
     default:
         break;
     }
@@ -290,6 +295,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::AT:
     case TokenType::KW_PRIVATE:
     case TokenType::KW_PROTECTED:
+    case TokenType::KW_STATIC:
         return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
@@ -922,6 +928,15 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
         case TokenType::DOT:
             node = parse_dot_expr(node);
             break;
+
+        case TokenType::KW_AS: {
+            auto expr = node;
+            node = create_node(NodeType::CastExpr, token);
+            consume();
+            node->data.cast_expr.dest_type = parse_type_expr(true);
+            node->data.cast_expr.expr = expr;
+            break;
+        }
 
         case TokenType::LBRACK:
             node = parse_index_expr(node);

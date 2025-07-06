@@ -14,7 +14,8 @@ TESTS_LIST = 00_fib.test \
 		10_copy.test \
 		11_copy_builtins.test \
 		12_references.test \
-		13_enum_struct.test
+		13_enum_struct.test \
+		14_static_method.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

@@ -102,10 +102,12 @@ struct ChiTypeStruct {
     ast::Node *node = nullptr;
     array<ChiStructMember *> members = {};
     array<ChiStructMember *> fields = {};
+    array<ChiStructMember *> static_members = {};
     array<ChiType *> type_params = {};
     array<ChiType *> subtypes = {};
     array<InterfaceImpl *> interfaces = {};
     map<string, ChiStructMember *> member_table = {};
+    map<string, ChiStructMember *> static_member_table = {};
     map<ChiType *, InterfaceImpl *> interface_table = {};
     optional<string> display_name = std::nullopt;
     string global_id = "";
@@ -119,6 +121,8 @@ struct ChiTypeStruct {
                                 ChiType *resolved_type);
 
     ChiStructMember *find_member(const string &name);
+
+    ChiStructMember *find_static_member(const string &name);
 
     InterfaceImpl *add_interface(Context *allocator, ChiType *trait, ChiType *impl);
 
@@ -405,6 +409,7 @@ struct Scope {
 
 union TypeInfoData {
     ChiTypeInt int_;
+    ChiTypeFloat float_;
 };
 
 #pragma pack(push, 1)

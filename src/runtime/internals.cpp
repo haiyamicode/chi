@@ -118,6 +118,24 @@ static std::string istringf(const CxAny &v) {
     return "";
 }
 
+static std::string fstringf(const CxAny &v) {
+    auto typedata = &v.type->data;
+    auto &spec = typedata->float_;
+
+#define _FORMAT_FLOAT(T, v) fmt::format("{}", (T)(*(T *)(&v.data)))
+    switch (spec.bit_count) {
+    case 32:
+        return _FORMAT_FLOAT(float, v);
+    case 64:
+        return _FORMAT_FLOAT(double, v);
+    default:
+        break;
+    }
+
+    panic("unhandled");
+    return "";
+}
+
 static void **program_vtable;
 
 void cx_set_program_vtable(void *ptr) { program_vtable = (void **)ptr; }
@@ -149,6 +167,8 @@ static std::string get_value_display(const CxAny &v) {
         return fmt::format("{}", *(bool *)&v.data);
     case TypeKind::Int:
         return istringf(v);
+    case TypeKind::Float:
+        return fstringf(v);
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:

@@ -38,6 +38,7 @@ enum DeclFlag : uint32_t {
     DECL_IS_ENTRY = 1 << 2,
     DECL_PROTECTED = 1 << 3,
     DECL_MUTABLE = 1 << 4,
+    DECL_STATIC = 1 << 5,
 };
 
 struct Module {
@@ -118,6 +119,7 @@ struct DeclSpec {
     bool is_mutable() const { return has_flag(DECL_MUTABLE); }
     bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
     bool is_extern() const { return has_flag(DECL_EXTERN); }
+    bool is_static() const { return has_flag(DECL_STATIC); }
 };
 
 struct FnProto {
@@ -128,7 +130,7 @@ struct FnProto {
     bool is_type_expr = false;
 };
 
-MAKE_ENUM(FnKind, TopLevel, InstanceMethod, StaticMethod, Constructor, Destructor, Lambda);
+MAKE_ENUM(FnKind, TopLevel, InstanceMethod, Constructor, Destructor, Lambda);
 
 struct FnDef {
     Node *fn_proto = nullptr;
@@ -141,9 +143,8 @@ struct FnDef {
     array<Node *> cleanup_vars = {};
     bool has_try = false;
 
-    bool is_instance_method() {
-        return fn_kind != FnKind::StaticMethod && fn_kind != FnKind::TopLevel;
-    }
+    bool is_static() { return decl_spec && decl_spec->is_static(); }
+    bool is_instance_method() { return fn_kind != FnKind::TopLevel && !is_static(); }
 
     bool has_try_or_cleanup() { return has_try || cleanup_vars.len; }
 };
@@ -644,13 +645,21 @@ struct Node {
         }
     }
 
-    DeclSpec &declspec() {
+    DeclSpec &declspec_ref() {
         auto ptr = get_declspec();
         if (!ptr) {
             panic("node type {} does not have declspec", PRINT_ENUM(type));
         }
         return *ptr;
     };
+
+    DeclSpec declspec() {
+        auto ptr = get_declspec();
+        if (!ptr) {
+            return {};
+        }
+        return *ptr;
+    }
 
     bool can_escape() {
         if (type == NodeType::Identifier) {

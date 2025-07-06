@@ -230,6 +230,9 @@ class Compiler {
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                       NodeList *captures);
 
+    llvm::Value *compile_number_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
+                                           ChiType *to_type);
+
     llvm::Value *compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                     ChiType *to_type);
 
