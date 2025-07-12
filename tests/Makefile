@@ -17,15 +17,23 @@ TESTS_LIST = 00_fib.test \
 		13_enum_struct.test \
 		14_static_method.test \
 		15_package.test \
-		16_lambda.test
+		16_lambda.test \
+		17_escape_analysis.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
 OUTPUT_DIR = $(BUILD_DIR)/tests
 
-%.test: %.expect %.xc
+%.test: %.expect
 	echo Test: $*...
-	$(CHI) -o $(TMP).$* -c $*.xc && $(TMP).$* 2>&1 >$*.output;
+	@if [ -f $*.xc ]; then \
+		$(CHI) -o $(TMP).$* -c $*.xc && $(TMP).$* 2>&1 >$*.output; \
+	elif [ -f $*.x ]; then \
+		$(CHI) -o $(TMP).$* -c $*.x && $(TMP).$* 2>&1 >$*.output; \
+	else \
+		echo "No source file found for test $*"; \
+		exit 1; \
+	fi
 	@if [ "x`diff -qbu $*.expect $*.output`" != "x" ]; \
 	then \
         	echo "error in test $*"; \
