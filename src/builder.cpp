@@ -131,7 +131,13 @@ void Builder::build_package(const string &package_dir) {
     auto config_str = config_content.read_all();
     boost::json::value config_json;
     std::error_code ec;
-    config_json = boost::json::parse(config_str, ec);
+
+    // Enable comment parsing for .jsonc files
+    boost::json::parse_options opts;
+    opts.allow_comments = true;
+    opts.allow_trailing_commas = true; // Also allow trailing commas for better .jsonc support
+
+    config_json = boost::json::parse(config_str, ec, {}, opts);
 
     if (ec) {
         print("error: failed to parse package.jsonc: {}\n", ec.message());
