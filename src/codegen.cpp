@@ -414,39 +414,36 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     fn->use_label(entry_b);
 
     auto &proto = fn_def.fn_proto->data.fn_proto;
-    int skip = fn->bind_offset;
     llvm::Value *sret_arg = nullptr;
-    for (uint32_t i = 0; i < fn->llvm_fn->arg_size(); i++) {
-        if (i == fn->sret_offset) {
-            auto llvm_param = fn->llvm_fn->getArg(i);
-            sret_arg = llvm_param;
-            continue;
-        }
 
-        if (i == fn->bind_offset - 1) {
-            auto llvm_param = fn->llvm_fn->getArg(i);
+    for (const auto &param_info : fn->parameter_info) {
+        auto llvm_param = fn->llvm_fn->getArg(param_info.llvm_index);
+
+        if (param_info.kind == ParameterKind::SRet) {
+            sret_arg = llvm_param;
+        } else if (param_info.kind == ParameterKind::Bind) {
             auto var = builder.CreateAlloca(llvm_param->getType(), nullptr, llvm_param->getName());
             builder.CreateStore(llvm_param, var);
             fn->bind_ptr = builder.CreateLoad(llvm_param->getType(), var);
-            continue;
+        } else if (param_info.kind == ParameterKind::Regular) {
+            auto idx = param_info.user_param_index;
+            auto param = proto.params[idx];
+            auto var = compile_alloc(fn, param);
+            emit_dbg_location(param);
+            compile_copy(fn, llvm_param, var, get_chitype(param));
+            add_var(param, var);
+
+            // debug info
+            auto param_line_no = param->token->pos.line_number();
+            auto user_param_offset = fn->get_user_param_llvm_offset();
+            auto dbg_var = dbg_builder->createParameterVariable(
+                sp, llvm_param->getName(), param_info.llvm_index + user_param_offset + 1, file,
+                param_line_no, compile_di_type(get_chitype(param)));
+            dbg_builder->insertDeclare(
+                var, dbg_var, dbg_builder->createExpression(),
+                llvm::DILocation::get(sp->getContext(), param_line_no, 0, sp),
+                builder.GetInsertBlock());
         }
-
-        auto idx = i - skip;
-        auto param = proto.params[idx];
-        auto llvm_param = fn->llvm_fn->getArg(i);
-        auto var = compile_alloc(fn, param);
-        emit_dbg_location(param);
-        compile_copy(fn, llvm_param, var, get_chitype(param));
-        add_var(param, var);
-
-        // debug info
-        auto param_line_no = param->token->pos.line_number();
-        auto dbg_var = dbg_builder->createParameterVariable(sp, llvm_param->getName(), i + skip + 1,
-                                                            file, param_line_no,
-                                                            compile_di_type(get_chitype(param)));
-        dbg_builder->insertDeclare(var, dbg_var, dbg_builder->createExpression(),
-                                   llvm::DILocation::get(sp->getContext(), param_line_no, 0, sp),
-                                   builder.GetInsertBlock());
     }
 
     // function return
@@ -2101,20 +2098,23 @@ Function *Compiler::get_fn(ast::Node *node) {
 Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
     auto declspec = fn->declspec_ref();
     auto ftype = get_chitype(fn);
-    int bind_offset = 0;
+
+    // Determine bind parameter information
+    bool has_bind = false;
     string bind_name = "";
     if (ftype->kind == TypeKind::FnLambda) {
-        bind_offset = 1;
+        has_bind = true;
         ftype = ftype->data.fn_lambda.bound_fn;
         bind_name = "_binds";
         assert(ftype);
     }
     if (ftype->kind == TypeKind::Fn) {
         if (ftype->data.fn.container_ref) {
-            bind_offset = 1;
+            has_bind = true;
             bind_name = "this";
         }
     }
+
     if (name.empty()) {
         name = proto_node->name;
     }
@@ -2124,30 +2124,35 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
                               llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
 
-    // sret mechanism
-    auto sret_offset = -1;
-    if (ftype->data.fn.should_use_sret() && !declspec.is_extern()) {
-        bind_offset++;
-        sret_offset = 0;
-    }
-
-    // Set names for all arguments.
-    for (int i = 0; i < fn_l->arg_size(); i++) {
-        if (i == sret_offset) {
-            fn_l->getArg(i)->setName("sret");
-            // fn_l->getArg(i)->addAttr(llvm::Attribute::StructRet);
-        } else if (i == bind_offset - 1) {
-            fn_l->getArg(i)->setName(bind_name);
-        } else {
-            auto index = i - bind_offset;
-            auto arg = fn_l->arg_begin() + i;
-            arg->setName(proto_node->data.fn_proto.params[index]->name);
-        }
-    }
-
     auto new_fn = add_fn(fn_l, fn, ftype);
-    new_fn->bind_offset = bind_offset;
-    new_fn->sret_offset = sret_offset;
+
+    // Build parameter information
+    std::vector<ParameterInfo> param_info;
+    int llvm_index = 0;
+
+    // Add sret parameter if needed
+    bool has_sret = ftype->data.fn.should_use_sret() && !declspec.is_extern();
+    if (has_sret) {
+        param_info.emplace_back(ParameterKind::SRet, llvm_index++, -1, "sret");
+        fn_l->getArg(llvm_index - 1)->setName("sret");
+    }
+
+    // Add bind parameter if needed
+    if (has_bind) {
+        param_info.emplace_back(ParameterKind::Bind, llvm_index++, -1, bind_name);
+        fn_l->getArg(llvm_index - 1)->setName(bind_name);
+    }
+
+    // Add regular user parameters
+    for (int user_idx = 0; user_idx < proto_node->data.fn_proto.params.len; user_idx++) {
+        auto param_name = proto_node->data.fn_proto.params[user_idx]->name;
+        param_info.emplace_back(ParameterKind::Regular, llvm_index++, user_idx, param_name);
+        fn_l->getArg(llvm_index - 1)->setName(param_name);
+    }
+
+    // Store parameter information
+    new_fn->parameter_info = std::move(param_info);
+
     new_fn->llvm_fn->setName(new_fn->get_llvm_name());
     return new_fn;
 }

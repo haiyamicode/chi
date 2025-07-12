@@ -27,6 +27,22 @@ struct LoopLabels {
     label_t *end = nullptr;
 };
 
+enum class ParameterKind {
+    SRet,   // Struct return parameter
+    Bind,   // Bind parameter (this/lambda capture)
+    Regular // Regular user parameter
+};
+
+struct ParameterInfo {
+    ParameterKind kind;
+    int llvm_index;       // Position in LLVM function args
+    int user_param_index; // Index in original function parameters (-1 for generated)
+    std::string name;     // Parameter name
+
+    ParameterInfo(ParameterKind k, int llvm_idx, int user_idx = -1, std::string n = "")
+        : kind(k), llvm_index(llvm_idx), user_param_index(user_idx), name(n) {}
+};
+
 struct BlockScope {
     bool branched = false;
 };
@@ -51,16 +67,54 @@ struct Function {
     std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
     bool has_cleanup_invoke = false;
-    int bind_offset = 0;
-    int sret_offset = -1;
+
+    // Parameter information
+    std::vector<ParameterInfo> parameter_info;
     llvm::Value *bind_ptr = nullptr;
 
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
 
     string get_llvm_name() const { return qualified_name; }
-    bool use_sret() { return sret_offset >= 0; }
-    llvm::Value *get_this_arg() { return llvm_fn->getArg(use_sret() ? 1 : 0); }
+    bool use_sret() { return get_sret_param() != nullptr; }
+    llvm::Value *get_this_arg() {
+        auto bind_param = get_bind_param();
+        return bind_param ? llvm_fn->getArg(bind_param->llvm_index) : nullptr;
+    }
+
+    // New parameter system helper methods
+    ParameterInfo *get_sret_param() {
+        for (auto &param : parameter_info) {
+            if (param.kind == ParameterKind::SRet)
+                return &param;
+        }
+        return nullptr;
+    }
+
+    ParameterInfo *get_bind_param() {
+        for (auto &param : parameter_info) {
+            if (param.kind == ParameterKind::Bind)
+                return &param;
+        }
+        return nullptr;
+    }
+
+    ParameterInfo *get_param_at_llvm_index(int llvm_index) {
+        for (auto &param : parameter_info) {
+            if (param.llvm_index == llvm_index)
+                return &param;
+        }
+        return nullptr;
+    }
+
+    int get_user_param_llvm_offset() {
+        int offset = 0;
+        for (const auto &param : parameter_info) {
+            if (param.kind != ParameterKind::Regular)
+                offset++;
+        }
+        return offset;
+    }
 
     unknown_t get_null_constant();
     BlockScope *push_scope() {
