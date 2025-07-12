@@ -18,7 +18,7 @@ set(LIBS ${PKG_LIBS} ${LLVM_LIBS} pthread dl)
 
 # Runtime library
 include(GenerateExportHeader)
-add_library(rt STATIC ${HEADER_FILES} ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
+add_library(rt STATIC ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
 generate_export_header(rt PREFIX_NAME CHI_ EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/generated/rt_export.h)
 target_include_directories(rt PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${PROJECT_BINARY_DIR})
 target_link_libraries(rt PUBLIC fmt backtrace uv)
