@@ -10,6 +10,7 @@
 #include "analyzer.h"
 #include "ast_printer.h"
 #include "builder.h"
+#include "package_config.h"
 #include "parser.h"
 #include "util.h"
 #define BOOST_JSON_STANDALONE
@@ -128,23 +129,31 @@ void Builder::build_package(const string &package_dir) {
 
     auto config_content = io::Buffer::from_file(package_config_path.string());
     auto config_str = config_content.read_all();
-    boost::json::value config;
+    boost::json::value config_json;
     std::error_code ec;
-    config = boost::json::parse(config_str, ec);
+    config_json = boost::json::parse(config_str, ec);
 
     if (ec) {
         print("error: failed to parse package.jsonc: {}\n", ec.message());
         exit(1);
     }
 
-    // Extract entry file
-    string entry_file;
-    if (config.as_object().if_contains("entry_file")) {
-        entry_file = config.at("entry_file").as_string().c_str();
-    } else {
-        print("error: entry_file not specified in package.jsonc\n");
+    // Validate against JSON schema first
+    string schema_error;
+    if (!PackageConfig::validate_with_schema(config_json, schema_error)) {
+        print("error: package.jsonc schema validation failed:\n{}", schema_error);
         exit(1);
     }
+
+    // Parse configuration using Boost.JSON native serialization
+    auto config = boost::json::value_to<PackageConfig>(config_json);
+    string validation_error;
+    if (!config.validate(validation_error)) {
+        print("error: invalid package.jsonc configuration:\n{}", validation_error);
+        exit(1);
+    }
+
+    string entry_file = config.entry_file;
 
     auto entry_file_path = fs::path(package_dir) / entry_file;
     if (!fs::exists(entry_file_path)) {
@@ -174,67 +183,57 @@ void Builder::build_package(const string &package_dir) {
 
     // Check for C compiler configuration
     array<string> c_object_files;
-    if (config.as_object().if_contains("c_interop")) {
-        auto c_config = config.at("c_interop").as_object();
+    if (config.c_interop.has_value() && config.c_interop->enabled) {
+        const auto &c_config = *config.c_interop;
 
-        if (c_config.if_contains("enabled") && c_config.at("enabled").as_bool()) {
-            // Get include directories
-            array<string> include_dirs;
-            if (c_config.if_contains("include_directories")) {
-                for (auto &dir : c_config.at("include_directories").as_array()) {
-                    auto include_path = fs::path(package_dir) / dir.as_string().c_str();
-                    include_dirs.add(include_path.string());
-                }
+        // Get include directories
+        array<string> include_dirs;
+        for (const auto &dir : c_config.include_directories) {
+            auto include_path = fs::path(package_dir) / dir;
+            include_dirs.add(include_path.string());
+        }
+
+        // Get source files (with glob pattern support)
+        array<string> source_files;
+        for (const auto &pattern : c_config.source_files) {
+            // Use glob pattern matching
+            auto matched_files = glob_files(fs::path(package_dir), pattern);
+            for (auto &file : matched_files) {
+                source_files.add(file);
+            }
+        }
+
+        // Compile C source files
+        for (auto &src_file : source_files) {
+            auto obj_file = get_tmp_file_path(fs::path(src_file).stem().string() + ".o");
+
+            string include_flags = "";
+            for (auto &inc_dir : include_dirs) {
+                include_flags += fmt::format("-I{} ", inc_dir);
             }
 
-            // Get source files (with glob pattern support)
-            array<string> source_files;
-            if (c_config.if_contains("source_files")) {
-                for (auto &pattern : c_config.at("source_files").as_array()) {
-                    string pattern_str = pattern.as_string().c_str();
+            auto cmd = fmt::format("gcc -c {} {} -o {}", include_flags, src_file, obj_file);
 
-                    // Use glob pattern matching
-                    auto matched_files = glob_files(fs::path(package_dir), pattern_str);
-                    for (auto &file : matched_files) {
-                        source_files.add(file);
-                    }
-                }
+            if (debug_mode) {
+                print("running: {}\n", cmd);
             }
 
-            // Compile C source files
-            for (auto &src_file : source_files) {
-                auto obj_file = get_tmp_file_path(fs::path(src_file).stem().string() + ".o");
-
-                string include_flags = "";
-                for (auto &inc_dir : include_dirs) {
-                    include_flags += fmt::format("-I{} ", inc_dir);
-                }
-
-                auto cmd = fmt::format("gcc -c {} {} -o {}", include_flags, src_file, obj_file);
-
-                if (debug_mode) {
-                    print("running: {}\n", cmd);
-                }
-
-                auto result = system(cmd.c_str());
-                if (result != 0) {
-                    print("error: failed to compile C source file: {}\n", src_file);
-                    exit(1);
-                }
-
-                c_object_files.add(obj_file);
+            auto result = system(cmd.c_str());
+            if (result != 0) {
+                print("error: failed to compile C source file: {}\n", src_file);
+                exit(1);
             }
+
+            c_object_files.add(obj_file);
         }
     }
 
     // Get external libraries to link
     array<string> link_libraries;
-    if (config.as_object().if_contains("c_interop")) {
-        auto c_config = config.at("c_interop").as_object();
-        if (c_config.if_contains("link_libraries")) {
-            for (auto &lib : c_config.at("link_libraries").as_array()) {
-                link_libraries.add(lib.as_string().c_str());
-            }
+    if (config.c_interop.has_value()) {
+        const auto &c_config = *config.c_interop;
+        for (const auto &lib : c_config.link_libraries) {
+            link_libraries.add(lib);
         }
     }
 

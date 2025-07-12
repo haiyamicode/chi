@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Chi Package Configuration",
+  "description": "Schema for package.jsonc configuration files in Chi projects",
+  "type": "object",
+  "required": ["entry_file"],
+  "properties": {
+    "entry_file": {
+      "type": "string",
+      "description": "The main entry file for the package",
+      "minLength": 1
+    },
+    "c_interop": {
+      "type": "object",
+      "description": "Configuration for C interoperability",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether C interop is enabled",
+          "default": false
+        },
+        "include_directories": {
+          "type": "array",
+          "description": "List of include directories for C compilation",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "source_files": {
+          "type": "array",
+          "description": "List of C source file patterns to compile",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "link_libraries": {
+          "type": "array",
+          "description": "List of libraries to link against",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_files": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}
