@@ -13,7 +13,8 @@
 using namespace cx;
 
 MAKE_ENUM(FlagType, String, Bool);
-MAKE_ENUM(FlagId, Debug, Output, Ast, WorkingDir, Fuzz, Help);
+MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Output, Ast, WorkingDir, Fuzz, Help);
+MAKE_ENUM(InputMode, File, Package)
 
 struct Flag {
     FlagId id;
@@ -28,6 +29,8 @@ map<string, Flag> flag_map_short = {};
 map<string, Flag> flag_map_long = {};
 
 void init_flags() {
+    flags.add({FlagId::CompileEntry, "c", "compile", FlagType::String});
+    flags.add({FlagId::CompilePackage, "p", "package", FlagType::String});
     flags.add({FlagId::Debug, "d", "debug", FlagType::Bool});
     flags.add({FlagId::Output, "o", "output", FlagType::String});
     flags.add({FlagId::Ast, "a", "ast", FlagType::Bool});
@@ -48,7 +51,8 @@ int main(int argc, char *argv[]) {
     init_flags();
 
     Builder bld;
-    string file_name;
+    string input_file;
+    InputMode input_mode = InputMode::File;
     array<int> z;
     string flag_name;
     bld.build_mode = BuildMode::Executable;
@@ -57,18 +61,28 @@ int main(int argc, char *argv[]) {
     Flag *flag = nullptr;
 
     auto print_help = [&]() {
-        print("usage: chi [flags] source_file\n");
+        print("usage: chi [flags]\n");
         print("flags:\n");
+        print("  -c --compile <file>: compile from entry source file\n");
+        print("  -p --package <dir>: compile from a package directory\n");
         print("  -d --debug: debug mode\n");
         print("  -o --output: output file name\n");
         print("  -a --ast: build ast\n");
-        print("  -w --working-dir: working dir\n");
+        print("  -w --working-dir <dir>: working directory\n");
         print("  --fuzz: fuzz mode\n");
         print("  -h --help: help\n");
     };
 
     auto on_flag = [&]() {
         switch (flag->id) {
+        case FlagId::CompileEntry:
+            input_file = flag->value;
+            input_mode = InputMode::File;
+            break;
+        case FlagId::CompilePackage:
+            input_file = flag->value;
+            input_mode = InputMode::Package;
+            break;
         case FlagId::Debug:
             bld.debug_mode = true;
             break;
@@ -126,36 +140,44 @@ int main(int argc, char *argv[]) {
                 break;
             }
         } else {
-            if (!file_name.empty()) {
-                print_help();
-                return 1;
-            }
-            file_name = arg;
+            fmt::print("unknown argument: {}\n", arg);
+            return 1;
         }
     }
 
-    if (file_name.empty()) {
+    if (input_file.empty()) {
         print_help();
         return 0;
     }
 
     if (fuzz_mode) {
         auto N_TIMES = std::getenv("TIMES") ? std::atoi(std::getenv("TIMES")) : 1000;
-        print("runnning compilation {} times on {}...\n", N_TIMES, file_name);
+        print("runnning compilation {} times on {}...\n", N_TIMES, input_file);
         for (int i = 0; i < N_TIMES; i++) {
             Analyzer analyzer;
             analyzer.build_runtime();
             auto pkg = analyzer.add_package(".");
-            analyzer.process_file(pkg, file_name);
+            analyzer.process_file(pkg, input_file);
         }
-    } else {
-        if (bld.build_mode == BuildMode::Executable) {
-            if (bld.output_file_name.empty()) {
-                print("error: output file name is not specified\n");
-                return 1;
-            }
+        return 0;
+    }
+
+    if (bld.build_mode == BuildMode::Executable) {
+        if (bld.output_file_name.empty()) {
+            print("error: output file name is not specified\n");
+            return 1;
         }
-        bld.build_program(file_name);
+    }
+
+    switch (input_mode) {
+    case InputMode::File:
+        bld.build_program(input_file);
+        break;
+    case InputMode::Package:
+        bld.build_package(input_file);
+        break;
+    default:
+        assert(false);
     }
 
     return 0;

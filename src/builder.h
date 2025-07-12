@@ -43,6 +43,8 @@ class Builder {
 
     void build_program(const string &entry_file_name);
 
+    void build_package(const string &entry_file_name);
+
   private:
     string get_tmp_file_path(const string &filename);
 };

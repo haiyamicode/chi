@@ -26,7 +26,7 @@ target_link_libraries(rt PRIVATE ${PKG_LIBS})
 bundle_static_library(rt chrt)
 
 # Compiler executable
-add_executable(chi chc.cpp ${SOURCE_FILES})
+add_executable(chi chi.cpp ${SOURCE_FILES})
 install(TARGETS chi)
 target_include_directories(chi PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${LLVM_INCLUDE_DIRS} ${PROJECT_BINARY_DIR})
 
