@@ -1,0 +1,14 @@
+{
+  // Entry point for the Chi package
+  "entry_file": "main.xc",
+
+  /* C interoperability configuration
+     This allows the package to compile and link C code */
+  "c_interop": {
+    "enabled": true, // Enable C interop
+    "include_directories": ["native"], // Include directories for C headers
+    "source_files": ["**/*.c"], // Glob pattern for C source files
+    "link_libraries": ["m"] // Math library
+  }
+  // End of configuration
+}

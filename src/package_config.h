@@ -37,7 +37,8 @@ struct PackageConfig {
     bool validate(std::string &error_message) const;
 
     // Validate against JSON schema
-    static bool validate_with_schema(const boost::json::value &json, std::string &error_message);
+    static bool validate_with_schema(const boost::json::value &json,
+                                     const boost::json::value &schema, std::string &error_message);
 };
 
 // Boost.JSON serialization support for CInteropConfig

@@ -15,7 +15,8 @@ TESTS_LIST = 00_fib.test \
 		11_copy_builtins.test \
 		12_references.test \
 		13_enum_struct.test \
-		14_static_method.test
+		14_static_method.test \
+		15_package.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
@@ -23,7 +24,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 
 %.test: %.expect %.xc
 	echo Test: $*...
-	$(CHI) -o $(TMP).$* $*.xc && $(TMP).$* 2>&1 >$*.output;
+	$(CHI) -o $(TMP).$* -c $*.xc && $(TMP).$* 2>&1 >$*.output;
 	@if [ "x`diff -qbu $*.expect $*.output`" != "x" ]; \
 	then \
         	echo "error in test $*"; \
@@ -31,6 +32,18 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		exit 1; \
 	fi; \
        	rm -f $*.output
+
+# Special rule for package tests
+15_package.test: 15_package.expect
+	echo Test: 15_package...
+	$(CHI) -p testdata/15_package -o $(TMP).15_package && $(TMP).15_package 2>&1 >15_package.output;
+	@if [ "x`diff -qbu 15_package.expect 15_package.output`" != "x" ]; \
+	then \
+        	echo "error in test 15_package"; \
+        	diff -u 15_package.expect 15_package.output; \
+		exit 1; \
+	fi; \
+       	rm -f 15_package.output
 
 all: test
 

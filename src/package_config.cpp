@@ -158,32 +158,13 @@ bool PackageConfig::validate(std::string &error_message) const {
 }
 
 bool PackageConfig::validate_with_schema(const boost::json::value &json,
+                                         const boost::json::value &schema_json,
                                          std::string &error_message) {
     try {
-        // Load the schema from file
-        std::ifstream schema_file("src/package_schema.json");
-        if (!schema_file.is_open()) {
-            error_message = "Failed to open package schema file";
-            return false;
-        }
-
-        std::string schema_str((std::istreambuf_iterator<char>(schema_file)),
-                               std::istreambuf_iterator<char>());
-        schema_file.close();
-
-        // Parse schema JSON
-        std::error_code ec;
-        boost::json::value schema_json = boost::json::parse(schema_str, ec);
-        if (ec) {
-            error_message = "Failed to parse schema JSON: " + ec.message();
-            return false;
-        }
-
         // Create valijson schema and validator
         valijson::Schema schema;
         valijson::SchemaParser parser;
         valijson::adapters::BoostJsonAdapter schema_adapter(schema_json);
-
         parser.populateSchema(schema_adapter, schema);
 
         // Validate the JSON against the schema

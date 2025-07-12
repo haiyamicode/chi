@@ -144,9 +144,21 @@ void Builder::build_package(const string &package_dir) {
         exit(1);
     }
 
-    // Validate against JSON schema first
+    // Load and validate against JSON schema first
+    string schema_path = fs::path(m_ctx.root_path) / "src" / "package_schema.json";
+    auto schema_content = io::Buffer::from_file(schema_path);
+    auto schema_str = schema_content.read_all();
+    boost::json::value schema_json;
+    std::error_code schema_ec;
+    schema_json = boost::json::parse(schema_str, schema_ec);
+
+    if (schema_ec) {
+        print("error: failed to parse package schema: {}\n", schema_ec.message());
+        exit(1);
+    }
+
     string schema_error;
-    if (!PackageConfig::validate_with_schema(config_json, schema_error)) {
+    if (!PackageConfig::validate_with_schema(config_json, schema_json, schema_error)) {
         print("error: package.jsonc schema validation failed:\n{}", schema_error);
         exit(1);
     }
