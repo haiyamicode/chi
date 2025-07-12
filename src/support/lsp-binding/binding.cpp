@@ -9,7 +9,7 @@
 static std::string get_symbol_kind(cx::ast::Node *node) {
     switch (node->type) {
     case cx::ast::NodeType::FnDef:
-        return node->data.fn_def.fn_kind == cx::ast::FnKind::InstanceMethod ? "method" : "function";
+        return node->data.fn_def.fn_kind == cx::ast::FnKind::Method ? "method" : "function";
     case cx::ast::NodeType::StructDecl:
         return "struct";
     case cx::ast::NodeType::VarDecl:

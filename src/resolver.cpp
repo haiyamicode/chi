@@ -199,8 +199,12 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         }
         return from_type == to_type || to_type->get_elem() == from_type;
     }
-    case TypeKind::Fn:
+    case TypeKind::Fn: {
+        if (from_type->kind == TypeKind::FnLambda) {
+            return to_string(from_type->data.fn_lambda.fn) == to_string(to_type);
+        }
         return from_type->kind == TypeKind::Fn && to_string(from_type) == to_string(to_type);
+    }
     case TypeKind::FnLambda:
         if (from_type->kind == TypeKind::Fn) {
             return to_string(from_type) == to_string(to_type->data.fn_lambda.fn);
@@ -289,7 +293,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto &data = node->data.fn_def;
             auto fn_scope = scope.set_parent_fn_node(node);
             auto proto = resolve(data.fn_proto, fn_scope);
-            fn_scope = fn_scope.set_parent_fn(proto);
+            // For lambda functions, we need to extract the underlying function type
+            // from the FnLambda type for proper return type checking
+            auto lambda_fn_type =
+                proto->kind == TypeKind::FnLambda ? proto->data.fn_lambda.fn : proto;
+            fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
             resolve(data.body, fn_scope);
 
             // resolve captures

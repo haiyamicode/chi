@@ -47,7 +47,7 @@ clean:
 	rm -rf $(BUILD_DIR)/* && mkdir -p $(BUILD_DIR)
 
 compile_example: build install
-	$(CHI) $(INPUT_FILE) -o local/test -w local/build
+	$(CHI) -c $(INPUT_FILE) -o local/test -w local/build
 
 run_example: compile_example
 	./local/test

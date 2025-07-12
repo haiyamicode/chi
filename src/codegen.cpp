@@ -1436,6 +1436,13 @@ llvm::Value *Compiler::compile_dot_access(Function *fn, llvm::Value *ptr, ChiTyp
 
 RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     switch (expr->type) {
+    case ast::NodeType::FnDef: {
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto lambda_val = compile_expr(fn, expr);
+        auto lambda_ptr = fn->entry_alloca(lambda_val->getType(), "lambda_literal");
+        builder.CreateStore(lambda_val, lambda_ptr);
+        return RefValue::from_address(lambda_ptr);
+    }
     case ast::NodeType::VarDecl:
         return RefValue::from_address(get_var(expr));
     case ast::NodeType::Identifier:
@@ -1577,7 +1584,7 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
 
 normal:
     // handle captured variables
-    if (iden->escape.is_capture()) {
+    if (data.decl->escape.is_capture()) {
         assert(fn->bind_ptr);
         auto field_idx = data.decl->escape.local_index;
         assert(field_idx >= 0);

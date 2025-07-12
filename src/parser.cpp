@@ -338,7 +338,7 @@ FnKind Parser::parse_fn_identifier(Token **iden) {
             fn_kind = FnKind::Constructor;
             *iden = token;
         } else {
-            fn_kind = FnKind::InstanceMethod;
+            fn_kind = FnKind::Method;
             *iden = expect(TokenType::IDEN);
         }
     } else {
@@ -479,6 +479,7 @@ Node *Parser::parse_fn_lambda() {
     fn->name = "";
     fn->data.fn_def.fn_kind = FnKind::Lambda;
     fn->data.fn_def.fn_proto = proto;
+    fn->data.fn_def.decl_spec = m_ctx->allocator->create_decl_spec();
     proto->data.fn_proto.fn_def_node = fn;
     parse_fn_block(fn);
     return fn;

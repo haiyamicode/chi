@@ -130,7 +130,7 @@ struct FnProto {
     bool is_type_expr = false;
 };
 
-MAKE_ENUM(FnKind, TopLevel, InstanceMethod, Constructor, Destructor, Lambda);
+MAKE_ENUM(FnKind, TopLevel, Method, Constructor, Destructor, Lambda);
 
 struct FnDef {
     Node *fn_proto = nullptr;
@@ -144,7 +144,18 @@ struct FnDef {
     bool has_try = false;
 
     bool is_static() { return decl_spec && decl_spec->is_static(); }
-    bool is_instance_method() { return fn_kind != FnKind::TopLevel && !is_static(); }
+
+    bool is_instance_method() {
+        switch (fn_kind) {
+        case FnKind::Constructor:
+        case FnKind::Destructor:
+            return true;
+        case FnKind::Method:
+            return !is_static();
+        default:
+            return false;
+        }
+    }
 
     bool has_try_or_cleanup() { return has_try || cleanup_vars.len; }
 };

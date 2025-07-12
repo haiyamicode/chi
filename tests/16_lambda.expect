@@ -1,0 +1,12 @@
+testing basic lambda:
+Hello from lambda!
+add_lambda(5, 3) = 8
+
+testing lambda with timeout:
+Timeout callback executed!
+Counter after timeout: 42
+
+testing lambda with capture:
+captured x + y = 30
+
+All lambda tests completed!

@@ -2,11 +2,11 @@
 // Created by haint on 11/25/18.
 //
 
+#define CHI_RUNTIME_HAS_BACKTRACE 1
 #include "fmt/core.h"
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
-#define CHI_RUNTIME_HAS_BACKTRACE 1
-#include <csignal>
 #include <sstream>
 #include <uv.h>
 
