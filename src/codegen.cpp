@@ -423,7 +423,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             continue;
         }
 
-        if (i < fn->bind_offset) {
+        if (i == fn->bind_offset - 1) {
             auto llvm_param = fn->llvm_fn->getArg(i);
             auto var = builder.CreateAlloca(llvm_param->getType(), nullptr, llvm_param->getName());
             builder.CreateStore(llvm_param, var);
