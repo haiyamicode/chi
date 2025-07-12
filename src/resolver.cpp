@@ -297,8 +297,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // from the FnLambda type for proper return type checking
             auto lambda_fn_type =
                 proto->kind == TypeKind::FnLambda ? proto->data.fn_lambda.fn : proto;
-            fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
-            resolve(data.body, fn_scope);
+            auto local_fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
+            resolve(data.body, local_fn_scope);
 
             // resolve captures
             for (auto decl : data.captures) {
@@ -428,11 +428,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto existing = capture_map.get(data.decl);
                 if (!existing) {
                     auto idx = captures.len;
-                    data.decl->escape.local_index = idx;
                     captures.add(data.decl);
                     capture_map[data.decl] = idx;
+                    node->escape.local_index = idx;
                 } else {
-                    data.decl->escape.local_index = *existing;
+                    node->escape.local_index = *existing;
                 }
             }
         }

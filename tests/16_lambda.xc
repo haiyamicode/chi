@@ -17,21 +17,21 @@ func test_basic_lambda() {
   println("");
 }
 
-// func test_lambda_with_timeout() {
-//   println("testing lambda with timeout:");
+func test_lambda_with_timeout() {
+  println("testing lambda with timeout:");
   
-//   var counter: int = 0;
+  var counter: int = 0;
   
-//   // Test lambda passed to timeout function
-//   timeout(100, func () {
-//     counter = 42;
-//     println("Timeout callback executed!");
-//   });
+  // Test lambda passed to timeout function
+  timeout(100, func () {
+    counter = 42;
+    println("Timeout callback executed!");
+  });
   
-//   printf("Counter after timeout: {}\n", counter);
+  printf("Counter after timeout: {}\n", counter);
   
-//   println("");
-// }
+  println("");
+}
 
 func test_lambda_capture() {
   println("testing lambda with capture:");
@@ -52,7 +52,7 @@ func test_lambda_capture() {
 
 func main() {
   test_basic_lambda();
-  // test_lambda_with_timeout();
+  test_lambda_with_timeout();
   test_lambda_capture();
   
   println("All lambda tests completed!");

@@ -422,9 +422,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         if (param_info.kind == ParameterKind::SRet) {
             sret_arg = llvm_param;
         } else if (param_info.kind == ParameterKind::Bind) {
-            auto var = builder.CreateAlloca(llvm_param->getType(), nullptr, llvm_param->getName());
-            builder.CreateStore(llvm_param, var);
-            fn->bind_ptr = builder.CreateLoad(llvm_param->getType(), var);
+            fn->bind_ptr = llvm_param;
         } else if (param_info.kind == ParameterKind::Regular) {
             auto idx = param_info.user_param_index;
             auto param = proto.params[idx];
@@ -719,10 +717,10 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         builder.CreateStore(
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size), size_gep);
 
-        for (auto capture : *captures) {
+        for (int i = 0; i < captures->len; i++) {
+            auto capture = (*captures)[i];
             auto ref = get_var(capture);
-            auto capture_gep =
-                builder.CreateStructGEP(bstruct_l, bind_var, capture->escape.local_index);
+            auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
             builder.CreateStore(ref, capture_gep);
         }
     } else {
@@ -1581,9 +1579,9 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
 
 normal:
     // handle captured variables
-    if (data.decl->escape.is_capture()) {
+    if (iden->escape.is_capture()) {
         assert(fn->bind_ptr);
-        auto field_idx = data.decl->escape.local_index;
+        auto field_idx = iden->escape.local_index;
         assert(field_idx >= 0);
         auto bstruct = get_chitype(fn->node)->data.fn_lambda.bind_struct;
         auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
@@ -2140,7 +2138,9 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     // Add bind parameter if needed
     if (has_bind) {
         param_info.emplace_back(ParameterKind::Bind, llvm_index++, -1, bind_name);
-        fn_l->getArg(llvm_index - 1)->setName(bind_name);
+        auto bind_param = fn_l->getArg(llvm_index - 1);
+        bind_param->setName(bind_name);
+        new_fn->bind_ptr = bind_param;
     }
 
     // Add regular user parameters
@@ -2152,7 +2152,6 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     // Store parameter information
     new_fn->parameter_info = std::move(param_info);
-
     new_fn->llvm_fn->setName(new_fn->get_llvm_name());
     return new_fn;
 }
