@@ -47,6 +47,16 @@ func test_lambda_capture() {
   var captured_result = capture_lambda();
   printf("captured x + y = {}\n", captured_result);
   
+  // Test modifying captured variables
+  var z: int = 5;
+  var modify_lambda = func () {
+    z = z * 2;
+  };
+  
+  printf("z before modification: {}\n", z);
+  modify_lambda();
+  printf("z after modification: {}\n", z);
+  
   println("");
 }
 
