@@ -2074,12 +2074,21 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         fn->pop_loop();
         break;
     }
+    case ast::NodeType::Block: {
+        compile_block(fn, stmt, stmt, nullptr);
+        break;
+    }
     default:
         compile_assignment_to_type(fn, stmt, nullptr);
     }
 }
 
 void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node *node) {
+    // In managed memory mode, don't destroy heap-allocated objects locally - GC handles them
+    if (is_managed() && node->is_heap_allocated()) {
+        return;
+    }
+    
     auto type = get_chitype(node);
     if (type->kind == TypeKind::String) {
         auto &builder = *m_ctx->llvm_builder;

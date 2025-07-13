@@ -17,7 +17,9 @@ TESTS_LIST = 00_fib.test \
 		13_enum_struct.test \
 		14_static_method.test \
 		15_package.test \
-		16_lambda.test
+		16_lambda.test \
+		17_managed_basics.test \
+		18_gc_escape.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

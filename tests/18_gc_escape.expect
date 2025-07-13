@@ -1,0 +1,50 @@
+=== Testing Stack vs Heap Allocation ===
+Test 1: Non-escaping object
+GCBox(1) created
+Local object created, should be destroyed at scope end
+Scope ended - non-escaping object should be destroyed by now
+
+Test 2: Object escaping via pointer assignment
+GCBox(2) created
+Inside scope - local.id: 2, escaped_ptr->id: 2
+Local object escapes via pointer assignment
+Scope ended - escaped object should still be alive
+CRITICAL TEST: Accessing escaped pointer after scope: GCBox(2).id = 2
+
+Test 3: Object escaping via return value
+GCBox(100) created
+CRITICAL TEST: Function returned pointer to GCBox(100), accessing id: 100
+
+Test 4: Non-escaping function call
+GCBox(200) created
+GCBox(200) destroyed
+Non-escaping function returned value: 200 (object was destroyed)
+
+Test 5: Lambda capture escape
+GCBox(300) created
+Lambda created with captured object
+Lambda executed successfully, captured object id: 300
+
+Test 6: Use-after-scope validation
+GCBox(6) created
+GCBox(7) created
+Inside scope - accessing a.id: 6, b.id: 7
+Inside scope - accessing via pointers: ptr1->id=6, ptr2->id=7
+Both objects created and pointers assigned
+Both objects should still be accessible:
+CRITICAL TEST: After scope ended - ptr1->id=6, ptr2->id=7
+CRITICAL TEST: Accessing values - GCBox(6) and GCBox(7) both accessible!
+
+=== Cleanup Phase ===
+Final gc objects...
+GCBox(1000) created
+GCBox(1001) created
+GCBox(1002) created
+GCBox(1003) created
+GCBox(1004) created
+Test completed
+GCBox(1) destroyed
+GCBox(2) destroyed
+GCBox(6) destroyed
+GCBox(7) destroyed
+GCBox(1004) destroyed

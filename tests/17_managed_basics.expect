@@ -1,0 +1,48 @@
+Testing basic language features in managed memory mode
+=== Basic Types Test ===
+int: 42
+float: 3.14
+string: hello managed mode
+bool: true
+
+=== Structs Test ===
+TestStruct(id=1, name=managed)
+TestStruct(id=2, name=memory)
+TestStruct(1) destroyed
+TestStruct(2) destroyed
+
+=== Arrays Test ===
+Array: [10, 20, 30]
+arr[0] = 10
+arr[1] = 20
+arr[2] = 30
+
+=== Pointers Test ===
+value = 100
+*ptr = 100
+After modification: value = 200
+
+=== Enums Test ===
+Color: 0
+Color: 2
+
+=== Control Flow Test ===
+x is positive
+For loop:
+i = 0
+i = 1
+i = 2
+While loop:
+j = 0
+j = 1
+j = 2
+
+=== Functions Test ===
+Creating local object: TestStruct(id=99, name=local)
+TestStruct(99) destroyed
+
+=== Lambdas Test ===
+Simple lambda executed
+Lambda with capture result: 84
+
+All basic features working in managed mode!
