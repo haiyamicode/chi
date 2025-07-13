@@ -420,18 +420,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (auto decl_fn = data.decl->parent_fn) {
             if (decl_fn != scope.parent_fn_node) {
                 data.decl->escape.escaped = true;
-                
+
                 // Build capture path: each function that captures this variable
                 // The path represents the chain from innermost to outermost capturing function
-                
+
                 // First, collect all functions in the chain from current to declaration
-                array<ast::Node*> function_chain = {};
+                array<ast::Node *> function_chain = {};
                 auto current_fn = scope.parent_fn_node;
                 while (current_fn && current_fn != decl_fn) {
                     function_chain.add(current_fn);
                     current_fn = current_fn->parent_fn;
                 }
-                
+
                 // Now propagate captures and build path from innermost to outermost
                 for (int i = 0; i < function_chain.len; i++) {
                     auto fn = function_chain[i];
@@ -449,7 +449,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     } else {
                         capture_idx = *existing;
                     }
-                    
+
                     // Add this function to the capture path
                     ast::CapturePath path_entry;
                     path_entry.function = fn;
@@ -1460,7 +1460,7 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
     }
 
     if (node->type == NodeType::VarDecl || node->type == NodeType::ParamDecl) {
-        if (scope.parent_fn_node && should_destroy(node)) {
+        if (scope.parent_fn_node && should_destroy(node) && !node->escape.is_capture()) {
             scope.parent_fn_def()->cleanup_vars.add(node);
         }
     }

@@ -248,11 +248,6 @@ class Compiler {
     void add_var(ast::Node *node, llvm::Value *value) { m_ctx->var_table[node] = value; }
 
     llvm::Value *&get_var(ast::Node *node) { return m_ctx->var_table.at(node); }
-    
-    void assert_var_in_current_fn(ast::Node *var, Function *fn) {
-        assert(m_ctx->var_table.get(var) && "Variable should exist in var_table");
-        assert(var->parent_fn == fn->node && "Variable should be declared in current function");
-    }
 
     llvm::Value *compile_comparator(Function *fn, ast::Node *expr, ChiType *type = nullptr);
 
