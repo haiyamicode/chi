@@ -10,5 +10,24 @@ captured x + y = 30
 z before modification: 5
 z after modification: 10
 
+testing simple nested lambda:
+nested lambda result: 100
+
+testing complex nested lambda scenarios:
+triple nested result: 15
+counter before: 0
+counter after nested increments: 111
+adder(7) = 107
+multiplier(3) = 300
+lambda chain result: 71
+
+testing lambda capture edge cases:
+conditional capture result: 6
+conditional nested result: 22
+
+testing lambda with array captures:
+sum before processing: 0
+sum after multi-variable processing: 110
+
 All lambda tests completed!
 Timeout callback executed!

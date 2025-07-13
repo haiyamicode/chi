@@ -486,6 +486,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     // clean up & return
     fn->use_label(return_b);
     for (auto var : fn->get_def()->cleanup_vars) {
+        assert_var_in_current_fn(var, fn);
         compile_destruction(fn, get_var(var), var);
     }
     for (auto ptr : fn->vararg_pointers) {
@@ -511,6 +512,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         builder.CreateExtractValue(landing, {0});
         builder.CreateExtractValue(landing, {1});
         for (auto var : fn->get_def()->cleanup_vars) {
+            assert_var_in_current_fn(var, fn);
             compile_destruction(fn, get_var(var), var);
         }
         fn->insn_noop();
@@ -719,7 +721,46 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
 
         for (int i = 0; i < captures->len; i++) {
             auto capture = (*captures)[i];
-            auto ref = get_var(capture);
+            llvm::Value *ref;
+
+            // Check if the capture exists in current function's variable table AND
+            // the variable was declared in the current function (not a parent function)
+            if (m_ctx->var_table.get(capture) && capture->parent_fn == fn->node) {
+                assert_var_in_current_fn(capture, fn);
+                ref = get_var(capture);
+            } else {
+                // Handle nested captures: the variable should be in the current function's captures
+                // since capture propagation ensures all intermediate functions capture the variable
+                bool found = false;
+                
+                // Find the capture index in the current function's captures
+                auto &current_captures = fn->node->data.fn_def.captures;
+                for (int j = 0; j < current_captures.len; j++) {
+                    if (current_captures[j] == capture) {
+                        // This capture should be accessible from the current function's bind_ptr
+                        if (fn->bind_ptr) {
+                            auto current_fn_type = get_chitype(fn->node);
+                            if (current_fn_type->kind == TypeKind::FnLambda) {
+                                auto current_bstruct = current_fn_type->data.fn_lambda.bind_struct;
+                                auto current_bstruct_l = (llvm::StructType *)compile_type(current_bstruct);
+                                
+                                auto capture_gep = builder.CreateStructGEP(current_bstruct_l, fn->bind_ptr, j);
+                                ref = builder.CreateLoad(current_bstruct_l->elements()[j], capture_gep);
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (!found) {
+                    // The variable is not available in current scope - this should not happen
+                    // if capture propagation is working correctly
+                    ref = llvm::ConstantPointerNull::get(
+                        llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0));
+                }
+            }
+
             auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
             builder.CreateStore(ref, capture_gep);
         }
@@ -1134,7 +1175,15 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         // compile lambda function expression
         auto &data = expr->data.fn_def;
         assert(data.fn_kind == ast::FnKind::Lambda);
-        auto lambda_fn = compile_fn_proto(data.fn_proto, expr, fn->qualified_name + "__anonymous");
+
+        // Generate a descriptive lambda name with parent function context
+        string lambda_name;
+        if (fn && !fn->qualified_name.empty()) {
+            lambda_name = fn->qualified_name + "__lambda_" + std::to_string(expr->id);
+        } else {
+            lambda_name = "__lambda_" + std::to_string(expr->id);
+        }
+        auto lambda_fn = compile_fn_proto(data.fn_proto, expr, lambda_name);
         m_ctx->pending_fns.add(lambda_fn);
         return compile_lambda_alloc(fn, get_chitype(expr), lambda_fn->llvm_fn, &data.captures);
     }
@@ -1439,6 +1488,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         return RefValue::from_address(lambda_ptr);
     }
     case ast::NodeType::VarDecl:
+        assert_var_in_current_fn(expr, fn);
         return RefValue::from_address(get_var(expr));
     case ast::NodeType::Identifier:
         return compile_iden_ref(fn, expr);
@@ -1564,6 +1614,9 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     }
     if (data.decl->type == ast::NodeType::VarDecl) {
         auto &var = data.decl->data.var_decl;
+        if (var.identifier->get_name() == "outer_value") {
+            fmt::print("var_ref: {}\n", var.identifier->get_name());
+        }
         if (var.is_const && var.resolved_value.has_value() && !data.decl->parent_fn) {
             return RefValue::from_value(
                 compile_constant_value(fn, *var.resolved_value, get_chitype(data.decl)));
@@ -1581,14 +1634,26 @@ normal:
     // handle captured variables
     if (iden->escape.is_capture()) {
         assert(fn->bind_ptr);
-        auto field_idx = iden->escape.local_index;
-        assert(field_idx >= 0);
-        auto bstruct = get_chitype(fn->node)->data.fn_lambda.bind_struct;
+        assert(iden->escape.capture_path.len > 0);
+        
+        // The capture_path[0] represents the current function's capture
+        // We just need to access the immediate capture from current function's bind_ptr
+        auto &immediate_capture = iden->escape.capture_path[0];
+        auto capture_idx = immediate_capture.capture_index;
+        
+        // Get the binding structure for the current function
+        auto fn_type = get_chitype(fn->node);
+        assert(fn_type->kind == TypeKind::FnLambda);
+        auto bstruct = fn_type->data.fn_lambda.bind_struct;
         auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
-        auto gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, field_idx);
-        auto ref = builder.CreateLoad(bstruct_l->elements()[field_idx], gep);
+        
+        // Access the capture from current function's bind_ptr
+        auto gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, capture_idx);
+        auto ref = builder.CreateLoad(bstruct_l->elements()[capture_idx], gep);
+        
         return RefValue::from_address(ref);
     }
+    assert_var_in_current_fn(data.decl, fn);
     return RefValue::from_address(get_var(data.decl));
 }
 
@@ -2152,6 +2217,13 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     // Store parameter information
     new_fn->parameter_info = std::move(param_info);
+
+    // For lambda functions, use the passed name instead of the empty qualified_name
+    if (fn && fn->type == ast::NodeType::FnDef && fn->data.fn_def.fn_kind == ast::FnKind::Lambda &&
+        !name.empty()) {
+        new_fn->qualified_name = name;
+    }
+
     new_fn->llvm_fn->setName(new_fn->get_llvm_name());
     return new_fn;
 }

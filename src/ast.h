@@ -360,12 +360,35 @@ struct PrefixExpr {
     Node *expr = nullptr;
 };
 
+struct CapturePath {
+    Node *function = nullptr;   // The function in the capture chain
+    int32_t capture_index = -1; // Index of this variable in this function's captures
+};
+
 struct EscapeAnalysis {
     bool escaped = false;
-    int32_t local_index = -1;
     bool moved = false;
+    array<CapturePath> capture_path = {}; // Path from original declaration to current context
 
-    bool is_capture() { return local_index >= 0; }
+    bool is_capture() { return capture_path.len > 0; }
+
+    // Get the original declaring function (root of the capture chain)
+    Node *get_original_function() {
+        return capture_path.len > 0 ? capture_path[0].function : nullptr;
+    }
+
+    // Get the immediate capturing function (last in the chain)
+    Node *get_immediate_capturing_function() {
+        return capture_path.len > 0 ? capture_path[capture_path.len - 1].function : nullptr;
+    }
+
+    // Get the capture depth (how many function levels deep)
+    int get_capture_depth() { return capture_path.len; }
+    
+    // Get the capture index for the immediate capturing function (most commonly needed)
+    int32_t get_immediate_capture_index() {
+        return capture_path.len > 0 ? capture_path[capture_path.len - 1].capture_index : -1;
+    }
 };
 
 struct SizeofExpr {

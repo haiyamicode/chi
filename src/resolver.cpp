@@ -420,19 +420,41 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (auto decl_fn = data.decl->parent_fn) {
             if (decl_fn != scope.parent_fn_node) {
                 data.decl->escape.escaped = true;
-                auto &fn_def = scope.parent_fn_node->data.fn_def;
-                auto &captures = fn_def.captures;
-                auto &capture_map = fn_def.capture_map;
+                
+                // Build capture path: each function that captures this variable
+                // The path represents the chain from innermost to outermost capturing function
+                
+                // First, collect all functions in the chain from current to declaration
+                array<ast::Node*> function_chain = {};
+                auto current_fn = scope.parent_fn_node;
+                while (current_fn && current_fn != decl_fn) {
+                    function_chain.add(current_fn);
+                    current_fn = current_fn->parent_fn;
+                }
+                
+                // Now propagate captures and build path from innermost to outermost
+                for (int i = 0; i < function_chain.len; i++) {
+                    auto fn = function_chain[i];
+                    auto &fn_def = fn->data.fn_def;
+                    auto &captures = fn_def.captures;
+                    auto &capture_map = fn_def.capture_map;
 
-                // deduplicate captures by the declaration
-                auto existing = capture_map.get(data.decl);
-                if (!existing) {
-                    auto idx = captures.len;
-                    captures.add(data.decl);
-                    capture_map[data.decl] = idx;
-                    node->escape.local_index = idx;
-                } else {
-                    node->escape.local_index = *existing;
+                    // Add capture to current function if not already present
+                    auto existing = capture_map.get(data.decl);
+                    int32_t capture_idx;
+                    if (!existing) {
+                        capture_idx = captures.len;
+                        captures.add(data.decl);
+                        capture_map[data.decl] = capture_idx;
+                    } else {
+                        capture_idx = *existing;
+                    }
+                    
+                    // Add this function to the capture path
+                    ast::CapturePath path_entry;
+                    path_entry.function = fn;
+                    path_entry.capture_index = capture_idx;
+                    node->escape.capture_path.add(path_entry);
                 }
             }
         }

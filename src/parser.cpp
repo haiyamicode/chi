@@ -480,6 +480,7 @@ Node *Parser::parse_fn_lambda() {
     fn->data.fn_def.fn_kind = FnKind::Lambda;
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.decl_spec = m_ctx->allocator->create_decl_spec();
+    fn->parent_fn = get_scope()->find_parent(NodeType::FnDef);  // Set parent function for nested lambda chain
     proto->data.fn_proto.fn_def_node = fn;
     parse_fn_block(fn);
     return fn;
