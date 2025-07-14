@@ -125,6 +125,83 @@ void Parser::unexpected(Token *token) {
     consume();
 }
 
+// Error recovery mechanisms
+bool Parser::is_statement_start(TokenType type) {
+    switch (type) {
+    case TokenType::KW_VAR:
+    case TokenType::KW_LET:
+    case TokenType::KW_IF:
+    case TokenType::KW_FOR:
+    case TokenType::KW_WHILE:
+    case TokenType::KW_RETURN:
+    case TokenType::KW_BREAK:
+    case TokenType::KW_CONTINUE:
+    case TokenType::LBRACE:
+    case TokenType::SEMICOLON:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool Parser::is_declaration_start(TokenType type) {
+    switch (type) {
+    case TokenType::KW_FUNC:
+    case TokenType::KW_STRUCT:
+    case TokenType::KW_UNION:
+    case TokenType::KW_INTERFACE:
+    case TokenType::KW_ENUM:
+    case TokenType::KW_VAR:
+    case TokenType::KW_LET:
+    case TokenType::KW_EXTERN:
+    case TokenType::KW_IMPORT:
+    case TokenType::KW_EXPORT:
+    case TokenType::KW_TYPEDEF:
+    case TokenType::KW_PRIVATE:
+    case TokenType::KW_PROTECTED:
+    case TokenType::KW_STATIC:
+    case TokenType::AT:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool Parser::is_synchronization_point(TokenType type) {
+    return is_declaration_start(type) || is_statement_start(type) || 
+           type == TokenType::RBRACE || type == TokenType::END;
+}
+
+void Parser::recover_to_statement_boundary() {
+    while (true) {
+        auto token = get();
+        if (token->type == TokenType::END || is_statement_start(token->type)) {
+            break;
+        }
+        consume();
+    }
+}
+
+void Parser::recover_to_declaration_boundary() {
+    while (true) {
+        auto token = get();
+        if (token->type == TokenType::END || is_declaration_start(token->type)) {
+            break;
+        }
+        consume();
+    }
+}
+
+void Parser::recover_to_synchronization_point() {
+    while (true) {
+        auto token = get();
+        if (token->type == TokenType::END || is_synchronization_point(token->type)) {
+            break;
+        }
+        consume();
+    }
+}
+
 Token *Parser::next() {
     if (m_toki >= m_ctx->tokens.len) {
         return m_eof_token;
@@ -203,11 +280,23 @@ void Parser::parse_top_level_decls(NodeList *decls) {
         if (token->type == TokenType::END) {
             break;
         }
+        
+        // Skip unexpected tokens and recover to declaration boundary
+        if (!is_declaration_start(token->type) && 
+            token->type != TokenType::KW_INLINE && 
+            token->type != TokenType::KW_STATIC) {
+            unexpected(token);
+            recover_to_declaration_boundary();
+            continue;
+        }
+        
         if (token->type == TokenType::KW_INLINE || token->type == TokenType::KW_STATIC) {
             consume();
         }
         auto decl = parse_top_level_decl();
-        decls->add(decl);
+        if (decl) {
+            decls->add(decl);
+        }
 
         // add export if exported
         if (decl->type == NodeType::FnDef) {
@@ -320,6 +409,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
         return parse_export_decl();
     default:
         unexpected(token);
+        recover_to_declaration_boundary();
         return create_error_node();
     }
 }
@@ -744,9 +834,15 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
             bool as_expr = false;
             auto start_token = token;
             auto stmt = parse_stmt(&as_expr);
-            stmt->parent = node;
-            stmt->start_token = start_token;
-            stmt->end_token = lookahead(-1);
+            if (stmt) {
+                stmt->parent = node;
+                stmt->start_token = start_token;
+                stmt->end_token = lookahead(-1);
+            } else {
+                // Failed to parse statement, skip to next statement boundary
+                recover_to_statement_boundary();
+                continue;
+            }
 
             if (as_expr) {
                 node->data.block.return_expr = stmt;
@@ -831,6 +927,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
 
     default:
         unexpected(token);
+        recover_to_statement_boundary();
         return create_error_node();
     }
 }

@@ -105,6 +105,14 @@ class Parser {
 
     void unexpected(Token *token);
 
+    // Error recovery mechanisms
+    void recover_to_statement_boundary();
+    void recover_to_declaration_boundary(); 
+    void recover_to_synchronization_point();
+    bool is_statement_start(TokenType type);
+    bool is_declaration_start(TokenType type);
+    bool is_synchronization_point(TokenType type);
+
     bool at_comma(TokenType end_token);
 
     int get_op_precedence(TokenType op_type);

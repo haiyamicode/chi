@@ -613,7 +613,7 @@ struct Node {
         case NodeType::VarDecl:
             return this;
         case NodeType::Identifier:
-            return data.identifier.decl->get_decl();
+            return data.identifier.decl ? data.identifier.decl->get_decl() : nullptr;
         case NodeType::DotExpr: {
             if (data.dot_expr.should_resolve_variant && container_type_id.has_value()) {
                 auto parent_id = *container_type_id;
