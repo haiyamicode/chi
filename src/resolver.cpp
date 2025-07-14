@@ -137,6 +137,10 @@ void Resolver::resolve(ast::Module *module) {
 }
 
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit) {
+    if (!from_type || !to_type) {
+        return false;
+    }
+
     from_type = from_type->eval();
     to_type = to_type->eval();
 
@@ -1657,6 +1661,11 @@ string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display)
 
 void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type,
                                 bool is_explicit) {
+    // If from_type is null (failed to resolve), skip assignment check
+    if (!from_type || !to_type) {
+        return;
+    }
+
     if (!can_assign(from_type, to_type, is_explicit)) {
         if (!is_explicit) {
             auto can_convert_explitcitly = can_assign(from_type, to_type, true);
