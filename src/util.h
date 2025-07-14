@@ -338,18 +338,20 @@ struct CharBuf : public array<char> {
 
 // Portable glob pattern matching function
 // Supports patterns like "*.c", "file*.cpp", "test?.h", etc.
-static inline bool match_glob_pattern(const string& pattern, const string& text) {
-    const char* p = pattern.c_str();
-    const char* t = text.c_str();
-    const char* p_backup = nullptr;
-    const char* t_backup = nullptr;
+static inline bool match_glob_pattern(const string &pattern, const string &text) {
+    const char *p = pattern.c_str();
+    const char *t = text.c_str();
+    const char *p_backup = nullptr;
+    const char *t_backup = nullptr;
 
     while (*t != '\0') {
         if (*p == '*') {
             // Skip consecutive '*' characters
-            while (*p == '*') p++;
-            if (*p == '\0') return true; // Pattern ends with '*', match everything
-            
+            while (*p == '*')
+                p++;
+            if (*p == '\0')
+                return true; // Pattern ends with '*', match everything
+
             // Remember positions for backtracking
             p_backup = p;
             t_backup = t;
@@ -359,69 +361,69 @@ static inline bool match_glob_pattern(const string& pattern, const string& text)
             t++;
         } else {
             // No match, try backtracking if we have a '*'
-            if (p_backup == nullptr) return false;
+            if (p_backup == nullptr)
+                return false;
             p = p_backup;
             t = ++t_backup;
         }
     }
 
     // Skip any trailing '*' in pattern
-    while (*p == '*') p++;
+    while (*p == '*')
+        p++;
     return *p == '\0';
 }
 
 // Glob pattern matching using std::filesystem and portable pattern matching
 // Supports patterns like "*.c", "dir/*.cpp", "**/*.h", etc.
-static inline array<string> glob_files(const fs::path& base_path, const string& pattern) {
+static inline array<string> glob_files(const fs::path &base_path, const string &pattern) {
     array<string> matched_files;
-    
-    try {
-        // Check if this is a recursive pattern (**)
-        if (pattern.find("**") != string::npos) {
-            // Extract the filename pattern after **
-            size_t star_star_pos = pattern.find("**");
-            string filename_pattern = pattern.substr(star_star_pos + 2);
-            
-            // Remove leading slash if present
-            if (!filename_pattern.empty() && filename_pattern[0] == '/') {
-                filename_pattern = filename_pattern.substr(1);
+
+    // Check if this is a recursive pattern (**)
+    if (pattern.find("**") != string::npos) {
+        // Extract the filename pattern after **
+        size_t star_star_pos = pattern.find("**");
+        string filename_pattern = pattern.substr(star_star_pos + 2);
+
+        // Remove leading slash if present
+        if (!filename_pattern.empty() && filename_pattern[0] == '/') {
+            filename_pattern = filename_pattern.substr(1);
+        }
+
+        // Use recursive_directory_iterator for ** patterns
+        for (auto &entry : fs::recursive_directory_iterator(
+                 base_path, fs::directory_options::skip_permission_denied)) {
+            if (entry.is_regular_file()) {
+                string filename = entry.path().filename().string();
+
+                // Use portable glob pattern matching
+                if (match_glob_pattern(filename_pattern, filename)) {
+                    matched_files.add(entry.path().string());
+                }
             }
-            
-            // Use recursive_directory_iterator for ** patterns
-            for (auto& entry : fs::recursive_directory_iterator(base_path, fs::directory_options::skip_permission_denied)) {
+        }
+    } else {
+        // Handle non-recursive patterns
+        fs::path pattern_path = base_path / pattern;
+        fs::path dir_path = pattern_path.parent_path();
+        string filename_pattern = pattern_path.filename().string();
+
+        if (fs::exists(dir_path) && fs::is_directory(dir_path)) {
+            // Use directory_iterator for non-recursive patterns
+            for (auto &entry :
+                 fs::directory_iterator(dir_path, fs::directory_options::skip_permission_denied)) {
                 if (entry.is_regular_file()) {
                     string filename = entry.path().filename().string();
-                    
+
                     // Use portable glob pattern matching
                     if (match_glob_pattern(filename_pattern, filename)) {
                         matched_files.add(entry.path().string());
                     }
                 }
             }
-        } else {
-            // Handle non-recursive patterns
-            fs::path pattern_path = base_path / pattern;
-            fs::path dir_path = pattern_path.parent_path();
-            string filename_pattern = pattern_path.filename().string();
-            
-            if (fs::exists(dir_path) && fs::is_directory(dir_path)) {
-                // Use directory_iterator for non-recursive patterns
-                for (auto& entry : fs::directory_iterator(dir_path, fs::directory_options::skip_permission_denied)) {
-                    if (entry.is_regular_file()) {
-                        string filename = entry.path().filename().string();
-                        
-                        // Use portable glob pattern matching
-                        if (match_glob_pattern(filename_pattern, filename)) {
-                            matched_files.add(entry.path().string());
-                        }
-                    }
-                }
-            }
         }
-    } catch (const fs::filesystem_error&) {
-        // Silently ignore filesystem errors (permissions, etc.)
     }
-    
+
     return matched_files;
 }
 
