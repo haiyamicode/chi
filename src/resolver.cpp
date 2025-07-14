@@ -500,6 +500,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 var_type = expr_type;
             }
         }
+        if (!var_type) {
+            // Failed to resolve variable type due to malformed expression
+            error(node, "failed to resolve variable type");
+            return get_system_types()->void_;
+        }
         if (var_type->kind == TypeKind::Void) {
             error(node, errors::INVALID_VARIABLE_TYPE, to_string(var_type));
         }
@@ -1426,6 +1431,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::CaseExpr: {
         auto &data = node->data.case_expr;
         return resolve(data.body, scope);
+    }
+    case NodeType::EmptyStmt: {
+        // Empty statements do nothing and have void type
+        node->resolved_type = get_system_types()->void_;
+        return node->resolved_type;
     }
     default:
         print("\n");

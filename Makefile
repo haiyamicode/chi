@@ -37,6 +37,9 @@ test: test_compiler
 test_compiler: build
 	(cd tests; make test)
 
+analyzer_test: build
+	(cd analyzer_tests; make test)
+
 clean:
 	rm -rf $(BUILD_DIR)/* && mkdir -p $(BUILD_DIR)
 
@@ -51,3 +54,6 @@ compile_example_package: build install
 
 run_example_package: compile_example_package
 	./local/test_package_exe
+
+analyze_example:
+	$(CHI) -analyzer -c $(INPUT_FILE)

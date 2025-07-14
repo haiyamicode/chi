@@ -13,7 +13,7 @@
 using namespace cx;
 
 MAKE_ENUM(FlagType, String, Bool);
-MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Output, Ast, WorkingDir, Fuzz, Help);
+MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Output, Ast, WorkingDir, Analyzer, Help);
 MAKE_ENUM(InputMode, File, Package)
 
 struct Flag {
@@ -35,7 +35,7 @@ void init_flags() {
     flags.add({FlagId::Output, "o", "output", FlagType::String});
     flags.add({FlagId::Ast, "a", "ast", FlagType::Bool});
     flags.add({FlagId::WorkingDir, "w", "working-dir", FlagType::String});
-    flags.add({FlagId::Fuzz, "fuzz", "fuzz", FlagType::Bool});
+    flags.add({FlagId::Analyzer, "analyzer", "analyzer", FlagType::Bool});
     flags.add({FlagId::Help, "h", "help", FlagType::Bool});
 
     for (auto &f : flags) {
@@ -57,7 +57,7 @@ int main(int argc, char *argv[]) {
     string flag_name;
     bld.build_mode = BuildMode::Executable;
     bld.working_dir = "build";
-    bool fuzz_mode = false;
+    bool analyzer_mode = false;
     Flag *flag = nullptr;
 
     auto print_help = [&]() {
@@ -69,7 +69,7 @@ int main(int argc, char *argv[]) {
         print("  -o --output: output file name\n");
         print("  -a --ast: build ast\n");
         print("  -w --working-dir <dir>: working directory\n");
-        print("  --fuzz: fuzz mode\n");
+        print("  --analyzer: analyzer mode\n");
         print("  -h --help: help\n");
     };
 
@@ -95,8 +95,8 @@ int main(int argc, char *argv[]) {
         case FlagId::WorkingDir:
             bld.working_dir = flag->value;
             break;
-        case FlagId::Fuzz:
-            fuzz_mode = true;
+        case FlagId::Analyzer:
+            analyzer_mode = true;
             break;
         case FlagId::Help:
             print_help();
@@ -150,15 +150,21 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    if (fuzz_mode) {
-        auto N_TIMES = std::getenv("TIMES") ? std::atoi(std::getenv("TIMES")) : 1000;
-        print("runnning compilation {} times on {}...\n", N_TIMES, input_file);
-        for (int i = 0; i < N_TIMES; i++) {
-            Analyzer analyzer;
-            analyzer.build_runtime();
-            auto pkg = analyzer.add_package(".");
-            analyzer.process_file(pkg, input_file);
+    if (analyzer_mode) {
+        Analyzer analyzer;
+        analyzer.build_runtime();
+        auto pkg = analyzer.add_package(".");
+        auto module = analyzer.process_file(pkg, input_file);
+
+        // Print collected errors for analyzer testing
+        if (module && module->errors.len > 0) {
+            for (auto &error : module->errors) {
+                print("{}:{}:{}: error: {}\n", module->full_path(), error.pos.line_number(),
+                      error.pos.col_number(), error.message);
+            }
+            return 1; // Return error code to indicate parsing issues
         }
+
         return 0;
     }
 

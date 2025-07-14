@@ -426,6 +426,12 @@ Node *Parser::parse_type_expr(bool type_only) {
         consume();
         node = parse_fn_type(token);
     } else {
+        // Check if we have a valid identifier token for type
+        if (token->type != TokenType::IDEN && token->type != TokenType::KW_THIS &&
+            token->type != TokenType::KW_NEW && token->type != TokenType::KW_DELETE) {
+            error(token, "expected type identifier, got '{}'", token->to_string());
+            return create_error_node();
+        }
         auto iden = parse_identifier();
         node = iden;
         if (next_is(TokenType::DOT)) {
@@ -480,7 +486,8 @@ Node *Parser::parse_fn_lambda() {
     fn->data.fn_def.fn_kind = FnKind::Lambda;
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.decl_spec = m_ctx->allocator->create_decl_spec();
-    fn->parent_fn = get_scope()->find_parent(NodeType::FnDef);  // Set parent function for nested lambda chain
+    fn->parent_fn =
+        get_scope()->find_parent(NodeType::FnDef); // Set parent function for nested lambda chain
     proto->data.fn_proto.fn_def_node = fn;
     parse_fn_block(fn);
     return fn;
@@ -571,10 +578,21 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
 
     if (!as_field) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
-        assert(node->parent_fn);
+        // In malformed code, parent_fn might be null
+        if (!node->parent_fn) {
+            error(iden, "variable declaration outside of function");
+        }
     }
     if (!next_is(TokenType::ASS)) {
-        node->data.var_decl.type = parse_type_expr();
+        auto token = get();
+        if (token->type == TokenType::END || token->type == TokenType::RBRACE ||
+            token->type == TokenType::SEMICOLON) {
+            // Missing type - create error node but continue parsing
+            error(iden, "missing type declaration for variable '{}'", iden->str);
+            node->data.var_decl.type = create_error_node();
+        } else {
+            node->data.var_decl.type = parse_type_expr();
+        }
     }
     if (next_is(TokenType::ASS)) {
         consume();
@@ -658,7 +676,19 @@ Node *Parser::parse_fn_param() {
         is_variadic = true;
     }
     auto iden = expect(TokenType::IDEN);
-    auto type = parse_type_expr();
+
+    // Check if type is missing (e.g., at end of parameter list)
+    auto token = get();
+    Node *type;
+    if (token->type == TokenType::END || token->type == TokenType::RPAREN ||
+        token->type == TokenType::COMMA) {
+        // Missing type - create error node but continue parsing
+        error(iden, "missing type declaration for parameter '{}'", iden->str);
+        type = create_error_node();
+    } else {
+        type = parse_type_expr();
+    }
+
     auto param = create_node(NodeType::ParamDecl, iden);
     param->data.param_decl.type = type;
     param->data.param_decl.is_variadic = is_variadic;
@@ -884,7 +914,6 @@ Node *Parser::parse_child_expr(bool lhs, Node *parent) {
 Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
     auto token = get();
     switch (token->type) {
-    case TokenType::ADD:
     case TokenType::KW_NEW:
         return parse_construct_expr();
 
@@ -892,6 +921,7 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
     case TokenType::KW_DELETE:
         return parse_prefix_expr();
 
+    case TokenType::ADD:
     case TokenType::AND:
     case TokenType::MUL:
     case TokenType::SUB:
@@ -906,7 +936,12 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
             node->data.unary_op_expr.op_type = TokenType::MUTREF;
         }
 
-        node->data.unary_op_expr.op1 = parse_child_expr(lhs, parent);
+        auto operand = parse_child_expr(lhs, parent);
+        if (operand && operand->type == NodeType::Error) {
+            // If operand parsing failed, return error node instead of malformed unary expr
+            return operand;
+        }
+        node->data.unary_op_expr.op1 = operand;
         return node;
     }
 
@@ -1055,7 +1090,10 @@ Node *Parser::parse_branch_stmt() {
 }
 
 void Parser::add_to_scope(Node *node) {
-    assert(!node->name.empty());
+    if (node->name.empty()) {
+        // Don't add nodes without names to scope - this can happen with malformed code
+        return;
+    }
     add_to_scope(node, node->name);
 }
 
@@ -1324,8 +1362,16 @@ void Parser::parse_enum_block(Node *node) {
                 parse_struct_block(node->data.enum_decl.base_struct);
             }
         } else {
+            auto before_pos = m_toki;
             auto member = parse_enum_member(node);
             node->data.enum_decl.variants.add(member);
+            
+            // Error recovery: if we didn't advance, consume a token to avoid infinite loop
+            if (m_toki == before_pos) {
+                auto token = get();
+                error(token, "unexpected token in enum declaration: '{}'", token->to_string());
+                consume();
+            }
         }
     }
     m_ctx->resolver->pop_scope();
@@ -1362,8 +1408,16 @@ void Parser::parse_struct_block(Node *node) {
             error(get(), errors::UNEXPECTED_EOF);
             return;
         }
+        auto before_pos = m_toki;
         auto member = parse_struct_member(node->data.struct_decl.kind, node);
         node->data.struct_decl.members.add(member);
+        
+        // Error recovery: if we didn't advance, consume a token to avoid infinite loop
+        if (m_toki == before_pos) {
+            auto token = get();
+            error(token, "unexpected token in struct declaration: '{}'", token->to_string());
+            consume();
+        }
     }
     m_ctx->resolver->pop_scope();
     expect(TokenType::RBRACE);
@@ -1408,8 +1462,23 @@ Node *Parser::parse_construct_expr() {
             if (field_started) {
                 unexpected(token);
             }
+            
+            // Check for problematic tokens that could cause infinite recursion
+            if (token->type == TokenType::LBRACK || token->type == TokenType::RBRACE || 
+                token->type == TokenType::END) {
+                unexpected(token);
+                break; // Stop processing this construct expression
+            }
+            
             auto expr = parse_expr();
-            node->data.construct_expr.items.add(expr);
+            if (expr && expr->type != NodeType::Error) {
+                node->data.construct_expr.items.add(expr);
+            } else {
+                // If parse_expr failed, consume token and continue
+                if (get()->type != TokenType::RBRACE && get()->type != TokenType::END) {
+                    consume();
+                }
+            }
         }
         if (!at_comma(TokenType::RBRACE)) {
             break;
@@ -1480,8 +1549,16 @@ Node *Parser::parse_enum_member(Node *parent) {
                 error(get(), errors::UNEXPECTED_EOF);
                 break;
             }
+            auto before_pos = m_toki;
             auto member = parse_struct_member(node->data.struct_decl.kind, struct_node);
             struct_node->data.struct_decl.members.add(member);
+            
+            // Error recovery: if we didn't advance, consume a token to avoid infinite loop
+            if (m_toki == before_pos) {
+                auto token = get();
+                error(token, "unexpected token in struct declaration: '{}'", token->to_string());
+                consume();
+            }
         }
         expect(TokenType::RBRACE);
     }
@@ -1492,7 +1569,14 @@ Node *Parser::parse_enum_member(Node *parent) {
     }
 
     if (!next_is(TokenType::RBRACE) && !next_is(TokenType::SEMICOLON) && !next_is(TokenType::END)) {
-        expect(TokenType::COMMA);
+        if (next_is(TokenType::COMMA)) {
+            consume(); // consume the comma
+        } else {
+            // Missing comma - consume the unexpected token and report error
+            auto token = get();
+            error(token, "expected ',' after enum member, got '{}'", token->to_string());
+            consume();
+        }
     }
 
     return node;
