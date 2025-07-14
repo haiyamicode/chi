@@ -668,6 +668,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.dot_expr;
         auto field_name = data.field->str;
         auto expr_type = resolve(data.expr, scope, flags);
+        if (!expr_type) {
+            return nullptr;
+        }
         if (field_name.empty()) {
             return create_type(TypeKind::Unknown);
         }
@@ -1044,6 +1047,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             for (auto implement : data.implements) {
+                // Skip error nodes in implements list
+                if (implement->type == NodeType::Error) {
+                    continue;
+                }
+
                 auto impl_trait = resolve_value(implement, scope);
                 auto trait_struct = resolve_struct_type(impl_trait);
                 if (!ChiTypeStruct::is_interface(trait_struct)) {
@@ -1117,6 +1125,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.index_expr;
         auto expr_type = resolve(data.expr, scope);
         auto subscript_type = resolve(data.subscript, scope);
+        if (!expr_type || !subscript_type) {
+            return nullptr;
+        }
 
         switch (expr_type->kind) {
         case TypeKind::Pointer:

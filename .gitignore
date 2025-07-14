@@ -2,5 +2,6 @@ build
 .idea
 .DS_Store
 local
+debug
 .cache
 compile_commands.json

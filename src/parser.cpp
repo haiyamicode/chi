@@ -1311,6 +1311,10 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
         save_block_pos(node);
         consume();
         while (get()->type != TokenType::LBRACE) {
+            if (get()->type == TokenType::END) {
+                error(get(), errors::UNEXPECTED_EOF);
+                break;
+            }
             consume();
         }
     } else {
@@ -1394,7 +1398,21 @@ void Parser::parse_struct_block(Node *node) {
             if (token->type == TokenType::LBRACE) {
                 break;
             }
+            
+            // Check if we have a valid interface type followed by proper syntax
+            auto saved_pos = m_toki;
             auto expr = parse_type_expr(true);
+            
+            // If the next token after the type is not comma or LBRACE, 
+            // this is malformed (missing opening brace)
+            auto next_token = get();
+            if (next_token->type != TokenType::COMMA && next_token->type != TokenType::LBRACE) {
+                // This is malformed - missing opening brace after implements
+                error(next_token, "expected '{{' after implements clause, got '{}'", next_token->to_string());
+                node->data.struct_decl.implements.add(create_error_node());
+                return; // Stop parsing implements and let caller handle the error
+            }
+            
             node->data.struct_decl.implements.add(expr);
             if (!at_comma(TokenType::LBRACE)) {
                 break;
