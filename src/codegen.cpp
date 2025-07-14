@@ -310,6 +310,9 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     case TypeKind::Bool: {
         return llvm_db.createBasicType("bool", 8, llvm::dwarf::DW_ATE_boolean);
     }
+    case TypeKind::Char: {
+        return llvm_db.createBasicType("char", 8, llvm::dwarf::DW_ATE_unsigned_char);
+    }
     case TypeKind::Int: {
         return llvm_db.createBasicType("int", type->data.int_.bit_count,
                                        llvm::dwarf::DW_ATE_signed);
@@ -2088,7 +2091,7 @@ void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node
     if (is_managed() && node->is_heap_allocated()) {
         return;
     }
-    
+
     auto type = get_chitype(node);
     if (type->kind == TypeKind::String) {
         auto &builder = *m_ctx->llvm_builder;
@@ -2185,6 +2188,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     if (name.empty()) {
         name = proto_node->name;
     }
+
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
     auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, name,
                                        m_ctx->llvm_module.get());
@@ -2287,6 +2291,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Bool: {
         return llvm::Type::getInt1Ty(llvm_ctx);
     }
+    case TypeKind::Char: {
+        return llvm::Type::getInt8Ty(llvm_ctx);
+    }
     case TypeKind::Int: {
         return llvm::Type::getIntNTy(llvm_ctx, type->data.int_.bit_count);
     }
@@ -2339,14 +2346,6 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     }
     case TypeKind::Array: {
         return compile_type(type->data.array.internal);
-        // auto &data = type->data.array;
-        // auto elem_type_l = compile_type(data.elem);
-        // std::vector<llvm::Type *> members;
-        // members.push_back(get_llvm_ptr_type());              // void *data
-        // members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t size
-        // members.push_back(llvm::Type::getInt32Ty(llvm_ctx)); // uint32_t capacity
-        // members.push_back(llvm::Type::getInt8Ty(llvm_ctx));  // uint8_t flags
-        // return llvm::StructType::create(members, get_resolver()->to_string(type, true));
     }
     case TypeKind::Any: {
         std::vector<llvm::Type *> members;

@@ -21,7 +21,7 @@ struct Context;
 struct ChiTypeStruct;
 struct ChiTypeEnum;
 
-MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, String, Struct, Pointer, Reference,
+MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer, Reference,
           MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box, Result, Error,
           FnLambda, Promise, Infer, Module, This, Unknown, Bytes, Undefined)
 
@@ -373,6 +373,7 @@ struct ChiType {
         case TypeKind::Reference:
         case TypeKind::MutRef:
         case TypeKind::Bool:
+        case TypeKind::Char:
         case TypeKind::Void:
             return true;
         default:

@@ -274,6 +274,17 @@ struct Array<T> implements
   func raw_data() &T {
     return this.data;
   }
+
+  func filter(predicate: func(value: T) bool) Array<T> {
+    var result: Array<T> = {};
+    for item in this {
+      if predicate(item) {
+        result.add(item);
+      }
+    }
+    return result;
+  }
+
 }
 
 struct Map<K, V> implements ops.Index<K, V> {

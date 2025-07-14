@@ -37,7 +37,7 @@ void Resolver::context_init_primitives() {
     }
     auto &system_types = m_ctx->system_types;
     system_types.any = create_type(TypeKind::Any);
-    system_types.char_ = create_int_type(8, false);
+    system_types.char_ = create_type(TypeKind::Char);
     system_types.uint8 = create_int_type(8, true);
     system_types.int_ = create_int_type(32, false);
     system_types.int32 = create_int_type(32, false);
@@ -136,6 +136,44 @@ void Resolver::resolve(ast::Module *module) {
     }
 }
 
+bool Resolver::can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit) {
+    if (!from_fn || !to_fn) {
+        return false;
+    }
+
+    // Both types must be function types
+    if (from_fn->kind != TypeKind::Fn || to_fn->kind != TypeKind::Fn) {
+        return false;
+    }
+
+    auto &from_data = from_fn->data.fn;
+    auto &to_data = to_fn->data.fn;
+
+    // Check parameter count
+    if (from_data.params.len != to_data.params.len) {
+        return false;
+    }
+
+    // Check variadic flag
+    if (from_data.is_variadic != to_data.is_variadic) {
+        return false;
+    }
+
+    // Check return type (covariant)
+    if (!can_assign(from_data.return_type, to_data.return_type, is_explicit)) {
+        return false;
+    }
+
+    // Check parameter types (contravariant)
+    for (size_t i = 0; i < from_data.params.len; i++) {
+        if (!can_assign(to_data.params[i], from_data.params[i], is_explicit)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit) {
     if (!from_type || !to_type) {
         return false;
@@ -205,15 +243,19 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     }
     case TypeKind::Fn: {
         if (from_type->kind == TypeKind::FnLambda) {
-            return to_string(from_type->data.fn_lambda.fn) == to_string(to_type);
+            return can_assign_fn(from_type->data.fn_lambda.fn, to_type, is_explicit);
         }
-        return from_type->kind == TypeKind::Fn && to_string(from_type) == to_string(to_type);
+        return from_type->kind == TypeKind::Fn && can_assign_fn(from_type, to_type, is_explicit);
     }
     case TypeKind::FnLambda:
         if (from_type->kind == TypeKind::Fn) {
-            return to_string(from_type) == to_string(to_type->data.fn_lambda.fn);
+            return can_assign_fn(from_type, to_type->data.fn_lambda.fn, is_explicit);
         }
-        return from_type->kind == TypeKind::FnLambda && to_string(from_type) == to_string(to_type);
+        if (from_type->kind == TypeKind::FnLambda) {
+            return can_assign_fn(from_type->data.fn_lambda.fn, to_type->data.fn_lambda.fn,
+                                 is_explicit);
+        }
+        return false;
     case TypeKind::EnumValue:
         return from_type->kind == TypeKind::EnumValue &&
                is_same_type(from_type->data.enum_value.enum_type,
@@ -381,7 +423,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto is_extern = node->get_declspec() ? node->get_declspec()->is_extern() : false;
-        auto fn_type = get_fn_type(return_type, &param_types, is_variadic, container, is_extern);
+        // Only pass container for method declarations, not for function parameter types
+        auto method_container = is_fn_decl ? container : nullptr;
+        auto fn_type =
+            get_fn_type(return_type, &param_types, is_variadic, method_container, is_extern);
         if (!is_fn_decl) {
             return get_lambda_for_fn(fn_type);
         }
@@ -650,6 +695,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_system_types()->float_;
         case TokenType::KW_UNDEFINED:
             return get_system_types()->undefined;
+        case TokenType::CHAR:
+            return get_system_types()->char_;
         default:
             unreachable();
         }
@@ -740,6 +787,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (expr_struct->is_generic()) {
             data.should_resolve_variant = true;
         }
+
+        // For Array types, ensure we use the substituted member type
+        if (expr_type->kind == TypeKind::Array && stype->kind == TypeKind::Struct) {
+            // Check if the resolved subtype has a different member with substituted type
+            auto resolved_member = stype->data.struct_.find_member(field_name);
+            if (resolved_member && resolved_member->resolved_type != member->resolved_type) {
+                return resolved_member->resolved_type;
+            }
+        }
+
         return member->resolved_type;
     }
     case NodeType::ConstructExpr: {
@@ -1910,8 +1967,19 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
         auto return_type = type_placeholders_sub(data.return_type, subs);
         array<ChiType *> params = {};
         type_placeholders_sub_each(&data.params, subs, &params);
-        return get_fn_type(return_type, &params, data.is_variadic, data.container_ref->get_elem(),
-                           data.is_extern);
+        auto container = data.container_ref ? data.container_ref->get_elem() : nullptr;
+        return get_fn_type(return_type, &params, data.is_variadic, container, data.is_extern);
+    }
+    case TypeKind::FnLambda: {
+        auto &data = type->data.fn_lambda;
+
+        auto substituted_fn = type_placeholders_sub(data.fn, subs);
+        // If the substituted function type is the same as the original,
+        // return the original lambda to preserve concrete types
+        if (substituted_fn == data.fn) {
+            return type;
+        }
+        return get_lambda_for_fn(substituted_fn);
     }
     default:
         return type;
@@ -2160,12 +2228,19 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
 }
 
 ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
+    auto key = fmt::format("Lambda<{}>", to_string(fn_type, true));
+    if (auto cached = m_ctx->composite_types.get(key)) {
+        return *cached;
+    }
+
     auto lambda = create_type(TypeKind::FnLambda);
     lambda->data.fn_lambda.fn = fn_type;
+    lambda->is_placeholder = fn_type->is_placeholder;
 
     auto struct_type = create_type(TypeKind::Struct);
     auto &struct_ = struct_type->data.struct_;
     struct_type->display_name = "Lambda<" + to_string(fn_type, true) + ">" + "::Internal";
+    struct_type->name = struct_type->display_name;
 
     struct_.kind = ContainerKind::Struct;
     struct_.add_member(get_allocator(), "ptr", get_dummy_var("ptr"),
@@ -2190,6 +2265,8 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
     bound_fn.return_type = fn_data.return_type;
     bound_fn.is_variadic = fn_data.is_variadic;
     bound_fn.container_ref = fn_data.container_ref;
+
+    m_ctx->composite_types[key] = lambda;
     return lambda;
 }
 
@@ -2242,6 +2319,7 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
     case NodeType::LiteralExpr: {
         auto token = node->token;
         switch (token->type) {
+        case TokenType::CHAR:
         case TokenType::INT: {
             return {token->val.i};
         }

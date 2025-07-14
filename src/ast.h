@@ -384,7 +384,7 @@ struct EscapeAnalysis {
 
     // Get the capture depth (how many function levels deep)
     int get_capture_depth() { return capture_path.len; }
-    
+
     // Get the capture index for the immediate capturing function (most commonly needed)
     int32_t get_immediate_capture_index() {
         return capture_path.len > 0 ? capture_path[capture_path.len - 1].capture_index : -1;

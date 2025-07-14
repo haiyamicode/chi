@@ -165,8 +165,17 @@ static std::string get_value_display(const CxAny &v) {
     }
     case TypeKind::Bool:
         return fmt::format("{}", *(bool *)&v.data);
-    case TypeKind::Int:
+    case TypeKind::Char: {
+        uint8_t char_value = *(uint8_t *)&v.data;
+        // Only display as character if it's printable, otherwise show as number
+        if (char_value >= 32 && char_value <= 126) {
+            return fmt::format("'{}'", (char)char_value);
+        }
+        return fmt::format("{}", char_value);
+    }
+    case TypeKind::Int: {
         return istringf(v);
+    }
     case TypeKind::Float:
         return fstringf(v);
     case TypeKind::Pointer:

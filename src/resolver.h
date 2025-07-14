@@ -129,9 +129,7 @@ struct ResolveScope {
     ResolveScope set_is_lhs(bool is_lhs) const;
 };
 
-enum ResolveFlag : uint32_t {
-    IS_FN_DECL_PROTO = 1 << 0,
-};
+enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0 };
 
 class Resolver {
     ResolveContext *m_ctx = nullptr;
@@ -154,6 +152,7 @@ class Resolver {
     ast::Node *add_primitive(const string &name, ChiType *type);
 
     bool can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit = false);
+    bool can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit = false);
 
     bool is_same_type(ChiType *a, ChiType *b);
 
