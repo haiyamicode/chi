@@ -168,8 +168,8 @@ bool Parser::is_declaration_start(TokenType type) {
 }
 
 bool Parser::is_synchronization_point(TokenType type) {
-    return is_declaration_start(type) || is_statement_start(type) || 
-           type == TokenType::RBRACE || type == TokenType::END;
+    return is_declaration_start(type) || is_statement_start(type) || type == TokenType::RBRACE ||
+           type == TokenType::END;
 }
 
 void Parser::recover_to_statement_boundary() {
@@ -280,16 +280,15 @@ void Parser::parse_top_level_decls(NodeList *decls) {
         if (token->type == TokenType::END) {
             break;
         }
-        
+
         // Skip unexpected tokens and recover to declaration boundary
-        if (!is_declaration_start(token->type) && 
-            token->type != TokenType::KW_INLINE && 
+        if (!is_declaration_start(token->type) && token->type != TokenType::KW_INLINE &&
             token->type != TokenType::KW_STATIC) {
             unexpected(token);
             recover_to_declaration_boundary();
             continue;
         }
-        
+
         if (token->type == TokenType::KW_INLINE || token->type == TokenType::KW_STATIC) {
             consume();
         }
@@ -729,7 +728,7 @@ Node *Parser::parse_fn_type(Token *func) {
     auto next_is_separator = next_is(TokenType::RPAREN) || next_is(TokenType::SEMICOLON) ||
                              next_is(TokenType::COMMA) || next_is(TokenType::GT);
     if (!next_is_separator) {
-        data.return_type = parse_type_expr();
+        data.return_type = parse_type_expr(true);
     }
     return proto;
 }
@@ -1466,7 +1465,7 @@ void Parser::parse_enum_block(Node *node) {
             auto before_pos = m_toki;
             auto member = parse_enum_member(node);
             node->data.enum_decl.variants.add(member);
-            
+
             // Error recovery: if we didn't advance, consume a token to avoid infinite loop
             if (m_toki == before_pos) {
                 auto token = get();
@@ -1495,21 +1494,22 @@ void Parser::parse_struct_block(Node *node) {
             if (token->type == TokenType::LBRACE) {
                 break;
             }
-            
+
             // Check if we have a valid interface type followed by proper syntax
             auto saved_pos = m_toki;
             auto expr = parse_type_expr(true);
-            
-            // If the next token after the type is not comma or LBRACE, 
+
+            // If the next token after the type is not comma or LBRACE,
             // this is malformed (missing opening brace)
             auto next_token = get();
             if (next_token->type != TokenType::COMMA && next_token->type != TokenType::LBRACE) {
                 // This is malformed - missing opening brace after implements
-                error(next_token, "expected '{{' after implements clause, got '{}'", next_token->to_string());
+                error(next_token, "expected '{{' after implements clause, got '{}'",
+                      next_token->to_string());
                 node->data.struct_decl.implements.add(create_error_node());
                 return; // Stop parsing implements and let caller handle the error
             }
-            
+
             node->data.struct_decl.implements.add(expr);
             if (!at_comma(TokenType::LBRACE)) {
                 break;
@@ -1526,7 +1526,7 @@ void Parser::parse_struct_block(Node *node) {
         auto before_pos = m_toki;
         auto member = parse_struct_member(node->data.struct_decl.kind, node);
         node->data.struct_decl.members.add(member);
-        
+
         // Error recovery: if we didn't advance, consume a token to avoid infinite loop
         if (m_toki == before_pos) {
             auto token = get();
@@ -1577,14 +1577,14 @@ Node *Parser::parse_construct_expr() {
             if (field_started) {
                 unexpected(token);
             }
-            
+
             // Check for problematic tokens that could cause infinite recursion
-            if (token->type == TokenType::LBRACK || token->type == TokenType::RBRACE || 
+            if (token->type == TokenType::LBRACK || token->type == TokenType::RBRACE ||
                 token->type == TokenType::END) {
                 unexpected(token);
                 break; // Stop processing this construct expression
             }
-            
+
             auto expr = parse_expr();
             if (expr && expr->type != NodeType::Error) {
                 node->data.construct_expr.items.add(expr);
@@ -1667,7 +1667,7 @@ Node *Parser::parse_enum_member(Node *parent) {
             auto before_pos = m_toki;
             auto member = parse_struct_member(node->data.struct_decl.kind, struct_node);
             struct_node->data.struct_decl.members.add(member);
-            
+
             // Error recovery: if we didn't advance, consume a token to avoid infinite loop
             if (m_toki == before_pos) {
                 auto token = get();
