@@ -126,6 +126,7 @@ struct FnProto {
     array<Node *> params = {};
     Node *return_type = nullptr;
     Node *fn_def_node = nullptr;
+    array<Node *> type_params = {};
     bool is_vararg = false;
     bool is_type_expr = false;
 };

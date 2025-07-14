@@ -54,6 +54,7 @@ struct ChiTypeFn {
     bool is_variadic = false;
     ChiType *container_ref = nullptr;
     bool is_extern = false;
+    array<ChiType *> type_params = {};
 
     ChiType *get_param_at(size_t index);
     int get_va_start();

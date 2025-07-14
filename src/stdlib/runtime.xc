@@ -284,7 +284,6 @@ struct Array<T> implements
     }
     return result;
   }
-
 }
 
 struct Map<K, V> implements ops.Index<K, V> {

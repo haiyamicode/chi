@@ -633,6 +633,11 @@ void Parser::parse_fn_block(Node *fn) {
         add_to_scope(param);
         param->parent_fn = fn;
     }
+    
+    // Add type parameters to scope
+    for (auto type_param : fn_proto.type_params) {
+        m_ctx->resolver->declare_symbol(type_param->name, type_param);
+    }
     fn_def.body = parse_block(scope);
     m_ctx->resolver->pop_scope();
 }
@@ -697,9 +702,45 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
 }
 
 Node *Parser::parse_fn_proto(Token *token) {
-    expect(TokenType::LPAREN);
     auto proto = create_node(NodeType::FnProto, token);
     proto->name = token->get_name();
+    
+    // Push a scope for function prototype parsing  
+    auto proto_scope = m_ctx->resolver->push_scope(proto);
+    
+    // Parse type parameters like <T, U>
+    auto &type_params = proto->data.fn_proto.type_params;
+    if (next_is(TokenType::LT)) {
+        expect(TokenType::LT);
+        Token *param_token;
+        for (;;) {
+            param_token = get();
+            if (param_token->type == TokenType::END) {
+                error(param_token, errors::UNEXPECTED_EOF);
+                m_ctx->resolver->pop_scope();
+                return proto;
+            }
+            if (param_token->type == TokenType::GT) {
+                break;
+            }
+            auto param_iden = expect(TokenType::IDEN);
+            auto param_node = create_node(NodeType::TypeParam, param_iden);
+            param_node->name = param_iden->str;  // Set the name explicitly
+            param_node->data.type_param.index = type_params.len;
+            type_params.add(param_node);
+            
+            // Add type parameter to scope
+            add_to_scope(param_node);
+
+            if (!at_comma(TokenType::GT)) {
+                break;
+            }
+            consume();
+        }
+        expect(TokenType::GT);
+    }
+    
+    expect(TokenType::LPAREN);
     auto vararg = parse_fn_params(&proto->data.fn_proto.params);
     if (vararg) {
         proto->data.fn_proto.is_vararg = true;
@@ -708,6 +749,9 @@ Node *Parser::parse_fn_proto(Token *token) {
     if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON)) {
         proto->data.fn_proto.return_type = parse_type_expr(true);
     }
+    
+    // Pop the prototype scope
+    m_ctx->resolver->pop_scope();
     return proto;
 }
 

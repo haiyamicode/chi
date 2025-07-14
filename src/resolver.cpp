@@ -395,8 +395,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
         auto is_fn_decl = flags & IS_FN_DECL_PROTO;
+        
+        // Create a new scope for type parameters
+        auto fn_scope = scope;
+        TypeList type_param_types;
+        
+        // Process type parameters first
+        for (auto param : data.type_params) {
+            auto type_param = resolve(param, fn_scope);
+            type_param_types.add(type_param);
+        }
+        
         auto return_type =
-            data.return_type ? resolve_value(data.return_type, scope) : get_system_types()->void_;
+            data.return_type ? resolve_value(data.return_type, fn_scope) : get_system_types()->void_;
         TypeList param_types;
         bool is_variadic = false;
         bool is_static = node->declspec().is_static();
@@ -413,7 +424,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(param, errors::VARIADIC_NOT_FINAL, param->name);
                 return create_type(TypeKind::Fn);
             }
-            auto param_type = resolve_value(param, scope);
+            auto param_type = resolve_value(param, fn_scope);
             if (pdata.is_variadic) {
                 param_type = get_array_type(param_type);
                 param->resolved_type = param_type;
@@ -427,6 +438,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto method_container = is_fn_decl ? container : nullptr;
         auto fn_type =
             get_fn_type(return_type, &param_types, is_variadic, method_container, is_extern);
+        
+        // Store type parameters in the function type
+        for (auto type_param : type_param_types) {
+            fn_type->data.fn.type_params.add(type_param);
+        }
+        
         if (!is_fn_decl) {
             return get_lambda_for_fn(fn_type);
         }
@@ -2133,12 +2150,18 @@ void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *
         error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, params_required, n_args);
         return;
     }
+    
+    // Regular function call - check types normally
     for (size_t i = 0; i < n_args; i++) {
         auto param_type = fn->get_param_at(i);
         auto arg = args->at(i);
         scope.value_type = param_type;
         auto arg_type = resolve(arg, scope);
-        check_assignment(arg, arg_type, param_type);
+        
+        // Skip type checking for placeholder types (generic parameters)
+        if (!param_type->is_placeholder) {
+            check_assignment(arg, arg_type, param_type);
+        }
     }
     scope.value_type = nullptr;
 }
