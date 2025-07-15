@@ -74,25 +74,135 @@ void CodegenContext::init_llvm() {
 Compiler::Compiler(CodegenContext *ctx) : m_ctx(ctx) {}
 
 ChiType *Compiler::eval_type(ChiType *type) {
-    if (type->is_placeholder && m_fn && m_fn->container_subtype) {
-        type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+    if (type->is_placeholder && type->kind == TypeKind::Placeholder) {
+        printf("DEBUG: eval_type called on placeholder %s (index=%ld)\n",
+               type->data.placeholder.name.c_str(), type->data.placeholder.index);
+        printf("DEBUG: Placeholder source_decl=%p\n", type->data.placeholder.source_decl);
+        if (type->data.placeholder.source_decl) {
+            printf("DEBUG: Source declaration type: %d, name: %s\n",
+                   (int)type->data.placeholder.source_decl->type,
+                   type->data.placeholder.source_decl->name.c_str());
+        } else {
+            printf("DEBUG: No source declaration - this placeholder was created without proper "
+                   "tracking\n");
+        }
+        printf("DEBUG: Current function: %s\n", m_fn ? m_fn->qualified_name.c_str() : "null");
+
+        // Let's also check the placeholder's trait if it has one
+        if (type->data.placeholder.trait) {
+            printf("DEBUG: Placeholder has trait: %s\n",
+                   type->data.placeholder.trait->name.has_value()
+                       ? type->data.placeholder.trait->name->c_str()
+                       : "unnamed trait");
+        }
     }
-    // Handle function generic placeholders
+
+    // Handle struct/container type parameters using selective substitution
+    if (type->is_placeholder && m_fn && m_fn->container_subtype) {
+        // Use selective substitution to only replace placeholders that belong to the struct
+        if (m_fn->fn_type && m_fn->fn_type->data.fn.container_ref) {
+            auto container_ref = m_fn->fn_type->data.fn.container_ref;
+            auto container_struct = get_resolver()->resolve_struct_type(container_ref);
+            if (container_struct) {
+                type = get_resolver()->type_placeholders_sub_selective(
+                    type, m_fn->container_subtype, container_struct->node);
+            }
+        }
+    }
+
+    // Handle function generic placeholders using selective substitution
     if (type->is_placeholder && m_fn && m_fn->specialized_subtype &&
         m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-        type =
-            get_resolver()->type_placeholders_sub(type, &m_fn->specialized_subtype->data.subtype);
+        // Use selective substitution to only replace placeholders that belong to the current
+        // function
+        if (m_fn->node) {
+            auto old_type = type;
+            type = get_resolver()->type_placeholders_sub_selective(
+                type, &m_fn->specialized_subtype->data.subtype, m_fn->node->get_root_node());
+            if (type != old_type) {
+                printf("DEBUG: Function substitution resolved placeholder\n");
+            } else {
+                printf("DEBUG: Function substitution did not resolve placeholder (belongs to "
+                       "different source)\n");
+            }
+        }
     }
+
+    if (type->is_placeholder && type->kind == TypeKind::Fn && m_fn_eval_subtype &&
+        m_fn_eval_subtype->kind == TypeKind::Subtype) {
+        auto subtype_data = &m_fn_eval_subtype->data.subtype;
+        auto old_type = type;
+        type = get_resolver()->type_placeholders_sub_selective(type, subtype_data,
+                                                               subtype_data->root_node);
+        fmt::print("DEBUG: Function type on fn_eval_subtype:\n before: {}\n after: {}\n",
+                   get_resolver()->to_string(old_type), get_resolver()->to_string(type));
+    }
+
+    // Handle placeholders with unknown source (likely from built-in types like enum base)
+    if (type->is_placeholder && type->kind == TypeKind::Placeholder &&
+        !type->data.placeholder.source_decl) {
+
+        printf("DEBUG: Checking enum base fix for function: %s\n",
+               m_fn ? m_fn->qualified_name.c_str() : "null");
+
+        // For enum base types like __CxEnumBase<T>, check if the current function
+        // has a concrete type in its name that matches the placeholder
+        if (m_fn && m_fn->qualified_name.find("__CxEnumBase<") != string::npos) {
+            printf("DEBUG: Found enum base function, extracting concrete type\n");
+            // Extract the concrete type from the function name
+            // e.g., "__CxEnumBase<int>.discriminator" -> should substitute T with int
+            auto start = m_fn->qualified_name.find('<') + 1;
+            auto end = m_fn->qualified_name.find('>');
+            if (start != string::npos && end != string::npos && end > start) {
+                auto concrete_type_name = m_fn->qualified_name.substr(start, end - start);
+
+                // Map common type names to their actual types
+                ChiType *concrete_type = nullptr;
+                if (concrete_type_name == "int") {
+                    concrete_type = get_resolver()->get_system_types()->int_;
+                } else if (concrete_type_name == "char") {
+                    concrete_type = get_resolver()->get_system_types()->char_;
+                } else if (concrete_type_name == "bool") {
+                    concrete_type = get_resolver()->get_system_types()->bool_;
+                }
+
+                if (concrete_type) {
+                    printf("DEBUG: Resolved enum base placeholder %s to %s\n",
+                           type->data.placeholder.name.c_str(), concrete_type_name.c_str());
+                    return concrete_type;
+                }
+            }
+        }
+
+        // General fallback for other unknown source placeholders
+        if (m_fn && m_fn->specialized_subtype &&
+            m_fn->specialized_subtype->kind == TypeKind::Subtype) {
+            type = get_resolver()->type_placeholders_sub(type,
+                                                         &m_fn->specialized_subtype->data.subtype);
+        }
+        if (type->is_placeholder && m_fn && m_fn->container_subtype) {
+            type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+        }
+    }
+
+    // Handle array types with placeholder elements using selective substitution
     if (type->kind == TypeKind::Array && type->data.array.elem->is_placeholder) {
         if (m_fn && m_fn->container_subtype) {
-            return get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+            if (m_fn->fn_type && m_fn->fn_type->data.fn.container_ref) {
+                auto container_node = m_fn->fn_type->data.fn.container_ref->data.struct_.node;
+                return get_resolver()->type_placeholders_sub_selective(
+                    type, m_fn->container_subtype, container_node);
+            }
         }
         if (m_fn && m_fn->specialized_subtype &&
             m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-            return get_resolver()->type_placeholders_sub(type,
-                                                         &m_fn->specialized_subtype->data.subtype);
+            if (m_fn->node) {
+                return get_resolver()->type_placeholders_sub_selective(
+                    type, &m_fn->specialized_subtype->data.subtype, m_fn->node);
+            }
         }
     }
+
     if (type->kind == TypeKind::Subtype) {
         return type->data.subtype.final_type;
     }
@@ -233,6 +343,29 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
                 auto subtype_member = struct_type->data.struct_.find_member(member->name);
                 fn_node = subtype_member->node;
             }
+
+            auto fn_type = get_chitype(fn_node);
+
+            // For generic methods, compile their specialized versions instead
+            if (fn_type && fn_type->is_placeholder && fn_type->kind == TypeKind::Fn) {
+                // Skip the generic version but compile all specialized versions
+                for (auto specialized_subtype : fn_type->data.fn.subtypes) {
+                    if (!specialized_subtype->is_placeholder) {
+                        auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node, "",
+                                                   specialized_subtype);
+                        fn->specialized_subtype = specialized_subtype;
+                        if (subtype) {
+                            fn->container_subtype = &subtype->data.subtype;
+                            fn->container_type = subtype;
+                        } else {
+                            fn->container_type = type;
+                        }
+                        m_ctx->pending_fns.add(fn);
+                    }
+                }
+                continue;
+            }
+
             auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node);
             if (subtype) {
                 fn->container_subtype = &subtype->data.subtype;
@@ -1385,9 +1518,9 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     case TypeKind::Struct: {
         auto sty = get_resolver()->resolve_struct_type(type);
         auto &builder = *m_ctx->llvm_builder;
-        auto copyp = sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
-        if (copyp) {
-            auto copy = *copyp;
+        auto copy_fn_p = sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+        if (copy_fn_p) {
+            auto copy_fn = *copy_fn_p;
             auto from_address = src.address ? src.address : nullptr;
             if (!from_address) {
                 from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy_from");
@@ -1398,10 +1531,10 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                 dest, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
                 size, {});
             auto loc = m_ctx->llvm_builder->getCurrentDebugLocation();
-            auto call = builder.CreateCall(get_fn(copy->node)->llvm_fn, {
-                                                                            dest,
-                                                                            from_address,
-                                                                        });
+            auto call = builder.CreateCall(get_fn(copy_fn->node)->llvm_fn, {
+                                                                               dest,
+                                                                               from_address,
+                                                                           });
             call->setDebugLoc(loc);
             emit_dbg_location(expr);
             return;
@@ -2268,6 +2401,7 @@ Function *Compiler::get_specialized_fn(ast::Node *generic_fn_decl, ChiType *spec
 Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name,
                                      ChiType *subtype) {
     auto declspec = fn->declspec_ref();
+    m_fn_eval_subtype = subtype;
     auto ftype = get_chitype(fn);
 
     // Determine bind parameter information
@@ -2278,7 +2412,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     if (subtype) {
         assert(subtype->kind == TypeKind::Subtype);
         auto &subtype_data = subtype->data.subtype;
-        ftype = subtype_data.final_type;
+        ftype = eval_type(subtype_data.final_type);
         assert(ftype && ftype->kind == TypeKind::Fn);
 
         // Create a unique name for the specialized function
@@ -2298,6 +2432,8 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
             assert(ftype);
         }
     }
+
+    assert(!ftype->is_placeholder && "Compiling placeholder type");
 
     if (ftype->kind == TypeKind::Fn) {
         if (ftype->data.fn.container_ref) {
@@ -2426,6 +2562,43 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 }
 
 llvm::Type *Compiler::_compile_type(ChiType *type) {
+    if (type->is_placeholder) {
+        printf("DEBUG: _compile_type called on placeholder %s (index=%ld)\n",
+               type->kind == TypeKind::Placeholder ? type->data.placeholder.name.c_str()
+                                                   : "non-placeholder",
+               type->kind == TypeKind::Placeholder ? type->data.placeholder.index : -1);
+        printf("DEBUG: Placeholder source_decl=%p\n",
+               type->kind == TypeKind::Placeholder ? type->data.placeholder.source_decl : nullptr);
+        printf("DEBUG: Current function: %s\n", m_fn ? m_fn->qualified_name.c_str() : "null");
+        if (m_fn) {
+            printf("DEBUG: Function node: %p\n", m_fn->node);
+            printf("DEBUG: Function type: %s\n",
+                   m_fn->fn_type ? get_resolver()->to_string(m_fn->fn_type).c_str() : "null");
+            printf("DEBUG: Function has container_subtype: %s\n",
+                   m_fn->container_subtype ? "true" : "false");
+            printf("DEBUG: Function has specialized_subtype: %s\n",
+                   m_fn->specialized_subtype ? "true" : "false");
+        }
+
+        // Print the call stack to see where this is coming from
+        printf("DEBUG: Call stack trace - this placeholder is being compiled in context of %s\n",
+               m_fn ? m_fn->qualified_name.c_str() : "null");
+
+        // Try eval_type one more time to see if it can resolve it
+        fmt::print("DEBUG: resolving placeholder type {} (index={})\n",
+                   get_resolver()->to_string(type), type->data.placeholder.index);
+        if (get_resolver()->to_string(type) == "U") {
+            fmt::print("debug.\n");
+        }
+        auto resolved = eval_type(type);
+        if (resolved != type) {
+            assert(!resolved->is_placeholder);
+            printf("DEBUG: eval_type resolved the placeholder to a different type\n");
+            return _compile_type(resolved);
+        } else {
+            printf("DEBUG: eval_type could not resolve the placeholder\n");
+        }
+    }
     assert(!type->is_placeholder && "compile_type called on placeholder type");
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
@@ -2521,6 +2694,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         if (!data.fields.len) {
             return compile_type(get_system_types()->void_);
         }
+
         std::vector<llvm::Type *> members;
         for (auto &member : data.fields) {
             members.push_back(compile_type(member->resolved_type));

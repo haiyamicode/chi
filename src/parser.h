@@ -107,7 +107,7 @@ class Parser {
 
     // Error recovery mechanisms
     void recover_to_statement_boundary();
-    void recover_to_declaration_boundary(); 
+    void recover_to_declaration_boundary();
     void recover_to_synchronization_point();
     bool is_statement_start(TokenType type);
     bool is_declaration_start(TokenType type);
@@ -158,7 +158,7 @@ class Parser {
 
     Node *parse_var_decl(bool as_field, DeclSpec *decl_spec = nullptr);
 
-    Node *parse_fn_proto(Token *iden);
+    Node *parse_fn_proto(Token *iden, Node *fn_node);
 
     Node *parse_fn_type(Token *func);
 

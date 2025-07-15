@@ -101,3 +101,8 @@ Tests are located in `tests/` directory with `.xc` source files and correspondin
 - You can use lldb to debug the compiler or the output executable.
 - Take a look at .vscode/launch.json for a working debugging setup using lldb, the configuration is for VSCode, but you can
   use a similar setup with command line.
+
+### Writing temporary code for debugging
+
+- Best practice is to write your temporary code into local/test.xc, then test it with 'make run_example' or 'make compile_example' (for compilation only).
+  When you encounter any issues, please isolate into a minimal test case that demonstrates it. Feel free to add debug prints, conditional debug prints or run debugging as needed (prioriotize debug prints first since they are easy to track).

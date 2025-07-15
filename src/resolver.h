@@ -243,7 +243,7 @@ class Resolver {
     ChiType *to_value_type(ChiType *type);
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
-    ChiType *get_fn_subtype(ChiType *generic_fn, TypeList *type_args);
+    ChiType *get_fn_subtype(ChiType *generic_fn, TypeList *type_args, ast::Node *root_node);
     ChiType *resolve_fn_subtype(ChiType *subtype);
     void infer_type_params(ChiType *param_type, ChiType *arg_type,
                            map<ChiType *, ChiType *> *inferences);
@@ -289,6 +289,11 @@ class Resolver {
 
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);
     ChiType *type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *> *subs);
+
+    void type_placeholders_sub_each_selective(TypeList *list, ChiTypeSubtype *subs,
+                                              TypeList *output, ast::Node *source_filter);
+    ChiType *type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype *subs,
+                                             ast::Node *source_filter);
 
     ast::Node *find_root_decl(ast::Node *node);
 

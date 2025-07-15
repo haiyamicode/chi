@@ -219,6 +219,8 @@ struct CompiledVtable {
 class Compiler {
     CodegenContext *m_ctx = nullptr;
     Function *m_fn = nullptr;
+    ChiType *m_fn_eval_subtype = nullptr;
+    ast::Node *m_fn_node = nullptr;
 
     llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
 
@@ -314,13 +316,14 @@ class Compiler {
 
     llvm::Value *compile_reflection_vtable();
 
-    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "", ChiType *subtype = nullptr);
+    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "",
+                               ChiType *subtype = nullptr);
     Function *compile_fn_proto_specialized(ast::Node *node, ast::Node *fn, ChiType *subtype);
     Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 
     Function *get_system_fn(const string &name);
     Function *get_specialized_fn(ast::Node *generic_fn_decl, ChiType *specialized_subtype);
-    
+
     // Helper function to get resolved function type from a specialized subtype
     ChiType *get_specialized_fn_type(ChiType *specialized_subtype);
 

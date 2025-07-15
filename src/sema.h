@@ -164,6 +164,7 @@ struct ChiTypeSubtype {
     ChiType *generic = nullptr;
     TypeList args = {};
     ChiType *final_type = nullptr;
+    ast::Node *root_node = nullptr;
 };
 
 struct ChiEnumVariant {
@@ -206,6 +207,10 @@ struct ChiTypeEnumValue {
 struct ChiTypePlaceholder {
     ChiType *trait = nullptr;
     long index = 0;
+    // Source information to disambiguate placeholders
+    ast::Node *source_decl =
+        nullptr; // The struct/function declaration that owns this type parameter
+    string name; // The name of the type parameter (T, U, etc.)
 };
 
 struct ChiTypeFnLambda {
@@ -320,6 +325,13 @@ struct ChiType {
     }
 
     void clone(ChiType *b) {
+        b->kind = kind;
+        b->name = name;
+        b->is_placeholder = is_placeholder;
+        b->id = id;
+        b->display_name = display_name;
+        b->global_id = global_id;
+
 #define CHITYPE_CASE_CLONE_FIELD(field, type, type_struct)                                         \
     case TypeKind::type:                                                                           \
         b->data.field = data.field;                                                                \

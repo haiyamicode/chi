@@ -170,6 +170,7 @@ struct TypeParam {
     Node *type = nullptr;
     long index = 0;
     Node *bound = nullptr;
+    Node *source_decl = nullptr; // The struct/function that owns this type parameter
 };
 
 struct Block {
@@ -220,7 +221,8 @@ struct FnCallExpr {
     Node *fn_ref_expr = nullptr;
     array<Node *> args = {};
     bool is_builtin = false;
-    ChiType *specialized_fn_type = nullptr;  // For generic function calls, stores the specialized function type
+    ChiType *specialized_fn_type =
+        nullptr; // For generic function calls, stores the specialized function type
 };
 
 struct IfStmt {
@@ -448,6 +450,7 @@ struct Node {
     ChiType *orig_type = nullptr;
     EscapeAnalysis escape = {};
     Node *parent_fn = nullptr;
+    Node *root_node = nullptr;
     uint32_t id = 0;
     int index = 0;
     Node *parent = nullptr;
@@ -651,6 +654,8 @@ struct Node {
         }
         return nullptr;
     }
+
+    Node *get_root_node() { return root_node ? root_node : this; }
 
     bool is_mutable() {
         switch (type) {

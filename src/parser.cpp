@@ -569,8 +569,8 @@ Node *Parser::parse_type_expr(bool type_only) {
 
 Node *Parser::parse_fn_lambda() {
     auto token = expect(TokenType::KW_FUNC);
-    auto proto = parse_fn_proto(token);
     auto fn = create_node(NodeType::FnDef, token);
+    auto proto = parse_fn_proto(token, fn);
     fn->name = "";
     fn->data.fn_def.fn_kind = FnKind::Lambda;
     fn->data.fn_def.fn_proto = proto;
@@ -590,7 +590,7 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
     auto fn = create_node(NodeType::FnDef, iden);
     fn->start_token = iden;
     fn->name = iden->get_name();
-    auto proto = parse_fn_proto(iden);
+    auto proto = parse_fn_proto(iden, fn);
     proto->data.fn_proto.fn_def_node = fn;
     fn->data.fn_def.fn_proto = proto;
     fn->data.fn_def.fn_kind = kind;
@@ -701,7 +701,7 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     return node;
 }
 
-Node *Parser::parse_fn_proto(Token *token) {
+Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
     auto proto = create_node(NodeType::FnProto, token);
     proto->name = token->get_name();
 
@@ -728,6 +728,7 @@ Node *Parser::parse_fn_proto(Token *token) {
             auto param_node = create_node(NodeType::TypeParam, param_iden);
             param_node->name = param_iden->str; // Set the name explicitly
             param_node->data.type_param.index = type_params.len;
+            param_node->data.type_param.source_decl = fn_node;
             type_params.add(param_node);
 
             // Add type parameter to scope
@@ -1439,6 +1440,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
                 param_node->data.type_param.type = parse_type_expr();
             }
             param_node->data.type_param.index = params.len;
+            param_node->data.type_param.source_decl = node;
             params.add(param_node);
 
             if (!at_comma(TokenType::GT)) {
