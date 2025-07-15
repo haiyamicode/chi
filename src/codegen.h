@@ -314,7 +314,7 @@ class Compiler {
 
     llvm::Value *compile_reflection_vtable();
 
-    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "");
+    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "", ChiType *subtype = nullptr);
     Function *compile_fn_proto_specialized(ast::Node *node, ast::Node *fn, ChiType *subtype);
     Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 

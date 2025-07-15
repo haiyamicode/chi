@@ -2259,19 +2259,39 @@ Function *Compiler::get_specialized_fn(ast::Node *generic_fn_decl, ChiType *spec
     return specialized_fn;
 }
 
-Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
+Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name, ChiType *subtype) {
     auto declspec = fn->declspec_ref();
     auto ftype = get_chitype(fn);
 
     // Determine bind parameter information
     bool has_bind = false;
     string bind_name = "";
-    if (ftype->kind == TypeKind::FnLambda) {
-        has_bind = true;
-        ftype = ftype->data.fn_lambda.bound_fn;
-        bind_name = "_binds";
-        assert(ftype);
+    
+    // Handle specialization first, then lambda processing
+    if (subtype) {
+        assert(subtype->kind == TypeKind::Subtype);
+        auto &subtype_data = subtype->data.subtype;
+        ftype = subtype_data.final_type;
+        assert(ftype && ftype->kind == TypeKind::Fn);
+
+        // Create a unique name for the specialized function
+        if (name.empty()) {
+            name = proto_node->name;
+        }
+        name += "_specialized";
+        for (auto arg : subtype_data.args) {
+            name += "_" + get_resolver()->to_string(arg, false);
+        }
+    } else {
+        // Handle lambda types for non-specialized functions only
+        if (ftype->kind == TypeKind::FnLambda) {
+            has_bind = true;
+            ftype = ftype->data.fn_lambda.bound_fn;
+            bind_name = "_binds";
+            assert(ftype);
+        }
     }
+    
     if (ftype->kind == TypeKind::Fn) {
         if (ftype->data.fn.container_ref) {
             has_bind = true;
@@ -2291,6 +2311,11 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     auto new_fn = add_fn(fn_l, fn, ftype);
 
+    // Store the specialized type for lookup if this is a specialized function
+    if (subtype) {
+        new_fn->specialized_subtype = subtype;
+    }
+
     // Build parameter information
     std::vector<ParameterInfo> param_info;
     int llvm_index = 0;
@@ -2320,8 +2345,12 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     // Store parameter information
     new_fn->parameter_info = std::move(param_info);
 
+    // For specialized functions, always use the specialized name
+    if (subtype) {
+        new_fn->qualified_name = name;
+    }
     // For lambda functions, use the passed name instead of the empty qualified_name
-    if (fn && fn->type == ast::NodeType::FnDef && fn->data.fn_def.fn_kind == ast::FnKind::Lambda &&
+    else if (fn && fn->type == ast::NodeType::FnDef && fn->data.fn_def.fn_kind == ast::FnKind::Lambda &&
         !name.empty()) {
         new_fn->qualified_name = name;
     }
@@ -2332,75 +2361,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
 Function *Compiler::compile_fn_proto_specialized(ast::Node *proto_node, ast::Node *fn,
                                                  ChiType *subtype) {
-    assert(subtype->kind == TypeKind::Subtype);
-    auto &subtype_data = subtype->data.subtype;
-    auto specialized_fn_type = subtype_data.final_type;
-    assert(specialized_fn_type && specialized_fn_type->kind == TypeKind::Fn);
-
-    // Create a unique name for the specialized function
-    string specialized_name = proto_node->name;
-    specialized_name += "_specialized";
-    for (auto arg : subtype_data.args) {
-        specialized_name += "_" + get_resolver()->to_string(arg, false);
-    }
-
-    // Compile the specialized function using the resolved function type
-    auto declspec = fn->declspec_ref();
-    auto ftype = specialized_fn_type;
-
-    // Determine bind parameter information
-    bool has_bind = false;
-    string bind_name = "";
-    if (ftype->kind == TypeKind::Fn) {
-        if (ftype->data.fn.container_ref) {
-            has_bind = true;
-            bind_name = "this";
-        }
-    }
-
-    auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
-    auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, specialized_name,
-                                       m_ctx->llvm_module.get());
-    fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
-                              llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
-
-    auto new_fn = add_fn(fn_l, fn, ftype);
-
-    // Store the specialized type for lookup
-    new_fn->specialized_subtype = subtype;
-
-    // Build parameter information
-    std::vector<ParameterInfo> param_info;
-    int llvm_index = 0;
-
-    // Add sret parameter if needed
-    bool has_sret = ftype->data.fn.should_use_sret() && !declspec.is_extern();
-    if (has_sret) {
-        param_info.emplace_back(ParameterKind::SRet, llvm_index++, -1, "sret");
-        fn_l->getArg(llvm_index - 1)->setName("sret");
-    }
-
-    // Add bind parameter if needed
-    if (has_bind) {
-        param_info.emplace_back(ParameterKind::Bind, llvm_index++, -1, bind_name);
-        auto bind_param = fn_l->getArg(llvm_index - 1);
-        bind_param->setName(bind_name);
-        new_fn->bind_ptr = bind_param;
-    }
-
-    // Add regular user parameters
-    for (int user_idx = 0; user_idx < proto_node->data.fn_proto.params.len; user_idx++) {
-        auto param_name = proto_node->data.fn_proto.params[user_idx]->name;
-        param_info.emplace_back(ParameterKind::Regular, llvm_index++, user_idx, param_name);
-        fn_l->getArg(llvm_index - 1)->setName(param_name);
-    }
-
-    // Store parameter information
-    new_fn->parameter_info = std::move(param_info);
-    new_fn->qualified_name = specialized_name;
-    new_fn->specialized_subtype = subtype; // Set the specialized subtype for eval_type
-    new_fn->llvm_fn->setName(new_fn->get_llvm_name());
-    return new_fn;
+    return compile_fn_proto(proto_node, fn, "", subtype);
 }
 
 void Compiler::compile_extern(ast::Node *node) {
