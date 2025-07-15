@@ -80,7 +80,8 @@ ChiType *Compiler::eval_type(ChiType *type) {
     // Handle function generic placeholders
     if (type->is_placeholder && m_fn && m_fn->specialized_subtype &&
         m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-        type = get_resolver()->type_placeholders_sub(type, &m_fn->specialized_subtype->data.subtype);
+        type =
+            get_resolver()->type_placeholders_sub(type, &m_fn->specialized_subtype->data.subtype);
     }
     if (type->kind == TypeKind::Array && type->data.array.elem->is_placeholder) {
         if (m_fn && m_fn->container_subtype) {
@@ -454,6 +455,11 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             fn->bind_ptr = llvm_param;
         } else if (param_info.kind == ParameterKind::Regular) {
             auto idx = param_info.user_param_index;
+            // DEBUG: Accessing parameter
+            if (idx >= proto.params.len) {
+                printf("ERROR: idx %d >= proto.params.len %lu\n", idx, proto.params.len);
+                continue;
+            }
             auto param = proto.params[idx];
 
             // For specialized functions, resolve the parameter type first
@@ -2259,14 +2265,15 @@ Function *Compiler::get_specialized_fn(ast::Node *generic_fn_decl, ChiType *spec
     return specialized_fn;
 }
 
-Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name, ChiType *subtype) {
+Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name,
+                                     ChiType *subtype) {
     auto declspec = fn->declspec_ref();
     auto ftype = get_chitype(fn);
 
     // Determine bind parameter information
     bool has_bind = false;
     string bind_name = "";
-    
+
     // Handle specialization first, then lambda processing
     if (subtype) {
         assert(subtype->kind == TypeKind::Subtype);
@@ -2291,7 +2298,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
             assert(ftype);
         }
     }
-    
+
     if (ftype->kind == TypeKind::Fn) {
         if (ftype->data.fn.container_ref) {
             has_bind = true;
@@ -2304,6 +2311,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
 
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
+    // DEBUG: Creating function
     auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, name,
                                        m_ctx->llvm_module.get());
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
@@ -2329,17 +2337,30 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     // Add bind parameter if needed
     if (has_bind) {
+        // DEBUG: Adding bind parameter
         param_info.emplace_back(ParameterKind::Bind, llvm_index++, -1, bind_name);
-        auto bind_param = fn_l->getArg(llvm_index - 1);
-        bind_param->setName(bind_name);
-        new_fn->bind_ptr = bind_param;
+        if (llvm_index - 1 >= fn_l->arg_size()) {
+            printf("ERROR: Bind param index %d >= arg_size %u\n", llvm_index - 1,
+                   (unsigned)fn_l->arg_size());
+        } else {
+            auto bind_param = fn_l->getArg(llvm_index - 1);
+            bind_param->setName(bind_name);
+            new_fn->bind_ptr = bind_param;
+        }
     }
 
     // Add regular user parameters
+    // DEBUG: Adding user parameters
     for (int user_idx = 0; user_idx < proto_node->data.fn_proto.params.len; user_idx++) {
         auto param_name = proto_node->data.fn_proto.params[user_idx]->name;
+        // DEBUG: Adding user parameter
         param_info.emplace_back(ParameterKind::Regular, llvm_index++, user_idx, param_name);
-        fn_l->getArg(llvm_index - 1)->setName(param_name);
+        if (llvm_index - 1 >= fn_l->arg_size()) {
+            printf("ERROR: User param index %d >= arg_size %u\n", llvm_index - 1,
+                   (unsigned)fn_l->arg_size());
+        } else {
+            fn_l->getArg(llvm_index - 1)->setName(param_name);
+        }
     }
 
     // Store parameter information
@@ -2350,8 +2371,8 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
         new_fn->qualified_name = name;
     }
     // For lambda functions, use the passed name instead of the empty qualified_name
-    else if (fn && fn->type == ast::NodeType::FnDef && fn->data.fn_def.fn_kind == ast::FnKind::Lambda &&
-        !name.empty()) {
+    else if (fn && fn->type == ast::NodeType::FnDef &&
+             fn->data.fn_def.fn_kind == ast::FnKind::Lambda && !name.empty()) {
         new_fn->qualified_name = name;
     }
 

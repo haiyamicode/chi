@@ -63,6 +63,7 @@ struct SystemTypes {
     ChiType *error = nullptr;
     ChiType *promise = nullptr;
     ChiType *undefined = nullptr;
+    ChiType *lambda = nullptr;
 };
 
 struct ResolveContext {
@@ -129,7 +130,7 @@ struct ResolveScope {
     ResolveScope set_is_lhs(bool is_lhs) const;
 };
 
-enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0 };
+enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0, IS_FN_LAMBDA = 1 << 1 };
 
 class Resolver {
     ResolveContext *m_ctx = nullptr;
@@ -244,7 +245,8 @@ class Resolver {
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
     ChiType *get_fn_subtype(ChiType *generic_fn, TypeList *type_args);
     ChiType *resolve_fn_subtype(ChiType *subtype);
-    void infer_type_params(ChiType *param_type, ChiType *arg_type, map<ChiType *, ChiType *> *inferences);
+    void infer_type_params(ChiType *param_type, ChiType *arg_type,
+                           map<ChiType *, ChiType *> *inferences);
 
     bool is_struct_type(ChiType *type);
 
@@ -261,7 +263,8 @@ class Resolver {
     ChiType *get_promise_type(ChiType *value);
 
     ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
-                         ChiType *container = nullptr, bool is_extern = false, TypeList *type_params = nullptr);
+                         ChiType *container = nullptr, bool is_extern = false,
+                         TypeList *type_params = nullptr);
 
     ChiType *get_lambda_for_fn(ChiType *fn);
 

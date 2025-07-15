@@ -60,6 +60,19 @@ void Resolver::context_init_primitives() {
     system_types.error = create_type(TypeKind::Error);
     system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
+    
+    // Create a system lambda type for LLVM compatibility
+    // All lambdas use the same underlying structure: {ptr, i32, ptr}
+    system_types.lambda = create_type(TypeKind::Struct);
+    auto &lambda_struct = system_types.lambda->data.struct_;
+    system_types.lambda->display_name = "Lambda";
+    system_types.lambda->name = "Lambda";
+    lambda_struct.kind = ContainerKind::Struct;
+    lambda_struct.add_member(get_allocator(), "ptr", get_dummy_var("ptr"),
+                           get_pointer_type(system_types.void_));
+    lambda_struct.add_member(get_allocator(), "size", get_dummy_var("size"), system_types.uint32);
+    lambda_struct.add_member(get_allocator(), "data", get_dummy_var("data"),
+                           get_pointer_type(system_types.void_));
 
     add_primitive("bool", system_types.bool_);
     add_primitive("string", system_types.string);
@@ -347,7 +360,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.fn_kind == ast::FnKind::Lambda) {
             auto &data = node->data.fn_def;
             auto fn_scope = scope.set_parent_fn_node(node);
-            auto proto = resolve(data.fn_proto, fn_scope);
+            auto proto = resolve(data.fn_proto, fn_scope, flags | IS_FN_DECL_PROTO | IS_FN_LAMBDA);
             // For lambda functions, we need to extract the underlying function type
             // from the FnLambda type for proper return type checking
             auto lambda_fn_type =
@@ -404,6 +417,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
         auto is_fn_decl = flags & IS_FN_DECL_PROTO;
+        auto is_lambda = flags & IS_FN_LAMBDA;
 
         // Create a new scope for type parameters
         auto fn_scope = scope;
@@ -448,7 +462,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto fn_type = get_fn_type(return_type, &param_types, is_variadic, method_container,
                                    is_extern, &type_param_types);
 
-        if (!is_fn_decl) {
+        if (is_lambda || !is_fn_decl) {
             return get_lambda_for_fn(fn_type);
         }
         return fn_type;
@@ -2392,28 +2406,16 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
 }
 
 ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
-    auto key = fmt::format("Lambda<{}>", to_string(fn_type, true));
-    if (auto cached = m_ctx->composite_types.get(key)) {
-        return *cached;
-    }
+    // Don't cache lambda types - keep them all unique to avoid conflicts
+    // Each lambda instance should have its own type even with same signature
 
     auto lambda = create_type(TypeKind::FnLambda);
     lambda->data.fn_lambda.fn = fn_type;
     lambda->is_placeholder = fn_type->is_placeholder;
 
-    auto struct_type = create_type(TypeKind::Struct);
-    auto &struct_ = struct_type->data.struct_;
-    struct_type->display_name = "Lambda<" + to_string(fn_type, true) + ">" + "::Internal";
-    struct_type->name = struct_type->display_name;
-
-    struct_.kind = ContainerKind::Struct;
-    struct_.add_member(get_allocator(), "ptr", get_dummy_var("ptr"),
-                       get_pointer_type(get_system_types()->void_));
-    struct_.add_member(get_allocator(), "size", get_dummy_var("size"), get_system_types()->uint32);
-    struct_.add_member(get_allocator(), "data", get_dummy_var("data"),
-                       get_pointer_type(get_system_types()->void_));
-
-    lambda->data.fn_lambda.internal = struct_type;
+    // Use the system lambda type for all lambda internal structures
+    // This ensures LLVM compatibility across different lambda types
+    lambda->data.fn_lambda.internal = get_system_types()->lambda;
 
     auto bound_type = create_type(TypeKind::Fn);
     lambda->data.fn_lambda.bound_fn = bound_type;
@@ -2430,7 +2432,6 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
     bound_fn.is_variadic = fn_data.is_variadic;
     bound_fn.container_ref = fn_data.container_ref;
 
-    m_ctx->composite_types[key] = lambda;
     return lambda;
 }
 
