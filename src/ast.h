@@ -220,6 +220,7 @@ struct FnCallExpr {
     Node *fn_ref_expr = nullptr;
     array<Node *> args = {};
     bool is_builtin = false;
+    ChiType *specialized_fn_type = nullptr;  // For generic function calls, stores the specialized function type
 };
 
 struct IfStmt {

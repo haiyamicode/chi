@@ -60,6 +60,7 @@ struct Function {
     ChiType *container_type = nullptr;
     ChiTypeSubtype *container_subtype = nullptr;
     ChiType *fn_type = nullptr;
+    ChiType *specialized_subtype = nullptr; // For specialized generic functions
     label_t *next_end_label = nullptr;
     array<llvm::Value *> vararg_pointers = {};
 
@@ -173,6 +174,8 @@ struct CodegenContext {
     map<TypeId, box<TypeInfo>> info_table = {};
     map<string, Function *> function_table = {};
     map<string, Function *> system_functions = {};
+    map<string, ast::Node *> generic_functions =
+        {}; // Maps function global_id to AST node for instantiation
     map<ChiType *, llvm::Value *> typeinfo_table = {};
     map<string, llvm::Type *> anon_type_table = {};
     map<InterfaceImpl *, llvm::Value *> impl_table = {};
@@ -295,7 +298,8 @@ class Compiler {
 
     void _compile_struct(ast::Node *node, ChiType *struct_type);
 
-    llvm::Value *compile_alloc(Function *fn, ast::Node *decl, bool is_new = false);
+    llvm::Value *compile_alloc(Function *fn, ast::Node *decl, bool is_new = false,
+                               ChiType *type = nullptr);
 
     void compile_stmt(Function *fn, ast::Node *stmt);
 
@@ -311,9 +315,14 @@ class Compiler {
     llvm::Value *compile_reflection_vtable();
 
     Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "");
+    Function *compile_fn_proto_specialized(ast::Node *node, ast::Node *fn, ChiType *subtype);
     Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 
     Function *get_system_fn(const string &name);
+    Function *get_specialized_fn(ast::Node *generic_fn_decl, ChiType *specialized_subtype);
+    
+    // Helper function to get resolved function type from a specialized subtype
+    ChiType *get_specialized_fn_type(ChiType *specialized_subtype);
 
     void compile_struct_vtables(ChiType *type);
     llvm::Value *compile_type_info(ChiType *type);

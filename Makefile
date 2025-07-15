@@ -55,5 +55,5 @@ compile_example_package: build install
 run_example_package: compile_example_package
 	./local/test_package_exe
 
-analyze_example:
+analyze_example: build
 	$(CHI) -analyzer -c $(INPUT_FILE)

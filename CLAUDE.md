@@ -96,8 +96,8 @@ Tests are located in `tests/` directory with `.xc` source files and correspondin
 - `.x` - Chi module files (managed memory mode)
 - `.expect` - Expected test output files
 
-### Debugging
+### Debugging Compiler Crashes
 
-- Use `BUILD_MODE=Debug make build` for debug builds
-- Add `-d` flag when running chi compiler for debug mode
-- Debug mode enables additional error checking and panic on parser errors
+- You can use lldb to debug the compiler or the output executable.
+- Take a look at .vscode/launch.json for a working debugging setup using lldb, the configuration is for VSCode, but you can
+  use a similar setup with command line.

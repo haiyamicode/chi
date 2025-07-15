@@ -23,6 +23,7 @@ constexpr auto CALL_WRONG_NUMBER_OF_ARGS =
     "wrong number of arguments for function call, expected {}, got {}";
 constexpr auto SUBTYPE_WRONG_NUMBER_OF_ARGS =
     "wrong number of type arguments for {}, expected {}, got {}";
+constexpr auto GENERIC_TYPE_INFERENCE_FAILED = "failed to infer type parameters for generic function call";
 constexpr auto CANNOT_CALL_NON_FUNCTION = "cannot call non-function value";
 constexpr auto MEMBER_NOT_FOUND = "member '{}' not found for type {}";
 constexpr auto PRIVATE_MEMBER_NOT_ACCESSIBLE =

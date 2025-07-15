@@ -21,9 +21,9 @@ struct Context;
 struct ChiTypeStruct;
 struct ChiTypeEnum;
 
-MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer, Reference,
-          MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box, Result, Error,
-          FnLambda, Promise, Infer, Module, This, Unknown, Bytes, Undefined)
+MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer,
+          Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box,
+          Result, Error, FnLambda, Promise, Infer, Module, This, Unknown, Bytes, Undefined)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
@@ -55,10 +55,12 @@ struct ChiTypeFn {
     ChiType *container_ref = nullptr;
     bool is_extern = false;
     array<ChiType *> type_params = {};
+    array<ChiType *> subtypes = {}; // Instantiated function types with concrete type arguments
 
     ChiType *get_param_at(size_t index);
     int get_va_start();
     bool should_use_sret();
+    bool is_generic() const { return type_params.len > 0; }
 };
 
 struct ChiStructMember {
@@ -161,7 +163,7 @@ struct ChiTypeResult {
 struct ChiTypeSubtype {
     ChiType *generic = nullptr;
     TypeList args = {};
-    ChiType *resolved_struct = nullptr;
+    ChiType *final_type = nullptr;
 };
 
 struct ChiEnumVariant {

@@ -242,6 +242,9 @@ class Resolver {
     ChiType *to_value_type(ChiType *type);
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
+    ChiType *get_fn_subtype(ChiType *generic_fn, TypeList *type_args);
+    ChiType *resolve_fn_subtype(ChiType *subtype);
+    void infer_type_params(ChiType *param_type, ChiType *arg_type, map<ChiType *, ChiType *> *inferences);
 
     bool is_struct_type(ChiType *type);
 
@@ -258,7 +261,7 @@ class Resolver {
     ChiType *get_promise_type(ChiType *value);
 
     ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
-                         ChiType *container = nullptr, bool is_extern = false);
+                         ChiType *container = nullptr, bool is_extern = false, TypeList *type_params = nullptr);
 
     ChiType *get_lambda_for_fn(ChiType *fn);
 
@@ -282,6 +285,7 @@ class Resolver {
     }
 
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);
+    ChiType *type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *> *subs);
 
     ast::Node *find_root_decl(ast::Node *node);
 

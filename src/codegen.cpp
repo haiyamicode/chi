@@ -77,11 +77,23 @@ ChiType *Compiler::eval_type(ChiType *type) {
     if (type->is_placeholder && m_fn && m_fn->container_subtype) {
         type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
     }
+    // Handle function generic placeholders
+    if (type->is_placeholder && m_fn && m_fn->specialized_subtype &&
+        m_fn->specialized_subtype->kind == TypeKind::Subtype) {
+        type = get_resolver()->type_placeholders_sub(type, &m_fn->specialized_subtype->data.subtype);
+    }
     if (type->kind == TypeKind::Array && type->data.array.elem->is_placeholder) {
-        return get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+        if (m_fn && m_fn->container_subtype) {
+            return get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+        }
+        if (m_fn && m_fn->specialized_subtype &&
+            m_fn->specialized_subtype->kind == TypeKind::Subtype) {
+            return get_resolver()->type_placeholders_sub(type,
+                                                         &m_fn->specialized_subtype->data.subtype);
+        }
     }
     if (type->kind == TypeKind::Subtype) {
-        return type->data.subtype.resolved_struct;
+        return type->data.subtype.final_type;
     }
     if (type->kind == TypeKind::This) {
         return m_fn->fn_type->data.fn.container_ref;
@@ -122,8 +134,22 @@ void Compiler::compile_module(ast::Module *module) {
     for (auto decl : root.top_level_decls) {
         switch (decl->type) {
         case ast::NodeType::FnDef: {
-            auto fn = compile_fn_proto(decl->data.fn_def.fn_proto, decl);
-            m_ctx->pending_fns.add(fn);
+            auto proto = decl->data.fn_def.fn_proto;
+            auto fn_type = get_chitype(decl);
+            if (fn_type && fn_type->kind == TypeKind::Fn && fn_type->data.fn.is_generic()) {
+                // This is a generic function - compile all its instantiated subtypes
+                for (auto subtype : fn_type->data.fn.subtypes) {
+                    if (subtype->is_placeholder) {
+                        continue;
+                    }
+                    // Compile specialized version of the function
+                    auto specialized_fn = compile_fn_proto_specialized(proto, decl, subtype);
+                    m_ctx->pending_fns.add(specialized_fn);
+                }
+            } else {
+                auto fn = compile_fn_proto(proto, decl);
+                m_ctx->pending_fns.add(fn);
+            }
             break;
         }
         case ast::NodeType::StructDecl:
@@ -197,7 +223,7 @@ void Compiler::compile_struct(ast::Node *node) {
 
 void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     auto subtype = type->kind == TypeKind::Subtype ? type : nullptr;
-    auto struct_type = type->kind == TypeKind::Subtype ? type->data.subtype.resolved_struct : type;
+    auto struct_type = type->kind == TypeKind::Subtype ? type->data.subtype.final_type : type;
 
     for (auto member : node->data.struct_decl.members) {
         if (member->type == ast::NodeType::FnDef) {
@@ -373,7 +399,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
                                         nullptr, {});
     }
     case TypeKind::Subtype: {
-        return compile_di_type(type->data.subtype.resolved_struct);
+        return compile_di_type(type->data.subtype.final_type);
     }
     case TypeKind::This: {
         return llvm_db.createBasicType("this", 0, llvm::dwarf::DW_ATE_address);
@@ -429,9 +455,24 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         } else if (param_info.kind == ParameterKind::Regular) {
             auto idx = param_info.user_param_index;
             auto param = proto.params[idx];
-            auto var = compile_alloc(fn, param);
+
+            // For specialized functions, resolve the parameter type first
+            ChiType *param_type;
+            auto specialized_fn_type = get_specialized_fn_type(fn->specialized_subtype);
+            if (specialized_fn_type) {
+                param_type = specialized_fn_type->data.fn.params[idx];
+            } else {
+                param_type = get_chitype(param);
+            }
+
+            // Make sure to evaluate the type to handle any remaining placeholders
+            param_type = eval_type(param_type);
+
+            auto var = compile_alloc(fn, param, param_type);
+
             emit_dbg_location(param);
-            compile_copy(fn, llvm_param, var, get_chitype(param));
+
+            compile_copy(fn, llvm_param, var, param_type);
             add_var(param, var);
 
             // debug info
@@ -439,7 +480,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             auto user_param_offset = fn->get_user_param_llvm_offset();
             auto dbg_var = dbg_builder->createParameterVariable(
                 sp, llvm_param->getName(), param_info.llvm_index + user_param_offset + 1, file,
-                param_line_no, compile_di_type(get_chitype(param)));
+                param_line_no, compile_di_type(param_type));
             dbg_builder->insertDeclare(
                 var, dbg_var, dbg_builder->createExpression(),
                 llvm::DILocation::get(sp->getContext(), param_line_no, 0, sp),
@@ -1736,6 +1777,17 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto fn_decl = data.fn_ref_expr->get_decl(container_type_id);
     assert(fn_decl->type == ast::NodeType::FnDef);
     auto fn_type = get_chitype(fn_decl);
+
+    // For generic function calls, use the specialized function type
+    if (expr->type == ast::NodeType::FnCallExpr) {
+        auto &fn_call_data = expr->data.fn_call_expr;
+        if (fn_call_data.specialized_fn_type) {
+            auto specialized_fn_type = get_specialized_fn_type(fn_call_data.specialized_fn_type);
+            if (specialized_fn_type) {
+                fn_type = specialized_fn_type;
+            }
+        }
+    }
     auto &fn_spec = fn_type->data.fn;
     auto is_variadic = fn_spec.is_variadic;
     auto va_start = fn_spec.get_va_start();
@@ -1781,7 +1833,15 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         args.push_back(ctn_ptr);
     }
     if (!callee.getCallee()) {
-        auto callee_fn = get_fn(fn_decl);
+        Function *callee_fn = nullptr;
+
+        // Check if this is a call to a specialized generic function
+        if (data.specialized_fn_type && data.specialized_fn_type->kind == TypeKind::Subtype) {
+            callee_fn = get_specialized_fn(fn_decl, data.specialized_fn_type);
+        } else {
+            callee_fn = get_fn(fn_decl);
+        }
+
         callee = callee_fn->llvm_fn;
     }
 
@@ -1838,11 +1898,15 @@ llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
     return sret_type ? builder.CreateLoad(sret_type, sret_var) : ret;
 }
 
-llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new) {
+llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new, ChiType *type) {
     auto &llvm_builder = *m_ctx->llvm_builder.get();
     auto &llvm_ctx = *m_ctx->llvm_ctx.get();
     auto &llvm_module = *m_ctx->llvm_module.get();
-    auto var_type_l = compile_type_of(decl);
+    auto var_type_l = type ? compile_type(type) : compile_type_of(decl);
+
+    // Debug: Show what type compile_alloc is using
+    auto chi_type = get_chitype(decl);
+    assert(!chi_type->is_placeholder && "compile_alloc called on placeholder type");
 
     Function *alloc_fn = nullptr;
     if (is_managed()) {
@@ -2165,6 +2229,36 @@ Function *Compiler::get_fn(ast::Node *node) {
     return *entry;
 }
 
+Function *Compiler::get_specialized_fn(ast::Node *generic_fn_decl, ChiType *specialized_subtype) {
+    assert(specialized_subtype->kind == TypeKind::Subtype);
+    auto &subtype_data = specialized_subtype->data.subtype;
+
+    // Create a unique key for this specialized function
+    auto base_id = get_resolver()->resolve_global_id(generic_fn_decl);
+    string specialized_id = base_id + "_specialized";
+    for (auto arg : subtype_data.args) {
+        specialized_id += "_" + get_resolver()->to_string(arg, false);
+    }
+
+    // Check if this specialized function already exists
+    auto existing = m_ctx->function_table.get(specialized_id);
+    if (existing) {
+        return *existing;
+    }
+
+    // For now, compile on-demand - this should be moved to the initial compilation phase later
+    auto proto = generic_fn_decl->data.fn_def.fn_proto;
+    auto specialized_fn = compile_fn_proto_specialized(proto, generic_fn_decl, specialized_subtype);
+
+    // Add to function table with the specialized key
+    m_ctx->function_table[specialized_id] = specialized_fn;
+
+    // Add to pending functions for body compilation
+    m_ctx->pending_fns.add(specialized_fn);
+
+    return specialized_fn;
+}
+
 Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
     auto declspec = fn->declspec_ref();
     auto ftype = get_chitype(fn);
@@ -2236,6 +2330,79 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     return new_fn;
 }
 
+Function *Compiler::compile_fn_proto_specialized(ast::Node *proto_node, ast::Node *fn,
+                                                 ChiType *subtype) {
+    assert(subtype->kind == TypeKind::Subtype);
+    auto &subtype_data = subtype->data.subtype;
+    auto specialized_fn_type = subtype_data.final_type;
+    assert(specialized_fn_type && specialized_fn_type->kind == TypeKind::Fn);
+
+    // Create a unique name for the specialized function
+    string specialized_name = proto_node->name;
+    specialized_name += "_specialized";
+    for (auto arg : subtype_data.args) {
+        specialized_name += "_" + get_resolver()->to_string(arg, false);
+    }
+
+    // Compile the specialized function using the resolved function type
+    auto declspec = fn->declspec_ref();
+    auto ftype = specialized_fn_type;
+
+    // Determine bind parameter information
+    bool has_bind = false;
+    string bind_name = "";
+    if (ftype->kind == TypeKind::Fn) {
+        if (ftype->data.fn.container_ref) {
+            has_bind = true;
+            bind_name = "this";
+        }
+    }
+
+    auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
+    auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, specialized_name,
+                                       m_ctx->llvm_module.get());
+    fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
+                              llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
+
+    auto new_fn = add_fn(fn_l, fn, ftype);
+
+    // Store the specialized type for lookup
+    new_fn->specialized_subtype = subtype;
+
+    // Build parameter information
+    std::vector<ParameterInfo> param_info;
+    int llvm_index = 0;
+
+    // Add sret parameter if needed
+    bool has_sret = ftype->data.fn.should_use_sret() && !declspec.is_extern();
+    if (has_sret) {
+        param_info.emplace_back(ParameterKind::SRet, llvm_index++, -1, "sret");
+        fn_l->getArg(llvm_index - 1)->setName("sret");
+    }
+
+    // Add bind parameter if needed
+    if (has_bind) {
+        param_info.emplace_back(ParameterKind::Bind, llvm_index++, -1, bind_name);
+        auto bind_param = fn_l->getArg(llvm_index - 1);
+        bind_param->setName(bind_name);
+        new_fn->bind_ptr = bind_param;
+    }
+
+    // Add regular user parameters
+    for (int user_idx = 0; user_idx < proto_node->data.fn_proto.params.len; user_idx++) {
+        auto param_name = proto_node->data.fn_proto.params[user_idx]->name;
+        param_info.emplace_back(ParameterKind::Regular, llvm_index++, user_idx, param_name);
+        fn_l->getArg(llvm_index - 1)->setName(param_name);
+    }
+
+    // Store parameter information
+    new_fn->parameter_info = std::move(param_info);
+    new_fn->qualified_name = specialized_name;
+    new_fn->specialized_subtype = subtype; // Set the specialized subtype for eval_type
+    new_fn->llvm_fn->setName(new_fn->get_llvm_name());
+    return new_fn;
+}
+
 void Compiler::compile_extern(ast::Node *node) {
     auto &data = node->data.extern_decl;
     for (auto member : data.members) {
@@ -2277,6 +2444,7 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 }
 
 llvm::Type *Compiler::_compile_type(ChiType *type) {
+    assert(!type->is_placeholder && "compile_type called on placeholder type");
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
     case TypeKind::This: {
@@ -2323,7 +2491,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         if (data.container_ref) {
             param_types.push_back(compile_type(data.container_ref));
         }
-        for (auto param : data.params) {
+        for (size_t i = 0; i < data.params.len; i++) {
+            auto param = data.params[i];
             param_types.push_back(compile_type(param));
         }
         return llvm::FunctionType::get(ret_type_l, param_types, false);
@@ -2384,7 +2553,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return compile_type(type->data.promise.internal);
     }
     case TypeKind::Subtype: {
-        return compile_type(type->data.subtype.resolved_struct);
+        return compile_type(type->data.subtype.final_type);
     }
     case TypeKind::Placeholder: {
         return compile_type(get_system_types()->void_);
@@ -2521,6 +2690,17 @@ Function *Compiler::get_system_fn(const string &name) {
     auto fn = get_fn(node);
     m_ctx->system_functions[name] = fn;
     return fn;
+}
+
+ChiType *Compiler::get_specialized_fn_type(ChiType *specialized_subtype) {
+    if (!specialized_subtype || specialized_subtype->kind != TypeKind::Subtype) {
+        return nullptr;
+    }
+    auto resolved_fn = specialized_subtype->data.subtype.final_type;
+    if (resolved_fn && resolved_fn->kind == TypeKind::Fn) {
+        return resolved_fn;
+    }
+    return nullptr;
 }
 
 } // namespace codegen
