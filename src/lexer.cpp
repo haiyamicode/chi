@@ -858,6 +858,8 @@ string Token::to_string() const {
         return val.b ? "true" : "false";
     case TokenType::NULLP:
         return "null";
+    case TokenType::KW_UNDEFINED:
+        return "undefined";
     default:
         if (type >= TokenType::KW_BREAK && type <= TokenType::KW_UNION) {
             return str;

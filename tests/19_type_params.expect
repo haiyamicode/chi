@@ -1,0 +1,4 @@
+identity<int>(42) = 42
+identity<char>('A') = 'A'
+final value: 'K'
+float result: 32.5

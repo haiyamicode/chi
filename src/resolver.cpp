@@ -215,7 +215,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                can_assign(from_type, get_system_types()->int_, is_explicit);
     }
     case TypeKind::Int:
-        if (from_type->kind == TypeKind::Float) {
+        if (from_type->kind == TypeKind::Float || from_type->kind == TypeKind::Char) {
             return is_explicit;
         }
         return type_is_int(from_type);
@@ -224,6 +224,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
             return is_explicit;
         }
         return from_type->kind == TypeKind::Float;
+    case TypeKind::Char:
+        return from_type->kind == TypeKind::Char ||
+               (is_explicit && from_type->kind == TypeKind::Int);
     case TypeKind::Any:
         return true;
     case TypeKind::Struct: {
@@ -344,15 +347,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             }
-            if (decl->type == NodeType::FnDef &&
-                decl->data.fn_def.fn_proto->data.fn_proto.type_params.len > 0) {
-                auto fn_type = to_value_type(decl->resolved_type);
-                if (fn_type && fn_type->kind == TypeKind::Fn) {
-                    for (auto subtype : fn_type->data.fn.subtypes) {
-                        resolve_fn_subtype(subtype);
-                    }
-                }
-            }
+            // if (decl->type == NodeType::FnDef &&
+            //     decl->data.fn_def.fn_proto->data.fn_proto.type_params.len > 0) {
+            //     auto fn_type = to_value_type(decl->resolved_type);
+            //     if (fn_type && fn_type->kind == TypeKind::Fn) {
+            //         for (auto variant : fn_type->data.fn.variants) {
+            //             resolve_fn_subtype(variant->data.generated_fn.subtype);
+            //         }
+            //     }
+            // }
         }
         return nullptr;
     }
@@ -460,9 +463,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto is_extern = node->get_declspec() ? node->get_declspec()->is_extern() : false;
         // Only pass container for method declarations, not for function parameter types
         auto method_container = is_fn_decl ? container : nullptr;
-        if (node->name == "filter") {
-            fmt::print("fn_proto: {}\n", node->name);
-        }
         auto fn_type = get_fn_type(return_type, &param_types, is_variadic, method_container,
                                    is_extern, &type_param_types);
 
@@ -924,29 +924,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto &fn_lambda = fn_type->data.fn_lambda;
             fn_type = fn_lambda.fn;
         }
-        auto &fn = fn_type->data.fn;
-        resolve_fn_call(node, scope, &fn, &data.args);
-
-        // For generic functions, substitute type parameters in the return type
-        printf("DEBUG: Function call - is_generic=%d, node_type=%d\n", fn.is_generic(), node->type);
-        if (fn.is_generic() && node->type == ast::NodeType::FnCallExpr) {
-            auto &fn_call_data = node->data.fn_call_expr;
-            printf("DEBUG: Generic function call - specialized_fn_type=%p\n", fn_call_data.specialized_fn_type);
-            if (fn_call_data.specialized_fn_type &&
-                fn_call_data.specialized_fn_type->kind == TypeKind::Subtype) {
-                auto resolved_fn = fn_call_data.specialized_fn_type->data.subtype.final_type;
-                printf("DEBUG: Resolved function type=%p, kind=%d\n", resolved_fn, resolved_fn ? (int)resolved_fn->kind : -1);
-                if (resolved_fn && resolved_fn->kind == TypeKind::Fn) {
-                    auto return_type = resolved_fn->data.fn.return_type;
-                    printf("DEBUG: Specialized return type=%p, is_placeholder=%d\n", return_type, return_type->is_placeholder);
-                    return return_type;
-                }
-            }
+        if (data.fn_ref_expr->type == NodeType::Identifier &&
+            data.fn_ref_expr->data.identifier.decl->name == "transform") {
         }
 
-        auto return_type = fn.return_type;
-        printf("DEBUG: Generic function falling back to original return type=%p, is_placeholder=%d\n", return_type, return_type->is_placeholder);
-        return return_type;
+        auto &fn = fn_type->data.fn;
+        return resolve_fn_call(node, scope, &fn, &data.args);
     }
     case NodeType::IfStmt: {
         auto &data = node->data.if_stmt;
@@ -1088,13 +1071,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
 
                 TypeList args = {enum_data.discriminator};
-                printf("DEBUG: Creating enum base subtype with discriminator: %s\n",
-                       to_string(enum_data.discriminator).c_str());
                 auto subtype = get_subtype(to_value_type(cx_enum_base->resolved_type), &args);
-                printf("DEBUG: Created enum base subtype: %s\n", to_string(subtype).c_str());
                 auto enum_base_struct = eval_struct_type(resolve_subtype(subtype));
-                printf("DEBUG: Resolved enum base struct: %s\n",
-                       to_string(enum_base_struct).c_str());
 
                 auto base_value_struct = resolve_struct_type(enum_data.base_value_type);
                 for (auto base_member : enum_base_struct->data.struct_.members) {
@@ -1656,6 +1634,12 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
             return to_string(container_type) + "." + node->name;
         }
         break;
+    case NodeType::GeneratedFn: {
+        auto &data = node->data.generated_fn;
+        return to_string(data.fn_subtype);
+        // auto fn_name = resolve_qualified_name(data.original_fn);
+        // return fmt::format("{}.{}", fn_name, to_string(data.fn_subtype));
+    }
     default:
         break;
     }
@@ -1678,16 +1662,23 @@ string Resolver::to_string(ChiType *type, bool for_display) {
         return to_string(type->get_elem(), for_display);
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
-        std::stringstream ss;
-        ss << to_string(data.generic, for_display) << "<";
-        for (int i = 0; i < data.args.len; i++) {
-            ss << to_string(data.args[i], for_display);
-            if (i < data.args.len - 1) {
-                ss << ",";
+        switch (data.generic->kind) {
+        case cx::TypeKind::Fn:
+        case cx::TypeKind::FnLambda:
+            return to_string(data.final_type, for_display);
+        default: {
+            std::stringstream ss;
+            ss << to_string(data.generic, for_display) << "<";
+            for (int i = 0; i < data.args.len; i++) {
+                ss << to_string(data.args[i], for_display);
+                if (i < data.args.len - 1) {
+                    ss << ",";
+                }
             }
+            ss << ">";
+            return ss.str();
         }
-        ss << ">";
-        return ss.str();
+        }
     }
     case TypeKind::String:
         return "string";
@@ -2168,6 +2159,14 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *
         auto substitution = subs->get(type);
         return substitution ? *substitution : type;
     }
+    case TypeKind::Subtype: {
+        auto &data = type->data.subtype;
+        array<ChiType *> args;
+        for (auto arg : data.args) {
+            args.add(type_placeholders_sub(arg, subs));
+        }
+        return get_subtype(data.generic, &args);
+    }
 
     case TypeKind::Pointer:
     case TypeKind::Reference:
@@ -2348,23 +2347,20 @@ bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
     return a_sty->global_id == b_sty->global_id;
 }
 
-void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,
-                               NodeList *args) {
+ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,
+                                   NodeList *args) {
     auto n_args = args->len;
     auto n_params = fn->params.len;
     auto params_required = n_params - (fn->is_variadic ? 1 : 0);
     bool ok = fn->is_variadic ? n_args >= params_required : n_args == n_params;
     if (!ok) {
         error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, params_required, n_args);
-        return;
+        return fn->return_type;
     }
 
     // Debug: check type params
-    // Check if this is a generic function call that needs type inference
+    // Check if this is a generic function call that needs explicit type parameters
     if (fn->is_generic()) {
-        // Perform type inference
-        map<ChiType *, ChiType *> type_inferences;
-
         // Resolve arguments first to get their types
         array<ChiType *> arg_types;
         for (size_t i = 0; i < n_args; i++) {
@@ -2373,62 +2369,72 @@ void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *
             arg_types.add(arg_type);
         }
 
-        // Infer type parameters from arguments
-        for (size_t i = 0; i < n_args; i++) {
-            auto param_type = fn->get_param_at(i);
-            auto arg_type = arg_types[i];
-            infer_type_params(param_type, arg_type, &type_inferences);
+        // Get explicit type parameters from function call
+        array<ChiType *> type_args;
+        if (node->type == ast::NodeType::FnCallExpr) {
+            auto &fn_call_data = node->data.fn_call_expr;
+
+            // Check if explicit type parameters were provided
+            if (fn_call_data.type_args.len == 0) {
+                error(node, "Generic function call requires explicit type parameters");
+                return fn->return_type;
+            }
+
+            // Check if the number of type parameters matches
+            if (fn_call_data.type_args.len != fn->type_params.len) {
+                error(node, "Wrong number of type parameters: expected {}, got {}",
+                      fn->type_params.len, fn_call_data.type_args.len);
+                return fn->return_type;
+            }
+
+            // Resolve the explicit type parameters
+            for (auto type_arg_node : fn_call_data.type_args) {
+                auto type_arg = resolve_value(type_arg_node, scope);
+                type_args.add(type_arg);
+            }
+        } else {
+            // For non-FnCallExpr (like constructors), this shouldn't happen with new logic
+            error(node, "Generic function call requires explicit type parameters");
+            return fn->return_type;
         }
 
-        // Create type arguments list in the order of type parameters
-        array<ChiType *> type_args;
-        for (auto type_param : fn->type_params) {
-
-            // Get the underlying placeholder type for map lookup
+        // Create type substitution map for parameter type checking
+        map<ChiType *, ChiType *> type_substitutions;
+        for (size_t i = 0; i < fn->type_params.len; i++) {
+            auto type_param = fn->type_params[i];
             auto lookup_key = type_param;
             if (type_param->kind == TypeKind::TypeSymbol) {
                 lookup_key = type_param->data.type_symbol.giving_type;
             }
-
-            // Use the inferred type from type_inferences map
-            auto inferred_type = type_inferences.get(lookup_key);
-            if (inferred_type) {
-                type_args.add(*inferred_type);
-            } else {
-                // Fallback to void if inference failed
-                type_args.add(get_system_types()->void_);
-            }
+            type_substitutions.emplace(lookup_key, type_args[i]);
         }
 
         // Create or get the specialized function type
         // Get the original function declaration node to access its function type
         auto &fn_call_data = node->data.fn_call_expr;
         auto fn_decl_node = fn_call_data.fn_ref_expr->get_decl();
-        printf("DEBUG: Creating specialized function - fn_decl_node=%p, type_args.len=%zu\n",
-               fn_decl_node, type_args.len);
         assert(fn_decl_node && fn_decl_node->type == ast::NodeType::FnDef);
         auto original_fn_type = node_get_type(fn_decl_node);
         assert(original_fn_type && original_fn_type->kind == TypeKind::Fn);
-        printf("DEBUG: Original function is_generic=%s, type_params.len=%zu\n",
-               original_fn_type->data.fn.is_generic() ? "true" : "false",
-               original_fn_type->data.fn.type_params.len);
 
-        auto specialized_subtype = get_fn_subtype(original_fn_type, &type_args, fn_decl_node);
-        printf("DEBUG: Created specialized_subtype=%p\n", specialized_subtype);
-        // Store the specialized type for codegen to use
-        if (node->type == ast::NodeType::FnCallExpr) {
-            node->data.fn_call_expr.specialized_fn_type = specialized_subtype;
-        }
+        auto fn_variant = get_fn_variant(original_fn_type, &type_args, fn_decl_node);
+        auto generated_fn_type = fn_variant->data.generated_fn.fn_subtype;
 
-        // Now check types with the inferred concrete types
+        // Store the specialized function for codegen to use
+        assert(node->type == ast::NodeType::FnCallExpr);
+        node->data.fn_call_expr.generated_fn = fn_variant;
+
+        // Now check types with the explicit concrete types
         for (size_t i = 0; i < n_args; i++) {
             auto param_type = fn->get_param_at(i);
             auto arg_type = arg_types[i];
 
-            // Substitute placeholders with inferred types
-            auto concrete_param_type = type_placeholders_sub(param_type, &type_inferences);
+            // Substitute placeholders with explicit types
+            auto concrete_param_type = type_placeholders_sub(param_type, &type_substitutions);
             check_assignment(args->at(i), arg_type, concrete_param_type);
         }
+
+        return fn_variant->resolved_type->data.fn.return_type;
     } else {
         // Regular function call - check types normally
         for (size_t i = 0; i < n_args; i++) {
@@ -2440,7 +2446,9 @@ void Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *
             check_assignment(arg, arg_type, param_type);
         }
     }
+
     scope.value_type = nullptr;
+    return fn->return_type;
 }
 
 ChiType *Resolver::create_pointer_type(ChiType *elem, TypeKind kind) {
@@ -2759,11 +2767,24 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
     return sub;
 }
 
-ChiType *Resolver::get_fn_subtype(ChiType *generic_fn, TypeList *type_args, ast::Node *root_node) {
+ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, ast::Node *fn_node) {
+    // stringstream ss;
+    // ss << "FnSubtype<";
+    // ss << to_string(generic_fn) << type_args;
+    // for (auto arg : *type_args) {
+    //     ss << to_string(arg) << ",";
+    // }
+    // ss << ">";
+    // auto key = ss.str();
+    // if (auto cached = m_ctx->composite_types.get(key)) {
+    //     return *cached;
+    // }
+
     assert(generic_fn->kind == TypeKind::Fn);
     auto &gen = generic_fn->data.fn;
-    for (auto subtype : gen.subtypes) {
-        assert(subtype->kind == TypeKind::Subtype);
+    for (auto variant : gen.variants) {
+        assert(variant->type == NodeType::GeneratedFn);
+        auto subtype = variant->data.generated_fn.fn_subtype;
         auto &subtype_data = subtype->data.subtype;
         if (subtype_data.args.len != type_args->len) {
             continue;
@@ -2778,23 +2799,51 @@ ChiType *Resolver::get_fn_subtype(ChiType *generic_fn, TypeList *type_args, ast:
             }
         }
         if (matches) {
-            return subtype;
+            return variant;
         }
     }
+
     auto sub = create_type(TypeKind::Subtype);
     sub->data.subtype.generic = generic_fn;
-    sub->data.subtype.root_node = root_node->get_root_node();
+    sub->data.subtype.root_node = fn_node->get_root_node();
+
+    auto generated_fn = create_node(NodeType::GeneratedFn);
+    generated_fn->data.generated_fn.fn_subtype = sub;
+    generated_fn->data.generated_fn.original_fn = fn_node;
+    generated_fn->module = fn_node->module;
+    generated_fn->root_node = fn_node->get_root_node();
+    sub->data.subtype.generated_fn = generated_fn;
+    auto orig_proto = fn_node->data.fn_def.fn_proto;
+    auto new_proto = create_node(NodeType::FnProto);
+    new_proto->data.fn_proto.fn_def_node = generated_fn;
+    new_proto->data.fn_proto.return_type = orig_proto->data.fn_proto.return_type;
+    generated_fn->data.generated_fn.fn_proto = new_proto;
+
+    for (auto param : orig_proto->data.fn_proto.params) {
+        auto new_param = create_node(NodeType::ParamDecl);
+        param->clone(new_param);
+        new_param->name = param->name;
+        new_proto->data.fn_proto.params.add(new_param);
+    }
+
     for (auto arg : *type_args) {
         sub->data.subtype.args.add(arg);
         if (arg->is_placeholder) {
             sub->is_placeholder = true;
         }
     }
-    gen.subtypes.add(sub);
-    fmt::print("\nDEBUG: adding function subtype -> {} with root node: {}, {}\n", to_string(sub),
-               root_node->id, to_string(root_node->resolved_type));
-    resolve_fn_subtype(sub);
-    return sub;
+
+    gen.variants.add(generated_fn);
+    auto resolved_fn_type = resolve_fn_subtype(sub);
+
+    // Resolve generated nodes
+    generated_fn->resolved_type = resolved_fn_type;
+    for (int i = 0; i < resolved_fn_type->data.fn.params.len; i++) {
+        auto proto_param = new_proto->data.fn_proto.params[i];
+        proto_param->resolved_type = resolved_fn_type->data.fn.params[i];
+    }
+    new_proto->data.fn_proto.return_type->resolved_type = resolved_fn_type->data.fn.return_type;
+    return generated_fn;
 }
 
 ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
@@ -2816,9 +2865,6 @@ ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
 
         // Use the underlying placeholder type as the key, not the TypeSymbol wrapper
         auto substitution_key = type_param;
-        if (type_param->kind == TypeKind::TypeSymbol) {
-            substitution_key = type_param->data.type_symbol.giving_type;
-        }
 
         type_substitutions[substitution_key] = concrete_type;
     }
@@ -2826,92 +2872,21 @@ ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
     // Create specialized function type by substituting type parameters
     auto specialized_return_type =
         type_placeholders_sub(generic_fn_data.return_type, &type_substitutions);
-    //        generic_fn_data.return_type->id,
-    //        to_string(specialized_return_type, false).c_str());
 
     array<ChiType *> specialized_params;
     for (auto param_type : generic_fn_data.params) {
         auto specialized_param = type_placeholders_sub(param_type, &type_substitutions);
-        //        param_type->id,
-        //        to_string(specialized_param, false).c_str());
         specialized_params.add(specialized_param);
     }
 
+    auto container_elem =
+        generic_fn_data.container_ref ? generic_fn_data.container_ref->get_elem() : nullptr;
     auto specialized_fn_type =
         get_fn_type(specialized_return_type, &specialized_params, generic_fn_data.is_variadic,
-                    generic_fn_data.container_ref->get_elem(), generic_fn_data.is_extern);
+                    container_elem, generic_fn_data.is_extern);
 
     data.final_type = specialized_fn_type;
     return specialized_fn_type;
-}
-
-void Resolver::infer_type_params(ChiType *param_type, ChiType *arg_type,
-                                 map<ChiType *, ChiType *> *inferences) {
-
-    // If the parameter type is a type parameter (placeholder), infer it from the argument type
-    if (param_type->kind == TypeKind::Placeholder) {
-        auto existing = inferences->get(param_type);
-        if (existing) {
-            // Type parameter already inferred, check consistency
-            if (!is_same_type(*existing, arg_type)) {
-                // Inconsistent inference - this would be an error
-                return;
-            }
-        } else {
-            // New inference
-            inferences->emplace(param_type, arg_type);
-        }
-        return;
-    }
-
-    // For composite types, recursively infer from their elements
-    switch (param_type->kind) {
-    case TypeKind::Pointer:
-    case TypeKind::Reference:
-    case TypeKind::MutRef:
-    case TypeKind::Optional:
-    case TypeKind::Box:
-        if (arg_type->kind == param_type->kind) {
-            infer_type_params(param_type->get_elem(), arg_type->get_elem(), inferences);
-        }
-        break;
-    case TypeKind::Array:
-        if (arg_type->kind == TypeKind::Array) {
-            infer_type_params(param_type->get_elem(), arg_type->get_elem(), inferences);
-        }
-        break;
-    case TypeKind::Fn:
-        if (arg_type->kind == TypeKind::Fn) {
-            auto &param_fn = param_type->data.fn;
-            auto &arg_fn = arg_type->data.fn;
-            if (param_fn.params.len == arg_fn.params.len) {
-                // Infer from return type
-                infer_type_params(param_fn.return_type, arg_fn.return_type, inferences);
-                // Infer from parameter types
-                for (size_t i = 0; i < param_fn.params.len; i++) {
-                    infer_type_params(param_fn.params[i], arg_fn.params[i], inferences);
-                }
-            }
-        } else if (arg_type->kind == TypeKind::FnLambda) {
-            // Parameter expects function, argument is lambda - compare with lambda's underlying
-            // function type
-            infer_type_params(param_type, arg_type->data.fn_lambda.fn, inferences);
-        }
-        break;
-    case TypeKind::FnLambda:
-        if (arg_type->kind == TypeKind::FnLambda) {
-            // Both are lambdas - compare underlying function types
-            infer_type_params(param_type->data.fn_lambda.fn, arg_type->data.fn_lambda.fn,
-                              inferences);
-        } else if (arg_type->kind == TypeKind::Fn) {
-            // Parameter expects lambda, argument is function - compare with lambda's function type
-            infer_type_params(param_type->data.fn_lambda.fn, arg_type, inferences);
-        }
-        break;
-    default:
-        // For primitive types and other cases, no inference needed
-        break;
-    }
 }
 
 ChiType *Resolver::resolve_subtype(ChiType *subtype) {
@@ -2940,19 +2915,13 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         if (member->get_name() == "filter" &&
             to_string(type) ==
                 "(&Array<JsonValue>) func(Lambda<func(JsonValue) bool>) Array<JsonValue>") {
-            printf("DEBUG: resolve_subtype member %s type %s\n", member->get_name().c_str(),
-                   to_string(type).c_str());
         }
 
         // For built-in enum base types, use complete substitution to resolve all placeholders
         // For user-defined types, use selective substitution to preserve method type parameters
         if (base.node && base.node->name == "__CxEnumBase") {
             // Use complete substitution for enum base to resolve all placeholders
-            printf("DEBUG: resolve_subtype using complete substitution for %s member %s\n",
-                   base.node->name.c_str(), member->get_name().c_str());
-            printf("DEBUG: Before substitution: %s\n", to_string(type).c_str());
             type = type_placeholders_sub(type, &data);
-            printf("DEBUG: After substitution: %s\n", to_string(type).c_str());
         } else {
             // Use selective substitution to only replace struct type parameters,
             // preserving method type parameters for later inference
@@ -2978,8 +2947,6 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
 
         if (member->get_name() == "filter" &&
             to_string(type) == "(&Array<T>) func(Lambda<func(T) bool>) Array<T>") {
-            printf("DEBUG: resolve_subtype member %s type %s\n", member->get_name().c_str(),
-                   to_string(type).c_str());
         }
 
         auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type);

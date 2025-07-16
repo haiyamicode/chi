@@ -68,7 +68,14 @@ void AstPrinter::print_node(Node *node) {
             print("func");
             return;
         }
-        print("func {}(", node->name);
+        print("func {}", node->name);
+        // Print type parameters if present
+        if (data.type_params.len > 0) {
+            print("<");
+            print_node_list(&data.type_params);
+            print(">");
+        }
+        print("(");
         print_node_list(&data.params);
         print(")");
         if (data.return_type) {
@@ -265,6 +272,12 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::FnCallExpr: {
         auto &data = node->data.fn_call_expr;
         print_node(data.fn_ref_expr);
+        // Print type parameters if present
+        if (data.type_args.len > 0) {
+            print("<");
+            print_node_list(&data.type_args);
+            print(">");
+        }
         print("(");
         print_node_list(&data.args);
         print(")");
@@ -483,6 +496,27 @@ void AstPrinter::print_node(Node *node) {
         }
 
         print_node(data.body);
+        break;
+    }
+    case NodeType::EnumDecl: {
+        auto &data = node->data.enum_decl;
+        print_declspec(data.decl_spec);
+        print("enum ");
+        if (!node->name.empty()) {
+            print("{}", node->name);
+        }
+        print(" {{\n");
+        m_indent++;
+        for (int i = 0; i < data.variants.len; i++) {
+            print_indent(m_indent);
+            print_node(data.variants.at(i));
+            if (i < data.variants.len - 1) {
+                print(",");
+            }
+            print("\n");
+        }
+        m_indent--;
+        print("}}\n");
         break;
     }
     default:

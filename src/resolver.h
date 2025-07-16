@@ -186,7 +186,7 @@ class Resolver {
 
     void resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node);
 
-    void resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn, NodeList *args);
+    ChiType *resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn, NodeList *args);
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);
 
@@ -243,10 +243,8 @@ class Resolver {
     ChiType *to_value_type(ChiType *type);
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
-    ChiType *get_fn_subtype(ChiType *generic_fn, TypeList *type_args, ast::Node *root_node);
+    ast::Node *get_fn_variant(ChiType *generic_fn, TypeList *type_args, ast::Node *fn_node);
     ChiType *resolve_fn_subtype(ChiType *subtype);
-    void infer_type_params(ChiType *param_type, ChiType *arg_type,
-                           map<ChiType *, ChiType *> *inferences);
 
     bool is_struct_type(ChiType *type);
 
@@ -284,7 +282,8 @@ class Resolver {
 
     bool type_is_int(ChiType *type) {
         return type->kind == TypeKind::Int || type->kind == TypeKind::Bool ||
-               type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference;
+               type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
+               type->kind == TypeKind::MutRef || type->kind == TypeKind::Char;
     }
 
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);

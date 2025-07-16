@@ -75,25 +75,8 @@ Compiler::Compiler(CodegenContext *ctx) : m_ctx(ctx) {}
 
 ChiType *Compiler::eval_type(ChiType *type) {
     if (type->is_placeholder && type->kind == TypeKind::Placeholder) {
-        printf("DEBUG: eval_type called on placeholder %s (index=%ld)\n",
-               type->data.placeholder.name.c_str(), type->data.placeholder.index);
-        printf("DEBUG: Placeholder source_decl=%p\n", type->data.placeholder.source_decl);
-        if (type->data.placeholder.source_decl) {
-            printf("DEBUG: Source declaration type: %d, name: %s\n",
-                   (int)type->data.placeholder.source_decl->type,
-                   type->data.placeholder.source_decl->name.c_str());
-        } else {
-            printf("DEBUG: No source declaration - this placeholder was created without proper "
-                   "tracking\n");
-        }
-        printf("DEBUG: Current function: %s\n", m_fn ? m_fn->qualified_name.c_str() : "null");
-
         // Let's also check the placeholder's trait if it has one
         if (type->data.placeholder.trait) {
-            printf("DEBUG: Placeholder has trait: %s\n",
-                   type->data.placeholder.trait->name.has_value()
-                       ? type->data.placeholder.trait->name->c_str()
-                       : "unnamed trait");
         }
     }
 
@@ -119,12 +102,6 @@ ChiType *Compiler::eval_type(ChiType *type) {
             auto old_type = type;
             type = get_resolver()->type_placeholders_sub_selective(
                 type, &m_fn->specialized_subtype->data.subtype, m_fn->node->get_root_node());
-            if (type != old_type) {
-                printf("DEBUG: Function substitution resolved placeholder\n");
-            } else {
-                printf("DEBUG: Function substitution did not resolve placeholder (belongs to "
-                       "different source)\n");
-            }
         }
     }
 
@@ -134,45 +111,11 @@ ChiType *Compiler::eval_type(ChiType *type) {
         auto old_type = type;
         type = get_resolver()->type_placeholders_sub_selective(type, subtype_data,
                                                                subtype_data->root_node);
-        fmt::print("DEBUG: Function type on fn_eval_subtype:\n before: {}\n after: {}\n",
-                   get_resolver()->to_string(old_type), get_resolver()->to_string(type));
     }
 
     // Handle placeholders with unknown source (likely from built-in types like enum base)
     if (type->is_placeholder && type->kind == TypeKind::Placeholder &&
         !type->data.placeholder.source_decl) {
-
-        printf("DEBUG: Checking enum base fix for function: %s\n",
-               m_fn ? m_fn->qualified_name.c_str() : "null");
-
-        // For enum base types like __CxEnumBase<T>, check if the current function
-        // has a concrete type in its name that matches the placeholder
-        if (m_fn && m_fn->qualified_name.find("__CxEnumBase<") != string::npos) {
-            printf("DEBUG: Found enum base function, extracting concrete type\n");
-            // Extract the concrete type from the function name
-            // e.g., "__CxEnumBase<int>.discriminator" -> should substitute T with int
-            auto start = m_fn->qualified_name.find('<') + 1;
-            auto end = m_fn->qualified_name.find('>');
-            if (start != string::npos && end != string::npos && end > start) {
-                auto concrete_type_name = m_fn->qualified_name.substr(start, end - start);
-
-                // Map common type names to their actual types
-                ChiType *concrete_type = nullptr;
-                if (concrete_type_name == "int") {
-                    concrete_type = get_resolver()->get_system_types()->int_;
-                } else if (concrete_type_name == "char") {
-                    concrete_type = get_resolver()->get_system_types()->char_;
-                } else if (concrete_type_name == "bool") {
-                    concrete_type = get_resolver()->get_system_types()->bool_;
-                }
-
-                if (concrete_type) {
-                    printf("DEBUG: Resolved enum base placeholder %s to %s\n",
-                           type->data.placeholder.name.c_str(), concrete_type_name.c_str());
-                    return concrete_type;
-                }
-            }
-        }
 
         // General fallback for other unknown source placeholders
         if (m_fn && m_fn->specialized_subtype &&
@@ -249,12 +192,13 @@ void Compiler::compile_module(ast::Module *module) {
             auto fn_type = get_chitype(decl);
             if (fn_type && fn_type->kind == TypeKind::Fn && fn_type->data.fn.is_generic()) {
                 // This is a generic function - compile all its instantiated subtypes
-                for (auto subtype : fn_type->data.fn.subtypes) {
-                    if (subtype->is_placeholder) {
+                for (auto variant : fn_type->data.fn.variants) {
+                    if (variant->resolved_type->is_placeholder) {
                         continue;
                     }
+
                     // Compile specialized version of the function
-                    auto specialized_fn = compile_fn_proto_specialized(proto, decl, subtype);
+                    auto specialized_fn = compile_fn_proto(proto, variant, "");
                     m_ctx->pending_fns.add(specialized_fn);
                 }
             } else {
@@ -349,11 +293,9 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             // For generic methods, compile their specialized versions instead
             if (fn_type && fn_type->is_placeholder && fn_type->kind == TypeKind::Fn) {
                 // Skip the generic version but compile all specialized versions
-                for (auto specialized_subtype : fn_type->data.fn.subtypes) {
-                    if (!specialized_subtype->is_placeholder) {
-                        auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node, "",
-                                                   specialized_subtype);
-                        fn->specialized_subtype = specialized_subtype;
+                for (auto variant : fn_type->data.fn.variants) {
+                    if (!variant->resolved_type->is_placeholder) {
+                        auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, variant);
                         if (subtype) {
                             fn->container_subtype = &subtype->data.subtype;
                             fn->container_type = subtype;
@@ -384,7 +326,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     }
 
     for (auto member : struct_type->data.struct_.members) {
-        if (member->is_method()) {
+        if (member->is_method() && !member->resolved_type->is_placeholder) {
             auto method_fn = get_fn(member->node);
             member->vtable_index = m_ctx->reflection_vtable.size();
             m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);
@@ -546,9 +488,17 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
 }
 
 Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
-    auto &fn_def = node->data.fn_def;
+    auto is_generated = node->type == ast::NodeType::GeneratedFn;
+    auto fn_def_node = is_generated ? node->data.generated_fn.original_fn : node;
+
+    assert(fn_def_node->type == ast::NodeType::FnDef);
+    auto &fn_def = fn_def_node->data.fn_def;
+    // auto proto_node = is_generated ? node->data.generated_fn.fn_proto : fn_def.fn_proto;
+    auto proto_node = fn_def.fn_proto;
+    auto &fn_proto = proto_node->data.fn_proto;
+
     if (!fn) {
-        fn = compile_fn_proto(fn_def.fn_proto, node);
+        fn = compile_fn_proto(proto_node, node);
     }
     if (!fn->llvm_fn->empty()) {
         panic("function already compiled");
@@ -576,7 +526,6 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     auto *entry_b = fn->new_label("_entry");
     fn->use_label(entry_b);
 
-    auto &proto = fn_def.fn_proto->data.fn_proto;
     llvm::Value *sret_arg = nullptr;
 
     for (const auto &param_info : fn->parameter_info) {
@@ -588,25 +537,13 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             fn->bind_ptr = llvm_param;
         } else if (param_info.kind == ParameterKind::Regular) {
             auto idx = param_info.user_param_index;
-            // DEBUG: Accessing parameter
-            if (idx >= proto.params.len) {
-                printf("ERROR: idx %d >= proto.params.len %lu\n", idx, proto.params.len);
+            if (idx >= fn_proto.params.len) {
+                printf("ERROR: idx %d >= proto.params.len %lu\n", idx, fn_proto.params.len);
                 continue;
             }
-            auto param = proto.params[idx];
 
-            // For specialized functions, resolve the parameter type first
-            ChiType *param_type;
-            auto specialized_fn_type = get_specialized_fn_type(fn->specialized_subtype);
-            if (specialized_fn_type) {
-                param_type = specialized_fn_type->data.fn.params[idx];
-            } else {
-                param_type = get_chitype(param);
-            }
-
-            // Make sure to evaluate the type to handle any remaining placeholders
-            param_type = eval_type(param_type);
-
+            auto param = fn_proto.params[idx];
+            auto param_type = param_info.type;
             auto var = compile_alloc(fn, param, param_type);
 
             emit_dbg_location(param);
@@ -1516,7 +1453,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     }
     case TypeKind::Array:
     case TypeKind::Struct: {
-        auto sty = get_resolver()->resolve_struct_type(type);
+        auto sty = get_resolver()->resolve_struct_type(eval_type(type));
         auto &builder = *m_ctx->llvm_builder;
         auto copy_fn_p = sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
         if (copy_fn_p) {
@@ -1920,11 +1857,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     // For generic function calls, use the specialized function type
     if (expr->type == ast::NodeType::FnCallExpr) {
         auto &fn_call_data = expr->data.fn_call_expr;
-        if (fn_call_data.specialized_fn_type) {
-            auto specialized_fn_type = get_specialized_fn_type(fn_call_data.specialized_fn_type);
-            if (specialized_fn_type) {
-                fn_type = specialized_fn_type;
-            }
+        if (fn_call_data.generated_fn) {
+            fn_type = get_chitype(fn_call_data.generated_fn);
         }
     }
     auto &fn_spec = fn_type->data.fn;
@@ -1975,8 +1909,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         Function *callee_fn = nullptr;
 
         // Check if this is a call to a specialized generic function
-        if (data.specialized_fn_type && data.specialized_fn_type->kind == TypeKind::Subtype) {
-            callee_fn = get_specialized_fn(fn_decl, data.specialized_fn_type);
+        if (data.generated_fn) {
+            callee_fn = get_fn(data.generated_fn);
         } else {
             callee_fn = get_fn(fn_decl);
         }
@@ -2083,6 +2017,9 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &llvm_builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
         auto &llvm_module = *m_ctx->llvm_module.get();
+        if (stmt->name == "zresult") {
+            fmt::print(">>> zresult\n");
+        }
         auto var = compile_alloc(fn, stmt);
         add_var(stmt, var);
         auto var_type = get_chitype(stmt);
@@ -2368,39 +2305,10 @@ Function *Compiler::get_fn(ast::Node *node) {
     return *entry;
 }
 
-Function *Compiler::get_specialized_fn(ast::Node *generic_fn_decl, ChiType *specialized_subtype) {
-    assert(specialized_subtype->kind == TypeKind::Subtype);
-    auto &subtype_data = specialized_subtype->data.subtype;
-
-    // Create a unique key for this specialized function
-    auto base_id = get_resolver()->resolve_global_id(generic_fn_decl);
-    string specialized_id = base_id + "_specialized";
-    for (auto arg : subtype_data.args) {
-        specialized_id += "_" + get_resolver()->to_string(arg, false);
-    }
-
-    // Check if this specialized function already exists
-    auto existing = m_ctx->function_table.get(specialized_id);
-    if (existing) {
-        return *existing;
-    }
-
-    // For now, compile on-demand - this should be moved to the initial compilation phase later
-    auto proto = generic_fn_decl->data.fn_def.fn_proto;
-    auto specialized_fn = compile_fn_proto_specialized(proto, generic_fn_decl, specialized_subtype);
-
-    // Add to function table with the specialized key
-    m_ctx->function_table[specialized_id] = specialized_fn;
-
-    // Add to pending functions for body compilation
-    m_ctx->pending_fns.add(specialized_fn);
-
-    return specialized_fn;
-}
-
-Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name,
-                                     ChiType *subtype) {
+Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
     auto declspec = fn->declspec_ref();
+    auto subtype =
+        fn->type == ast::NodeType::GeneratedFn ? fn->data.generated_fn.fn_subtype : nullptr;
     m_fn_eval_subtype = subtype;
     auto ftype = get_chitype(fn);
 
@@ -2417,12 +2325,13 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
         // Create a unique name for the specialized function
         if (name.empty()) {
-            name = proto_node->name;
+            name = get_resolver()->resolve_qualified_name(fn);
         }
-        name += "_specialized";
+        name += ".<";
         for (auto arg : subtype_data.args) {
-            name += "_" + get_resolver()->to_string(arg, false);
+            name += get_resolver()->to_string(arg, false) + ",";
         }
+        name += ">";
     } else {
         // Handle lambda types for non-specialized functions only
         if (ftype->kind == TypeKind::FnLambda) {
@@ -2447,7 +2356,6 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
 
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
-    // DEBUG: Creating function
     auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, name,
                                        m_ctx->llvm_module.get());
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
@@ -2473,7 +2381,6 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     // Add bind parameter if needed
     if (has_bind) {
-        // DEBUG: Adding bind parameter
         param_info.emplace_back(ParameterKind::Bind, llvm_index++, -1, bind_name);
         if (llvm_index - 1 >= fn_l->arg_size()) {
             printf("ERROR: Bind param index %d >= arg_size %u\n", llvm_index - 1,
@@ -2486,11 +2393,16 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
 
     // Add regular user parameters
-    // DEBUG: Adding user parameters
     for (int user_idx = 0; user_idx < proto_node->data.fn_proto.params.len; user_idx++) {
-        auto param_name = proto_node->data.fn_proto.params[user_idx]->name;
-        // DEBUG: Adding user parameter
-        param_info.emplace_back(ParameterKind::Regular, llvm_index++, user_idx, param_name);
+        auto param = proto_node->data.fn_proto.params[user_idx];
+        auto param_name = param->name;
+        auto &info =
+            param_info.emplace_back(ParameterKind::Regular, llvm_index++, user_idx, param_name);
+        if (subtype) {
+            info.type = ftype->data.fn.params[user_idx];
+        } else {
+            info.type = get_chitype(param);
+        }
         if (llvm_index - 1 >= fn_l->arg_size()) {
             printf("ERROR: User param index %d >= arg_size %u\n", llvm_index - 1,
                    (unsigned)fn_l->arg_size());
@@ -2505,6 +2417,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     // For specialized functions, always use the specialized name
     if (subtype) {
         new_fn->qualified_name = name;
+        new_fn->specialized_subtype = subtype;
     }
     // For lambda functions, use the passed name instead of the empty qualified_name
     else if (fn && fn->type == ast::NodeType::FnDef &&
@@ -2514,11 +2427,6 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     new_fn->llvm_fn->setName(new_fn->get_llvm_name());
     return new_fn;
-}
-
-Function *Compiler::compile_fn_proto_specialized(ast::Node *proto_node, ast::Node *fn,
-                                                 ChiType *subtype) {
-    return compile_fn_proto(proto_node, fn, "", subtype);
 }
 
 void Compiler::compile_extern(ast::Node *node) {
@@ -2563,40 +2471,15 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 
 llvm::Type *Compiler::_compile_type(ChiType *type) {
     if (type->is_placeholder) {
-        printf("DEBUG: _compile_type called on placeholder %s (index=%ld)\n",
-               type->kind == TypeKind::Placeholder ? type->data.placeholder.name.c_str()
-                                                   : "non-placeholder",
-               type->kind == TypeKind::Placeholder ? type->data.placeholder.index : -1);
-        printf("DEBUG: Placeholder source_decl=%p\n",
-               type->kind == TypeKind::Placeholder ? type->data.placeholder.source_decl : nullptr);
-        printf("DEBUG: Current function: %s\n", m_fn ? m_fn->qualified_name.c_str() : "null");
-        if (m_fn) {
-            printf("DEBUG: Function node: %p\n", m_fn->node);
-            printf("DEBUG: Function type: %s\n",
-                   m_fn->fn_type ? get_resolver()->to_string(m_fn->fn_type).c_str() : "null");
-            printf("DEBUG: Function has container_subtype: %s\n",
-                   m_fn->container_subtype ? "true" : "false");
-            printf("DEBUG: Function has specialized_subtype: %s\n",
-                   m_fn->specialized_subtype ? "true" : "false");
-        }
-
-        // Print the call stack to see where this is coming from
-        printf("DEBUG: Call stack trace - this placeholder is being compiled in context of %s\n",
-               m_fn ? m_fn->qualified_name.c_str() : "null");
-
         // Try eval_type one more time to see if it can resolve it
-        fmt::print("DEBUG: resolving placeholder type {} (index={})\n",
-                   get_resolver()->to_string(type), type->data.placeholder.index);
         if (get_resolver()->to_string(type) == "U") {
             fmt::print("debug.\n");
         }
         auto resolved = eval_type(type);
         if (resolved != type) {
             assert(!resolved->is_placeholder);
-            printf("DEBUG: eval_type resolved the placeholder to a different type\n");
             return _compile_type(resolved);
         } else {
-            printf("DEBUG: eval_type could not resolve the placeholder\n");
         }
     }
     assert(!type->is_placeholder && "compile_type called on placeholder type");

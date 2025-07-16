@@ -185,6 +185,10 @@ class Parser {
     Node *parse_operand(bool lhs, Node *parent);
 
     Node *parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent);
+    bool is_function_call_with_type_params();
+    Node *parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *parent);
+    bool try_parse_type_expr_lookahead(int &pos);
+    bool try_parse_fn_type_lookahead(int &pos);
 
     Node *parse_simple_stmt();
 

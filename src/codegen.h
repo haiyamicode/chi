@@ -10,6 +10,7 @@
 #include <list>
 
 #include "ast.h"
+#include "enum.h"
 #include "llvm.h"
 #include "resolver.h"
 #include "runtime/internals.h"
@@ -38,6 +39,7 @@ struct ParameterInfo {
     int llvm_index;       // Position in LLVM function args
     int user_param_index; // Index in original function parameters (-1 for generated)
     std::string name;     // Parameter name
+    ChiType *type = nullptr;
 
     ParameterInfo(ParameterKind k, int llvm_idx, int user_idx = -1, std::string n = "")
         : kind(k), llvm_index(llvm_idx), user_param_index(user_idx), name(n) {}
@@ -137,8 +139,15 @@ struct Function {
     llvm::AllocaInst *entry_alloca(llvm::Type *ty, const string &name = "");
 
     ast::FnDef *get_def() {
-        assert(node && node->type == ast::NodeType::FnDef);
-        return &node->data.fn_def;
+        switch (node->type) {
+        case ast::NodeType::GeneratedFn:
+            return &node->data.generated_fn.original_fn->data.fn_def;
+        case ast::NodeType::FnDef:
+            return &node->data.fn_def;
+        default:
+            panic("invalid node type for function: {}", PRINT_ENUM(node->type));
+            return nullptr;
+        }
     }
 };
 
@@ -316,9 +325,7 @@ class Compiler {
 
     llvm::Value *compile_reflection_vtable();
 
-    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "",
-                               ChiType *subtype = nullptr);
-    Function *compile_fn_proto_specialized(ast::Node *node, ast::Node *fn, ChiType *subtype);
+    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "");
     Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 
     Function *get_system_fn(const string &name);

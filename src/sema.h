@@ -55,7 +55,7 @@ struct ChiTypeFn {
     ChiType *container_ref = nullptr;
     bool is_extern = false;
     array<ChiType *> type_params = {};
-    array<ChiType *> subtypes = {}; // Instantiated function types with concrete type arguments
+    array<ast::Node *> variants = {};
 
     ChiType *get_param_at(size_t index);
     int get_va_start();
@@ -165,6 +165,7 @@ struct ChiTypeSubtype {
     TypeList args = {};
     ChiType *final_type = nullptr;
     ast::Node *root_node = nullptr;
+    ast::Node *generated_fn = nullptr;
 };
 
 struct ChiEnumVariant {

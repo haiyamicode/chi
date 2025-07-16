@@ -21,7 +21,7 @@ install:
 	cd $(BUILD_DIR) && $(MAKE) install
 
 asm: build
-	$(CHI) -s $(INPUT_FILE) 
+	$(CHI) -s -c $(INPUT_FILE) 
 
 compile_example_debug: build install
 	$(CHI) -d -c $(INPUT_FILE) -o local/test -w local/build
@@ -30,7 +30,7 @@ run_example_debug: compile_example_debug
 	./local/test
 
 ast: build
-	$(CHI) -a $(INPUT_FILE)
+	$(CHI) -a -c $(INPUT_FILE)
 
 test: test_compiler
 

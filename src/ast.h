@@ -21,7 +21,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
           ExternDecl, TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl);
+          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -220,9 +220,9 @@ struct TryExpr {
 struct FnCallExpr {
     Node *fn_ref_expr = nullptr;
     array<Node *> args = {};
+    array<Node *> type_args = {}; // Explicit type parameters
     bool is_builtin = false;
-    ChiType *specialized_fn_type =
-        nullptr; // For generic function calls, stores the specialized function type
+    Node *generated_fn = nullptr;
 };
 
 struct IfStmt {
@@ -441,6 +441,12 @@ struct EnumDecl {
     }
 };
 
+struct GeneratedFn {
+    Node *original_fn = nullptr;
+    ChiType *fn_subtype = nullptr;
+    Node *fn_proto = nullptr;
+};
+
 struct Node {
     NodeType type = NodeType::Error;
     Token *token = nullptr;
@@ -500,6 +506,7 @@ struct Node {
         CaseExpr case_expr;
         FieldInitExpr field_init_expr;
         EnumDecl enum_decl;
+        GeneratedFn generated_fn;
 
         NodeData() {}
 
@@ -534,6 +541,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(case_expr, CaseExpr)
             _AST_CASE_INITIALIZE_FIELD(field_init_expr, FieldInitExpr)
             _AST_CASE_INITIALIZE_FIELD(enum_decl, EnumDecl)
+            _AST_CASE_INITIALIZE_FIELD(generated_fn, GeneratedFn)
         default:
             break;
         }
@@ -564,6 +572,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(case_expr, CaseExpr)
             _AST_CASE_DESTROY_FIELD(field_init_expr, FieldInitExpr)
             _AST_CASE_DESTROY_FIELD(enum_decl, EnumDecl)
+            _AST_CASE_DESTROY_FIELD(generated_fn, GeneratedFn)
         default:
             memset(&data, 0, sizeof(data));
             break;
@@ -605,6 +614,7 @@ struct Node {
             _AST_CASE_CLONE_FIELD(case_expr, CaseExpr)
             _AST_CASE_CLONE_FIELD(field_init_expr, FieldInitExpr)
             _AST_CASE_CLONE_FIELD(enum_decl, EnumDecl)
+            _AST_CASE_CLONE_FIELD(generated_fn, GeneratedFn)
         default:
             memcpy(&b->data, &data, sizeof(data));
             break;
@@ -681,6 +691,8 @@ struct Node {
                 return nullptr;
             }
             return data.fn_proto.fn_def_node->get_declspec();
+        case NodeType::GeneratedFn:
+            return data.generated_fn.original_fn->get_declspec();
         default:
             return nullptr;
         }

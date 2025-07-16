@@ -1121,6 +1121,15 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
             node = parse_index_expr(node);
             break;
 
+        case TokenType::LT:
+            // Check if this is a function call with type parameters
+            if (is_function_call_with_type_params()) {
+                node = parse_fn_call_with_type_params(node, lhs, parent);
+            } else {
+                return node; // Let the expression parser handle it as a comparison
+            }
+            break;
+
         case TokenType::LPAREN:
             node = parse_fn_call_expr(node, lhs, parent);
             break;
@@ -1213,6 +1222,212 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
     }
     expect(TokenType::RPAREN);
     return node;
+}
+
+bool Parser::is_function_call_with_type_params() {
+    // Use proper type expression parsing to distinguish func<type>() from a < b
+    int pos = 1; // Start after the '<' token
+    
+    // Parse type arguments
+    for (;;) {
+        auto token = lookahead(pos);
+        if (token->type == TokenType::END) {
+            return false;
+        }
+        if (token->type == TokenType::GT) {
+            pos++;
+            break;
+        }
+        
+        // Try to parse a type expression at this position
+        if (!try_parse_type_expr_lookahead(pos)) {
+            return false;
+        }
+        
+        token = lookahead(pos);
+        if (token->type == TokenType::COMMA) {
+            pos++;
+        } else if (token->type == TokenType::GT) {
+            pos++;
+            break;
+        } else {
+            return false;
+        }
+    }
+    
+    // After parsing type arguments, next token should be '('
+    auto token = lookahead(pos);
+    return token->type == TokenType::LPAREN;
+}
+
+Node *Parser::parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *parent) {
+    auto node = create_node(NodeType::FnCallExpr, fn_expr->token);
+    node->data.fn_call_expr.fn_ref_expr = fn_expr;
+    
+    // Parse type parameters <T, U>
+    expect(TokenType::LT);
+    for (;;) {
+        auto token = get();
+        if (token->type == TokenType::END) {
+            error(token, errors::UNEXPECTED_EOF);
+            return node;
+        }
+        if (token->type == TokenType::GT) {
+            break;
+        }
+        
+        auto type_arg = parse_type_expr(true);
+        node->data.fn_call_expr.type_args.add(type_arg);
+        
+        if (!at_comma(TokenType::GT)) {
+            break;
+        }
+        consume();
+    }
+    expect(TokenType::GT);
+    
+    // Parse function arguments
+    expect(TokenType::LPAREN);
+    for (;;) {
+        auto tok = get();
+        if (tok->type == TokenType::END) {
+            error(tok, errors::UNEXPECTED_EOF);
+            return node;
+        }
+        if (tok->type == TokenType::RPAREN) {
+            break;
+        } else {
+            auto arg = parse_child_expr(lhs, parent);
+            node->data.fn_call_expr.args.add(arg);
+        }
+        if (!at_comma(TokenType::RPAREN)) {
+            break;
+        }
+        consume();
+    }
+    expect(TokenType::RPAREN);
+    return node;
+}
+
+bool Parser::try_parse_fn_type_lookahead(int &pos) {
+    // func might not have parentheses
+    auto token = lookahead(pos);
+    if (token->type != TokenType::LPAREN) {
+        return true;
+    }
+    pos++;
+    
+    // Parse parameters
+    for (;;) {
+        token = lookahead(pos);
+        if (token->type == TokenType::END) {
+            return false;
+        }
+        if (token->type == TokenType::RPAREN) {
+            pos++;
+            break;
+        }
+        
+        // Handle variadic parameters
+        if (token->type == TokenType::ELLIPSIS) {
+            pos++;
+            token = lookahead(pos);
+        }
+        
+        // Parse parameter type
+        if (!try_parse_type_expr_lookahead(pos)) {
+            return false;
+        }
+        
+        token = lookahead(pos);
+        if (token->type == TokenType::COMMA) {
+            pos++;
+        } else if (token->type == TokenType::RPAREN) {
+            pos++;
+            break;
+        } else {
+            return false;
+        }
+    }
+    
+    // Check if there's a return type
+    token = lookahead(pos);
+    if (token->type != TokenType::RPAREN && token->type != TokenType::SEMICOLON &&
+        token->type != TokenType::COMMA && token->type != TokenType::GT) {
+        // Parse return type
+        if (!try_parse_type_expr_lookahead(pos)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool Parser::try_parse_type_expr_lookahead(int &pos) {
+    // Parse sigils (*, &, etc.) first
+    auto token = lookahead(pos);
+    if (token->type == TokenType::END) {
+        return false;
+    }
+    
+    // Handle pointer sigil
+    if (token->type == TokenType::MUL) {
+        pos++;
+        token = lookahead(pos);
+        if (token->type == TokenType::END) {
+            return false;
+        }
+    }
+    
+    // Handle reference sigil 
+    if (token->type == TokenType::AND) {
+        pos++;
+        token = lookahead(pos);
+        if (token->type == TokenType::END) {
+            return false;
+        }
+    }
+    
+    // Must be an identifier-based type
+    if (token->type != TokenType::IDEN) {
+        return false;
+    }
+    pos++;
+    
+    // Handle generic types (e.g., Container<T>)
+    token = lookahead(pos);
+    if (token->type == TokenType::LT) {
+        pos++;
+        
+        // Parse type arguments
+        for (;;) {
+            token = lookahead(pos);
+            if (token->type == TokenType::END) {
+                return false;
+            }
+            if (token->type == TokenType::GT) {
+                pos++;
+                break;
+            }
+            
+            // Recursively parse type argument
+            if (!try_parse_type_expr_lookahead(pos)) {
+                return false;
+            }
+            
+            token = lookahead(pos);
+            if (token->type == TokenType::COMMA) {
+                pos++;
+            } else if (token->type == TokenType::GT) {
+                pos++;
+                break;
+            } else {
+                return false;
+            }
+        }
+    }
+    
+    return true;
 }
 
 Node *Parser::parse_return_stmt() {
