@@ -55,7 +55,6 @@ struct ChiTypeFn {
     ChiType *container_ref = nullptr;
     bool is_extern = false;
     array<ChiType *> type_params = {};
-    array<ast::Node *> variants = {};
 
     ChiType *get_param_at(size_t index);
     int get_va_start();

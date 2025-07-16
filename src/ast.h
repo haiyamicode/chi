@@ -143,6 +143,7 @@ struct FnDef {
     bool is_generated = false;
     array<Node *> cleanup_vars = {};
     bool has_try = false;
+    array<Node *> variants = {};
 
     bool is_static() { return decl_spec && decl_spec->is_static(); }
 

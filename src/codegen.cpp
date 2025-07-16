@@ -190,9 +190,9 @@ void Compiler::compile_module(ast::Module *module) {
         case ast::NodeType::FnDef: {
             auto proto = decl->data.fn_def.fn_proto;
             auto fn_type = get_chitype(decl);
-            if (fn_type && fn_type->kind == TypeKind::Fn && fn_type->data.fn.is_generic()) {
+            if (fn_type && fn_type->is_placeholder) {
                 // This is a generic function - compile all its instantiated subtypes
-                for (auto variant : fn_type->data.fn.variants) {
+                for (auto variant : decl->data.fn_def.variants) {
                     if (variant->resolved_type->is_placeholder) {
                         continue;
                     }
@@ -291,9 +291,9 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             auto fn_type = get_chitype(fn_node);
 
             // For generic methods, compile their specialized versions instead
-            if (fn_type && fn_type->is_placeholder && fn_type->kind == TypeKind::Fn) {
+            if (fn_type->is_placeholder) {
                 // Skip the generic version but compile all specialized versions
-                for (auto variant : fn_type->data.fn.variants) {
+                for (auto variant : fn_node->data.fn_def.variants) {
                     if (!variant->resolved_type->is_placeholder) {
                         auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, variant);
                         if (subtype) {
@@ -896,7 +896,8 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
 
 llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *value,
                                                  ChiType *from_type, ChiType *to_type) {
-    if (from_type->kind == TypeKind::Int && to_type->kind == TypeKind::Float) {
+    auto from_int = from_type->kind == TypeKind::Int || from_type->kind == TypeKind::Char;
+    if (from_int && to_type->kind == TypeKind::Float) {
         auto &builder = *m_ctx->llvm_builder;
         bool is_unsigned = from_type->data.int_.is_unsigned;
         auto from_type_l = compile_type(from_type);
@@ -916,7 +917,7 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         } else {
             return builder.CreateFPToSI(value, to_type_l);
         }
-    } else if (from_type->kind == TypeKind::Int && to_type->kind == TypeKind::Int) {
+    } else if (from_int && to_type->kind == TypeKind::Int) {
         auto &builder = *m_ctx->llvm_builder;
         auto from_type_l = compile_type(from_type);
         auto to_type_l = compile_type(to_type);
@@ -938,7 +939,7 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         }
     }
 
-    panic("unreachable");
+    panic("number conversion not implemented");
     return nullptr;
 }
 
@@ -2352,7 +2353,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
 
     if (name.empty()) {
-        name = proto_node->name;
+        name = get_resolver()->resolve_qualified_name(fn);
     }
 
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
@@ -2447,41 +2448,19 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
     }
 
     type = eval_type(type);
-    if (!type->name) {
-        auto stringid = get_resolver()->to_string(type);
-        auto it = m_ctx->anon_type_table.get(stringid);
-        if (it) {
-            return *it;
-        }
-    } else {
-        auto it = m_ctx->type_table.get(type->id);
-        if (it) {
-            return *it;
-        }
+    auto key = get_resolver()->to_string(type);
+    auto it = m_ctx->type_table.get(key);
+    if (it) {
+        return *it;
     }
-    auto compiled_type = _compile_type(type);
-    m_ctx->type_table[type->id] = compiled_type;
 
-    if (!type->name) {
-        auto stringid = get_resolver()->to_string(type);
-        m_ctx->anon_type_table[stringid] = compiled_type;
-    }
+    auto compiled_type = _compile_type(type);
+    m_ctx->type_table[key] = compiled_type;
     return compiled_type;
 }
 
 llvm::Type *Compiler::_compile_type(ChiType *type) {
-    if (type->is_placeholder) {
-        // Try eval_type one more time to see if it can resolve it
-        if (get_resolver()->to_string(type) == "U") {
-            fmt::print("debug.\n");
-        }
-        auto resolved = eval_type(type);
-        if (resolved != type) {
-            assert(!resolved->is_placeholder);
-            return _compile_type(resolved);
-        } else {
-        }
-    }
+    auto key = get_resolver()->to_string(type);
     assert(!type->is_placeholder && "compile_type called on placeholder type");
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
@@ -2566,6 +2545,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return compile_type(data.internal);
     }
     case TypeKind::Struct: {
+        auto key = get_resolver()->to_string(type);
         auto &data = type->data.struct_;
         if (data.kind == ContainerKind::Interface) {
             std::vector<llvm::Type *> members;
@@ -2598,7 +2578,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return compile_type(get_system_types()->void_);
     }
     case TypeKind::Enum: {
-        return _compile_type(type->data.enum_.base_value_type);
+        return compile_type(type->data.enum_.base_value_type);
     }
     case TypeKind::EnumValue: {
         if (type->data.enum_value.member) {

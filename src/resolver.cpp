@@ -26,6 +26,7 @@ ast::Node *Resolver::add_primitive(const string &name, ChiType *type) {
     node->name = name;
     type->name = name;
     m_ctx->builtins.add(node);
+    type->global_id = name;
     auto sym = create_type_symbol(node->name, type);
     node->resolved_type = sym;
     return node;
@@ -1405,6 +1406,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         assert(data.source_decl && "Type parameter without source declaration");
         phty->data.placeholder.source_decl = data.source_decl;
+        phty->global_id = fmt::format("{}.{}", resolve_global_id(data.source_decl), node->name);
         phty->is_placeholder = true;
         auto type_symbol = create_type_symbol(node->name, phty);
         return type_symbol;
@@ -1627,18 +1629,25 @@ bool Resolver::has_interface_impl(ChiTypeStruct *struct_type, string interface_i
 string Resolver::resolve_qualified_name(ast::Node *node) {
     switch (node->type) {
     case NodeType::FnDef:
-        if (node->data.fn_def.is_instance_method()) {
+        if (node->resolved_type && node->resolved_type->kind == TypeKind::Fn) {
             auto container_ref = node->resolved_type->data.fn.container_ref;
-            assert(container_ref);
-            auto container_type = container_ref->get_elem();
-            return to_string(container_type) + "." + node->name;
+            if (container_ref) {
+                auto container = container_ref->get_elem();
+                if (to_string(container) == "Type:540:runtime.Array<any>") {
+                    fmt::print("{}", node->name);
+                }
+                return fmt::format("{}.{}", to_string(container), node->name);
+            }
+            return node->name;
         }
-        break;
+        if (node->parent) {
+            return fmt::format("{}.{}", resolve_qualified_name(node->parent), node->name);
+        }
+        return node->name;
     case NodeType::GeneratedFn: {
         auto &data = node->data.generated_fn;
-        return to_string(data.fn_subtype);
-        // auto fn_name = resolve_qualified_name(data.original_fn);
-        // return fmt::format("{}.{}", fn_name, to_string(data.fn_subtype));
+        auto fn_name = resolve_qualified_name(data.original_fn);
+        return fmt::format("{}.{}", fn_name, to_string(data.fn_subtype));
     }
     default:
         break;
@@ -1648,15 +1657,21 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
 
 string Resolver::to_string(ChiType *type, bool for_display) {
     assert(type);
-    if (type->display_name && for_display) {
-        return *type->display_name;
-    }
-    if (type->name) {
-        if (!for_display) {
+    if (for_display) {
+        if (type->display_name) {
+            return *type->display_name;
+        }
+        if (type->name) {
             return *type->name;
         }
-        return !type->global_id.empty() ? type->global_id : *type->name;
+    } else {
+        if (!type->global_id.empty()) {
+            return type->global_id;
+        }
+        auto name = to_string(type, true);
+        return fmt::format("Type:{}:{}", type->id, name);
     }
+
     switch (type->kind) {
     case TypeKind::This:
         return to_string(type->get_elem(), for_display);
@@ -1706,6 +1721,17 @@ string Resolver::to_string(ChiType *type, bool for_display) {
     }
     assert(type->kind < TypeKind::__COUNT);
     return to_string(type->kind, &type->data, for_display);
+}
+
+string Resolver::to_string(TypeList *type_list, bool for_display) {
+    std::stringstream ss;
+    for (int i = 0; i < type_list->len; i++) {
+        ss << to_string(type_list->at(i), for_display);
+        if (i < type_list->len - 1) {
+            ss << ",";
+        }
+    }
+    return ss.str();
 }
 
 string Resolver::to_string(TypeKind kind, ChiType::Data *data, bool for_display) {
@@ -2242,6 +2268,7 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
             sub->data.subtype.generic = to_value_type(array);
             sub->data.subtype.args.add(sty->data.array.elem);
             sub->is_placeholder = sty->data.array.elem->is_placeholder;
+            sub->global_id = sty->global_id;
             auto astype = resolve_subtype(sub);
             sty->data.array.internal = astype;
             sty = astype;
@@ -2479,6 +2506,7 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     m_ctx->array_of[elem] = type;
     type->data.array.internal = nullptr;
     type->is_placeholder = elem->is_placeholder;
+    type->global_id = fmt::format("runtime.Array<{}>", elem->global_id);
     return type;
 }
 
@@ -2583,15 +2611,17 @@ ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
     if (value->kind == TypeKind::Void) {
         value = get_system_types()->bool_;
     }
+
     auto key = fmt::format("Result<{},{}>", to_string(value), to_string(err));
     if (auto cached = m_ctx->composite_types.get(key)) {
         return *cached;
     }
+
     auto result_type = create_type(TypeKind::Result);
     auto &data = result_type->data.result;
     data.value = value;
     data.error = err;
-    assert(to_string(result_type) == key);
+    result_type->global_id = key;
     m_ctx->composite_types[key] = result_type;
 
     // create internal struct for accessing the fields
@@ -2754,6 +2784,7 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
     auto sub = create_type(TypeKind::Subtype);
     sub->data.subtype.generic = generic;
     sub->data.subtype.root_node = gen.node;
+    sub->global_id = fmt::format("{}<{}>", gen.global_id, to_string(type_args));
     for (auto arg : *type_args) {
         sub->data.subtype.args.add(arg);
         if (arg->is_placeholder) {
@@ -2781,8 +2812,9 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
     // }
 
     assert(generic_fn->kind == TypeKind::Fn);
+    assert(fn_node->type == NodeType::FnDef);
     auto &gen = generic_fn->data.fn;
-    for (auto variant : gen.variants) {
+    for (auto variant : fn_node->data.fn_def.variants) {
         assert(variant->type == NodeType::GeneratedFn);
         auto subtype = variant->data.generated_fn.fn_subtype;
         auto &subtype_data = subtype->data.subtype;
@@ -2833,7 +2865,7 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
         }
     }
 
-    gen.variants.add(generated_fn);
+    fn_node->data.fn_def.variants.add(generated_fn);
     auto resolved_fn_type = resolve_fn_subtype(sub);
 
     // Resolve generated nodes
@@ -2898,6 +2930,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     auto &base = data.generic->data.struct_;
     auto sty = create_type(TypeKind::Struct);
     sty->name = to_string(subtype);
+    sty->global_id = subtype->global_id;
 
     auto &scpy = sty->data.struct_;
     scpy.kind = base.kind;
@@ -2910,11 +2943,6 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         member->resolved_type->clone(type);
         if (member->is_method()) {
             type->data.fn.container_ref = get_pointer_type(sty, TypeKind::Reference);
-        }
-
-        if (member->get_name() == "filter" &&
-            to_string(type) ==
-                "(&Array<JsonValue>) func(Lambda<func(JsonValue) bool>) Array<JsonValue>") {
         }
 
         // For built-in enum base types, use complete substitution to resolve all placeholders

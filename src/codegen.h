@@ -179,7 +179,7 @@ struct CodegenContext {
     std::vector<llvm::Constant *> reflection_vtable = {};
 
     map<ast::Node *, llvm::Value *> var_table = {};
-    map<TypeId, llvm::Type *> type_table = {};
+    map<string, llvm::Type *> type_table = {};
     map<TypeId, box<TypeInfo>> info_table = {};
     map<string, Function *> function_table = {};
     map<string, Function *> system_functions = {};

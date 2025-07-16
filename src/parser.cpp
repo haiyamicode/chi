@@ -1227,7 +1227,7 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
 bool Parser::is_function_call_with_type_params() {
     // Use proper type expression parsing to distinguish func<type>() from a < b
     int pos = 1; // Start after the '<' token
-    
+
     // Parse type arguments
     for (;;) {
         auto token = lookahead(pos);
@@ -1238,12 +1238,12 @@ bool Parser::is_function_call_with_type_params() {
             pos++;
             break;
         }
-        
+
         // Try to parse a type expression at this position
         if (!try_parse_type_expr_lookahead(pos)) {
             return false;
         }
-        
+
         token = lookahead(pos);
         if (token->type == TokenType::COMMA) {
             pos++;
@@ -1254,7 +1254,7 @@ bool Parser::is_function_call_with_type_params() {
             return false;
         }
     }
-    
+
     // After parsing type arguments, next token should be '('
     auto token = lookahead(pos);
     return token->type == TokenType::LPAREN;
@@ -1263,7 +1263,7 @@ bool Parser::is_function_call_with_type_params() {
 Node *Parser::parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *parent) {
     auto node = create_node(NodeType::FnCallExpr, fn_expr->token);
     node->data.fn_call_expr.fn_ref_expr = fn_expr;
-    
+
     // Parse type parameters <T, U>
     expect(TokenType::LT);
     for (;;) {
@@ -1275,17 +1275,17 @@ Node *Parser::parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *pare
         if (token->type == TokenType::GT) {
             break;
         }
-        
+
         auto type_arg = parse_type_expr(true);
         node->data.fn_call_expr.type_args.add(type_arg);
-        
+
         if (!at_comma(TokenType::GT)) {
             break;
         }
         consume();
     }
     expect(TokenType::GT);
-    
+
     // Parse function arguments
     expect(TokenType::LPAREN);
     for (;;) {
@@ -1316,7 +1316,7 @@ bool Parser::try_parse_fn_type_lookahead(int &pos) {
         return true;
     }
     pos++;
-    
+
     // Parse parameters
     for (;;) {
         token = lookahead(pos);
@@ -1327,18 +1327,18 @@ bool Parser::try_parse_fn_type_lookahead(int &pos) {
             pos++;
             break;
         }
-        
+
         // Handle variadic parameters
         if (token->type == TokenType::ELLIPSIS) {
             pos++;
             token = lookahead(pos);
         }
-        
+
         // Parse parameter type
         if (!try_parse_type_expr_lookahead(pos)) {
             return false;
         }
-        
+
         token = lookahead(pos);
         if (token->type == TokenType::COMMA) {
             pos++;
@@ -1349,7 +1349,7 @@ bool Parser::try_parse_fn_type_lookahead(int &pos) {
             return false;
         }
     }
-    
+
     // Check if there's a return type
     token = lookahead(pos);
     if (token->type != TokenType::RPAREN && token->type != TokenType::SEMICOLON &&
@@ -1359,7 +1359,7 @@ bool Parser::try_parse_fn_type_lookahead(int &pos) {
             return false;
         }
     }
-    
+
     return true;
 }
 
@@ -1369,7 +1369,7 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
     if (token->type == TokenType::END) {
         return false;
     }
-    
+
     // Handle pointer sigil
     if (token->type == TokenType::MUL) {
         pos++;
@@ -1378,8 +1378,8 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
             return false;
         }
     }
-    
-    // Handle reference sigil 
+
+    // Handle reference sigil
     if (token->type == TokenType::AND) {
         pos++;
         token = lookahead(pos);
@@ -1387,18 +1387,18 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
             return false;
         }
     }
-    
+
     // Must be an identifier-based type
     if (token->type != TokenType::IDEN) {
         return false;
     }
     pos++;
-    
+
     // Handle generic types (e.g., Container<T>)
     token = lookahead(pos);
     if (token->type == TokenType::LT) {
         pos++;
-        
+
         // Parse type arguments
         for (;;) {
             token = lookahead(pos);
@@ -1409,12 +1409,12 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
                 pos++;
                 break;
             }
-            
+
             // Recursively parse type argument
             if (!try_parse_type_expr_lookahead(pos)) {
                 return false;
             }
-            
+
             token = lookahead(pos);
             if (token->type == TokenType::COMMA) {
                 pos++;
@@ -1426,7 +1426,7 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
             }
         }
     }
-    
+
     return true;
 }
 
@@ -1788,6 +1788,7 @@ void Parser::parse_struct_block(Node *node) {
         auto before_pos = m_toki;
         auto member = parse_struct_member(node->data.struct_decl.kind, node);
         node->data.struct_decl.members.add(member);
+        member->parent = node;
 
         // Error recovery: if we didn't advance, consume a token to avoid infinite loop
         if (m_toki == before_pos) {

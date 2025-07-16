@@ -10,6 +10,11 @@ func identity<T>(value: T) T {
     return value;
 }
 
+// Generic function that transforms values
+func transform<T, U>(value: T, transformer: func(value: T) U) U {
+    return transformer(value);
+}
+
 struct Container<T> {
     value: T;
 
@@ -33,6 +38,10 @@ func main() {
     
     var char_result = identity<char>('A');
     printf("identity<char>('A') = {}\n", char_result);
+    
+    // // Test generic transform function
+    var doubled = transform<int, int>(5, func(x: int) int { return x * 2; });
+    printf("transform<int, int>(5, double) = {}\n", doubled);
     
     // Test generic struct with method type parameters
     var container: Container<int> = {65};

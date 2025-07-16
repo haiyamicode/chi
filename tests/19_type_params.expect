@@ -1,4 +1,5 @@
 identity<int>(42) = 42
 identity<char>('A') = 'A'
+transform<int, int>(5, double) = 10
 final value: 'K'
 float result: 32.5
