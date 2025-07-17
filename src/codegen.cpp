@@ -1832,9 +1832,13 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             (llvm::FunctionType *)compile_type(lambda_type->data.fn_lambda.bound_fn);
         std::vector<llvm::Value *> args = {};
 
-        auto bind_gep = builder.CreateStructGEP(lambda_type_l, ref.address, 2);
-        auto bind_ptr = builder.CreateLoad(lambda_type_l->elements()[2], bind_gep);
-        args.push_back(bind_ptr);
+        // Only add bind parameter if lambda has captures
+        auto &lambda_data = lambda_type->data.fn_lambda;
+        if (lambda_data.captures.len > 0) {
+            auto bind_gep = builder.CreateStructGEP(lambda_type_l, ref.address, 2);
+            auto bind_ptr = builder.CreateLoad(lambda_type_l->elements()[2], bind_gep);
+            args.push_back(bind_ptr);
+        }
 
         for (int i = 0; i < data.args.len; i++) {
             auto arg = data.args[i];
@@ -2018,9 +2022,6 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &llvm_builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
         auto &llvm_module = *m_ctx->llvm_module.get();
-        if (stmt->name == "zresult") {
-            fmt::print(">>> zresult\n");
-        }
         auto var = compile_alloc(fn, stmt);
         add_var(stmt, var);
         auto var_type = get_chitype(stmt);
@@ -2336,9 +2337,13 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     } else {
         // Handle lambda types for non-specialized functions only
         if (ftype->kind == TypeKind::FnLambda) {
-            has_bind = true;
-            ftype = ftype->data.fn_lambda.bound_fn;
-            bind_name = "_binds";
+            // Only add bind parameter if lambda has captures
+            auto &lambda_data = ftype->data.fn_lambda;
+            has_bind = lambda_data.captures.len > 0;
+            ftype = lambda_data.bound_fn;
+            if (has_bind) {
+                bind_name = "_binds";
+            }
             assert(ftype);
         }
     }

@@ -5,3 +5,4 @@ local
 debug
 .cache
 compile_commands.json
+.roomodes
