@@ -1334,6 +1334,19 @@ bool Parser::try_parse_fn_type_lookahead(int &pos) {
             token = lookahead(pos);
         }
 
+        // Parse parameter name (required in Chi)
+        if (token->type != TokenType::IDEN) {
+            return false;
+        }
+        pos++; // Skip parameter name
+        
+        // Expect colon
+        token = lookahead(pos);
+        if (token->type != TokenType::COLON) {
+            return false;
+        }
+        pos++; // Skip colon
+        
         // Parse parameter type
         if (!try_parse_type_expr_lookahead(pos)) {
             return false;
@@ -1388,6 +1401,12 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
         }
     }
 
+    // Handle function types (func(...) ...)
+    if (token->type == TokenType::KW_FUNC) {
+        pos++;
+        return try_parse_fn_type_lookahead(pos);
+    }
+    
     // Must be an identifier-based type
     if (token->type != TokenType::IDEN) {
         return false;
