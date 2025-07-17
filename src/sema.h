@@ -29,7 +29,7 @@ MAKE_ENUM(Visibility, Public, Private, Protected)
 
 MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display)
 
-MAKE_ENUM(DotKind, Field, EnumVariant);
+MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda);
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;

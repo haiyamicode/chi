@@ -64,7 +64,7 @@ void Resolver::context_init_primitives() {
     system_types.undefined = create_type(TypeKind::Undefined);
 
     // Create a system lambda type for LLVM compatibility
-    // All lambdas use the same underlying structure: {ptr, i32, ptr}
+    // All lambdas use the same underlying structure: {ptr, size, data, flags}
     system_types.lambda = create_type(TypeKind::Struct);
     auto &lambda_struct = system_types.lambda->data.struct_;
     system_types.lambda->display_name = "Lambda";
@@ -379,20 +379,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 proto->data.fn_lambda.captures.add(type);
             }
 
-            // create bound form of the lambda function if it has captures
+            // create bound form of the lambda function - always create for consistent calling
+            // convention
             auto fn_type = proto->data.fn_lambda.fn;
             auto &fn_data = fn_type->data.fn;
 
-            // Only create bound function and bind struct if there are captures
-            if (data.captures.len > 0) {
-                auto bound_type = create_type(TypeKind::Fn);
-                proto->data.fn_lambda.bound_fn = bound_type;
+            // Always create bound function and bind struct for consistent lambda calling convention
+            auto bound_type = create_type(TypeKind::Fn);
+            proto->data.fn_lambda.bound_fn = bound_type;
 
-                // binding struct
-                auto bstruct = create_type(TypeKind::Struct);
-                bstruct->display_name = fmt::format("__lambda_{}::Bind", proto->id);
-                auto &bstruct_data = bstruct->data.struct_;
-                bstruct_data.kind = ContainerKind::Struct;
+            // binding struct
+            auto bstruct = create_type(TypeKind::Struct);
+            bstruct->display_name = fmt::format("__lambda_{}::Bind", proto->id);
+            auto &bstruct_data = bstruct->data.struct_;
+            bstruct_data.kind = ContainerKind::Struct;
+
+            if (data.captures.len > 0) {
+                // Add capture fields to binding struct
                 for (int i = 0; i < data.captures.len; i++) {
                     auto capture = data.captures[i];
                     auto name = fmt::format("capture_{}", i);
@@ -400,22 +403,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         get_allocator(), capture->name, get_dummy_var(name),
                         get_pointer_type(capture->resolved_type, TypeKind::Reference));
                 }
-
-                // create signature with binding struct as first parameter
-                proto->data.fn_lambda.bind_struct = bstruct;
-                auto &bound_fn = bound_type->data.fn;
-                bound_fn.params.add(get_pointer_type(bstruct, TypeKind::Reference));
-                for (auto param : fn_data.params) {
-                    bound_fn.params.add(param);
-                }
-                bound_fn.return_type = fn_data.return_type;
-                bound_fn.is_variadic = fn_data.is_variadic;
-                bound_fn.container_ref = fn_data.container_ref;
-            } else {
-                // No captures - use the original function directly
-                proto->data.fn_lambda.bound_fn = fn_type;
-                proto->data.fn_lambda.bind_struct = nullptr;
             }
+
+            // create signature with binding struct as first parameter
+            proto->data.fn_lambda.bind_struct = bstruct;
+            auto &bound_fn = bound_type->data.fn;
+
+            // Always add binding struct as first parameter (even if empty for lambdas without
+            // captures)
+            bound_fn.params.add(get_pointer_type(bstruct, TypeKind::Reference));
+            for (auto param : fn_data.params) {
+                bound_fn.params.add(param);
+            }
+            bound_fn.return_type = fn_data.return_type;
+            bound_fn.is_variadic = fn_data.is_variadic;
+            bound_fn.container_ref = fn_data.container_ref;
             return proto;
         }
 
@@ -562,6 +564,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(data.decl, errors::VARIABLE_USED_BEFORE_INITIALIZED, data.decl->name);
             }
         }
+        
+        // Convert function to lambda when used as value (not in call context)
+        if (data.decl->type == NodeType::FnDef && !scope.is_fn_call && type->kind == TypeKind::Fn) {
+            type = get_lambda_for_fn(type);
+        }
+        
         return type;
     }
     case NodeType::TypeSigil: {
@@ -857,6 +865,56 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        // Check if this is a method being accessed as a value (not a function call)
+        // Only convert to lambda if we're NOT in a function reference context
+        if (member->is_method() && member->resolved_type &&
+            member->resolved_type->kind == TypeKind::Fn && !scope.is_fn_call) {
+            // Mark this DotExpr as needing method-to-lambda conversion
+            data.resolved_dot_kind = DotKind::MethodToLambda;
+
+            // Create a method lambda type - we'll generate a proxy function
+            auto lambda_type = create_type(TypeKind::FnLambda);
+            lambda_type->data.fn_lambda.fn = member->resolved_type;
+            lambda_type->data.fn_lambda.internal = get_system_types()->lambda;
+            lambda_type->is_placeholder = member->resolved_type->is_placeholder;
+
+            // Create a bound function type for the proxy (with binding struct as first param)
+            auto bound_fn = create_type(TypeKind::Fn);
+            auto &bound_fn_data = bound_fn->data.fn;
+            auto &method_fn_data = member->resolved_type->data.fn;
+
+            // Add binding struct as first parameter
+            bound_fn_data.params.add(get_system_types()->void_ref);
+
+            // Add all original method parameters (except 'this' which is handled via binding)
+            for (auto param : method_fn_data.params) {
+                bound_fn_data.params.add(param);
+            }
+
+            bound_fn_data.return_type = method_fn_data.return_type;
+            bound_fn_data.is_variadic = method_fn_data.is_variadic;
+
+            // Create a binding struct to hold the instance pointer
+            auto bind_struct = create_type(TypeKind::Struct);
+            bind_struct->data.struct_.kind = ContainerKind::Struct;
+            bind_struct->name = "MethodLambdaBind";
+
+            // Add the instance pointer as the only field
+            auto instance_type = data.expr->resolved_type;
+            if (!instance_type->is_pointer()) {
+                instance_type = get_pointer_type(instance_type);
+            }
+            auto instance_member = bind_struct->data.struct_.add_member(
+                get_allocator(), "instance", get_dummy_var("instance"), instance_type);
+
+            // Set up the lambda type
+            lambda_type->data.fn_lambda.bind_struct = bind_struct;
+            lambda_type->data.fn_lambda.bound_fn = bound_fn;
+            lambda_type->data.fn_lambda.captures.add(instance_type);
+
+            return lambda_type;
+        }
+
         return member->resolved_type;
     }
     case NodeType::ConstructExpr: {
@@ -923,7 +981,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::FnCallExpr: {
         auto &data = node->data.fn_call_expr;
-        auto fn_ref_scope = scope.set_is_lhs(false);
+        auto fn_ref_scope = scope.set_is_lhs(false).set_is_fn_call(true);
         auto fn_type = resolve(data.fn_ref_expr, fn_ref_scope);
         if (fn_type->kind != TypeKind::Fn && fn_type->kind != TypeKind::FnLambda) {
             error(data.fn_ref_expr, errors::CANNOT_CALL_NON_FUNCTION);
@@ -2226,9 +2284,19 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *
         auto &data = type->data.fn_lambda;
         auto fn = type_placeholders_sub(data.fn, subs);
         auto internal = type_placeholders_sub(data.internal, subs);
-        auto bound_fn = data.bound_fn ? type_placeholders_sub(data.bound_fn, subs) : nullptr;
+        // Only substitute bound_fn if it has placeholders
+        auto bound_fn = data.bound_fn;
+        if (bound_fn && bound_fn->is_placeholder) {
+            bound_fn = type_placeholders_sub(bound_fn, subs);
+        }
         auto bind_struct =
             data.bind_struct ? type_placeholders_sub(data.bind_struct, subs) : nullptr;
+
+        // If nothing changed, return the original type
+        if (fn == data.fn && internal == data.internal && bound_fn == data.bound_fn &&
+            bind_struct == data.bind_struct) {
+            return type;
+        }
 
         auto lambda_type = create_type(TypeKind::FnLambda);
         lambda_type->data.fn_lambda.fn = fn;
@@ -2613,8 +2681,37 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
         bound_fn.is_variadic = fn_data.is_variadic;
         bound_fn.container_ref = fn_data.container_ref;
     } else {
-        lambda->data.fn_lambda.bound_fn = fn_type;
-        lambda->data.fn_lambda.bind_struct = nullptr;
+        // Always create a bound function with binding struct as first parameter
+        // This ensures consistent lambda calling convention
+
+        // Build the parameter list with binding struct first
+        TypeList bound_params;
+        bound_params.add(get_system_types()->void_ref);
+
+        // Add all original function parameters
+        for (auto param : fn_data.params) {
+            bound_params.add(param);
+        }
+
+        // Create the bound function type with all parameters
+        // Manually create the function type to avoid caching issues
+        auto bound_fn_type = create_type(TypeKind::Fn);
+        bound_fn_type->data.fn.return_type = fn_data.return_type;
+        bound_fn_type->data.fn.is_variadic = fn_data.is_variadic;
+        bound_fn_type->data.fn.params = bound_params;
+
+        // Mark this type as not having placeholders to prevent substitution
+        bound_fn_type->is_placeholder = false;
+        // Add a unique marker to prevent type substitution
+        bound_fn_type->global_id = fmt::format("__lambda_bound_fn_{}", bound_fn_type->id);
+
+        lambda->data.fn_lambda.bound_fn = bound_fn_type;
+
+        // Create an empty binding struct (no captures)
+        auto bstruct = create_type(TypeKind::Struct);
+        lambda->data.fn_lambda.bind_struct = bstruct;
+        bstruct->data.struct_.kind = ContainerKind::Struct;
+        bstruct->name = "EmptyLambdaBind";
     }
 
     return lambda;
@@ -3222,3 +3319,7 @@ ResolveScope ResolveScope::set_move_outlet(ast::Node *outlet) const {
 ResolveScope ResolveScope::set_block(ast::Block *block) const { RS_SET_PROP_COPY(block, block); }
 
 ResolveScope ResolveScope::set_is_lhs(bool is_lhs) const { RS_SET_PROP_COPY(is_lhs, is_lhs); }
+
+ResolveScope ResolveScope::set_is_fn_call(bool is_fn_call) const {
+    RS_SET_PROP_COPY(is_fn_call, is_fn_call);
+}

@@ -100,6 +100,7 @@ struct ResolveScope {
     ast::Block *block = nullptr;
     bool is_lhs = false;
     ChiType *parent_type_symbol = nullptr;
+    bool is_fn_call = false; // True when resolving function reference for call
 
     ast::FnDef *parent_fn_def() {
         assert(parent_fn_node);
@@ -128,6 +129,8 @@ struct ResolveScope {
     ResolveScope set_block(ast::Block *block) const;
 
     ResolveScope set_is_lhs(bool is_lhs) const;
+
+    ResolveScope set_is_fn_call(bool is_fn_call) const;
 };
 
 enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0, IS_FN_LAMBDA = 1 << 1 };

@@ -331,8 +331,10 @@ class Compiler {
     Function *get_system_fn(const string &name);
     Function *get_specialized_fn(ast::Node *generic_fn_decl, ChiType *specialized_subtype);
 
-    // Helper function to get resolved function type from a specialized subtype
-    ChiType *get_specialized_fn_type(ChiType *specialized_subtype);
+    llvm::Value *generate_method_proxy_function(Function *fn, ChiStructMember *method_member,
+                                                ChiType *lambda_type);
+    llvm::Value *generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
+                                                ChiType *lambda_type, NodeList *captures);
 
     void compile_struct_vtables(ChiType *type);
     llvm::Value *compile_type_info(ChiType *type);

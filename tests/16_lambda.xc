@@ -245,6 +245,62 @@ func test_lambda_array_capture() {
   println("");
 }
 
+struct Calculator {
+  multiplier: int = 1;
+  
+  func multiply(value: int) int {
+    return value * this.multiplier;
+  }
+}
+
+func add_for_lambda_test(a: int, b: int) int {
+  return a + b;
+}
+
+func test_method_to_lambda() {
+  println("testing method to lambda conversion:");
+  
+  var calc: Calculator = {.multiplier = 3};
+  
+  // Direct method call
+  var direct_result = calc.multiply(5);
+  printf("Direct method call: {}\n", direct_result);
+  
+  // Method to lambda conversion
+  var method_lambda = calc.multiply;
+  var lambda_result = method_lambda(5);
+  printf("Method as lambda: {}\n", lambda_result);
+  
+  // Test abstracted interface with explicit lambda type
+  var abstracted: func (value: int) int = method_lambda;
+  var abstracted_result = abstracted(7);
+  printf("Abstracted lambda interface: {}\n", abstracted_result);
+  
+  // Test with different instance
+  var calc2: Calculator = {.multiplier = 10};
+  var method_lambda2 = calc2.multiply;
+  var result2 = method_lambda2(2);
+  printf("Different instance lambda: {}\n", result2);
+  
+  println("");
+}
+
+func test_function_to_lambda() {
+  println("testing function to lambda conversion:");
+  
+  // Convert function to lambda
+  var fn_lambda = add_for_lambda_test;
+  var result1 = fn_lambda(10, 20);
+  printf("Function as lambda: {}\n", result1);
+  
+  // Through abstracted interface
+  var abstracted: func (a: int, b: int) int = fn_lambda;
+  var result2 = abstracted(15, 25);
+  printf("Abstracted function lambda: {}\n", result2);
+  
+  println("");
+}
+
 func main() {
   test_basic_lambda();
   test_lambda_with_timeout();
@@ -253,6 +309,8 @@ func main() {
   test_nested_lambda_complex();
   test_recursive_lambda_capture();
   test_lambda_array_capture();
+  test_method_to_lambda();
+  test_function_to_lambda();
   
   println("All lambda tests completed!");
 }

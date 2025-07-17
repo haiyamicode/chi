@@ -29,5 +29,15 @@ testing lambda with array captures:
 sum before processing: 0
 sum after multi-variable processing: 110
 
+testing method to lambda conversion:
+Direct method call: 15
+Method as lambda: 15
+Abstracted lambda interface: 21
+Different instance lambda: 20
+
+testing function to lambda conversion:
+Function as lambda: 30
+Abstracted function lambda: 40
+
 All lambda tests completed!
 Timeout callback executed!

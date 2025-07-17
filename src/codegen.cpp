@@ -822,7 +822,6 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     auto struct_type_l = compile_type(struct_type);
     auto var = builder.CreateAlloca(struct_type_l, nullptr, "lambda");
     auto fn_ptr_gep = builder.CreateStructGEP(struct_type_l, var, 0);
-    builder.CreateStore(fn_ptr, fn_ptr_gep);
     auto size_gep = builder.CreateStructGEP(struct_type_l, var, 1);
     auto data_gep = builder.CreateStructGEP(struct_type_l, var, 2);
 
@@ -836,6 +835,10 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         builder.CreateStore(bind_var, data_gep);
         builder.CreateStore(
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size), size_gep);
+
+        // For lambdas with captures, use the original function directly
+        // The captures are handled by the binding struct
+        builder.CreateStore(fn_ptr, fn_ptr_gep);
 
         for (int i = 0; i < captures->len; i++) {
             auto capture = (*captures)[i];
@@ -885,12 +888,18 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
             builder.CreateStore(ref, capture_gep);
         }
     } else {
+        // For lambdas without captures, we still generate a proxy function for consistent calling
+        // convention Generate proxy function that ignores the binding struct parameter
+        auto proxy_fn = generate_lambda_proxy_function(fn, fn_ptr, lambda_type, nullptr);
+        builder.CreateStore(proxy_fn, fn_ptr_gep);
+
         builder.CreateStore(llvm::ConstantPointerNull::get(
                                 llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0)),
                             data_gep);
         builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), 0),
                             size_gep);
     }
+
     return builder.CreateLoad(struct_type_l, var);
 }
 
@@ -1639,6 +1648,54 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                 panic("not implemented");
                 return RefValue();
             }
+        } else if (data.resolved_dot_kind == DotKind::MethodToLambda) {
+            // Create a method lambda using proxy function approach
+            auto lambda_type = get_chitype(expr);
+            assert(lambda_type->kind == TypeKind::FnLambda);
+            auto lambda_struct_type = compile_type(lambda_type->data.fn_lambda.internal);
+
+            // Allocate lambda structure
+            auto lambda_alloca = builder.CreateAlloca(lambda_struct_type, nullptr, "method_lambda");
+
+            // Generate a proxy function that wraps the method call
+            auto proxy_fn =
+                generate_method_proxy_function(fn, data.resolved_struct_member, lambda_type);
+
+            // Get the instance pointer
+            llvm::Value *instance_ptr;
+            if (type->is_pointer()) {
+                instance_ptr = compile_expr(fn, data.expr);
+            } else {
+                auto ref = compile_expr_ref(fn, data.expr);
+                instance_ptr = ref.address;
+            }
+
+            // Create binding struct to hold the instance pointer
+            auto bind_struct_type = compile_type(lambda_type->data.fn_lambda.bind_struct);
+            auto bind_alloca = builder.CreateAlloca(bind_struct_type, nullptr, "method_bind");
+
+            // Store instance pointer in binding struct
+            auto instance_gep = builder.CreateStructGEP(bind_struct_type, bind_alloca, 0);
+            builder.CreateStore(instance_ptr, instance_gep);
+
+            // Fill lambda structure: {ptr, size, data}
+            // ptr = proxy function pointer
+            auto fn_ptr_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloca, 0);
+            auto fn_ptr_cast = builder.CreateBitCast(proxy_fn, builder.getInt8PtrTy());
+            builder.CreateStore(fn_ptr_cast, fn_ptr_gep);
+
+            // size = size of binding struct
+            auto size_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloca, 1);
+            auto struct_size =
+                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(bind_struct_type);
+            builder.CreateStore(builder.getInt32(struct_size), size_gep);
+
+            // data = binding struct pointer (heap allocated)
+            auto data_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloca, 2);
+            auto bind_void_ptr = builder.CreateBitCast(bind_alloca, builder.getInt8PtrTy());
+            builder.CreateStore(bind_void_ptr, data_gep);
+
+            return RefValue::from_address(lambda_alloca);
         } else if (type->is_pointer()) {
             type = type->get_elem();
             ptr = compile_expr(fn, data.expr);
@@ -1742,9 +1799,18 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
         }
     }
     if (data.decl->type == ast::NodeType::FnDef) {
-        auto fn = get_fn(data.decl);
-        auto type_l = compile_type(get_chitype(iden));
-        return RefValue::from_value(fn->llvm_fn);
+        auto fn_obj = get_fn(data.decl);
+        auto iden_type = get_chitype(iden);
+        
+        // If the identifier type is a lambda, we need to create a lambda struct
+        if (iden_type->kind == TypeKind::FnLambda) {
+            auto lambda_value = compile_lambda_alloc(fn, iden_type, fn_obj->llvm_fn, nullptr);
+            return RefValue::from_value(lambda_value);
+        }
+        
+        // Otherwise, return the raw function pointer
+        auto type_l = compile_type(iden_type);
+        return RefValue::from_value(fn_obj->llvm_fn);
     }
 
 normal:
@@ -1832,17 +1898,20 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             (llvm::FunctionType *)compile_type(lambda_type->data.fn_lambda.bound_fn);
         std::vector<llvm::Value *> args = {};
 
-        // Only add bind parameter if lambda has captures
+        // Standard lambda calling - same for all lambdas now
         auto &lambda_data = lambda_type->data.fn_lambda;
-        if (lambda_data.captures.len > 0) {
-            auto bind_gep = builder.CreateStructGEP(lambda_type_l, ref.address, 2);
-            auto bind_ptr = builder.CreateLoad(lambda_type_l->elements()[2], bind_gep);
-            args.push_back(bind_ptr);
-        }
+        auto data_gep = builder.CreateStructGEP(lambda_type_l, ref.address, 2);
+        auto data_ptr = builder.CreateLoad(lambda_type_l->elements()[2], data_gep);
+
+        // Always pass binding struct as first argument for all lambdas
+        // This ensures consistent calling convention
+        args.push_back(data_ptr);
 
         for (int i = 0; i < data.args.len; i++) {
             auto arg = data.args[i];
-            auto param_type = fn_spec.get_param_at(i);
+            // User arguments always start from parameter index 1 (after binding struct)
+            int param_index = i + 1;
+            auto param_type = fn_spec.get_param_at(param_index);
             args.push_back(compile_assignment_to_type(fn, arg, param_type));
         }
 
@@ -1974,6 +2043,127 @@ llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
     }
 
     return sret_type ? builder.CreateLoad(sret_type, sret_var) : ret;
+}
+
+llvm::Value *Compiler::generate_method_proxy_function(Function *fn, ChiStructMember *method_member,
+                                                      ChiType *lambda_type) {
+    auto &builder = *m_ctx->llvm_builder.get();
+
+    // Save current insert point
+    auto saved_insert_point = builder.GetInsertBlock();
+
+    // Get the original method function
+    auto method_fn = get_fn(method_member->node);
+    auto method_type = method_member->resolved_type;
+    auto &method_spec = method_type->data.fn;
+
+    // Create function type for the proxy: (bind_struct*, user_args...) -> return_type
+    auto bound_fn_type = lambda_type->data.fn_lambda.bound_fn;
+    auto proxy_fn_type = (llvm::FunctionType *)compile_type(bound_fn_type);
+
+    // Create the proxy function
+    auto proxy_name = fmt::format("__method_proxy_{}_{}",
+                                  method_member->parent_struct->display_name.value_or("unnamed"),
+                                  method_member->get_name());
+    auto proxy_llvm_fn = llvm::Function::Create(proxy_fn_type, llvm::Function::InternalLinkage,
+                                                proxy_name, m_ctx->llvm_module.get());
+
+    // Create function body
+    auto entry_bb = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "entry", proxy_llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+
+    // Extract instance pointer from binding struct (first argument)
+    auto bind_struct_ptr = proxy_llvm_fn->args().begin();
+    auto bind_struct_type = compile_type(lambda_type->data.fn_lambda.bind_struct);
+    auto instance_gep = builder.CreateStructGEP(bind_struct_type, bind_struct_ptr, 0);
+    auto instance_ptr = builder.CreateLoad(bind_struct_type->getStructElementType(0), instance_gep);
+
+    // Prepare arguments for the original method call
+    std::vector<llvm::Value *> method_args;
+
+    // First argument is the instance pointer
+    method_args.push_back(instance_ptr);
+
+    // Add user arguments (skip first argument which is the binding struct)
+    auto arg_iter = proxy_llvm_fn->args().begin();
+    ++arg_iter; // skip binding struct
+    for (; arg_iter != proxy_llvm_fn->args().end(); ++arg_iter) {
+        method_args.push_back(&*arg_iter);
+    }
+
+    // Call the original method
+    auto result = builder.CreateCall(method_fn->llvm_fn, method_args);
+
+    // Return the result
+    if (method_spec.return_type->kind == TypeKind::Void) {
+        builder.CreateRetVoid();
+    } else {
+        builder.CreateRet(result);
+    }
+
+    // Restore insert point
+    if (saved_insert_point) {
+        builder.SetInsertPoint(saved_insert_point);
+    }
+
+    return proxy_llvm_fn;
+}
+
+llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
+                                                      ChiType *lambda_type, NodeList *captures) {
+    auto &builder = *m_ctx->llvm_builder.get();
+
+    // Save current insert point
+    auto saved_insert_point = builder.GetInsertBlock();
+
+    // Get the original function type
+    auto original_fn_type = lambda_type->data.fn_lambda.fn;
+    auto &original_fn_spec = original_fn_type->data.fn;
+    
+
+    // Create function type for the proxy: (bind_struct*, user_args...) -> return_type
+    auto bound_fn_type = lambda_type->data.fn_lambda.bound_fn;
+    auto proxy_fn_type = (llvm::FunctionType *)compile_type(bound_fn_type);
+
+    // Create the proxy function
+    auto proxy_name = fmt::format("__lambda_proxy_{}", lambda_type->id);
+    auto proxy_llvm_fn = llvm::Function::Create(proxy_fn_type, llvm::Function::InternalLinkage,
+                                                proxy_name, m_ctx->llvm_module.get());
+
+    // Create function body
+    auto entry_bb = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "entry", proxy_llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+
+    // Prepare arguments for the original function call
+    std::vector<llvm::Value *> original_args;
+
+    // Skip the first argument (binding struct) and pass the rest to the original function
+    auto arg_count = proxy_llvm_fn->arg_size();
+
+    // Start from index 1 to skip the binding struct (index 0)
+    for (unsigned i = 1; i < arg_count; ++i) {
+        auto arg = proxy_llvm_fn->getArg(i);
+        original_args.push_back(arg);
+    }
+
+    // Call the original function
+    auto original_fn_type_l = (llvm::FunctionType *)compile_type(original_fn_type);
+    llvm::FunctionCallee original_callee(original_fn_type_l, original_fn_ptr);
+    auto result = builder.CreateCall(original_callee, original_args);
+
+    // Return the result
+    if (original_fn_spec.return_type->kind == TypeKind::Void) {
+        builder.CreateRetVoid();
+    } else {
+        builder.CreateRet(result);
+    }
+
+    // Restore insert point
+    if (saved_insert_point) {
+        builder.SetInsertPoint(saved_insert_point);
+    }
+
+    return proxy_llvm_fn;
 }
 
 llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new, ChiType *type) {
@@ -2714,17 +2904,6 @@ Function *Compiler::get_system_fn(const string &name) {
     auto fn = get_fn(node);
     m_ctx->system_functions[name] = fn;
     return fn;
-}
-
-ChiType *Compiler::get_specialized_fn_type(ChiType *specialized_subtype) {
-    if (!specialized_subtype || specialized_subtype->kind != TypeKind::Subtype) {
-        return nullptr;
-    }
-    auto resolved_fn = specialized_subtype->data.subtype.final_type;
-    if (resolved_fn && resolved_fn->kind == TypeKind::Fn) {
-        return resolved_fn;
-    }
-    return nullptr;
 }
 
 } // namespace codegen
