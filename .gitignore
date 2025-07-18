@@ -6,3 +6,5 @@ debug
 .cache
 compile_commands.json
 .roomodes
+AGENTS.md
+CLAUDE.md
