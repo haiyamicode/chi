@@ -1339,14 +1339,14 @@ bool Parser::try_parse_fn_type_lookahead(int &pos) {
             return false;
         }
         pos++; // Skip parameter name
-        
+
         // Expect colon
         token = lookahead(pos);
         if (token->type != TokenType::COLON) {
             return false;
         }
         pos++; // Skip colon
-        
+
         // Parse parameter type
         if (!try_parse_type_expr_lookahead(pos)) {
             return false;
@@ -1406,7 +1406,7 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
         pos++;
         return try_parse_fn_type_lookahead(pos);
     }
-    
+
     // Must be an identifier-based type
     if (token->type != TokenType::IDEN) {
         return false;
@@ -1741,6 +1741,11 @@ void Parser::parse_enum_block(Node *node) {
                 struct_node->name = fmt::format("{}.BaseStruct", node->name);
                 node->data.enum_decl.base_struct = struct_node;
                 parse_struct_block(node->data.enum_decl.base_struct);
+            } else {
+                auto token = get();
+                error(token, "expected 'struct', got '{}'", token->to_string());
+                consume(); // consume the unexpected token to prevent infinite loop
+                return;    // stop parsing this enum
             }
         } else {
             auto before_pos = m_toki;

@@ -564,12 +564,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(data.decl, errors::VARIABLE_USED_BEFORE_INITIALIZED, data.decl->name);
             }
         }
-        
+
         // Convert function to lambda when used as value (not in call context)
         if (data.decl->type == NodeType::FnDef && !scope.is_fn_call && type->kind == TypeKind::Fn) {
             type = get_lambda_for_fn(type);
         }
-        
+
         return type;
     }
     case NodeType::TypeSigil: {
@@ -1068,6 +1068,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto discriminator_type = data.discriminator_type
                                           ? to_value_type(resolve(data.discriminator_type, scope))
                                           : m_ctx->system_types.int_;
+
+            // Validate discriminator type - only int is supported for now
+            if (discriminator_type->kind != TypeKind::Int) {
+                error(node, "enum discriminator must be integer type");
+                return nullptr;
+            }
             enum_type->data.enum_.discriminator = discriminator_type;
             value_type->data.enum_value.discriminator_type = discriminator_type;
             enum_type->data.enum_.base_value_type = value_type;
