@@ -1,0 +1,42 @@
+Basic types:
+int32: 100
+int64: 1000000
+uint32: 2000000
+uint64: 3000000
+float: 3.14
+float64: 3.1415927410125732
+
+Arithmetic operations:
+int32: 100 + 50 = 150
+int32: 100 - 50 = 50
+int32: 100 * 50 = 5000
+int32: 100 / 50 = 2
+float: 3.5 + 1.5 = 5
+float: 3.5 - 1.5 = 2
+float: 3.5 * 1.5 = 5.25
+float: 3.5 / 1.5 = 2.3333333
+
+Type conversions:
+int32 to float: 42 -> 42
+float to int32: 3.14 -> 3
+int32 to int64: 42 -> 42
+float to float64: 3.14 -> 3.140000104904175
+
+Mixed operations (with explicit casts):
+int32 + float: 100 + 2.5 = 102.5
+float - int32: 2.5 - 100 = -97.5
+int32 * float: 100 * 2.5 = 250
+float / int32: 2.5 / 100 = 0.025
+
+Unary operations:
+-int32: -42
+-float: -3.14
++int32: 42
++float: 3.14
+
+Edge cases:
+max int32: 2147483647
+min int32: -2147483648
+small float: 0.0001
+large float: 1000000
+All numeric type tests completed!

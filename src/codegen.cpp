@@ -1215,6 +1215,18 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             builder.CreateStore(after, ref.address);
             return data.is_suffix ? value : after;
         }
+        case TokenType::ADD:
+        case TokenType::SUB: {
+            auto value = compile_expr(fn, data.op1);
+            auto type = get_chitype(data.op1);
+            if (type->kind == TypeKind::Float) {
+                auto zero = llvm::ConstantFP::get(compile_type(type), 0.0);
+                return data.op_type == TokenType::ADD ? value : builder.CreateFSub(zero, value);
+            } else {
+                auto zero = llvm::ConstantInt::get(compile_type(type), 0);
+                return data.op_type == TokenType::ADD ? value : builder.CreateSub(zero, value);
+            }
+        }
         default:
             panic("not implemented: {}", PRINT_ENUM(data.op_type));
         }
@@ -1247,6 +1259,18 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto lhs = compile_expr(fn, data.op1);
             auto rhs = compile_expr(fn, data.op2);
             auto target_type = get_chitype(expr);
+
+            // Cast operands to target type if needed
+            auto lhs_type = get_chitype(data.op1);
+            auto rhs_type = get_chitype(data.op2);
+
+            if (lhs_type != target_type) {
+                lhs = compile_conversion(fn, lhs, lhs_type, target_type);
+            }
+            if (rhs_type != target_type) {
+                rhs = compile_conversion(fn, rhs, rhs_type, target_type);
+            }
+
             auto llvm_op = get_binop(data.op_type, target_type);
             return builder.CreateBinOp(llvm_op, lhs, rhs);
         }
@@ -1801,13 +1825,13 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     if (data.decl->type == ast::NodeType::FnDef) {
         auto fn_obj = get_fn(data.decl);
         auto iden_type = get_chitype(iden);
-        
+
         // If the identifier type is a lambda, we need to create a lambda struct
         if (iden_type->kind == TypeKind::FnLambda) {
             auto lambda_value = compile_lambda_alloc(fn, iden_type, fn_obj->llvm_fn, nullptr);
             return RefValue::from_value(lambda_value);
         }
-        
+
         // Otherwise, return the raw function pointer
         auto type_l = compile_type(iden_type);
         return RefValue::from_value(fn_obj->llvm_fn);
@@ -2119,7 +2143,6 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
     // Get the original function type
     auto original_fn_type = lambda_type->data.fn_lambda.fn;
     auto &original_fn_spec = original_fn_type->data.fn;
-    
 
     // Create function type for the proxy: (bind_struct*, user_args...) -> return_type
     auto bound_fn_type = lambda_type->data.fn_lambda.bound_fn;
@@ -2678,7 +2701,11 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return llvm::Type::getIntNTy(llvm_ctx, type->data.int_.bit_count);
     }
     case TypeKind::Float: {
-        return llvm::Type::getFloatTy(llvm_ctx);
+        if (type->data.float_.bit_count == 64) {
+            return llvm::Type::getDoubleTy(llvm_ctx);
+        } else {
+            return llvm::Type::getFloatTy(llvm_ctx);
+        }
     }
     case TypeKind::String: {
         return llvm::StructType::create(

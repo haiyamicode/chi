@@ -46,7 +46,7 @@ void Resolver::context_init_primitives() {
     system_types.uint32 = create_int_type(32, true);
     system_types.int64 = create_int_type(64, false);
     system_types.float_ = create_float_type(32);
-    system_types.double_ = create_float_type(64);
+    system_types.float64 = create_float_type(64);
     system_types.void_ = create_type(TypeKind::Void);
     system_types.void_ptr = create_pointer_type(system_types.void_, TypeKind::Pointer);
     system_types.null_ptr = create_pointer_type(system_types.void_, TypeKind::Pointer);
@@ -84,7 +84,7 @@ void Resolver::context_init_primitives() {
     add_primitive("int64", system_types.int64);
     add_primitive("char", system_types.char_);
     add_primitive("float", system_types.float_);
-    add_primitive("double", system_types.double_);
+    add_primitive("float64", system_types.float64);
     add_primitive("uint8", system_types.uint8);
     add_primitive("int8", create_int_type(8, false));
     add_primitive("int16", create_int_type(16, false));
@@ -671,7 +671,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::ADD:
         case TokenType::INC:
         case TokenType::DEC:
-            check_assignment(data.op1, t, get_system_types()->int_);
+            check_assignment(data.op1, t,
+                             t->kind == TypeKind::Float ? t : get_system_types()->int_);
             return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
         case TokenType::MUL: {
             error(data.op1, errors::C_STYLE_DEREFERENCE_DEPRECATED);
@@ -3120,7 +3121,7 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
     bool ok;
     switch (op_type) {
     case TokenType::ADD:
-        ok = type_is_int(type) || type->kind == TypeKind::String;
+        ok = type_is_int(type) || type->kind == TypeKind::Float || type->kind == TypeKind::String;
         break;
     default:
         ok = type_is_int(type) || type->kind == TypeKind::Float;
@@ -3137,7 +3138,7 @@ ChiType *Resolver::get_system_type(TypeKind kind) {
     case TypeKind::Int:
         return types->int64;
     case TypeKind::Float:
-        return types->double_;
+        return types->float64;
     case TypeKind::String:
         return types->string;
     case TypeKind::Array:

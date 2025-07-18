@@ -20,7 +20,8 @@ TESTS_LIST = 00_fib.test \
 		16_lambda.test \
 		17_managed_basics.test \
 		18_gc_escape.test \
-		19_type_params.test
+		19_type_params.test \
+		20_numeric_types.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
