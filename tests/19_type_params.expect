@@ -1,5 +1,10 @@
 identity<int>(42) = 42
+identity(42) [inferred] = 42
 identity<char>('A') = 'A'
+identity('A') [inferred] = 'A'
 transform<int, int>(5, double) = 10
+transform(5, double) [inferred] = 10
 final value: 'K'
+final value [inferred]: 'K'
 float result: 32.5
+float result [inferred]: 32.5

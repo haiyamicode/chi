@@ -297,6 +297,14 @@ class Resolver {
     ChiType *type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype *subs,
                                              ast::Node *source_filter);
 
+    // Type inference using visitor pattern
+    bool infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types, map<ChiType *, ChiType *> *inferred_types);
+    
+    template <typename PlaceholderHandler, typename RecursiveCallHandler>
+    bool visit_type_recursive(ChiType *param_type, ChiType *arg_type, 
+                              PlaceholderHandler handle_placeholder,
+                              RecursiveCallHandler make_recursive_call);
+
     ast::Node *find_root_decl(ast::Node *node);
 
     bool compare_impl_type(ChiType *base, ChiType *impl);
