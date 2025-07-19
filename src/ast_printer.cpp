@@ -121,7 +121,8 @@ void AstPrinter::print_node(Node *node) {
         for (auto stmt : data.statements) {
             print_indent(m_indent);
             print_node(stmt);
-            if (stmt->type != NodeType::IfStmt && stmt->type != NodeType::ForStmt) {
+            if (stmt->type != NodeType::IfStmt && stmt->type != NodeType::ForStmt &&
+                stmt->type != NodeType::WhileStmt) {
                 print(";\n");
             }
         }
@@ -383,13 +384,37 @@ void AstPrinter::print_node(Node *node) {
             print(" ");
         }
         if (data.kind == ForLoopKind::Range) {
-            print_node(data.expr);
-            if (data.bind) {
-                print("=> ");
-                print_node(data.bind);
+            if (data.bind_sigil != SigilKind::None) {
+                print("{}", get_sigil_symbol(data.bind_sigil));
+                print(" ");
             }
+            if (data.bind) {
+                print_node(data.bind);
+                print(" ");
+            }
+            print("in ");
+            print_node(data.expr);
             print(" ");
         }
+        print_node(data.body);
+        print("\n");
+        if (!node->is_last_stmt()) {
+            print("\n");
+        }
+        break;
+    }
+    case NodeType::WhileStmt: {
+        auto &data = node->data.while_stmt;
+        if (node->index > 0) {
+            print("\n");
+            print_indent(m_indent);
+        }
+        print("while");
+        if (data.condition) {
+            print(" ");
+            print_node(data.condition);
+        }
+        print(" ");
         print_node(data.body);
         print("\n");
         if (!node->is_last_stmt()) {
