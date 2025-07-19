@@ -690,7 +690,7 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     }
     if (next_is(TokenType::ASS)) {
         consume();
-        node->data.var_decl.expr = parse_expr();
+        node->data.var_decl.expr = parse_child_expr_construct(false, node);
         node->data.var_decl.initialized_at = node;
     }
     expect(TokenType::SEMICOLON);
@@ -1016,6 +1016,16 @@ Node *Parser::parse_expr() {
 
 Node *Parser::parse_expr_clause(bool lhs) { return parse_binary_expr(lhs, nullptr, DEFAULT_PREC); }
 
+Node *Parser::parse_child_expr_construct(bool lhs, Node *parent) {
+    // Try to parse as type construct expression if that's possible (e.g., Array<int>{1, 2, 3})
+    if (!lhs && is_construct_expr_with_type()) {
+        return parse_construct_expr();
+    }
+
+    // Fall back to normal expression parsing
+    return parse_child_expr(lhs, parent);
+}
+
 Node *Parser::parse_binary_expr(bool lhs, Node *parent, int prec) {
     auto op1 = parse_unary_expr(lhs, parent);
     for (;;) {
@@ -1212,7 +1222,7 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
         if (tok->type == TokenType::RPAREN) {
             break;
         } else {
-            auto arg = parse_child_expr(lhs, parent);
+            auto arg = parse_child_expr_construct(lhs, parent);
             node->data.fn_call_expr.args.add(arg);
         }
         if (!at_comma(TokenType::RPAREN)) {
@@ -1258,6 +1268,21 @@ bool Parser::is_function_call_with_type_params() {
     // After parsing type arguments, next token should be '('
     auto token = lookahead(pos);
     return token->type == TokenType::LPAREN;
+}
+
+bool Parser::is_construct_expr_with_type() {
+    // Check if we have a type expression followed by '{'
+    // This handles cases like Array<int>{1, 2, 3}
+    int pos = 0;
+
+    // Try to parse the complete type expression (handles both simple and generic types)
+    if (!try_parse_type_expr_lookahead(pos, true)) {
+        return false;
+    }
+
+    // Check if after the type expression we have a '{'
+    auto token = lookahead(pos);
+    return token->type == TokenType::LBRACE;
 }
 
 Node *Parser::parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *parent) {
@@ -1376,7 +1401,7 @@ bool Parser::try_parse_fn_type_lookahead(int &pos) {
     return true;
 }
 
-bool Parser::try_parse_type_expr_lookahead(int &pos) {
+bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
     // Parse sigils (*, &, etc.) first
     auto token = lookahead(pos);
     if (token->type == TokenType::END) {
@@ -1401,10 +1426,12 @@ bool Parser::try_parse_type_expr_lookahead(int &pos) {
         }
     }
 
-    // Handle function types (func(...) ...)
-    if (token->type == TokenType::KW_FUNC) {
-        pos++;
-        return try_parse_fn_type_lookahead(pos);
+    if (!struct_only) {
+        // Handle function types (func(...) ...)
+        if (token->type == TokenType::KW_FUNC) {
+            pos++;
+            return try_parse_fn_type_lookahead(pos);
+        }
     }
 
     // Must be an identifier-based type
@@ -1453,7 +1480,7 @@ Node *Parser::parse_return_stmt() {
     auto token = expect(TokenType::KW_RETURN);
     auto node = create_node(NodeType::ReturnStmt, token);
     if (get()->type != TokenType::SEMICOLON) {
-        node->data.return_stmt.expr = parse_expr();
+        node->data.return_stmt.expr = parse_child_expr_construct(false, node);
     }
     expect(TokenType::SEMICOLON);
     return node;
@@ -1833,6 +1860,9 @@ Node *Parser::parse_construct_expr() {
         if (!next_is(TokenType::LBRACE)) {
             node->data.construct_expr.type = parse_type_expr(true);
         }
+    } else if (!next_is(TokenType::LBRACE)) {
+        // We have a type expression like Array<int>{...}
+        node->data.construct_expr.type = parse_type_expr(true);
     }
     expect(TokenType::LBRACE);
     Token *token;

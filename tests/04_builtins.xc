@@ -21,6 +21,10 @@ func test_array() {
   a[0] = 2;
   a[1] = 1;
   printf("a=[{}, {}]\n", a[0], a[1]);
+  
+  // Alternative construct syntax
+  var b = Array<int>{10, 20, 30};
+  printf("b=[{}, {}, {}]\n", b[0], b[1], b[2]);
   println("");
 }
 

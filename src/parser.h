@@ -178,6 +178,8 @@ class Parser {
 
     Node *parse_child_expr(bool lhs, Node *parent);
 
+    Node *parse_child_expr_construct(bool lhs, Node *parent);
+
     Node *parse_unary_expr(bool lhs, Node *parent);
 
     Node *parse_primary_expr(bool lhs, Node *parent);
@@ -186,8 +188,10 @@ class Parser {
 
     Node *parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent);
     bool is_function_call_with_type_params();
+    bool is_construct_expr_with_type();
+    Node *parse_construct_expr();
     Node *parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *parent);
-    bool try_parse_type_expr_lookahead(int &pos);
+    bool try_parse_type_expr_lookahead(int &pos, bool struct_only = false);
     bool try_parse_fn_type_lookahead(int &pos);
 
     Node *parse_simple_stmt();
@@ -213,8 +217,6 @@ class Parser {
     Node *parse_enum_decl(DeclSpec *decl_spec = nullptr);
 
     Node *parse_struct_decl(TokenType keyword, DeclSpec *decl_spec = nullptr);
-
-    Node *parse_construct_expr();
 
     Node *parse_prefix_expr();
 
