@@ -286,6 +286,14 @@ struct Array<T> implements
     }
     return result;
   }
+
+  func map<U>(transform: func(value: T) U) Array<U> {
+    var result: Array<U> = {};
+    for item in this {
+      result.add(transform(item));
+    }
+    return result;
+  }
 }
 
 struct Map<K, V> implements ops.Index<K, V> {

@@ -3165,6 +3165,7 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
     generated_fn->data.generated_fn.original_fn = fn_node;
     generated_fn->module = fn_node->module;
     generated_fn->root_node = fn_node->get_root_node();
+    generated_fn->token = fn_node->token;
     sub->data.subtype.generated_fn = generated_fn;
     auto orig_proto = fn_node->data.fn_def.fn_proto;
     auto new_proto = create_node(NodeType::FnProto);
