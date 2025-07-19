@@ -2294,18 +2294,14 @@ void Resolver::type_placeholders_sub_each_selective(TypeList *list, ChiTypeSubty
     }
 }
 
-// Selective substitution that only replaces placeholders from a specific source declaration
-ChiType *Resolver::type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype *subs,
-                                                   ast::Node *source_filter) {
+// Visitor function for type placeholder substitution with configurable behavior
+template <typename PlaceholderHandler, typename RecursiveCallHandler>
+ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
+                                          PlaceholderHandler handle_placeholder,
+                                          RecursiveCallHandler make_recursive_call) {
     switch (type->kind) {
     case TypeKind::Placeholder:
-        // Only substitute if this placeholder belongs to the source we're targeting
-        if (type->data.placeholder.source_decl == source_filter) {
-            return subs->args[type->data.placeholder.index];
-        } else {
-            // Preserve placeholders from other sources (e.g., method type params)
-            return type;
-        }
+        return handle_placeholder(type, subs);
 
     case TypeKind::Pointer:
     case TypeKind::Reference:
@@ -2313,34 +2309,33 @@ ChiType *Resolver::type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype
     case TypeKind::Optional:
     case TypeKind::Box:
     case TypeKind::Array: {
-        auto elem_type = type_placeholders_sub_selective(type->get_elem(), subs, source_filter);
+        auto elem_type = make_recursive_call(type->get_elem(), subs);
         return get_wrapped_type(elem_type, type->kind);
     }
 
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
         array<ChiType *> args;
-        type_placeholders_sub_each_selective(&data.args, subs, &args, source_filter);
+        for (auto arg : data.args) {
+            args.add(make_recursive_call(arg, subs));
+        }
         return get_subtype(data.generic, &args);
     }
 
     case TypeKind::Fn: {
         auto &data = type->data.fn;
         ChiType *fn_type = create_type(TypeKind::Fn);
-        auto ret = type_placeholders_sub_selective(data.return_type, subs, source_filter);
+        auto ret = make_recursive_call(data.return_type, subs);
         fn_type->data.fn.return_type = ret;
         for (auto param : data.params) {
-            fn_type->data.fn.params.add(
-                type_placeholders_sub_selective(param, subs, source_filter));
+            fn_type->data.fn.params.add(make_recursive_call(param, subs));
         }
         // Preserve type parameters that don't belong to the source we're substituting
         for (auto type_param : data.type_params) {
-            // Check if this type parameter belongs to a different source
-            // For now, preserve all type parameters since we're doing selective substitution
             fn_type->data.fn.type_params.add(type_param);
         }
         fn_type->data.fn.is_variadic = data.is_variadic;
-        fn_type->data.fn.container_ref = data.container_ref; // Preserve container reference
+        fn_type->data.fn.container_ref = data.container_ref;
         fn_type->data.fn.is_extern = data.is_extern;
 
         // Mark as placeholder if any preserved type parameters are actually placeholders
@@ -2358,14 +2353,10 @@ ChiType *Resolver::type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype
 
     case TypeKind::FnLambda: {
         auto &data = type->data.fn_lambda;
-        auto fn = type_placeholders_sub_selective(data.fn, subs, source_filter);
-        auto internal = type_placeholders_sub_selective(data.internal, subs, source_filter);
-        auto bound_fn = data.bound_fn
-                            ? type_placeholders_sub_selective(data.bound_fn, subs, source_filter)
-                            : nullptr;
-        auto bind_struct = data.bind_struct ? type_placeholders_sub_selective(data.bind_struct,
-                                                                              subs, source_filter)
-                                            : nullptr;
+        auto fn = make_recursive_call(data.fn, subs);
+        auto internal = make_recursive_call(data.internal, subs);
+        auto bound_fn = data.bound_fn ? make_recursive_call(data.bound_fn, subs) : nullptr;
+        auto bind_struct = data.bind_struct ? make_recursive_call(data.bind_struct, subs) : nullptr;
 
         auto lambda_type = create_type(TypeKind::FnLambda);
         lambda_type->data.fn_lambda.fn = fn;
@@ -2381,47 +2372,36 @@ ChiType *Resolver::type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype
     }
 }
 
-ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
-    switch (type->kind) {
-    case TypeKind::Placeholder:
-        return subs->args[type->data.placeholder.index];
-
-    case TypeKind::Pointer:
-    case TypeKind::Reference:
-    case TypeKind::MutRef:
-    case TypeKind::Optional:
-    case TypeKind::Box:
-    case TypeKind::Array:
-        return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->kind);
-
-    case TypeKind::Subtype: {
-        auto &data = type->data.subtype;
-        array<ChiType *> args;
-        type_placeholders_sub_each(&data.args, subs, &args);
-        return get_subtype(data.generic, &args);
-    }
-    case TypeKind::Fn: {
-        auto &data = type->data.fn;
-        auto return_type = type_placeholders_sub(data.return_type, subs);
-        array<ChiType *> params = {};
-        type_placeholders_sub_each(&data.params, subs, &params);
-        auto container = data.container_ref ? data.container_ref->get_elem() : nullptr;
-        return get_fn_type(return_type, &params, data.is_variadic, container, data.is_extern);
-    }
-    case TypeKind::FnLambda: {
-        auto &data = type->data.fn_lambda;
-
-        auto substituted_fn = type_placeholders_sub(data.fn, subs);
-        // If the substituted function type is the same as the original,
-        // return the original lambda to preserve concrete types
-        if (substituted_fn == data.fn) {
+// Selective substitution that only replaces placeholders from a specific source declaration
+ChiType *Resolver::type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype *subs,
+                                                   ast::Node *source_filter) {
+    auto handle_placeholder = [source_filter](ChiType *type, ChiTypeSubtype *subs) -> ChiType * {
+        // Only substitute if this placeholder belongs to the source we're targeting
+        if (type->data.placeholder.source_decl == source_filter) {
+            return subs->args[type->data.placeholder.index];
+        } else {
             return type;
         }
-        return get_lambda_for_fn(substituted_fn);
-    }
-    default:
-        return type;
-    }
+    };
+
+    auto make_recursive_call = [this, source_filter](ChiType *type,
+                                                     ChiTypeSubtype *subs) -> ChiType * {
+        return type_placeholders_sub_selective(type, subs, source_filter);
+    };
+
+    return recursive_type_replace(type, subs, handle_placeholder, make_recursive_call);
+}
+
+ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
+    auto handle_placeholder = [](ChiType *type, ChiTypeSubtype *subs) -> ChiType * {
+        return subs->args[type->data.placeholder.index];
+    };
+
+    auto make_recursive_call = [this](ChiType *type, ChiTypeSubtype *subs) -> ChiType * {
+        return type_placeholders_sub(type, subs);
+    };
+
+    return recursive_type_replace(type, subs, handle_placeholder, make_recursive_call);
 }
 
 ChiType *Resolver::type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *> *subs) {

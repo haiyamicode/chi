@@ -284,6 +284,10 @@ class Resolver {
 
     void resolve(ast::Module *module);
 
+    template <typename PlaceholderHandler, typename RecursiveCallHandler>
+    ChiType *recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
+                                    PlaceholderHandler handle_placeholder,
+                                    RecursiveCallHandler make_recursive_call);
 
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);
     ChiType *type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *> *subs);
