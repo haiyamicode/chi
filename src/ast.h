@@ -168,9 +168,8 @@ struct ParamDecl {
 };
 
 struct TypeParam {
-    Node *type = nullptr;
     long index = 0;
-    Node *bound = nullptr;
+    Node *type_bound = nullptr;
     Node *source_decl = nullptr; // The struct/function that owns this type parameter
 };
 

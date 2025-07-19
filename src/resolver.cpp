@@ -1630,9 +1630,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto phty = create_type(TypeKind::Placeholder);
         phty->name = node->name;
-        if (data.type) {
-            phty->data.placeholder.trait = to_value_type(resolve(data.type, scope));
+
+        if (data.type_bound) {
+            phty->data.placeholder.trait = to_value_type(resolve(data.type_bound, scope));
         }
+
         phty->data.placeholder.index = data.index;
         phty->data.placeholder.name = node->name;
 
@@ -3246,18 +3248,6 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
 }
 
 ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, ast::Node *fn_node) {
-    // stringstream ss;
-    // ss << "FnSubtype<";
-    // ss << to_string(generic_fn) << type_args;
-    // for (auto arg : *type_args) {
-    //     ss << to_string(arg) << ",";
-    // }
-    // ss << ">";
-    // auto key = ss.str();
-    // if (auto cached = m_ctx->composite_types.get(key)) {
-    //     return *cached;
-    // }
-
     assert(generic_fn->kind == TypeKind::Fn);
     assert(fn_node->type == NodeType::FnDef);
     auto &gen = generic_fn->data.fn;
@@ -3322,7 +3312,6 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
         auto proto_param = new_proto->data.fn_proto.params[i];
         proto_param->resolved_type = resolved_fn_type->data.fn.params[i];
     }
-    new_proto->data.fn_proto.return_type->resolved_type = resolved_fn_type->data.fn.return_type;
     return generated_fn;
 }
 

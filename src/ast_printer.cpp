@@ -91,9 +91,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::TypeParam: {
         auto &data = node->data.type_param;
         print("{}", node->name);
-        if (data.bound) {
-            print(" : ");
-            print_node(data.bound);
+        if (data.type_bound) {
+            print(": ");
+            print_node(data.type_bound);
         }
         break;
     }

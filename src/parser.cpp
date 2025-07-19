@@ -729,6 +729,13 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
             param_node->name = param_iden->str; // Set the name explicitly
             param_node->data.type_param.index = type_params.len;
             param_node->data.type_param.source_decl = fn_node;
+
+            // Check for colon syntax for type bounds: T: SomeInterface
+            if (next_is(TokenType::COLON)) {
+                consume(); // consume the colon
+                param_node->data.type_param.type_bound = parse_type_expr(true);
+            }
+
             type_params.add(param_node);
 
             // Add type parameter to scope
@@ -1697,9 +1704,13 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
             }
             auto param_iden = expect(TokenType::IDEN);
             auto param_node = create_node(NodeType::TypeParam, param_iden);
-            if (!next_is(TokenType::COMMA) && !next_is(TokenType::GT)) {
-                param_node->data.type_param.type = parse_type_expr();
+
+            // Check for colon syntax for type bounds: T: SomeInterface
+            if (next_is(TokenType::COLON)) {
+                consume(); // consume the colon
+                param_node->data.type_param.type_bound = parse_type_expr(true);
             }
+
             param_node->data.type_param.index = params.len;
             param_node->data.type_param.source_decl = node;
             params.add(param_node);
