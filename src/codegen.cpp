@@ -1970,14 +1970,32 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto fn_decl = data.fn_ref_expr->get_decl(container_type_id);
     assert(fn_decl->type == ast::NodeType::FnDef);
     auto fn_type = get_chitype(fn_decl);
+    ChiType *ctn_type = nullptr;
 
-    // For generic function calls, use the specialized function type
     if (expr->type == ast::NodeType::FnCallExpr) {
         auto &fn_call_data = expr->data.fn_call_expr;
+
+        // For generic function calls, use the specialized function type
         if (fn_call_data.generated_fn) {
             fn_type = get_chitype(fn_call_data.generated_fn);
         }
+
+        // Replace methods of type trait placeholder with concrete type
+        if (fn_call_data.fn_ref_expr->type == ast::NodeType::DotExpr) {
+            auto &dot_data = fn_call_data.fn_ref_expr->data.dot_expr;
+            if (dot_data.resolved_dot_kind == DotKind::TypeTrait) {
+                auto name = dot_data.field->get_name();
+                auto concrete_type = get_chitype(dot_data.expr);
+                auto concrete_struct = get_resolver()->resolve_struct_type(concrete_type);
+                auto concrete_member = concrete_struct->find_member(name);
+                assert(concrete_member && "concrete member not found during codegen");
+                fn_type = concrete_member->resolved_type;
+                ctn_type = concrete_type;
+                fn_decl = concrete_member->node;
+            }
+        }
     }
+
     auto &fn_spec = fn_type->data.fn;
     auto is_variadic = fn_spec.is_variadic;
     auto va_start = fn_spec.get_va_start();
@@ -1998,7 +2016,9 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     llvm::Value *ctn_ptr = nullptr;
     if (fn_spec.container_ref) {
         auto dot_expr = data.fn_ref_expr->data.dot_expr;
-        auto ctn_type = get_chitype(dot_expr.expr);
+        if (!ctn_type) {
+            ctn_type = get_chitype(dot_expr.expr);
+        }
         auto ctn_type_l = compile_type(ctn_type);
         auto ptr = compile_dot_ptr(fn, dot_expr.expr);
 

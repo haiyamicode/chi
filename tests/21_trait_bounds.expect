@@ -1,0 +1,12 @@
+=== Type Parameter Trait Bounds Test ===
+
+-- Function trait bounds --
+Result: (0, 0)
+
+-- Struct trait bounds --
+Single trait bound: Container[PointContainer]: (10, 20)
+Retrieved item: (10, 20)
+Multiple type params: Pair((10, 20), Number(42))
+Different type, same interface: Container[NumberContainer]: Number(42)
+
+=== All trait bound tests passed! ===

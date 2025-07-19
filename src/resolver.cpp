@@ -978,6 +978,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        // Check if this is a placeholder type with trait bounds
+        if (expr_type->kind == TypeKind::Placeholder && expr_type->data.placeholder.trait) {
+            auto trait_type = expr_type->data.placeholder.trait;
+            if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
+                auto trait_struct = &trait_type->data.struct_;
+                auto member = trait_struct->find_member(field_name);
+                if (member && member->is_method()) {
+                    data.resolved_struct_member = member;
+                    data.resolved_decl = member->node;
+                    data.field->node = member->node;
+                    data.resolved_dot_kind = DotKind::TypeTrait;
+                    return member->resolved_type;
+                }
+            }
+            error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type, true));
+            return nullptr;
+        }
+
         auto stype = eval_struct_type(expr_type);
         if (!stype) {
             error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type, true));
