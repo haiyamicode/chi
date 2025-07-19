@@ -22,6 +22,46 @@ ast::Module *Analyzer::process_file(ast::Package *package, const string &file_na
     return process_source(package, &src, file_name);
 }
 
+ast::Module *Analyzer::format_file(ast::Package *package, const string &file_name) {
+    auto src = io::Buffer::from_file(file_name);
+
+    // Create module
+    auto module = m_ctx.module_from_path(package, file_name);
+    if (!module) {
+        return nullptr;
+    }
+
+    // Tokenize
+    Tokenization tokenization;
+    Lexer lexer(&src, &tokenization);
+    lexer.tokenize();
+
+    if (tokenization.error) {
+        module->errors.add({*tokenization.error, tokenization.error_pos});
+        return module;
+    }
+
+    // Parse with basic scope setup but skip semantic analysis
+    auto resolver = m_ctx.create_resolver();
+    ScopeResolver scope_resolver(&resolver);
+    module->scope = scope_resolver.get_scope();
+    module->import_scope = m_ctx.create_scope(module->scope);
+
+    ParseContext pc;
+    pc.resolver = &scope_resolver;
+    pc.module = module;
+    pc.allocator = &m_ctx;
+    pc.add_token_results(tokenization.tokens);
+
+    // Set up error handler to collect errors without crashing
+    pc.error_handler = [&](const Error &error) { module->errors.add(error); };
+
+    Parser parser(&pc);
+    parser.parse();
+
+    return module;
+}
+
 void Analyzer::build_runtime() {
     auto resolver = m_ctx.create_resolver();
     resolver.context_init_primitives();

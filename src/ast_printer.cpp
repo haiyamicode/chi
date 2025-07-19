@@ -109,6 +109,7 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::Block: {
         auto &data = node->data.block;
+        auto is_inline = !data.statements.len && !data.has_braces;
         if (data.is_arrow) {
             print(" => ");
         }
@@ -116,6 +117,7 @@ void AstPrinter::print_node(Node *node) {
             m_indent++;
             print("{{\n");
         }
+
         for (auto stmt : data.statements) {
             print_indent(m_indent);
             print_node(stmt);
@@ -125,12 +127,13 @@ void AstPrinter::print_node(Node *node) {
         }
 
         if (data.return_expr) {
-            if (data.statements.len) {
-                print_node_list(&data.statements);
+            if (!is_inline) {
+                print_indent(m_indent);
             }
-            print_indent(m_indent);
             print_node(data.return_expr);
-            print("\n");
+            if (!is_inline) {
+                print("\n");
+            }
         }
 
         if (data.has_braces) {
@@ -467,15 +470,17 @@ void AstPrinter::print_node(Node *node) {
         print("switch ");
         print_node(data.expr);
         print(" {{\n");
+        m_indent++;
         for (int i = 0; i < data.cases.len; i++) {
             auto case_node = data.cases.at(i);
-            print_indent(m_indent + 1);
+            print_indent(m_indent);
             print_node(case_node);
             if (i < data.cases.len - 1) {
                 print(",");
             }
             print("\n");
         }
+        m_indent--;
         print_indent(m_indent);
         print("}}");
         break;

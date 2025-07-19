@@ -7,14 +7,17 @@
 
 #define CHI_RUNTIME_HAS_BACKTRACE 1
 #include "analyzer.h"
+#include "ast_printer.h"
 #include "builder.h"
 #include "util.h"
 
 using namespace cx;
 
 MAKE_ENUM(FlagType, String, Bool);
-MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Output, Ast, WorkingDir, Analyzer, Help);
+MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Output, Ast, Format, WorkingDir, Analyzer,
+          Help);
 MAKE_ENUM(InputMode, File, Package)
+MAKE_ENUM(ProcessingMode, Build, Analyzer, Format)
 
 struct Flag {
     FlagId id;
@@ -34,6 +37,7 @@ void init_flags() {
     flags.add({FlagId::Debug, "d", "debug", FlagType::Bool});
     flags.add({FlagId::Output, "o", "output", FlagType::String});
     flags.add({FlagId::Ast, "a", "ast", FlagType::Bool});
+    flags.add({FlagId::Format, "f", "format", FlagType::Bool});
     flags.add({FlagId::WorkingDir, "w", "working-dir", FlagType::String});
     flags.add({FlagId::Analyzer, "analyzer", "analyzer", FlagType::Bool});
     flags.add({FlagId::Help, "h", "help", FlagType::Bool});
@@ -57,7 +61,7 @@ int main(int argc, char *argv[]) {
     string flag_name;
     bld.build_mode = BuildMode::Executable;
     bld.working_dir = "build";
-    bool analyzer_mode = false;
+    ProcessingMode processing_mode = ProcessingMode::Build;
     Flag *flag = nullptr;
 
     auto print_help = [&]() {
@@ -68,6 +72,7 @@ int main(int argc, char *argv[]) {
         print("  -d --debug: debug mode\n");
         print("  -o --output: output file name\n");
         print("  -a --ast: build ast\n");
+        print("  -f --format: format source code\n");
         print("  -w --working-dir <dir>: working directory\n");
         print("  --analyzer: analyzer mode\n");
         print("  -h --help: help\n");
@@ -92,11 +97,14 @@ int main(int argc, char *argv[]) {
         case FlagId::Ast:
             bld.build_mode = BuildMode::AST;
             break;
+        case FlagId::Format:
+            processing_mode = ProcessingMode::Format;
+            break;
         case FlagId::WorkingDir:
             bld.working_dir = flag->value;
             break;
         case FlagId::Analyzer:
-            analyzer_mode = true;
+            processing_mode = ProcessingMode::Analyzer;
             break;
         case FlagId::Help:
             print_help();
@@ -150,7 +158,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    if (analyzer_mode) {
+    if (processing_mode == ProcessingMode::Analyzer) {
         Analyzer analyzer;
         analyzer.build_runtime();
         auto pkg = analyzer.add_package(".");
@@ -168,6 +176,38 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    if (processing_mode == ProcessingMode::Format) {
+        Analyzer analyzer;
+        auto pkg = analyzer.add_package(".");
+        auto module = analyzer.format_file(pkg, input_file);
+
+        if (module && module->root) {
+            cx::AstPrinter printer(module->root);
+            printer.print_ast();
+        }
+        return 0;
+    }
+    bool format_mode = false;
+    for (int i = 1; i < argc; i++) {
+        string arg = argv[i];
+        if (arg == "-f" || arg == "--format") {
+            format_mode = true;
+            break;
+        }
+    }
+
+    if (format_mode) {
+        Analyzer analyzer;
+        analyzer.build_runtime();
+        auto pkg = analyzer.add_package(".");
+        auto module = analyzer.process_file(pkg, input_file);
+
+        if (module && module->root) {
+            cx::AstPrinter printer(module->root);
+            printer.print_ast();
+        }
+        return 0;
+    }
     if (bld.build_mode == BuildMode::Executable) {
         if (bld.output_file_name.empty()) {
             print("error: output file name is not specified\n");
