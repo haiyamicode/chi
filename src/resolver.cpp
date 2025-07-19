@@ -2404,77 +2404,24 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
     return recursive_type_replace(type, subs, handle_placeholder, make_recursive_call);
 }
 
-ChiType *Resolver::type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *> *subs) {
-    switch (type->kind) {
-    case TypeKind::Placeholder: {
+ChiType *Resolver::type_placeholders_sub_map(ChiType *type, map<ChiType *, ChiType *> *subs) {
+    auto handle_placeholder = [subs](ChiType *type, ChiTypeSubtype *) -> ChiType * {
         auto substitution = subs->get(type);
         return substitution ? *substitution : type;
-    }
-    case TypeKind::Subtype: {
-        auto &data = type->data.subtype;
-        array<ChiType *> args;
-        for (auto arg : data.args) {
-            args.add(type_placeholders_sub(arg, subs));
-        }
-        return get_subtype(data.generic, &args);
-    }
+    };
 
-    case TypeKind::Pointer:
-    case TypeKind::Reference:
-    case TypeKind::MutRef:
-    case TypeKind::Optional:
-    case TypeKind::Box:
-    case TypeKind::Array:
-        return get_wrapped_type(type_placeholders_sub(type->get_elem(), subs), type->kind);
+    auto make_recursive_call = [this, subs](ChiType *type, ChiTypeSubtype *) -> ChiType * {
+        return type_placeholders_sub_map(type, subs);
+    };
 
-    case TypeKind::Fn: {
-        auto &data = type->data.fn;
-        auto return_type = type_placeholders_sub(data.return_type, subs);
-        array<ChiType *> params = {};
-        for (auto param_type : data.params) {
-            params.add(type_placeholders_sub(param_type, subs));
-        }
-        auto container =
-            data.container_ref ? type_placeholders_sub(data.container_ref, subs) : nullptr;
-        return get_fn_type(return_type, &params, data.is_variadic, container, data.is_extern);
-    }
-
-    case TypeKind::FnLambda: {
-        auto &data = type->data.fn_lambda;
-        auto fn = type_placeholders_sub(data.fn, subs);
-        auto internal = type_placeholders_sub(data.internal, subs);
-        // Only substitute bound_fn if it has placeholders
-        auto bound_fn = data.bound_fn;
-        if (bound_fn && bound_fn->is_placeholder) {
-            bound_fn = type_placeholders_sub(bound_fn, subs);
-        }
-        auto bind_struct =
-            data.bind_struct ? type_placeholders_sub(data.bind_struct, subs) : nullptr;
-
-        // If nothing changed, return the original type
-        if (fn == data.fn && internal == data.internal && bound_fn == data.bound_fn &&
-            bind_struct == data.bind_struct) {
-            return type;
-        }
-
-        auto lambda_type = create_type(TypeKind::FnLambda);
-        lambda_type->data.fn_lambda.fn = fn;
-        lambda_type->data.fn_lambda.internal = internal;
-        lambda_type->data.fn_lambda.bound_fn = bound_fn;
-        lambda_type->data.fn_lambda.bind_struct = bind_struct;
-        return lambda_type;
-    }
-
-    default:
-        return type;
-    }
+    return recursive_type_replace(type, nullptr, handle_placeholder, make_recursive_call);
 }
 
 // Type inference algorithm using visitor pattern - mirrors recursive_type_replace structure
 template <typename UnificationHandler, typename RecursiveCallHandler>
-bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type, 
-                           UnificationHandler handle_placeholder,
-                           RecursiveCallHandler make_recursive_call) {
+bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
+                                    UnificationHandler handle_placeholder,
+                                    RecursiveCallHandler make_recursive_call) {
     // Handle different type kinds with same structure as recursive_type_replace
     switch (param_type->kind) {
     case TypeKind::Placeholder:
@@ -2521,17 +2468,17 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
         }
         auto &param_data = param_type->data.fn;
         auto &arg_data = arg_type->data.fn;
-        
+
         // Check return type
         if (!make_recursive_call(param_data.return_type, arg_data.return_type)) {
             return false;
         }
-        
+
         // Check parameter count
         if (param_data.params.len != arg_data.params.len) {
             return false;
         }
-        
+
         // Check each parameter type
         for (size_t i = 0; i < param_data.params.len; i++) {
             if (!make_recursive_call(param_data.params[i], arg_data.params[i])) {
@@ -2553,33 +2500,35 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
 
     default:
         // For concrete types, they must be identical
-        return param_type == arg_type || 
+        return param_type == arg_type ||
                (param_type->kind == arg_type->kind && param_type->global_id == arg_type->global_id);
     }
 }
 
-bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types, map<ChiType *, ChiType *> *inferred_types) {
+bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
+                                    map<ChiType *, ChiType *> *inferred_types) {
     // Initialize inferred types map
     inferred_types->clear();
-    
+
     // Check if we have the right number of arguments
     if (fn->params.len != arg_types->len) {
         return false;
     }
-    
+
     // Use visitor pattern to unify each parameter with its argument
     for (size_t i = 0; i < fn->params.len; i++) {
         ChiType *param_type = fn->params[i];
         ChiType *arg_type = (*arg_types)[i];
-        
+
         // Handle placeholder mapping via unification
-        auto handle_placeholder = [fn, inferred_types](ChiType *placeholder, ChiType *concrete) -> bool {
+        auto handle_placeholder = [fn, inferred_types](ChiType *placeholder,
+                                                       ChiType *concrete) -> bool {
             // Find the corresponding type parameter
             size_t placeholder_index = placeholder->data.placeholder.index;
             if (placeholder_index >= fn->type_params.len) {
                 return false;
             }
-            
+
             ChiType *corresponding_type_param = fn->type_params[placeholder_index];
             auto existing = inferred_types->get(corresponding_type_param);
             if (existing) {
@@ -2591,16 +2540,18 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types, map<ChiT
                 return true;
             }
         };
-        
+
         // Recursive unification using visitor pattern
-        auto make_recursive_call = [this, fn, inferred_types](ChiType *param, ChiType *arg) -> bool {
-            return this->visit_type_recursive(param, arg,
+        auto make_recursive_call = [this, fn, inferred_types](ChiType *param,
+                                                              ChiType *arg) -> bool {
+            return this->visit_type_recursive(
+                param, arg,
                 [fn, inferred_types](ChiType *placeholder, ChiType *concrete) -> bool {
                     size_t placeholder_index = placeholder->data.placeholder.index;
                     if (placeholder_index >= fn->type_params.len) {
                         return false;
                     }
-                    
+
                     ChiType *corresponding_type_param = fn->type_params[placeholder_index];
                     auto existing = inferred_types->get(corresponding_type_param);
                     if (existing) {
@@ -2611,13 +2562,14 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types, map<ChiT
                     }
                 },
                 [this, fn, inferred_types](ChiType *param, ChiType *arg) -> bool {
-                    return this->visit_type_recursive(param, arg,
+                    return this->visit_type_recursive(
+                        param, arg,
                         [fn, inferred_types](ChiType *placeholder, ChiType *concrete) -> bool {
                             size_t placeholder_index = placeholder->data.placeholder.index;
                             if (placeholder_index >= fn->type_params.len) {
                                 return false;
                             }
-                            
+
                             ChiType *corresponding_type_param = fn->type_params[placeholder_index];
                             auto existing = inferred_types->get(corresponding_type_param);
                             if (existing) {
@@ -2628,24 +2580,25 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types, map<ChiT
                             }
                         },
                         [](ChiType *param, ChiType *arg) -> bool {
-                            return param == arg || (param->kind == arg->kind && param->global_id == arg->global_id);
+                            return param == arg ||
+                                   (param->kind == arg->kind && param->global_id == arg->global_id);
                         });
                 });
         };
-        
+
         // Attempt to unify this parameter with its argument
         if (!visit_type_recursive(param_type, arg_type, handle_placeholder, make_recursive_call)) {
             return false; // Unification failed
         }
     }
-    
+
     // Verify that all type parameters have been inferred
     for (auto type_param : fn->type_params) {
         if (!inferred_types->get(type_param)) {
             return false; // Could not infer this type parameter
         }
     }
-    
+
     return true;
 }
 
@@ -2823,7 +2776,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                     error(node, "Failed to infer type parameters for generic function call");
                     return fn->return_type;
                 }
-                
+
                 // Convert inferred types to type_args array for compatibility
                 for (auto type_param : fn->type_params) {
                     auto inferred = inferred_types.get(type_param);
@@ -2836,10 +2789,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             } else {
                 // Check if the number of type parameters matches
                 if (fn_call_data.type_args.len != fn->type_params.len) {
-                error(node, "Wrong number of type parameters: expected {}, got {}",
-                      fn->type_params.len, fn_call_data.type_args.len);
-                return fn->return_type;
-            }
+                    error(node, "Wrong number of type parameters: expected {}, got {}",
+                          fn->type_params.len, fn_call_data.type_args.len);
+                    return fn->return_type;
+                }
 
                 // Resolve the explicit type parameters
                 for (auto type_arg_node : fn_call_data.type_args) {
@@ -2885,7 +2838,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto arg_type = arg_types[i];
 
             // Substitute placeholders with explicit types
-            auto concrete_param_type = type_placeholders_sub(param_type, &type_substitutions);
+            auto concrete_param_type = type_placeholders_sub_map(param_type, &type_substitutions);
             check_assignment(args->at(i), arg_type, concrete_param_type);
         }
 
@@ -3398,11 +3351,11 @@ ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
 
     // Create specialized function type by substituting type parameters
     auto specialized_return_type =
-        type_placeholders_sub(generic_fn_data.return_type, &type_substitutions);
+        type_placeholders_sub_map(generic_fn_data.return_type, &type_substitutions);
 
     array<ChiType *> specialized_params;
     for (auto param_type : generic_fn_data.params) {
-        auto specialized_param = type_placeholders_sub(param_type, &type_substitutions);
+        auto specialized_param = type_placeholders_sub_map(param_type, &type_substitutions);
         specialized_params.add(specialized_param);
     }
 
