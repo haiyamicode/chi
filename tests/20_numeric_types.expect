@@ -22,7 +22,7 @@ float to int32: 3.14 -> 3
 int32 to int64: 42 -> 42
 float to float64: 3.14 -> 3.140000104904175
 
-Mixed operations (with explicit casts):
+Mixed operations (implicit conversions):
 int32 + float: 100 + 2.5 = 102.5
 float - int32: 2.5 - 100 = -97.5
 int32 * float: 100 * 2.5 = 250
@@ -39,4 +39,16 @@ max int32: 2147483647
 min int32: -2147483648
 small float: 0.0001
 large float: 1000000
+
+Implicit integer conversions:
+bool to int32: true -> 1
+char to int32: ''A'' -> 65
+int8 to int32: 127 -> 127
+int16 to int64: 32767 -> 32767
+int32 to float: 127 -> 127
+int64 to float64: 32767 -> 32767
+float to float64: 3.14 -> 3.140000104904175
+int8 + int16 = int32: 127 + 32767 = -32642
+int32 + float = float: 127 + 3.14 = 130.14
+float + float64 = float64: 3.14 + 3.140000104904175 = 6.28000020980835
 All numeric type tests completed!

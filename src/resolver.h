@@ -284,11 +284,6 @@ class Resolver {
 
     void resolve(ast::Module *module);
 
-    bool type_is_int(ChiType *type) {
-        return type->kind == TypeKind::Int || type->kind == TypeKind::Bool ||
-               type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-               type->kind == TypeKind::MutRef || type->kind == TypeKind::Char;
-    }
 
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);
     ChiType *type_placeholders_sub(ChiType *type, map<ChiType *, ChiType *> *subs);

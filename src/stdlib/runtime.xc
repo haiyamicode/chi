@@ -85,7 +85,9 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
 
   func get(key: string) JsonValue {
     let new_value: JsonValue = {};
-    cx_json_value_get(this.data, &key, &new_value);
+    var key_ptr = &key;
+    var value_ptr = &new_value;
+    cx_json_value_get(this.data, key_ptr as *string, value_ptr as *void);
     return new_value;
   }
 
@@ -239,7 +241,7 @@ struct Array<T> implements
 
 	func index(index: uint32) &mut<T> {
 		assert(index < this.len, "index out of bounds");
-		return &this.data[index];
+		return &mut this.data[index];
 	}
 
   func begin() uint32 {
@@ -316,7 +318,7 @@ struct Map<K, V> implements ops.Index<K, V> {
     return null;
   }
 
-  func index(key: K) &V {
+  func index(key: K) &mut<V> {
     var k: any = key;
     var h: HashBytes = {};
     cx_hbytes(&k, &h);

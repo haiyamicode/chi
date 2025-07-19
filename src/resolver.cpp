@@ -189,6 +189,41 @@ bool Resolver::can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit)
     return true;
 }
 
+// Helper function to get integer type size in bits
+static int get_int_type_size(ChiType *type) {
+    switch (type->kind) {
+    case TypeKind::Bool:
+        return 1;
+    case TypeKind::Char:
+        return 8;
+    case TypeKind::Int:
+        return type->data.int_.bit_count;
+    default:
+        return 0;
+    }
+}
+
+// Helper function to check if integer conversion is safe (no data loss)
+static bool is_safe_int_conversion(ChiType *from, ChiType *to) {
+    if (to->kind != TypeKind::Int) {
+        return false;
+    }
+
+    int from_size = get_int_type_size(from);
+    int to_size = get_int_type_size(to);
+
+    if (from_size == 0 || to_size == 0) {
+        return false;
+    }
+
+    // If target is larger, it's always safe
+    if (to_size >= from_size) {
+        return true;
+    }
+
+    return false;
+}
+
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit) {
     if (!from_type || !to_type) {
         return false;
@@ -212,22 +247,94 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef: {
-        return from_type->kind == TypeKind::Pointer ||
-               can_assign(from_type, get_system_types()->int_, is_explicit);
+        // Allow null pointer to any pointer type - check this FIRST
+        if (from_type->kind == TypeKind::Pointer && from_type->data.pointer.is_null) {
+            return true;
+        }
+
+        // Allow null_ptr system type (special *void) to any pointer
+        if (from_type == get_system_types()->null_ptr) {
+            return true;
+        }
+
+        // Handle pointer/reference conversions
+        if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
+            from_type->kind == TypeKind::MutRef) {
+
+            auto from_elem = from_type->get_elem();
+            auto to_elem = to_type->get_elem();
+
+            if (from_elem && to_elem) {
+                // Check if the element types are the same
+                bool elem_same = is_same_type(from_elem, to_elem);
+
+                if (elem_same) {
+                    // Pointer <-> Reference/MutRef conversions are allowed
+                    if (from_type->kind == TypeKind::Pointer ||
+                        to_type->kind == TypeKind::Pointer) {
+                        return true;
+                    }
+                    // MutRef -> Ref is allowed
+                    if (from_type->kind == TypeKind::MutRef &&
+                        to_type->kind == TypeKind::Reference) {
+                        return true;
+                    }
+                    // Ref -> MutRef is NOT allowed
+                    if (from_type->kind == TypeKind::Reference &&
+                        to_type->kind == TypeKind::MutRef) {
+                        return false;
+                    }
+                    // Same kind is allowed
+                    if (from_type->kind == to_type->kind) {
+                        return true;
+                    }
+                }
+                // Allow void* conversions
+                else if (to_type->kind == TypeKind::Pointer && to_elem->kind == TypeKind::Void) {
+                    // Any pointer/reference can convert to void*
+                    return true;
+                } else if (from_type->kind == TypeKind::Pointer &&
+                           to_type->kind == TypeKind::Pointer) {
+                    // Allow void* to any pointer
+                    return from_elem->kind == TypeKind::Void;
+                }
+            }
+        }
+
+        // Int to pointer conversion must be explicit (after pointer/ref checks)
+        if (from_type->is_int_like()) {
+            return is_explicit;
+        }
+
+        return false;
     }
-    case TypeKind::Int:
-        if (from_type->kind == TypeKind::Float || from_type->kind == TypeKind::Char) {
-            return is_explicit;
+    case TypeKind::Int: {
+        // Allow implicit conversion from bool, char, and smaller int types
+        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char) {
+            return is_safe_int_conversion(from_type, to_type);
         }
-        return type_is_int(from_type);
-    case TypeKind::Float:
         if (from_type->kind == TypeKind::Int) {
+            return is_safe_int_conversion(from_type, to_type);
+        }
+        // Float to int requires explicit conversion
+        if (from_type->kind == TypeKind::Float) {
             return is_explicit;
         }
-        return from_type->kind == TypeKind::Float;
+        return false;
+    }
+    case TypeKind::Float: {
+        // Allow implicit conversion from any int type
+        if (from_type->is_int_like()) {
+            return true;
+        }
+        // Allow implicit conversion from float32 to float64
+        if (from_type->kind == TypeKind::Float) {
+            return to_type->data.float_.bit_count >= from_type->data.float_.bit_count;
+        }
+        return false;
+    }
     case TypeKind::Char:
-        return from_type->kind == TypeKind::Char ||
-               (is_explicit && from_type->kind == TypeKind::Int);
+        return from_type->kind == TypeKind::Char || (is_explicit && from_type->is_int_like());
     case TypeKind::Any:
         return true;
     case TypeKind::Struct: {
@@ -252,7 +359,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         return false;
     }
     case TypeKind::Bool:
-        return type_is_int(from_type) || from_type->kind == TypeKind::Optional;
+        // Allow implicit conversion from any int type to bool
+        return from_type->is_int_like() || from_type->kind == TypeKind::Optional ||
+               (is_explicit && from_type->kind == TypeKind::Char);
     case TypeKind::Optional: {
         if (from_type->kind == TypeKind::Pointer) {
             return from_type->data.pointer.is_null;
@@ -646,7 +755,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         } else {
             t2 = resolve(data.op2, scope);
         }
-        check_assignment(data.op2, t2, t1);
+
+        // For assignment operators, just check assignment validity
+        if (is_assignment_op(data.op_type)) {
+            check_assignment(data.op2, t2, t1);
+            return t1;
+        }
+
         switch (data.op_type) {
         case TokenType::EQ:
         case TokenType::NE:
@@ -655,9 +770,42 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::GT:
         case TokenType::GE:
             return get_system_types()->bool_;
-        default:
-            check_binary_op(node, data.op_type, t1);
-            return t1;
+        default: {
+            // For arithmetic operations, determine result type based on operands
+            ChiType *result_type = t1;
+
+            // If either operand is float, result is float
+            if (t1->kind == TypeKind::Float || t2->kind == TypeKind::Float) {
+                // If both are float, use the larger type
+                if (t1->kind == TypeKind::Float && t2->kind == TypeKind::Float) {
+                    result_type = t1->data.float_.bit_count >= t2->data.float_.bit_count ? t1 : t2;
+                } else {
+                    result_type = t1->kind == TypeKind::Float ? t1 : t2;
+                }
+            }
+            // For integer operations, use the larger type
+            else if (t1->is_int_like() && t2->is_int_like()) {
+                int t1_size = get_int_type_size(t1);
+                int t2_size = get_int_type_size(t2);
+
+                if (t2_size > t1_size) {
+                    result_type = t2;
+                } else if (t1_size == t2_size && t1->kind == TypeKind::Int &&
+                           t2->kind == TypeKind::Int) {
+                    // If same size, prefer unsigned if either is unsigned
+                    if (t2->data.int_.is_unsigned && !t1->data.int_.is_unsigned) {
+                        result_type = t2;
+                    }
+                }
+            }
+
+            // Check that both operands can be converted to the result type
+            check_assignment(data.op1, t1, result_type);
+            check_assignment(data.op2, t2, result_type);
+
+            check_binary_op(node, data.op_type, result_type);
+            return result_type;
+        }
         }
     }
     case NodeType::UnaryOpExpr: {
@@ -745,6 +893,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::NULLP:
             return get_system_types()->null_ptr;
         case TokenType::INT:
+            if (scope.value_type && scope.value_type->kind == TypeKind::Int) {
+                return scope.value_type;
+            }
             return get_system_types()->int_;
         case TokenType::STRING:
             return get_system_types()->string;
@@ -1253,7 +1404,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         if (subtype->is_placeholder) {
                             continue;
                         }
-                        resolve_vtable(impl_trait, subtype, implement);
+                        // For generic struct subtypes, we need to substitute the interface's
+                        // type parameters to match the subtype's instantiation
+                        ChiType *subtype_impl_trait = impl_trait;
+                        if (impl_trait->kind == TypeKind::Subtype) {
+                            // Substitute the struct's type parameters in the interface type
+                            auto &subtype_data = subtype->data.subtype;
+                            subtype_impl_trait = type_placeholders_sub(impl_trait, &subtype_data);
+                        }
+                        resolve_vtable(subtype_impl_trait, subtype, implement);
                     }
                 }
             }
@@ -1620,7 +1779,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     resolve_constant_value(clause);
                     auto clause_comparator = resolve_comparator(clause_type, scope);
                     check_assignment(clause, clause_comparator, expr_comparator);
-                    if (!can_assign(clause_comparator, get_system_types()->int_)) {
+                    if (!clause_comparator->is_int_like()) {
                         error(clause, errors::INVALID_SWITCH_TYPE, to_string(clause_type));
                     }
                 }
@@ -1653,6 +1812,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
 ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
     switch (type->kind) {
+    case TypeKind::This:
+        return resolve_comparator(type->eval(), scope);
     case TypeKind::EnumValue:
         return type->data.enum_value.discriminator_type;
     case TypeKind::Reference:
@@ -2028,7 +2189,18 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
                 error(base_node, errors::METHOD_NOT_IMPLEMENTED, node->name);
                 break;
             }
-            if (!compare_impl_type(base_member->resolved_type, child_method->resolved_type)) {
+
+            // If base_type is a subtype (like Index<uint32, T>), we need to substitute
+            // the placeholders in the base member type
+            ChiType *base_member_type = base_member->resolved_type;
+            if (base_type->kind == TypeKind::Subtype) {
+                auto &subtype_data = base_type->data.subtype;
+                // Use selective substitution to only substitute placeholders from the interface
+                base_member_type = type_placeholders_sub_selective(base_member_type, &subtype_data,
+                                                                   subtype_data.root_node);
+            }
+
+            if (!compare_impl_type(base_member_type, child_method->resolved_type)) {
                 error(base_node, errors::IMPLEMENT_NOT_MATCH, node->name,
                       to_string(base_type, true));
                 break;
@@ -2874,7 +3046,39 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
     return std::nullopt;
 }
 
-bool Resolver::is_same_type(ChiType *a, ChiType *b) { return to_value_type(a) == to_value_type(b); }
+bool Resolver::is_same_type(ChiType *a, ChiType *b) {
+    a = to_value_type(a);
+    b = to_value_type(b);
+
+    // First check pointer equality
+    if (a == b) {
+        return true;
+    }
+
+    // Special case: null_ptr (*void with is_null flag) is the same as *void
+    if (a->kind == TypeKind::Pointer && b->kind == TypeKind::Pointer) {
+        auto a_elem = a->get_elem();
+        auto b_elem = b->get_elem();
+        if (a_elem && b_elem && a_elem->kind == TypeKind::Void && b_elem->kind == TypeKind::Void) {
+            // Both are void pointers, consider them the same regardless of is_null flag
+            return true;
+        }
+    }
+
+    // If both types have global_id, compare them
+    if (!a->global_id.empty() && !b->global_id.empty()) {
+        return a->global_id == b->global_id;
+    }
+
+    // Special case for built-in types like string
+    if (a->kind == b->kind) {
+        if (a->kind == TypeKind::String) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
     assert(generic->kind == TypeKind::Struct);
@@ -3121,10 +3325,10 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
     bool ok;
     switch (op_type) {
     case TokenType::ADD:
-        ok = type_is_int(type) || type->kind == TypeKind::Float || type->kind == TypeKind::String;
+        ok = type->is_int_like() || type->kind == TypeKind::Float || type->kind == TypeKind::String;
         break;
     default:
-        ok = type_is_int(type) || type->kind == TypeKind::Float;
+        ok = type->is_int_like() || type->kind == TypeKind::Float;
         break;
     }
     if (!ok) {

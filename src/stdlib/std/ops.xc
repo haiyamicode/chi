@@ -3,7 +3,7 @@ interface Display {
 }
 
 interface Index<K, V> {
-  func index(index: K) &V;
+  func index(index: K) &mut<V>;
 }
 
 interface CopyFrom<T> {
@@ -11,7 +11,7 @@ interface CopyFrom<T> {
 }
 
 interface IndexIterable<K, V> {
-  func index(index: K) &V;
+  func index(index: K) &mut<V>;
   func begin() K;
   func end() K;
   func next(index: K) K;

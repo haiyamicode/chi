@@ -905,10 +905,19 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
 
 llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *value,
                                                  ChiType *from_type, ChiType *to_type) {
-    auto from_int = from_type->kind == TypeKind::Int || from_type->kind == TypeKind::Char;
+    auto from_int = from_type->is_int_like();
+    auto to_int = to_type->is_int_like();
+
     if (from_int && to_type->kind == TypeKind::Float) {
         auto &builder = *m_ctx->llvm_builder;
-        bool is_unsigned = from_type->data.int_.is_unsigned;
+        bool is_unsigned;
+        if (from_type->kind == TypeKind::Bool) {
+            is_unsigned = true;
+        } else if (from_type->kind == TypeKind::Char) {
+            is_unsigned = true;
+        } else {
+            is_unsigned = from_type->data.int_.is_unsigned;
+        }
         auto from_type_l = compile_type(from_type);
         auto to_type_l = compile_type(to_type);
         if (is_unsigned) {
@@ -916,9 +925,14 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         } else {
             return builder.CreateSIToFP(value, to_type_l);
         }
-    } else if (from_type->kind == TypeKind::Float && to_type->kind == TypeKind::Int) {
+    } else if (from_type->kind == TypeKind::Float && to_int) {
         auto &builder = *m_ctx->llvm_builder;
-        bool is_unsigned = to_type->data.int_.is_unsigned;
+        bool is_unsigned;
+        if (to_type->kind == TypeKind::Bool || to_type->kind == TypeKind::Char) {
+            is_unsigned = true;
+        } else {
+            is_unsigned = to_type->data.int_.is_unsigned;
+        }
         auto from_type_l = compile_type(from_type);
         auto to_type_l = compile_type(to_type);
         if (is_unsigned) {
@@ -926,11 +940,16 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         } else {
             return builder.CreateFPToSI(value, to_type_l);
         }
-    } else if (from_int && to_type->kind == TypeKind::Int) {
+    } else if (from_int && to_int) {
         auto &builder = *m_ctx->llvm_builder;
         auto from_type_l = compile_type(from_type);
         auto to_type_l = compile_type(to_type);
-        auto is_signed = !from_type->data.int_.is_unsigned;
+        bool is_signed;
+        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char) {
+            is_signed = false;
+        } else {
+            is_signed = !from_type->data.int_.is_unsigned;
+        }
         return builder.CreateIntCast(value, to_type_l, is_signed);
 
     } else if (from_type->kind == TypeKind::Float && to_type->kind == TypeKind::Float) {

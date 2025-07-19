@@ -365,6 +365,11 @@ struct ChiType {
         return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::MutRef;
     }
 
+    bool is_int_like() {
+        return kind == TypeKind::Int || kind == TypeKind::Bool || kind == TypeKind::Pointer ||
+               kind == TypeKind::Reference || kind == TypeKind::MutRef || kind == TypeKind::Char;
+    }
+
     string get_display_name() {
         if (display_name) {
             return *display_name;
