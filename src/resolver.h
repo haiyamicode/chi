@@ -296,6 +296,8 @@ class Resolver {
                                               TypeList *output, ast::Node *source_filter);
     ChiType *type_placeholders_sub_selective(ChiType *type, ChiTypeSubtype *subs,
                                              ast::Node *source_filter);
+    
+    ChiType *substitute_this_type(ChiType *type, ChiType *replacement);
 
     // Type inference using visitor pattern
     bool infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,

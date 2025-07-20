@@ -104,6 +104,7 @@ Token *Parser::expect_identifier() {
     switch (token->type) {
     case TokenType::IDEN:
     case TokenType::KW_THIS:
+    case TokenType::KW_THIS_TYPE:
     case TokenType::KW_NEW:
     case TokenType::KW_DELETE:
         return token;
@@ -240,7 +241,7 @@ Node *Parser::create_node(NodeType type, Token *token) {
     auto node = m_ctx->allocator->create_node(type);
     node->token = token;
     node->module = m_ctx->module;
-    if (token->type == TokenType::IDEN) {
+    if (token->type == TokenType::IDEN || token->type == TokenType::KW_THIS_TYPE) {
         node->name = token->str;
         if (!token->node) {
             token->node = node;
@@ -452,11 +453,13 @@ Node *Parser::parse_identifier() {
     auto token = expect_identifier();
     auto decl = m_ctx->resolver->find_symbol(token->str);
     auto node = create_identifier_node(token, decl);
-    if (!decl) {
+    if (!decl && token->type != TokenType::KW_THIS_TYPE) {
         error(token, errors::UNDECLARED, node->name);
     }
     if (token->type == TokenType::KW_THIS) {
         node->data.identifier.kind = IdentifierKind::This;
+    } else if (token->type == TokenType::KW_THIS_TYPE) {
+        node->data.identifier.kind = IdentifierKind::ThisType;
     }
     return node;
 }
@@ -517,7 +520,8 @@ Node *Parser::parse_type_expr(bool type_only) {
     } else {
         // Check if we have a valid identifier token for type
         if (token->type != TokenType::IDEN && token->type != TokenType::KW_THIS &&
-            token->type != TokenType::KW_NEW && token->type != TokenType::KW_DELETE) {
+            token->type != TokenType::KW_THIS_TYPE && token->type != TokenType::KW_NEW && 
+            token->type != TokenType::KW_DELETE) {
             error(token, "expected type identifier, got '{}'", token->to_string());
             return create_error_node();
         }

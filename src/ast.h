@@ -288,7 +288,7 @@ struct IndexExpr {
     ChiStructMember *resolved_method = nullptr;
 };
 
-MAKE_ENUM(IdentifierKind, Value, TypeName, This)
+MAKE_ENUM(IdentifierKind, Value, TypeName, This, ThisType)
 
 struct Identifier {
     IdentifierKind kind = IdentifierKind::Value;

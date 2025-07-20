@@ -6,3 +6,5 @@ a.brightness = 0
 b.brightness = 0.6
 c.brightness = 1
 d.brightness = 0.33333334
+e (copy of d): rgb(255,0,0)
+cloned white: rgb(255,255,255)

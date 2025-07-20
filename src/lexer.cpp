@@ -56,6 +56,7 @@ void Lexer::setup_keywords() {
     s_keywords["new"] = TokenType::KW_NEW;
     s_keywords["delete"] = TokenType::KW_DELETE;
     s_keywords["this"] = TokenType::KW_THIS;
+    s_keywords["This"] = TokenType::KW_THIS_TYPE;
     s_keywords["template"] = TokenType::KW_TEMPLATE;
     s_keywords["union"] = TokenType::KW_UNION;
     s_keywords["try"] = TokenType::KW_TRY;

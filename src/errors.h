@@ -41,6 +41,7 @@ constexpr auto METHOD_NOT_IMPLEMENTED = "interface method '{}' has not been impl
 constexpr auto MISSING_TYPE_ARGUMENTS = "type arguments are required for generic type '{}'";
 constexpr auto CANNOT_GET_POINTER_UNADDRESSABLE = "cannot get pointer of unaddressable value";
 constexpr auto CANNOT_GET_REFERENCE_UNADDRESSABLE = "cannot take reference of unaddressable value";
+constexpr auto INVALID_THIS_IN_STATIC = "'this' cannot be used in static methods; use 'This' for the type instead";
 constexpr auto C_STYLE_DEREFERENCE_DEPRECATED = "C-style dereference syntax is deprecated, please "
                                                 "use unwrap operator (e.g: 'p!' instead of '*p')";
 constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant expression";

@@ -23,7 +23,7 @@ struct ChiTypeEnum;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer,
           Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box,
-          Result, Error, FnLambda, Promise, Infer, Module, This, Unknown, Bytes, Undefined)
+          Result, Error, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes, Undefined)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
@@ -379,7 +379,8 @@ struct ChiType {
 
     ChiType *eval() {
         if (kind == TypeKind::This) {
-            return get_elem();
+            // In interfaces, This might not have elem set
+            return data.pointer.elem ? get_elem() : this;
         }
         return this;
     }

@@ -604,15 +604,36 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             if (is_static) {
-                assert(scope.parent_type_symbol);
-                return scope.parent_type_symbol;
+                error(node, errors::INVALID_THIS_IN_STATIC);
+                return create_type(TypeKind::Unknown);
             }
+
+            // Check if we're in an interface context
+            bool is_interface = ChiTypeStruct::is_interface(scope.parent_struct);
 
             auto type = create_type(TypeKind::This);
             auto is_mut = declspec.is_mutable();
             type->data.pointer.elem = get_pointer_type(
                 scope.parent_struct, is_mut ? TypeKind::MutRef : TypeKind::Reference);
             return type;
+        }
+        if (data.kind == ast::IdentifierKind::ThisType) {
+            if (!scope.parent_struct) {
+                error(node, errors::INVALID_THIS);
+                return create_type(TypeKind::Unknown);
+            }
+
+            // Check if we're in an interface context
+            bool is_interface = ChiTypeStruct::is_interface(scope.parent_struct);
+            
+            if (is_interface) {
+                // In interfaces, use ThisType as a placeholder for later substitution
+                return create_type(TypeKind::ThisType);
+            } else {
+                // In struct context, directly resolve to the struct type
+                assert(scope.parent_type_symbol);
+                return scope.parent_type_symbol;
+            }
         }
         if (!data.decl) {
             return create_type(TypeKind::Unknown);
@@ -2220,6 +2241,9 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
                                                                    subtype_data.root_node);
             }
 
+            // Substitute This types in interface methods with the implementing type
+            base_member_type = substitute_this_type(base_member_type, derived_type);
+
             if (!compare_impl_type(base_member_type, child_method->resolved_type)) {
                 error(base_node, errors::IMPLEMENT_NOT_MATCH, node->name,
                       to_string(base_type, true));
@@ -2387,9 +2411,41 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         return lambda_type;
     }
 
+    case TypeKind::This:
+    case TypeKind::ThisType: {
+        // This and ThisType should be handled by the caller if needed
+        return type;
+    }
+
     default:
         return type;
     }
+}
+
+// Substitute This types with a concrete type (used for interface implementations)
+ChiType *Resolver::substitute_this_type(ChiType *type, ChiType *replacement) {
+    // Use recursive_type_replace with custom handlers for This/ThisType
+    auto handle_this = [&](ChiType *t, ChiTypeSubtype *) -> ChiType * {
+        // This case is not used in this function, but required by template
+        return t;
+    };
+    
+    auto make_recursive_call = [&](ChiType *t, ChiTypeSubtype *) -> ChiType * {
+        if (t->kind == TypeKind::This || t->kind == TypeKind::ThisType) {
+            // Replace This/ThisType with the implementing type
+            return replacement;
+        }
+        // Recurse for other types
+        return substitute_this_type(t, replacement);
+    };
+    
+    // Handle This/ThisType at the top level
+    if (type->kind == TypeKind::This || type->kind == TypeKind::ThisType) {
+        return replacement;
+    }
+    
+    // Use recursive_type_replace for all other cases
+    return recursive_type_replace(type, nullptr, handle_this, make_recursive_call);
 }
 
 // Selective substitution that only replaces placeholders from a specific source declaration

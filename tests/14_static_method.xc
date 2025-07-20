@@ -1,6 +1,10 @@
 import "std/ops" as ops;
 
-struct Color implements ops.Display {
+interface Cloneable {
+  func clone() This;
+}
+
+struct Color implements ops.Display, Cloneable {
   r: int = 0;
   g: int = 0;
   b: int = 0;
@@ -11,23 +15,27 @@ struct Color implements ops.Display {
     this.b = b;
   }
 
-  static func black() Color {
+  static func black() This {
     return {0, 0, 0};
   }
 
-  static func white() Color {
+  static func white() This {
     return {255, 255, 255};
   }
 
-  static func gray(f: float) Color {
-    return this.white().multiply(f);
+  static func gray(f: float) This {
+    return Color.white().multiply(f);
   }
 
-  static func red() Color {
+  static func red() This {
     return {255, 0, 0};
   }
 
-  func multiply(f: float) Color {
+  static func create_copy(other: This) This {
+    return {other.r, other.g, other.b};
+  }
+
+  func multiply(f: float) This {
     let rf = this.r as float;
     let gf = this.g as float;
     let bf = this.b as float;
@@ -44,6 +52,10 @@ struct Color implements ops.Display {
   func brightness() float {
     let t = this.r + this.g + this.b;
     return (t as float) / 3.0 / 255.0;
+  }
+
+  func clone() This {
+    return {this.r, this.g, this.b};
   }
 }
 
@@ -64,4 +76,10 @@ func main() {
   printf("b.brightness = {}\n", b.brightness());
   printf("c.brightness = {}\n", c.brightness());
   printf("d.brightness = {}\n", d.brightness());
+
+  let e = Color.create_copy(d);
+  printf("e (copy of d): {}\n", e);
+
+  let cloned_color = c.clone();
+  printf("cloned white: {}\n", cloned_color);
 }
