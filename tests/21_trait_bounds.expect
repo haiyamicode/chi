@@ -3,6 +3,9 @@
 -- Function trait bounds --
 Result: (0, 0)
 
+-- Reference trait bounds --
+Reference result: (0, 0)
+
 -- Struct trait bounds --
 Single trait bound: Container[PointContainer]: (10, 20)
 Retrieved item: (10, 20)

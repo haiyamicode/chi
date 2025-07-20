@@ -804,7 +804,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 intrinsic_symbol = IntrinsicSymbol::Add;
                 break;
             default:
-                panic("not implemented: {}", PRINT_ENUM(data.op_type));
+                break;
             }
 
             ChiType *result_type = t1;
@@ -836,7 +836,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             // Check for intrinsic operator method (concrete types or trait bounds)
             if (intrinsic_symbol != IntrinsicSymbol::None) {
-                auto method_call = try_resolve_operator_method(intrinsic_symbol, t1, t2, data.op1, data.op2, node, scope);
+                auto method_call = try_resolve_operator_method(intrinsic_symbol, t1, t2, data.op1,
+                                                               data.op2, node, scope);
                 if (method_call.has_value()) {
                     data.resolved_call = method_call->call_node;
                     return method_call->return_type;
@@ -1022,9 +1023,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // Check if this is a placeholder type with trait bounds
-        if (expr_type->kind == TypeKind::Placeholder && expr_type->data.placeholder.trait) {
-            auto trait_type = expr_type->data.placeholder.trait;
+        // Check if this is a placeholder type with trait bounds (or reference to one)
+        auto check_type = expr_type;
+        if (expr_type->is_pointer_like()) {
+            check_type = expr_type->get_elem();
+        }
+        if (check_type->kind == TypeKind::Placeholder && check_type->data.placeholder.trait) {
+            auto trait_type = check_type->data.placeholder.trait;
             if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
                 auto trait_struct = &trait_type->data.struct_;
                 auto member = trait_struct->find_member(field_name);
@@ -3753,11 +3758,13 @@ ResolveScope ResolveScope::set_is_fn_call(bool is_fn_call) const {
     RS_SET_PROP_COPY(is_fn_call, is_fn_call);
 }
 
-optional<Resolver::OperatorMethodCall> Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiType *t2, 
-                                                                            ast::Node *op1, ast::Node *op2, ast::Node *node, ResolveScope &scope) {
+optional<Resolver::OperatorMethodCall>
+Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiType *t2,
+                                      ast::Node *op1, ast::Node *op2, ast::Node *node,
+                                      ResolveScope &scope) {
     ChiStructMember *method_member = nullptr;
     ChiType *return_type = nullptr;
-    
+
     // Try concrete struct type first
     auto stype = eval_struct_type(t1);
     if (stype) {
@@ -3773,7 +3780,7 @@ optional<Resolver::OperatorMethodCall> Resolver::try_resolve_operator_method(Int
             }
         }
     }
-    
+
     // Try placeholder type with trait bounds
     if (!method_member && t1->kind == TypeKind::Placeholder && t1->data.placeholder.trait) {
         auto trait_type = t1->data.placeholder.trait;
@@ -3791,7 +3798,7 @@ optional<Resolver::OperatorMethodCall> Resolver::try_resolve_operator_method(Int
             }
         }
     }
-    
+
     // Generate method call if we found a valid method
     if (method_member && return_type) {
         auto call_node = create_node(NodeType::FnCallExpr);
@@ -3811,9 +3818,9 @@ optional<Resolver::OperatorMethodCall> Resolver::try_resolve_operator_method(Int
         call_data.fn_ref_expr = dot_node;
         call_data.args = {op2};
         resolve(call_node, scope);
-        
+
         return OperatorMethodCall{call_node, return_type};
     }
-    
+
     return std::nullopt;
 }

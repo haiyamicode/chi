@@ -26,6 +26,11 @@ func print_it<T: Show>(t: T) {
     printf("Result: {}\n", t.show());
 }
 
+// Function with reference trait bound
+func print_ref<T: Show>(t: &T) {
+    printf("Reference result: {}\n", t.show());
+}
+
 // Struct with single trait bound
 struct Container<T: Show> {
     item: T = {};
@@ -57,6 +62,10 @@ func main() {
     printf("\n-- Function trait bounds --\n");
     var p: Point = {};
     print_it(p);
+    
+    // Test reference trait bounds
+    printf("\n-- Reference trait bounds --\n");
+    print_ref(&p);
     
     // Test struct trait bounds
     printf("\n-- Struct trait bounds --\n");

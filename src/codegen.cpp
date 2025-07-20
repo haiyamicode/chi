@@ -113,7 +113,7 @@ ChiType *Compiler::eval_type(ChiType *type) {
                                                                subtype_data->root_node);
     }
 
-    // Handle placeholders with unknown source (likely from built-in types like enum base)
+    // Handle placeholders with unknown source
     if (type->is_placeholder && type->kind == TypeKind::Placeholder &&
         !type->data.placeholder.source_decl) {
 
@@ -125,24 +125,6 @@ ChiType *Compiler::eval_type(ChiType *type) {
         }
         if (type->is_placeholder && m_fn && m_fn->container_subtype) {
             type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
-        }
-    }
-
-    // Handle array types with placeholder elements using selective substitution
-    if (type->kind == TypeKind::Array && type->data.array.elem->is_placeholder) {
-        if (m_fn && m_fn->container_subtype) {
-            if (m_fn->fn_type && m_fn->fn_type->data.fn.container_ref) {
-                auto container_node = m_fn->fn_type->data.fn.container_ref->data.struct_.node;
-                return get_resolver()->type_placeholders_sub_selective(
-                    type, m_fn->container_subtype, container_node);
-            }
-        }
-        if (m_fn && m_fn->specialized_subtype &&
-            m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-            if (m_fn->node) {
-                return get_resolver()->type_placeholders_sub_selective(
-                    type, &m_fn->specialized_subtype->data.subtype, m_fn->node);
-            }
         }
     }
 
