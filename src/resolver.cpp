@@ -387,6 +387,10 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         return from_type->kind == TypeKind::EnumValue &&
                is_same_type(from_type->data.enum_value.enum_type,
                             to_type->data.enum_value.enum_type);
+    case TypeKind::ThisType:
+        // ThisType should have been substituted by now in generic contexts
+        // If we reach here, it means the substitution didn't happen properly
+        return false;
     default:
         break;
     }
@@ -1010,7 +1014,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     data.resolved_decl = member->node;
                     data.field->node = member->node;
                     data.resolved_dot_kind = DotKind::TypeTrait;
-                    return member->resolved_type;
+                    // Substitute ThisType with the concrete placeholder type
+                    return substitute_this_type(member->resolved_type, expr_type);
                 }
             }
             error(node, errors::MEMBER_NOT_FOUND, field_name, to_string(expr_type, true));
