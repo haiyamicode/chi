@@ -229,7 +229,6 @@ class Compiler {
     CodegenContext *m_ctx = nullptr;
     Function *m_fn = nullptr;
     ChiType *m_fn_eval_subtype = nullptr;
-    ast::Node *m_fn_node = nullptr;
 
     llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
 

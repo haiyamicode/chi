@@ -3111,8 +3111,7 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
         bound_fn_type->data.fn.params = bound_params;
 
         // Mark this type as not having placeholders to prevent substitution
-        bound_fn_type->is_placeholder = false;
-        // Add a unique marker to prevent type substitution
+        bound_fn_type->is_placeholder = fn_type->is_placeholder;
         bound_fn_type->global_id = fmt::format("__lambda_bound_fn_{}", bound_fn_type->id);
 
         lambda->data.fn_lambda.bound_fn = bound_fn_type;

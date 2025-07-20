@@ -215,6 +215,7 @@ void Compiler::compile_module(ast::Module *module) {
         for (auto fn : list) {
             m_fn = fn;
             compile_fn_def(fn->node, fn);
+            m_fn = nullptr;
         }
     }
 }
@@ -2672,6 +2673,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
 
     new_fn->llvm_fn->setName(new_fn->get_llvm_name());
+    m_fn_eval_subtype = nullptr;
     return new_fn;
 }
 
