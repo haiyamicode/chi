@@ -190,6 +190,13 @@ class Resolver {
     void resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node);
 
     ChiType *resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn, NodeList *args);
+    
+    struct OperatorMethodCall {
+        ast::Node *call_node;
+        ChiType *return_type;
+    };
+    optional<OperatorMethodCall> try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiType *t2, 
+                                                           ast::Node *op1, ast::Node *op2, ast::Node *node, ResolveScope &scope);
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);
 

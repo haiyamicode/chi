@@ -834,48 +834,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
 
+            // Check for intrinsic operator method (concrete types or trait bounds)
             if (intrinsic_symbol != IntrinsicSymbol::None) {
-                auto operand_type = t1;
-                auto stype = eval_struct_type(operand_type);
-                if (stype) {
-                    auto &struct_data = stype->data.struct_;
-                    auto member_p = struct_data.member_intrinsics.get(intrinsic_symbol);
-                    if (member_p && (*member_p)->resolved_type) {
-                        auto method_member = *member_p;
-                        // Check if method signature matches: func add(rhs: T) T
-                        auto method_type = method_member->resolved_type;
-                        if (method_type && method_type->kind == TypeKind::Fn) {
-                            auto &fn_data = method_type->data.fn;
-                            if (fn_data.params.len == 1) {
-                                auto param_type = fn_data.params[0];
-                                auto return_type = fn_data.return_type;
-
-                                // Check if right operand can be assigned to parameter
-                                if (param_type && can_assign(t2, param_type)) {
-                                    // Store method info for codegen
-                                    auto call_node = create_node(NodeType::FnCallExpr);
-                                    call_node->token = node->token;
-                                    auto dot_node = create_node(NodeType::DotExpr);
-                                    dot_node->token = node->token;
-
-                                    // populate generated dot expression
-                                    auto &dot_data = dot_node->data.dot_expr;
-                                    dot_node->data.dot_expr.expr = data.op1;
-                                    dot_data.field = method_member->node->token;
-                                    dot_data.resolved_struct_member = method_member;
-                                    dot_data.resolved_decl = method_member->node;
-
-                                    // populate generated call
-                                    auto &call_data = call_node->data.fn_call_expr;
-                                    call_data.fn_ref_expr = dot_node;
-                                    call_data.args = {data.op2};
-                                    resolve(call_node, scope);
-                                    data.resolved_call = call_node;
-                                    return return_type;
-                                }
-                            }
-                        }
-                    }
+                auto method_call = try_resolve_operator_method(intrinsic_symbol, t1, t2, data.op1, data.op2, node, scope);
+                if (method_call.has_value()) {
+                    data.resolved_call = method_call->call_node;
+                    return method_call->return_type;
                 }
             }
 
@@ -3787,4 +3751,69 @@ ResolveScope ResolveScope::set_is_lhs(bool is_lhs) const { RS_SET_PROP_COPY(is_l
 
 ResolveScope ResolveScope::set_is_fn_call(bool is_fn_call) const {
     RS_SET_PROP_COPY(is_fn_call, is_fn_call);
+}
+
+optional<Resolver::OperatorMethodCall> Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiType *t2, 
+                                                                            ast::Node *op1, ast::Node *op2, ast::Node *node, ResolveScope &scope) {
+    ChiStructMember *method_member = nullptr;
+    ChiType *return_type = nullptr;
+    
+    // Try concrete struct type first
+    auto stype = eval_struct_type(t1);
+    if (stype) {
+        auto member_p = stype->data.struct_.member_intrinsics.get(symbol);
+        if (member_p && (*member_p)->resolved_type) {
+            method_member = *member_p;
+            auto method_type = method_member->resolved_type;
+            if (method_type && method_type->kind == TypeKind::Fn) {
+                auto &fn_data = method_type->data.fn;
+                if (fn_data.params.len == 1 && can_assign(t2, fn_data.params[0])) {
+                    return_type = fn_data.return_type;
+                }
+            }
+        }
+    }
+    
+    // Try placeholder type with trait bounds
+    if (!method_member && t1->kind == TypeKind::Placeholder && t1->data.placeholder.trait) {
+        auto trait_type = t1->data.placeholder.trait;
+        if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
+            auto member_p = trait_type->data.struct_.member_intrinsics.get(symbol);
+            if (member_p && (*member_p)->is_method()) {
+                method_member = *member_p;
+                auto method_type = method_member->resolved_type;
+                if (method_type && method_type->kind == TypeKind::Fn) {
+                    auto &fn_data = method_type->data.fn;
+                    if (fn_data.params.len == 1) {
+                        return_type = t1; // Return placeholder type for trait bounds
+                    }
+                }
+            }
+        }
+    }
+    
+    // Generate method call if we found a valid method
+    if (method_member && return_type) {
+        auto call_node = create_node(NodeType::FnCallExpr);
+        call_node->token = node->token;
+        auto dot_node = create_node(NodeType::DotExpr);
+        dot_node->token = node->token;
+
+        // populate generated dot expression
+        auto &dot_data = dot_node->data.dot_expr;
+        dot_node->data.dot_expr.expr = op1;
+        dot_data.field = method_member->node->token;
+        dot_data.resolved_struct_member = method_member;
+        dot_data.resolved_decl = method_member->node;
+
+        // populate generated call
+        auto &call_data = call_node->data.fn_call_expr;
+        call_data.fn_ref_expr = dot_node;
+        call_data.args = {op2};
+        resolve(call_node, scope);
+        
+        return OperatorMethodCall{call_node, return_type};
+    }
+    
+    return std::nullopt;
 }
