@@ -105,6 +105,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.IndexIterable"] = IntrinsicSymbol::IndexInterable;
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
+    m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -361,7 +362,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Bool:
         // Allow implicit conversion from any int type to bool
         return from_type->is_int_like() || from_type->kind == TypeKind::Optional ||
-               (is_explicit && from_type->kind == TypeKind::Char);
+               from_type->is_pointer_like() || (is_explicit && from_type->kind == TypeKind::Char);
     case TypeKind::Optional: {
         if (from_type->kind == TypeKind::Pointer) {
             return from_type->data.pointer.is_null;
@@ -629,7 +630,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             // Check if we're in an interface context
             bool is_interface = ChiTypeStruct::is_interface(scope.parent_struct);
-            
+
             if (is_interface) {
                 // In interfaces, use ThisType as a placeholder for later substitution
                 return create_type(TypeKind::ThisType);
@@ -796,7 +797,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::GE:
             return get_system_types()->bool_;
         default: {
-            // For arithmetic operations, determine result type based on operands
+            // First, check if left operand has interface method for this operator
+            IntrinsicSymbol intrinsic_symbol = IntrinsicSymbol::None;
+            switch (data.op_type) {
+            case TokenType::ADD:
+                intrinsic_symbol = IntrinsicSymbol::Add;
+                break;
+            default:
+                panic("not implemented: {}", PRINT_ENUM(data.op_type));
+            }
+
             ChiType *result_type = t1;
 
             // If either operand is float, result is float
@@ -820,6 +830,51 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     // If same size, prefer unsigned if either is unsigned
                     if (t2->data.int_.is_unsigned && !t1->data.int_.is_unsigned) {
                         result_type = t2;
+                    }
+                }
+            }
+
+            if (intrinsic_symbol != IntrinsicSymbol::None) {
+                auto operand_type = t1;
+                auto stype = eval_struct_type(operand_type);
+                if (stype) {
+                    auto &struct_data = stype->data.struct_;
+                    auto member_p = struct_data.member_intrinsics.get(intrinsic_symbol);
+                    if (member_p && (*member_p)->resolved_type) {
+                        auto method_member = *member_p;
+                        // Check if method signature matches: func add(rhs: T) T
+                        auto method_type = method_member->resolved_type;
+                        if (method_type && method_type->kind == TypeKind::Fn) {
+                            auto &fn_data = method_type->data.fn;
+                            if (fn_data.params.len == 1) {
+                                auto param_type = fn_data.params[0];
+                                auto return_type = fn_data.return_type;
+
+                                // Check if right operand can be assigned to parameter
+                                if (param_type && can_assign(t2, param_type)) {
+                                    // Store method info for codegen
+                                    auto call_node = create_node(NodeType::FnCallExpr);
+                                    call_node->token = node->token;
+                                    auto dot_node = create_node(NodeType::DotExpr);
+                                    dot_node->token = node->token;
+
+                                    // populate generated dot expression
+                                    auto &dot_data = dot_node->data.dot_expr;
+                                    dot_node->data.dot_expr.expr = data.op1;
+                                    dot_data.field = method_member->node->token;
+                                    dot_data.resolved_struct_member = method_member;
+                                    dot_data.resolved_decl = method_member->node;
+
+                                    // populate generated call
+                                    auto &call_data = call_node->data.fn_call_expr;
+                                    call_data.fn_ref_expr = dot_node;
+                                    call_data.args = {data.op2};
+                                    resolve(call_node, scope);
+                                    data.resolved_call = call_node;
+                                    return return_type;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1097,7 +1152,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             // Add the instance pointer as the only field
             auto instance_type = data.expr->resolved_type;
-            if (!instance_type->is_pointer()) {
+            if (!instance_type->is_pointer_like()) {
                 instance_type = get_pointer_type(instance_type);
             }
             auto instance_member = bind_struct->data.struct_.add_member(
@@ -2434,7 +2489,7 @@ ChiType *Resolver::substitute_this_type(ChiType *type, ChiType *replacement) {
         // This case is not used in this function, but required by template
         return t;
     };
-    
+
     auto make_recursive_call = [&](ChiType *t, ChiTypeSubtype *) -> ChiType * {
         if (t->kind == TypeKind::This || t->kind == TypeKind::ThisType) {
             // Replace This/ThisType with the implementing type
@@ -2443,12 +2498,12 @@ ChiType *Resolver::substitute_this_type(ChiType *type, ChiType *replacement) {
         // Recurse for other types
         return substitute_this_type(t, replacement);
     };
-    
+
     // Handle This/ThisType at the top level
     if (type->kind == TypeKind::This || type->kind == TypeKind::ThisType) {
         return replacement;
     }
-    
+
     // Use recursive_type_replace for all other cases
     return recursive_type_replace(type, nullptr, handle_this, make_recursive_call);
 }
@@ -2705,7 +2760,7 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
     if (sty->kind == TypeKind::This) {
         sty = sty->get_elem();
     }
-    if (sty->is_pointer()) {
+    if (sty->is_pointer_like()) {
         sty = sty->get_elem();
     }
     if (sty->kind == TypeKind::Array) {
@@ -2762,7 +2817,7 @@ bool Resolver::is_struct_access_mutable(ChiType *type) {
     if (sty->kind == TypeKind::This) {
         return is_struct_access_mutable(sty->get_elem());
     }
-    if (sty->is_pointer()) {
+    if (sty->is_pointer_like()) {
         return ChiTypeStruct::is_mutable_pointer(sty);
     }
     return true;
@@ -3517,6 +3572,10 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
     if (is_assignment_op(op_type)) {
         return;
     }
+    if (node->type == ast::NodeType::BinOpExpr && node->data.bin_op_expr.resolved_call) {
+        return;
+    }
+
     bool ok;
     switch (op_type) {
     case TokenType::ADD:

@@ -204,6 +204,7 @@ struct BinOpExpr {
     TokenType op_type = TokenType::ERROR;
     Node *op1 = nullptr;
     Node *op2 = nullptr;
+    Node *resolved_call = nullptr;
 };
 
 struct UnaryOpExpr {

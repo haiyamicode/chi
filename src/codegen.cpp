@@ -644,7 +644,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 llvm::Value *Compiler::compile_constant_value(Function *fn, const ConstantValue &value,
                                               ChiType *type, llvm::Type *llvm_type) {
     auto t = llvm_type ? llvm_type : compile_type(type);
-    if (type->is_pointer()) {
+    if (type->is_pointer_like()) {
         return llvm::ConstantPointerNull::get((llvm::PointerType *)t);
     }
     if (VARIANT_TRY(value, const_int_t, v)) {
@@ -905,8 +905,8 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
 
 llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *value,
                                                  ChiType *from_type, ChiType *to_type) {
-    auto from_int = from_type->is_int_like();
-    auto to_int = to_type->is_int_like();
+    auto from_int = from_type->is_int_like() || from_type->is_pointer_like();
+    auto to_int = to_type->is_int_like() || to_type->is_pointer_like();
 
     if (from_int && to_type->kind == TypeKind::Float) {
         auto &builder = *m_ctx->llvm_builder;
@@ -1275,6 +1275,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             return value;
         }
         default: {
+            // Check if this is an interface method call for an operator
+            if (data.resolved_call) {
+                return compile_fn_call(fn, data.resolved_call);
+            }
+
+            // Fall back to built-in arithmetic operations
             auto lhs = compile_expr(fn, data.op1);
             auto rhs = compile_expr(fn, data.op2);
             auto target_type = get_chitype(expr);
@@ -1632,7 +1638,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 
 llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     auto ctn_type = get_chitype(expr);
-    if (ctn_type->is_pointer()) {
+    if (ctn_type->is_pointer_like()) {
         return compile_expr(fn, expr);
     }
     auto ref = compile_expr_ref(fn, expr);
@@ -1706,7 +1712,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
 
             // Get the instance pointer
             llvm::Value *instance_ptr;
-            if (type->is_pointer()) {
+            if (type->is_pointer_like()) {
                 instance_ptr = compile_expr(fn, data.expr);
             } else {
                 auto ref = compile_expr_ref(fn, data.expr);
@@ -1739,7 +1745,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             builder.CreateStore(bind_void_ptr, data_gep);
 
             return RefValue::from_address(lambda_alloca);
-        } else if (type->is_pointer()) {
+        } else if (type->is_pointer_like()) {
             type = type->get_elem();
             ptr = compile_expr(fn, data.expr);
         } else {

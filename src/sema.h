@@ -23,11 +23,12 @@ struct ChiTypeEnum;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer,
           Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box,
-          Result, Error, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes, Undefined)
+          Result, Error, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
+          Undefined)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
-MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display)
+MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display, Add)
 
 MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait);
 
@@ -361,13 +362,12 @@ struct ChiType {
 
     bool is_raw_pointer() { return kind == TypeKind::Pointer; }
 
-    bool is_pointer() {
+    bool is_pointer_like() {
         return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::MutRef;
     }
 
     bool is_int_like() {
-        return kind == TypeKind::Int || kind == TypeKind::Bool || kind == TypeKind::Pointer ||
-               kind == TypeKind::Reference || kind == TypeKind::MutRef || kind == TypeKind::Char;
+        return kind == TypeKind::Int || kind == TypeKind::Bool || kind == TypeKind::Char;
     }
 
     string get_display_name() {
