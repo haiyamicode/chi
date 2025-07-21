@@ -109,6 +109,7 @@ struct ChiTypeStruct {
     array<ChiType *> type_params = {};
     array<ChiType *> subtypes = {};
     array<InterfaceImpl *> interfaces = {};
+    array<ChiType *> embeds = {}; // For interface embeds
     map<string, ChiStructMember *> member_table = {};
     map<string, ChiStructMember *> static_member_table = {};
     map<ChiType *, InterfaceImpl *> interface_table = {};

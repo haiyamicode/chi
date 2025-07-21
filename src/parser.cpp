@@ -1752,6 +1752,17 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
 Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
     switch (container_kind) {
     case ContainerKind::Interface: {
+        // Check for embed syntax (...interface_name)
+        if (next_is(TokenType::ELLIPSIS)) {
+            consume(); // consume ...
+            auto embed_node = create_node(NodeType::VarDecl, get());
+            embed_node->data.var_decl.is_embed = true;
+            embed_node->data.var_decl.is_field = false;
+            embed_node->data.var_decl.type = parse_type_expr(true);
+            embed_node->name = "__embed"; // Give it a name for internal use
+            expect(TokenType::SEMICOLON);
+            return embed_node;
+        }
         return parse_fn_decl(0);
     }
     default:
