@@ -190,16 +190,9 @@ class Resolver {
     void resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node);
 
     ChiType *resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn, NodeList *args);
-    
-    struct OperatorMethodCall {
-        ast::Node *call_node;
-        ChiType *return_type;
-    };
-    optional<OperatorMethodCall> try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiType *t2, 
-                                                           ast::Node *op1, ast::Node *op2, ast::Node *node, ResolveScope &scope);
-    
+
     array<IntrinsicSymbol> interface_get_intrinsics(ChiType *interface_type);
-    
+
     bool interface_satisfies_trait(ChiType *interface_type, ChiType *required_trait);
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);
@@ -328,6 +321,18 @@ class Resolver {
                                               const string &field_name, bool is_internal,
                                               bool is_write);
     bool is_friend_struct(ChiType *a, ChiType *b);
+
+    struct OperatorMethodCall {
+        ast::Node *call_node;
+        ChiType *return_type;
+    };
+    optional<OperatorMethodCall> try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1,
+                                                             ChiType *t2, ast::Node *op1,
+                                                             ast::Node *op2, ast::Node *node,
+                                                             ResolveScope &scope);
+
+    // Static utility function to map operator TokenType to IntrinsicSymbol
+    static IntrinsicSymbol get_operator_intrinsic_symbol(TokenType op_type);
 };
 
 class ScopeResolver {

@@ -798,14 +798,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_system_types()->bool_;
         default: {
             // First, check if left operand has interface method for this operator
-            IntrinsicSymbol intrinsic_symbol = IntrinsicSymbol::None;
-            switch (data.op_type) {
-            case TokenType::ADD:
-                intrinsic_symbol = IntrinsicSymbol::Add;
-                break;
-            default:
-                break;
-            }
+            IntrinsicSymbol intrinsic_symbol = get_operator_intrinsic_symbol(data.op_type);
 
             ChiType *result_type = t1;
 
@@ -2211,6 +2204,15 @@ IntrinsicSymbol Resolver::resolve_intrinsic_symbol(ast::Node *node) {
     return IntrinsicSymbol::None;
 }
 
+IntrinsicSymbol Resolver::get_operator_intrinsic_symbol(TokenType op_type) {
+    switch (op_type) {
+    case TokenType::ADD:
+        return IntrinsicSymbol::Add;
+    default:
+        return IntrinsicSymbol::None;
+    }
+}
+
 ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node *node,
                                                  ResolveScope &scope) {
     auto &struct_ = struct_type->data.struct_;
@@ -2291,16 +2293,17 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
                 } else if (base.kind == ContainerKind::Interface) {
                     // Check embedded interfaces for intrinsic symbols
                     for (auto embed_type : base.embeds) {
-                        if (embed_type && embed_type->kind == TypeKind::Struct && 
+                        if (embed_type && embed_type->kind == TypeKind::Struct &&
                             ChiTypeStruct::is_interface(embed_type)) {
                             auto &embed_data = embed_type->data.struct_;
-                            
+
                             // Find matching method in embedded interface
                             for (auto embed_member : embed_data.members) {
-                                if (embed_member->is_method() && 
+                                if (embed_member->is_method() &&
                                     embed_member->get_name() == base_member->get_name()) {
                                     // Check if embedded interface has intrinsic symbol
-                                    auto embed_intrinsic = resolve_intrinsic_symbol(embed_data.node);
+                                    auto embed_intrinsic =
+                                        resolve_intrinsic_symbol(embed_data.node);
                                     if (embed_intrinsic != IntrinsicSymbol::None) {
                                         child_method->symbol = embed_intrinsic;
                                         break;
@@ -2364,7 +2367,7 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
     // Add to embeds array if this is an interface
     if (current.kind == ContainerKind::Interface) {
         current.embeds.add(em_type);
-        
+
         // Copy methods from embedded interface to current interface
         for (auto embed_member : base.members) {
             if (embed_member->is_method()) {
@@ -2372,13 +2375,12 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
                 auto existing_member = current.find_member(embed_member->get_name());
                 if (!existing_member) {
                     // Add the method to current interface
-                    auto copied_member = current.add_member(get_allocator(), 
-                                                           embed_member->get_name(), 
-                                                           embed_member->node, 
-                                                           embed_member->resolved_type);
+                    auto copied_member =
+                        current.add_member(get_allocator(), embed_member->get_name(),
+                                           embed_member->node, embed_member->resolved_type);
                     copied_member->orig_parent = em_type;
                     copied_member->symbol = embed_member->symbol;
-                    
+
                     // Add to member_intrinsics if it has an intrinsic symbol
                     if (copied_member->symbol != IntrinsicSymbol::None) {
                         current.member_intrinsics[copied_member->symbol] = copied_member;
@@ -2998,8 +3000,9 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                             satisfies_bound = true;
                             break;
                         }
-                        
-                        // Check if this implemented interface satisfies the required trait (including embeds)
+
+                        // Check if this implemented interface satisfies the required trait
+                        // (including embeds)
                         if (interface_satisfies_trait(impl->interface_type, trait_type)) {
                             satisfies_bound = true;
                             break;
@@ -3672,14 +3675,7 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
             auto intrinsics = interface_get_intrinsics(trait_type);
 
             // Map operator to required intrinsic symbol
-            IntrinsicSymbol required_symbol = IntrinsicSymbol::None;
-            switch (op_type) {
-            case TokenType::ADD:
-                required_symbol = IntrinsicSymbol::Add;
-                break;
-            default:
-                break;
-            }
+            IntrinsicSymbol required_symbol = get_operator_intrinsic_symbol(op_type);
 
             // Check if the interface supports the required intrinsic
             if (required_symbol != IntrinsicSymbol::None) {
@@ -4012,25 +4008,25 @@ bool Resolver::interface_satisfies_trait(ChiType *interface_type, ChiType *requi
     if (!interface_type || !required_trait) {
         return false;
     }
-    
+
     // Direct match
     if (interface_type == required_trait) {
         return true;
     }
-    
+
     // Check if it's an interface
     if (interface_type->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(interface_type)) {
         return false;
     }
-    
+
     auto &struct_data = interface_type->data.struct_;
-    
+
     // Check embedded interfaces recursively
     for (auto embed_type : struct_data.embeds) {
         if (interface_satisfies_trait(embed_type, required_trait)) {
             return true;
         }
     }
-    
+
     return false;
 }

@@ -1258,20 +1258,41 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             return value;
         }
         default: {
-            // Check if this is an interface method call for an operator
+            auto target_type = get_chitype(expr);
+            auto lhs_type = get_chitype(data.op1);
+            auto rhs_type = get_chitype(data.op2);
+            auto struct_type = get_resolver()->eval_struct_type(target_type);
+
+            // For specialized generic functions, check if we need operator method calls
+            // with the concrete types instead of using primitive arithmetic
+            if (struct_type) {
+                // Try to resolve operator method with concrete types
+                IntrinsicSymbol intrinsic_symbol =
+                    Resolver::get_operator_intrinsic_symbol(data.op_type);
+
+                if (intrinsic_symbol != IntrinsicSymbol::None) {
+                    auto resolver = get_resolver();
+                    // Create a minimal scope for the method call resolution
+                    ResolveScope dummy_scope = {};
+                    auto method_call = resolver->try_resolve_operator_method(
+                        intrinsic_symbol, lhs_type, rhs_type, data.op1, data.op2, expr,
+                        dummy_scope);
+                    if (method_call.has_value()) {
+                        return compile_fn_call(fn, method_call->call_node);
+                    }
+                }
+            }
+
+            // Check if this is an interface method call for an operator (from resolver)
             if (data.resolved_call) {
                 return compile_fn_call(fn, data.resolved_call);
             }
 
-            // Fall back to built-in arithmetic operations
+            // Fall back to built-in arithmetic operations for primitive types
             auto lhs = compile_expr(fn, data.op1);
             auto rhs = compile_expr(fn, data.op2);
-            auto target_type = get_chitype(expr);
 
             // Cast operands to target type if needed
-            auto lhs_type = get_chitype(data.op1);
-            auto rhs_type = get_chitype(data.op2);
-
             if (lhs_type != target_type) {
                 lhs = compile_conversion(fn, lhs, lhs_type, target_type);
             }
