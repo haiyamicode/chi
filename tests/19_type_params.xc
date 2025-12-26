@@ -1,3 +1,5 @@
+import "std/ops" as ops;
+
 // Test function and method type parameters
 // This test verifies:
 // 1. Top-level generic functions with type parameters
@@ -15,19 +17,24 @@ func transform<T, U>(value: T, transformer: func(value: T) U) U {
     return transformer(value);
 }
 
-struct Container<T> {
+struct Container<T: ops.Add> {
     value: T;
 
     func new(value: T) {
         this.value = value;
     }
-    
+
     func get() T {
         return this.value;
     }
-    
+
     func zmap<U>(transform: func(value: T) U) Container<U> {
         return {transform(this.value)};
+    }
+
+    // Self-referencing generic: method takes Container<T> by value
+    func add(other: Container<T>) Container<T> {
+        return {this.value + other.value};
     }
 }
 
@@ -77,8 +84,14 @@ func main() {
     printf("float result: {}\n", float_container.get());
     
     // Test with inferred method type parameter
-    var float_container_inferred = container.zmap(func(i: int) float { 
-        return i as float * 0.5; 
+    var float_container_inferred = container.zmap(func(i: int) float {
+        return i as float * 0.5;
     });
     printf("float result [inferred]: {}\n", float_container_inferred.get());
+
+    // Test self-referencing generic struct method (Container<T>.add(Container<T>))
+    var c1: Container<int> = {100};
+    var c2: Container<int> = {200};
+    var added = c1.add(c2);
+    printf("added: {}\n", added.get());
 }

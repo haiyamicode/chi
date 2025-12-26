@@ -199,7 +199,7 @@ class Resolver {
 
     bool should_resolve_fn_body(ResolveScope &scope);
 
-    bool should_destroy(ast::Node *node);
+    bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
 
     ChiType *resolve_comparator(ChiType *type, ResolveScope &scope);
 

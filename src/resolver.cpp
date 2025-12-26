@@ -540,6 +540,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.body && should_resolve_fn_body(scope)) {
             fn_scope = fn_scope.set_parent_fn(proto);
             resolve(data.body, fn_scope);
+
+            // Add params to cleanup_vars (after body resolution ensures types are resolved)
+            auto &proto_data = data.fn_proto->data.fn_proto;
+            for (auto param : proto_data.params) {
+                if (should_destroy(param) && !param->escape.is_capture()) {
+                    data.cleanup_vars.add(param);
+                }
+            }
         }
         return proto;
     }
@@ -751,6 +759,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.is_const) {
             data.resolved_value = resolve_constant_value(data.expr);
             return var_type;
+        }
+        // Add to cleanup_vars if this variable needs destruction
+        if (scope.parent_fn_node && should_destroy(node, var_type) && !node->escape.is_capture()) {
+            scope.parent_fn_def()->cleanup_vars.add(node);
         }
         return var_type;
     }
@@ -1812,7 +1824,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         return type;
     }
     case NodeType::BindIdentifier: {
-        return scope.value_type;
+        // Add to cleanup_vars if this bind variable needs destruction (for-range by value)
+        auto bind_type = scope.value_type;
+        if (scope.parent_fn_node && should_destroy(node, bind_type) && !node->escape.is_capture()) {
+            scope.parent_fn_def()->cleanup_vars.add(node);
+        }
+        return bind_type;
     }
     case NodeType::ImportSymbol: {
         auto &data = node->data.import_symbol;
@@ -1902,11 +1919,6 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
         node->global_id = resolve_global_id(node);
     }
 
-    if (node->type == NodeType::VarDecl || node->type == NodeType::ParamDecl) {
-        if (scope.parent_fn_node && should_destroy(node) && !node->escape.is_capture()) {
-            scope.parent_fn_def()->cleanup_vars.add(node);
-        }
-    }
     if (!result)
         return nullptr;
     return result;
@@ -2396,13 +2408,13 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
     }
 }
 
-bool Resolver::should_destroy(ast::Node *node) {
+bool Resolver::should_destroy(ast::Node *node, ChiType *type_override) {
     auto is_managed = has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED);
     if (is_managed && node->is_heap_allocated()) {
         return false;
     }
-    auto resolved_type = node_get_type(node);
-    if (resolved_type->kind == TypeKind::String) {
+    auto resolved_type = type_override ? type_override : node_get_type(node);
+    if (!resolved_type || resolved_type->kind == TypeKind::String) {
         return false;
     }
     return is_struct_type(resolved_type) && get_struct_member(resolved_type, "delete");
