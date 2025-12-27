@@ -580,7 +580,12 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     auto return_b = fn->new_label("_return");
     fn->return_label = return_b;
     if (fn_def.body) {
-        compile_block(fn, node, fn_def.body, return_b);
+        // Check if this is an async function with awaits
+        if (fn_def.is_async()) {
+            compile_async_fn_body(fn);
+        } else {
+            compile_block(fn, node, fn_def.body, return_b);
+        }
     }
     if (fn->get_def()->has_try_or_cleanup()) {
         fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
@@ -884,6 +889,517 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     }
 
     return builder.CreateLoad(struct_type_l, var);
+}
+
+// ============================================================================
+// Async/Await Codegen
+// ============================================================================
+
+// Helper to check if an expression contains an await
+static bool contains_await(ast::Node *node) {
+    if (!node) return false;
+    if (node->type == ast::NodeType::AwaitExpr) return true;
+
+    switch (node->type) {
+    case ast::NodeType::VarDecl: {
+        auto &data = node->data.var_decl;
+        return contains_await(data.expr);
+    }
+    case ast::NodeType::ReturnStmt:
+        return contains_await(node->data.return_stmt.expr);
+    case ast::NodeType::BinOpExpr:
+        return contains_await(node->data.bin_op_expr.op1) ||
+               contains_await(node->data.bin_op_expr.op2);
+    case ast::NodeType::FnCallExpr:
+        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
+            if (contains_await(node->data.fn_call_expr.args[i])) return true;
+        }
+        return contains_await(node->data.fn_call_expr.fn_ref_expr);
+    case ast::NodeType::UnaryOpExpr:
+        return contains_await(node->data.unary_op_expr.op1);
+    default:
+        return false;
+    }
+}
+
+// Find the await expression within a node
+static ast::Node *find_await_expr(ast::Node *node) {
+    if (!node) return nullptr;
+    if (node->type == ast::NodeType::AwaitExpr) return node;
+
+    switch (node->type) {
+    case ast::NodeType::VarDecl:
+        return find_await_expr(node->data.var_decl.expr);
+    case ast::NodeType::ReturnStmt:
+        return find_await_expr(node->data.return_stmt.expr);
+    case ast::NodeType::BinOpExpr: {
+        auto lhs = find_await_expr(node->data.bin_op_expr.op1);
+        return lhs ? lhs : find_await_expr(node->data.bin_op_expr.op2);
+    }
+    case ast::NodeType::FnCallExpr:
+        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
+            auto arg = find_await_expr(node->data.fn_call_expr.args[i]);
+            if (arg) return arg;
+        }
+        return find_await_expr(node->data.fn_call_expr.fn_ref_expr);
+    case ast::NodeType::UnaryOpExpr:
+        return find_await_expr(node->data.unary_op_expr.op1);
+    default:
+        return nullptr;
+    }
+}
+
+void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars) {
+    if (!node) return;
+
+    switch (node->type) {
+    case ast::NodeType::Identifier: {
+        auto decl = node->data.identifier.decl;
+        if (decl && decl->type == ast::NodeType::VarDecl) {
+            vars.insert(decl);
+        }
+        break;
+    }
+    case ast::NodeType::VarDecl:
+        collect_vars_used_in_node(node->data.var_decl.expr, vars);
+        break;
+    case ast::NodeType::ReturnStmt:
+        collect_vars_used_in_node(node->data.return_stmt.expr, vars);
+        break;
+    case ast::NodeType::BinOpExpr:
+        collect_vars_used_in_node(node->data.bin_op_expr.op1, vars);
+        collect_vars_used_in_node(node->data.bin_op_expr.op2, vars);
+        break;
+    case ast::NodeType::FnCallExpr:
+        collect_vars_used_in_node(node->data.fn_call_expr.fn_ref_expr, vars);
+        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
+            collect_vars_used_in_node(node->data.fn_call_expr.args[i], vars);
+        }
+        break;
+    case ast::NodeType::AwaitExpr:
+        collect_vars_used_in_node(node->data.await_expr.expr, vars);
+        break;
+    case ast::NodeType::Block:
+        for (int i = 0; i < node->data.block.statements.len; i++) {
+            collect_vars_used_in_node(node->data.block.statements[i], vars);
+        }
+        break;
+    case ast::NodeType::UnaryOpExpr:
+        collect_vars_used_in_node(node->data.unary_op_expr.op1, vars);
+        break;
+    default:
+        break;
+    }
+}
+
+std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
+    std::vector<AsyncSegment> segments;
+    AsyncSegment current;
+
+    auto &stmts = body->data.block.statements;
+    for (int i = 0; i < stmts.len; i++) {
+        auto stmt = stmts[i];
+        if (contains_await(stmt)) {
+            // This statement has an await - it ends the current segment
+            current.await_expr = find_await_expr(stmt);
+            current.await_value_type = get_chitype(current.await_expr);
+
+            // If the await is in a var decl, store it for later use
+            if (stmt->type == ast::NodeType::VarDecl) {
+                current.await_var_decl = stmt;
+            } else {
+                current.stmts.push_back(stmt);
+            }
+
+            segments.push_back(current);
+            current = AsyncSegment();
+        } else {
+            current.stmts.push_back(stmt);
+        }
+    }
+
+    // Add the final segment (code after last await, including return)
+    if (!current.stmts.empty()) {
+        segments.push_back(current);
+    }
+
+    // Now compute vars_to_capture for each segment
+    // A var defined in segment i needs to be captured if used in segment j (j > i)
+    // Note: await_var_decl for segment i is NOT captured by segment i - it's passed as the value parameter
+    std::set<ast::Node *> defined_vars;
+    for (size_t i = 0; i < segments.size(); i++) {
+        // Collect vars defined in this segment's statements
+        for (auto stmt : segments[i].stmts) {
+            if (stmt->type == ast::NodeType::VarDecl) {
+                defined_vars.insert(stmt);
+            }
+        }
+
+        // For subsequent segments, find which vars they use
+        for (size_t j = i + 1; j < segments.size(); j++) {
+            std::set<ast::Node *> used_vars;
+            for (auto stmt : segments[j].stmts) {
+                collect_vars_used_in_node(stmt, used_vars);
+            }
+            // Also check the await expression itself (argument to await)
+            if (segments[j].await_expr) {
+                collect_vars_used_in_node(segments[j].await_expr->data.await_expr.expr, used_vars);
+            }
+
+            // Any var in defined_vars that is in used_vars must be captured
+            for (auto var : used_vars) {
+                if (defined_vars.count(var)) {
+                    segments[i].vars_to_capture.insert(var);
+                }
+            }
+        }
+
+        // Add await_var_decl to defined_vars AFTER computing this segment's captures
+        // This is because await_var_decl is passed as value parameter, not captured
+        if (segments[i].await_var_decl) {
+            defined_vars.insert(segments[i].await_var_decl);
+        }
+    }
+
+    return segments;
+}
+
+llvm::Function *Compiler::create_continuation_fn_decl(AsyncContext &ctx, int segment_index) {
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &llvm_module = *m_ctx->llvm_module;
+    auto parent_fn = ctx.parent_fn;
+
+    // Create the continuation function: void __fnname_cont_N(void* data, void* value)
+    auto void_type = llvm::Type::getVoidTy(llvm_ctx);
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+    auto fn_type = llvm::FunctionType::get(void_type, {ptr_type, ptr_type}, false);
+    auto fn_name = parent_fn->qualified_name + "__cont_" + std::to_string(segment_index);
+    auto llvm_fn = llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fn_name, llvm_module);
+
+    // Create a Function object for code generation
+    auto cont_fn = new Function(m_ctx, llvm_fn, parent_fn->node);
+    cont_fn->qualified_name = fn_name;
+
+    // Set up entry block
+    auto entry_b = cont_fn->new_label("_entry");
+    cont_fn->use_label(entry_b);
+
+    // Store the Function object for later body generation
+    ctx.continuation_fn_objects.push_back(cont_fn);
+
+    return llvm_fn;
+}
+
+void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_index) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    auto &segment = ctx.segments[segment_index];
+
+    // Get the continuation function object (index in continuation arrays is segment_index - 1)
+    int cont_idx = segment_index - 1;
+    auto cont_fn = ctx.continuation_fn_objects[cont_idx];
+    auto llvm_fn = ctx.continuations[cont_idx];
+
+    // Position builder at entry block (already set up in create_continuation_fn_decl)
+    builder.SetInsertPoint(&llvm_fn->getEntryBlock());
+
+    // Get the arguments: data (captures) and value (resolved promise value)
+    auto data_arg = llvm_fn->getArg(0);
+    auto value_arg = llvm_fn->getArg(1);
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+
+    // Previous segment that ended with an await
+    int prev_segment_idx = segment_index - 1;
+    auto &prev_segment = ctx.segments[prev_segment_idx];
+
+    // Build the capture struct type for this continuation
+    // { result_promise_ptr, captured_var1, captured_var2, ... }
+    std::vector<llvm::Type *> capture_types;
+    capture_types.push_back(ptr_type); // result promise pointer
+
+    std::vector<ast::Node *> captured_vars_ordered;
+    for (auto var : prev_segment.vars_to_capture) {
+        captured_vars_ordered.push_back(var);
+        capture_types.push_back(compile_type(get_chitype(var)));
+    }
+
+    auto capture_struct_type = llvm::StructType::get(llvm_ctx, capture_types);
+    auto captures_ptr = builder.CreateBitCast(data_arg, capture_struct_type->getPointerTo());
+
+    // Extract result promise pointer
+    auto result_promise_ptr_ptr = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
+    auto result_promise_ptr = builder.CreateLoad(ptr_type, result_promise_ptr_ptr);
+
+    // Extract captured variables and add to var table
+    map<ast::Node *, llvm::Value *> local_vars;
+    for (size_t i = 0; i < captured_vars_ordered.size(); i++) {
+        auto var = captured_vars_ordered[i];
+        auto var_type = get_chitype(var);
+        auto var_type_l = compile_type(var_type);
+
+        // Allocate local storage for the captured variable
+        auto local_alloc = cont_fn->entry_alloca(var_type_l, var->name);
+        auto captured_value_ptr = builder.CreateStructGEP(capture_struct_type, captures_ptr, i + 1);
+        auto captured_value = builder.CreateLoad(var_type_l, captured_value_ptr);
+        builder.CreateStore(captured_value, local_alloc);
+
+        local_vars[var] = local_alloc;
+        add_var(var, local_alloc);
+    }
+
+    // Handle the await result from previous segment
+    if (prev_segment.await_var_decl) {
+        auto var = prev_segment.await_var_decl;
+        auto var_type = get_chitype(var);
+        auto var_type_l = compile_type(var_type);
+
+        // Allocate storage for the await result
+        auto var_alloc = cont_fn->entry_alloca(var_type_l, var->name);
+
+        // Load value from value_arg (which is a pointer to the value)
+        auto result_value = builder.CreateLoad(var_type_l, value_arg);
+        builder.CreateStore(result_value, var_alloc);
+
+        local_vars[var] = var_alloc;
+        add_var(var, var_alloc);
+    }
+
+    // Check if this is the final segment (contains return)
+    bool is_final = (segment_index == (int)ctx.segments.size() - 1);
+
+    // Compile the segment's statements
+    for (auto stmt : segment.stmts) {
+        if (stmt->type == ast::NodeType::ReturnStmt) {
+            // For return in async function, resolve the result promise
+            auto &data = stmt->data.return_stmt;
+            if (data.expr) {
+                auto ret_value = compile_expr(cont_fn, data.expr);
+                auto value_type = get_chitype(data.expr);
+                auto value_type_l = compile_type(value_type);
+
+                // Box the value on heap
+                auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
+                auto value_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l);
+                auto value_size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), value_size);
+                auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
+                auto boxed_value = builder.CreateCall(malloc_fn, {value_size_l, null_ptr}, "boxed");
+                builder.CreateStore(ret_value, boxed_value);
+
+                // Call cx_promise_resolve
+                auto resolve_fn = get_system_fn("cx_promise_resolve");
+                builder.CreateCall(resolve_fn->llvm_fn, {result_promise_ptr, boxed_value});
+            } else {
+                // void return
+                auto resolve_fn = get_system_fn("cx_promise_resolve");
+                auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
+                builder.CreateCall(resolve_fn->llvm_fn, {result_promise_ptr, null_ptr});
+            }
+        } else if (contains_await(stmt)) {
+            // This segment has another await - chain to next continuation
+            auto await_expr = find_await_expr(stmt);
+            emit_promise_chain(cont_fn, ctx, await_expr, segment_index + 1, local_vars, result_promise_ptr);
+        } else {
+            compile_stmt(cont_fn, stmt);
+        }
+    }
+
+    // If segment has an await (not final), chain to next continuation
+    if (segment.await_expr && !is_final) {
+        emit_promise_chain(cont_fn, ctx, segment.await_expr, segment_index + 1, local_vars, result_promise_ptr);
+    }
+
+    builder.CreateRetVoid();
+
+    // Clean up temporary vars from var_table
+    for (auto &kv : local_vars.data) {
+        m_ctx->var_table.unset(kv.first);
+    }
+
+    llvm::verifyFunction(*llvm_fn);
+}
+
+llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,
+                                                  map<ast::Node *, llvm::Value *> &local_vars,
+                                                  llvm::Value *result_promise_ptr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    int prev_segment_idx = segment_index - 1;
+    auto &prev_segment = ctx.segments[prev_segment_idx];
+
+    // Build capture struct type: { result_promise_ptr, captured_vars... }
+    std::vector<llvm::Type *> capture_types;
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+    capture_types.push_back(ptr_type); // result promise pointer
+
+    std::vector<ast::Node *> captured_vars_ordered;
+    for (auto var : prev_segment.vars_to_capture) {
+        captured_vars_ordered.push_back(var);
+        capture_types.push_back(compile_type(get_chitype(var)));
+    }
+
+    auto capture_struct_type = llvm::StructType::get(llvm_ctx, capture_types);
+    auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
+
+    // Allocate capture struct on heap
+    auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
+    auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size);
+    auto null_ptr = llvm::ConstantPointerNull::get(ptr_type);
+    auto capture_alloc = builder.CreateCall(malloc_fn, {size_l, null_ptr}, "captures");
+    auto captures_ptr = builder.CreateBitCast(capture_alloc, capture_struct_type->getPointerTo());
+
+    // Store result promise pointer (passed as parameter)
+    auto result_ptr_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
+    builder.CreateStore(result_promise_ptr, result_ptr_gep);
+
+    // Store captured variables
+    for (size_t i = 0; i < captured_vars_ordered.size(); i++) {
+        auto var = captured_vars_ordered[i];
+        auto var_type = get_chitype(var);
+        auto var_type_l = compile_type(var_type);
+
+        // Get the variable value (either from local_vars or var_table)
+        llvm::Value *var_ptr;
+        if (local_vars.has_key(var)) {
+            var_ptr = local_vars[var];
+        } else {
+            var_ptr = get_var(var);
+        }
+        auto var_value = builder.CreateLoad(var_type_l, var_ptr);
+
+        auto var_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, i + 1);
+        builder.CreateStore(var_value, var_gep);
+    }
+
+    // Build CxLambda struct: { ptr, size, data }
+    auto lambda_type = get_system_types()->lambda;
+    auto lambda_type_l = compile_type(lambda_type);
+    auto lambda_struct_type = (llvm::StructType *)lambda_type_l;
+
+    auto lambda_alloc = fn->entry_alloca(lambda_struct_type, "lambda");
+
+    // ptr = continuation function (segment N uses continuation at index N-1)
+    auto cont_fn = ctx.continuations[segment_index - 1];
+    auto fn_ptr_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 0);
+    builder.CreateStore(cont_fn, fn_ptr_gep);
+
+    // size = capture struct size
+    auto size_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 1);
+    builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size), size_gep);
+
+    // data = captures pointer
+    auto data_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 2);
+    builder.CreateStore(capture_alloc, data_gep);
+
+    return builder.CreateLoad(lambda_struct_type, lambda_alloc);
+}
+
+void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
+                                   int next_segment_index, map<ast::Node *, llvm::Value *> &local_vars,
+                                   llvm::Value *result_promise_ptr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Compile the await expression to get the promise
+    auto awaited_promise = compile_expr(fn, await_expr->data.await_expr.expr);
+
+    // Allocate storage for the promise
+    auto awaited_promise_ptr = fn->entry_alloca(ctx.promise_struct_type, "awaited");
+    builder.CreateStore(awaited_promise, awaited_promise_ptr);
+
+    // Build continuation lambda for next segment
+    auto lambda = build_continuation_lambda(fn, ctx, next_segment_index, local_vars, result_promise_ptr);
+
+    // Store lambda and call cx_promise_then
+    auto lambda_ptr = fn->entry_alloca(compile_type(get_system_types()->lambda), "cont_lambda");
+    builder.CreateStore(lambda, lambda_ptr);
+
+    auto then_fn = get_system_fn("cx_promise_then");
+    auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
+    builder.CreateCall(then_fn->llvm_fn, {awaited_promise_ptr, lambda_ptr, null_ptr});
+}
+
+void Compiler::compile_async_fn_body(Function *fn) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    auto fn_def = fn->get_def();
+    auto body = fn_def->body;
+
+    // Get return type (Promise<T>)
+    auto return_type = fn->fn_type->data.fn.return_type;
+    assert(return_type->kind == TypeKind::Promise);
+
+    auto promise_struct_type_l = (llvm::StructType *)compile_type(return_type->data.promise.internal);
+
+    // Create AsyncContext
+    AsyncContext ctx;
+    ctx.parent_fn = fn;
+    ctx.promise_type = return_type;
+    ctx.promise_struct_type = promise_struct_type_l;
+    ctx.segments = collect_async_segments(body);
+
+    // Check if there are any awaits - if the first segment has no await_expr, there are no awaits
+    if (ctx.segments.empty() || !ctx.segments[0].await_expr) {
+        // No awaits - just compile normally
+        compile_block(fn, fn->node, body, fn->return_label);
+        return;
+    }
+
+    // Allocate result promise
+    ctx.result_promise_ptr = fn->entry_alloca(promise_struct_type_l, "result_promise");
+
+    // Initialize promise: cx_promise_new(&result)
+    auto promise_new_fn = get_system_fn("cx_promise_new");
+    builder.CreateCall(promise_new_fn->llvm_fn, {ctx.result_promise_ptr});
+
+    // Create label for first segment code before generating continuations
+    auto first_segment_label = fn->new_label("first_segment");
+
+    // Phase 1: Create all continuation function declarations first
+    // Note: this changes the builder's insert point to the continuation functions
+    for (size_t i = 1; i < ctx.segments.size(); i++) {
+        auto llvm_fn = create_continuation_fn_decl(ctx, i);
+        ctx.continuations.push_back(llvm_fn);
+    }
+
+    // Restore builder to parent function entry and add branch to first segment
+    builder.SetInsertPoint(&fn->llvm_fn->getEntryBlock());
+    builder.CreateBr(first_segment_label);
+
+    // Phase 2: Generate all continuation function bodies
+    for (size_t i = 1; i < ctx.segments.size(); i++) {
+        generate_async_continuation_body(ctx, i);
+    }
+
+    // Restore builder position to parent function's first segment label
+    fn->use_label(first_segment_label);
+
+    // Now compile the first segment (code before first await)
+    auto &first_segment = ctx.segments[0];
+    map<ast::Node *, llvm::Value *> local_vars;
+
+    for (auto stmt : first_segment.stmts) {
+        if (stmt->type == ast::NodeType::VarDecl) {
+            compile_stmt(fn, stmt);
+            local_vars[stmt] = get_var(stmt);
+        } else {
+            compile_stmt(fn, stmt);
+        }
+    }
+
+    // Handle the first await - chain to continuation for segment 1
+    if (first_segment.await_expr) {
+        emit_promise_chain(fn, ctx, first_segment.await_expr, 1, local_vars, ctx.result_promise_ptr);
+    }
+
+    // Store result promise in return_value
+    auto result_promise = builder.CreateLoad(promise_struct_type_l, ctx.result_promise_ptr);
+    builder.CreateStore(result_promise, fn->return_value);
+
+    // Jump to return label
+    builder.CreateBr(fn->return_label);
 }
 
 llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *value,

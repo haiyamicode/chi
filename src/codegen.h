@@ -8,6 +8,7 @@
 #pragma once
 
 #include <list>
+#include <set>
 
 #include "ast.h"
 #include "enum.h"
@@ -162,6 +163,25 @@ struct InvokeInfo {
     label_t *landing = nullptr;
     llvm::Value *sret = nullptr;
     llvm::Type *sret_type = nullptr;
+};
+
+// Async/await support structures
+struct AsyncSegment {
+    std::vector<ast::Node *> stmts;      // statements in this segment
+    ast::Node *await_expr = nullptr;     // the await that ends this segment (null for final)
+    ast::Node *await_var_decl = nullptr; // the var decl containing the await (if any)
+    ChiType *await_value_type = nullptr; // type of the awaited value
+    std::set<ast::Node *> vars_to_capture; // variables needed in later segments
+};
+
+struct AsyncContext {
+    Function *parent_fn = nullptr;
+    std::vector<AsyncSegment> segments;
+    std::vector<llvm::Function *> continuations;       // LLVM functions for continuations
+    std::vector<Function *> continuation_fn_objects;   // Function objects for codegen
+    llvm::Value *result_promise_ptr = nullptr; // Pointer to the result Promise
+    ChiType *promise_type = nullptr;           // The Promise<T> return type
+    llvm::StructType *promise_struct_type = nullptr;
 };
 
 struct CodegenContext {
@@ -334,6 +354,19 @@ class Compiler {
                                                 ChiType *lambda_type);
     llvm::Value *generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
                                                 ChiType *lambda_type, NodeList *captures);
+
+    // Async/await codegen
+    std::vector<AsyncSegment> collect_async_segments(ast::Node *body);
+    void collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars);
+    llvm::Function *create_continuation_fn_decl(AsyncContext &ctx, int segment_index);
+    void generate_async_continuation_body(AsyncContext &ctx, int segment_index);
+    llvm::Value *build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,
+                                           map<ast::Node *, llvm::Value *> &local_vars,
+                                           llvm::Value *result_promise_ptr);
+    void emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
+                            int next_segment_index, map<ast::Node *, llvm::Value *> &local_vars,
+                            llvm::Value *result_promise_ptr);
+    void compile_async_fn_body(Function *fn);
 
     void compile_struct_vtables(ChiType *type);
     llvm::Value *compile_type_info(ChiType *type);

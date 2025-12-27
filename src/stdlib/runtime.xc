@@ -27,6 +27,10 @@ extern "C" {
   func cx_personality(...) int32;
   func cx_timeout(delay: uint64, callback: *void);
   func cx_call(fn: *void);
+  func cx_promise_new(promise: *void);
+  func cx_promise_resolve(promise: *void, value: *void);
+  func cx_promise_reject(promise: *void, error: *void);
+  func cx_promise_then(promise: *void, on_resolve: *void, on_reject: *void);
   func cx_string_format(format: *string, values: *void, str: *string);
   func cx_string_from_chars(data: *void, size: uint32, str: *string);
   func cx_string_delete(dest: *string);
