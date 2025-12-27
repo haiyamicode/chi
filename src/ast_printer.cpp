@@ -347,6 +347,12 @@ void AstPrinter::print_node(Node *node) {
         print_node(data.expr);
         break;
     }
+    case NodeType::AwaitExpr: {
+        auto &data = node->data.await_expr;
+        print("await ");
+        print_node(data.expr);
+        break;
+    }
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
         print_node(data.expr);

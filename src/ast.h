@@ -20,7 +20,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
-          ExternDecl, TryExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
+          ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn);
 
 MAKE_ENUM(ModuleKind, XC, XM);
@@ -39,6 +39,7 @@ enum DeclFlag : uint32_t {
     DECL_PROTECTED = 1 << 3,
     DECL_MUTABLE = 1 << 4,
     DECL_STATIC = 1 << 5,
+    DECL_ASYNC = 1 << 6,
 };
 
 struct Module {
@@ -120,6 +121,7 @@ struct DeclSpec {
     bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
     bool is_extern() const { return has_flag(DECL_EXTERN); }
     bool is_static() const { return has_flag(DECL_STATIC); }
+    bool is_async() const { return has_flag(DECL_ASYNC); }
 };
 
 struct FnProto {
@@ -146,6 +148,7 @@ struct FnDef {
     array<Node *> variants = {};
 
     bool is_static() { return decl_spec && decl_spec->is_static(); }
+    bool is_async() { return decl_spec && decl_spec->is_async(); }
 
     bool is_instance_method() {
         switch (fn_kind) {
@@ -216,6 +219,10 @@ struct UnaryOpExpr {
 struct TryExpr {
     Node *expr = nullptr;
     Node *catch_expr = nullptr;
+};
+
+struct AwaitExpr {
+    Node *expr = nullptr;
 };
 
 struct FnCallExpr {
@@ -481,6 +488,7 @@ struct Node {
         BinOpExpr bin_op_expr;
         UnaryOpExpr unary_op_expr;
         TryExpr try_expr;
+        AwaitExpr await_expr;
         Node *child_expr;
         Identifier identifier;
         IfStmt if_stmt;

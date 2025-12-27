@@ -161,6 +161,7 @@ bool Parser::is_declaration_start(TokenType type) {
     case TokenType::KW_PRIVATE:
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
+    case TokenType::KW_ASYNC:
     case TokenType::AT:
         return true;
     default:
@@ -352,6 +353,11 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         spec->flags |= DECL_STATIC;
         break;
     }
+    case TokenType::KW_ASYNC: {
+        consume();
+        spec->flags |= DECL_ASYNC;
+        break;
+    }
     default:
         break;
     }
@@ -385,6 +391,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::KW_PRIVATE:
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
+    case TokenType::KW_ASYNC:
         return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
@@ -953,7 +960,8 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::INC:
     case TokenType::DEC:
     case TokenType::KW_SWITCH:
-    case TokenType::KW_TRY: {
+    case TokenType::KW_TRY:
+    case TokenType::KW_AWAIT: {
         if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_LET)) {
             return parse_var_decl(false);
         }
@@ -1112,6 +1120,13 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
         consume();
         auto node = create_node(NodeType::TryExpr, token);
         node->data.try_expr.expr = parse_child_expr(lhs, parent);
+        return node;
+    }
+
+    case TokenType::KW_AWAIT: {
+        consume();
+        auto node = create_node(NodeType::AwaitExpr, token);
+        node->data.await_expr.expr = parse_child_expr(lhs, parent);
         return node;
     }
 

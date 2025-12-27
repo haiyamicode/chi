@@ -70,6 +70,8 @@ void Lexer::setup_keywords() {
     s_keywords["in"] = TokenType::KW_IN;
     s_keywords["undefined"] = TokenType::KW_UNDEFINED;
     s_keywords["static"] = TokenType::KW_STATIC;
+    s_keywords["async"] = TokenType::KW_ASYNC;
+    s_keywords["await"] = TokenType::KW_AWAIT;
 
     // bool
     s_keywords["true"] = TokenType::BOOL;

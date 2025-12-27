@@ -1346,6 +1346,35 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         return result_var;
     }
+    case ast::NodeType::AwaitExpr: {
+        // For now, implement a simple synchronous await that reads the value directly
+        // from an already-resolved Promise. Full async implementation will use continuations.
+        auto &data = expr->data.await_expr;
+        auto &builder = *m_ctx->llvm_builder.get();
+
+        // Get the Promise type info
+        auto promise_type = get_chitype(data.expr);
+        auto promise_struct_type_l = compile_type(promise_type->data.promise.internal);
+
+        // Compile the promise expression and store it
+        auto promise_val = compile_expr(fn, data.expr);
+        auto promise_ptr = builder.CreateAlloca(promise_struct_type_l, nullptr, "await_promise");
+        builder.CreateStore(promise_val, promise_ptr);
+
+        // Get the value type (what we're unwrapping from Promise<T>)
+        auto result_type = get_chitype(expr);
+        auto result_type_l = compile_type(result_type);
+
+        // Promise struct layout: {state, value, error, on_resolve, on_reject}
+        // value is at index 1, and it's a pointer to the actual value
+        // GEP to get the value pointer field (index 1)
+        auto value_ptr_ptr = builder.CreateStructGEP(promise_struct_type_l, promise_ptr, 1, "await_value_ptr");
+        auto value_ptr = builder.CreateLoad(get_llvm_ptr_type(), value_ptr_ptr, "await_value_addr");
+
+        // Load the actual value
+        auto result = builder.CreateLoad(result_type_l, value_ptr, "await_result");
+        return result;
+    }
     case ast::NodeType::DotExpr: {
         auto member = expr->data.dot_expr.resolved_struct_member;
         auto ref = compile_expr_ref(fn, expr);
@@ -2301,8 +2330,46 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto scope = fn->get_scope();
 
         if (data.expr) {
-            auto ret_value = compile_assignment_value(fn, data.expr, stmt);
-            compile_copy(fn, ret_value, fn->return_value, get_chitype(stmt), data.expr);
+            // Check if this is an async function returning T (wrapped to Promise<T>)
+            bool is_async = fn->node && fn->node->type == ast::NodeType::FnDef &&
+                            fn->node->data.fn_def.is_async();
+            auto return_type = fn->fn_type->data.fn.return_type;
+
+            if (is_async && return_type->kind == TypeKind::Promise) {
+                // For async functions, wrap the return value in a Promise
+                auto value_type = return_type->data.promise.value;
+                auto value_type_l = compile_type(value_type);
+                auto promise_struct_type_l = compile_type(return_type->data.promise.internal);
+
+                // Compile the expression value
+                auto ret_value = compile_assignment_value(fn, data.expr, stmt);
+
+                // Allocate memory for the value on the heap
+                auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
+                auto value_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l);
+                auto value_size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), value_size);
+                auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
+                auto value_ptr = llvm_builder.CreateCall(malloc_fn, {value_size_l, null_ptr}, "value_ptr");
+                llvm_builder.CreateStore(ret_value, value_ptr);
+
+                // Initialize Promise fields in return_value
+                // state = CX_PROMISE_RESOLVED (1)
+                auto state_ptr = llvm_builder.CreateStructGEP(promise_struct_type_l, fn->return_value, 0, "state_ptr");
+                llvm_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), 1), state_ptr);
+
+                // value = value_ptr
+                auto value_field_ptr = llvm_builder.CreateStructGEP(promise_struct_type_l, fn->return_value, 1, "value_field_ptr");
+                llvm_builder.CreateStore(value_ptr, value_field_ptr);
+
+                // error = nullptr
+                auto error_ptr = llvm_builder.CreateStructGEP(promise_struct_type_l, fn->return_value, 2, "error_ptr");
+                llvm_builder.CreateStore(null_ptr, error_ptr);
+
+                // on_resolve and on_reject are left as zero-initialized
+            } else {
+                auto ret_value = compile_assignment_value(fn, data.expr, stmt);
+                compile_copy(fn, ret_value, fn->return_value, get_chitype(stmt), data.expr);
+            }
         }
         llvm_builder.CreateBr(fn->return_label);
         scope->branched = true;

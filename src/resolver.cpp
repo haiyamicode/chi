@@ -929,6 +929,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         scope.parent_fn_def()->has_try = true;
         return get_result_type(expr_type, get_system_types()->error);
     }
+    case NodeType::AwaitExpr: {
+        auto &data = node->data.await_expr;
+        auto expr_type = resolve(data.expr, scope);
+        // Check that we're inside an async function
+        auto parent_fn = scope.parent_fn_def();
+        if (!parent_fn->is_async()) {
+            error(node, "await can only be used inside async functions");
+        }
+        // Check that the expression returns a Promise<T>
+        if (expr_type->kind != TypeKind::Promise) {
+            error(node, "await requires a Promise type, got {}", to_string(expr_type));
+            return get_system_types()->void_;
+        }
+        // Return the unwrapped value type
+        return expr_type->data.promise.value;
+    }
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
         auto dest_type = resolve_value(data.dest_type, scope);
@@ -961,12 +977,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ReturnStmt: {
         auto &data = node->data.return_stmt;
-        auto expr_scope =
-            scope.set_is_escaping(true).set_value_type(scope.parent_fn->data.fn.return_type);
-        auto expr_type = data.expr ? resolve(data.expr, expr_scope) : get_system_types()->void_;
         assert(scope.parent_fn);
         auto return_type = scope.parent_fn->data.fn.return_type;
-        check_assignment(data.expr, expr_type, return_type);
+
+        // For async functions, the value type for the expression is the inner Promise value type
+        ChiType *value_type_hint = return_type;
+        if (scope.parent_fn_def()->is_async() && return_type->kind == TypeKind::Promise) {
+            value_type_hint = return_type->data.promise.value;
+        }
+
+        auto expr_scope = scope.set_is_escaping(true).set_value_type(value_type_hint);
+        auto expr_type = data.expr ? resolve(data.expr, expr_scope) : get_system_types()->void_;
+
+        // For async functions returning Promise<T>, allow returning T directly
+        ChiType *expected_type = return_type;
+        if (scope.parent_fn_def()->is_async() && return_type->kind == TypeKind::Promise) {
+            expected_type = return_type->data.promise.value;
+        }
+        check_assignment(data.expr, expr_type, expected_type);
         return return_type;
     }
     case NodeType::ParenExpr: {
@@ -3129,13 +3157,34 @@ ChiType *Resolver::get_promise_type(ChiType *value) {
     type->data.promise.value = value;
     m_ctx->promise_of[value] = type;
 
+    // Create internal struct matching CxPromise runtime layout:
+    // struct CxPromise {
+    //     CxPromiseState state;  // uint32
+    //     void *value;           // pointer
+    //     void *error;           // pointer
+    //     CxLambda on_resolve;   // struct {void*, uint32, void*}
+    //     CxLambda on_reject;    // struct {void*, uint32, void*}
+    // };
     auto stype = create_type(TypeKind::Struct);
     auto &struct_ = stype->data.struct_;
     type->data.promise.internal = stype;
+
+    // state: uint32
+    struct_.add_member(get_allocator(), "state", get_dummy_var("state"),
+                       get_system_types()->uint32);
+    // value: pointer to value type
+    struct_.add_member(get_allocator(), "value", get_dummy_var("value"),
+                       get_pointer_type(value, TypeKind::Pointer));
+    // error: pointer (void*)
+    struct_.add_member(get_allocator(), "error", get_dummy_var("error"),
+                       get_system_types()->null_ptr);
+    // on_resolve: lambda
     TypeList cb_params = {};
-    struct_.add_member(
-        get_allocator(), "callback", get_dummy_var("callback"),
-        get_lambda_for_fn(get_fn_type(get_system_types()->void_, &cb_params, false)));
+    auto lambda_type = get_lambda_for_fn(get_fn_type(get_system_types()->void_, &cb_params, false));
+    struct_.add_member(get_allocator(), "on_resolve", get_dummy_var("on_resolve"), lambda_type);
+    // on_reject: lambda
+    struct_.add_member(get_allocator(), "on_reject", get_dummy_var("on_reject"), lambda_type);
+
     struct_.kind = ContainerKind::Struct;
     type->is_placeholder = value->is_placeholder;
     return type;

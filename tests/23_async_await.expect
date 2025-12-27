@@ -1,0 +1,5 @@
+getValue() returned a Promise
+doubleValue(21) returned a Promise
+processValue() returned a Promise
+chainedAsync() returned a Promise
+async/await test complete!
