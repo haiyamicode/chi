@@ -1,3 +1,12 @@
+// Test generic struct constructor on heap allocation
+struct GenericBox<T> {
+	value: int = 0;
+
+	func new() {
+		this.value = 42;
+	}
+}
+
 struct Arr<T> {
 	data: *T = null;
 	size: uint32 = 0;
@@ -23,6 +32,15 @@ struct Arr<T> {
 }
 
 func main() {
+	// Test generic struct constructor on stack
+	var box_stack: GenericBox<int> = {};
+	printf("box_stack.value={}\n", box_stack.value);
+
+	// Test generic struct constructor on heap
+	var box_heap: *GenericBox<int> = new GenericBox<int>{};
+	printf("box_heap.value={}\n", box_heap.value);
+	delete box_heap;
+
 	var a: Arr<int> = {};
 	a.add(1);
 	a.add(2);

@@ -2128,6 +2128,11 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         auto array_struct_type = get_resolver()->eval_struct_type(type);
         return compile_construction(fn, dest, array_struct_type, expr);
     }
+    case TypeKind::Subtype: {
+        // Resolve generic struct instantiation to its concrete struct type
+        auto struct_type = get_resolver()->eval_struct_type(type);
+        return compile_construction(fn, dest, struct_type, expr);
+    }
     case TypeKind::Struct: {
         auto &data = type->data.struct_;
         auto constructor = ChiTypeStruct::get_constructor(type);
