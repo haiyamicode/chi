@@ -27,10 +27,7 @@ extern "C" {
   func cx_personality(...) int32;
   func cx_timeout(delay: uint64, callback: *void);
   func cx_call(fn: *void);
-  func cx_promise_new(promise: *void);
-  func cx_promise_resolve(promise: *void, value: *void);
-  func cx_promise_reject(promise: *void, error: *void);
-  func cx_promise_then(promise: *void, on_resolve: *void, on_reject: *void);
+  func cx_call_with_value(fn: *void, value: *void);
   func cx_string_format(format: *string, values: *void, str: *string);
   func cx_string_from_chars(data: *void, size: uint32, str: *string);
   func cx_string_delete(dest: *string);
@@ -182,6 +179,15 @@ func panic(message: string) {
 func timeout(delay: uint64, callback: func) {
   cx_timeout(delay, &callback);
 }
+
+// delay is temporarily disabled until Promise is fully integrated
+// func delay(ms: uint64) Promise<void> {
+//   var p: Promise<void> = {};
+//   timeout(ms, func () {
+//     // Need to capture p somehow
+//   });
+//   return p;
+// }
 
 func stringf(format: string, ...values: any) string {
   var str: string = "";
@@ -411,5 +417,61 @@ struct Refc<T> implements ops.CopyFrom<Refc<T>> {
 
   func ref_count() uint32 {
     return this.data.ref_count;
+  }
+}
+
+// Promise for async operations
+struct PromiseState<T> {
+  state: uint32 = 0;      // 0=pending, 1=resolved, 2=rejected
+  value: ?T = null;
+  callbacks: Array<func(value: T)> = {};
+}
+
+struct Promise<T> implements ops.CopyFrom<Promise<T>> {
+  protected data: Refc<PromiseState<T>>;
+
+  func new() {
+    this.data = {{}};
+  }
+
+  func delete() {
+    // Refc handles cleanup automatically
+  }
+
+  func copy_from(from: &Promise<T>) {
+    this.data.copy_from(&from.data);
+  }
+
+  func resolve(value: T) {
+    if this.data.get().state != 0 { return; }
+    this.data.get().state = 1;
+    this.data.get().value = value;
+
+    // Invoke all registered callbacks
+    for var i = 0; i < this.data.get().callbacks.len; i = i + 1 {
+      this.data.get().callbacks[i](value);
+    }
+  }
+
+  func is_resolved() bool {
+    return this.data.get().state == 1;
+  }
+
+  func get_value() T {
+    return this.data.get().value!;
+  }
+
+  func then(callback: func(value: T)) {
+    if this.data.get().state == 1 {
+      // Already resolved - invoke immediately
+      callback(this.data.get().value!);
+    } else {
+      // Pending - add to callback list
+      this.data.get().callbacks.add(callback);
+    }
+  }
+
+  func ref_count() uint32 {
+    return this.data.ref_count();
   }
 }

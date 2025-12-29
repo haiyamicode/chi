@@ -60,7 +60,8 @@ void Resolver::context_init_primitives() {
     system_types.box = create_type(TypeKind::Box);
     system_types.result = create_type(TypeKind::Result);
     system_types.error = create_type(TypeKind::Error);
-    system_types.promise = create_type(TypeKind::Promise);
+    // Promise is now defined as a Chi-native struct in runtime.xc
+    // system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
 
     // Create a system lambda type for LLVM compatibility
@@ -98,7 +99,8 @@ void Resolver::context_init_primitives() {
     add_primitive("Box", system_types.box);
     add_primitive("Result", system_types.result);
     add_primitive("Error", system_types.error);
-    add_primitive("Promise", system_types.promise);
+    // Promise is now defined as a Chi-native struct in runtime.xc
+    // add_primitive("Promise", system_types.promise);
 
     // intrinsic symbols
     m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
@@ -364,10 +366,11 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         return from_type->is_int_like() || from_type->kind == TypeKind::Optional ||
                from_type->is_pointer_like() || (is_explicit && from_type->kind == TypeKind::Char);
     case TypeKind::Optional: {
+        // Allow null pointer, same optional type, or implicit T -> ?T wrap
         if (from_type->kind == TypeKind::Pointer) {
             return from_type->data.pointer.is_null;
         }
-        return from_type == to_type || to_type->get_elem() == from_type;
+        return from_type == to_type || can_assign(from_type, to_type->get_elem(), is_explicit);
     }
     case TypeKind::Fn: {
         if (from_type->kind == TypeKind::FnLambda) {
@@ -568,6 +571,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto return_type = data.return_type ? resolve_value(data.return_type, fn_scope)
                                             : get_system_types()->void_;
+
+        // Async functions must explicitly return Promise<T>
+        bool is_async = node->declspec().is_async();
+        if (is_async && !is_promise_type(return_type)) {
+            error(node, errors::ASYNC_MUST_RETURN_PROMISE);
+        }
+
         TypeList param_types;
         bool is_variadic = false;
         bool is_static = node->declspec().is_static();
@@ -937,12 +947,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(node, "await can only be used inside async functions");
         }
         // Check that the expression returns a Promise<T>
-        if (expr_type->kind != TypeKind::Promise) {
+        if (!is_promise_type(expr_type)) {
             error(node, "await requires a Promise type, got {}", to_string(expr_type));
             return get_system_types()->void_;
         }
         // Return the unwrapped value type
-        return expr_type->data.promise.value;
+        return get_promise_value_type(expr_type);
     }
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
@@ -981,8 +991,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // For async functions, the value type for the expression is the inner Promise value type
         ChiType *value_type_hint = return_type;
-        if (scope.parent_fn_def()->is_async() && return_type->kind == TypeKind::Promise) {
-            value_type_hint = return_type->data.promise.value;
+        if (scope.parent_fn_def()->is_async() && is_promise_type(return_type)) {
+            value_type_hint = get_promise_value_type(return_type);
         }
 
         auto expr_scope = scope.set_is_escaping(true).set_value_type(value_type_hint);
@@ -990,8 +1000,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // For async functions returning Promise<T>, allow returning T directly
         ChiType *expected_type = return_type;
-        if (scope.parent_fn_def()->is_async() && return_type->kind == TypeKind::Promise) {
-            expected_type = return_type->data.promise.value;
+        if (scope.parent_fn_def()->is_async() && is_promise_type(return_type)) {
+            expected_type = get_promise_value_type(return_type);
         }
         check_assignment(data.expr, expr_type, expected_type);
         return return_type;
@@ -1456,6 +1466,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
                 if (node->name == "Array") {
                     m_ctx->rt_array_type = struct_type;
+                } else if (node->name == "Promise") {
+                    m_ctx->rt_promise_type = struct_type;
                 } else if (node->name == "__CxEnumBase") {
                     m_ctx->rt_enum_base = node;
                 }
@@ -1549,7 +1561,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.subtype_expr;
         auto type = to_value_type(resolve(data.type, scope));
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional ||
-            type->kind == TypeKind::Box || type->kind == TypeKind::Promise) {
+            type->kind == TypeKind::Box) {
             if (data.args.len != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
                       to_string(get_system_type(type->kind)), 1, data.args.len);
@@ -1971,9 +1983,6 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
             auto container_ref = node->resolved_type->data.fn.container_ref;
             if (container_ref) {
                 auto container = container_ref->get_elem();
-                if (to_string(container) == "Type:540:runtime.Array<any>") {
-                    fmt::print("{}", node->name);
-                }
                 return fmt::format("{}.{}", to_string(container), node->name);
             }
             return node->name;
@@ -2856,8 +2865,6 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
         sty = sty->data.enum_value.resolved_struct;
     } else if (sty->kind == TypeKind::FnLambda) {
         sty = sty->data.fn_lambda.internal;
-    } else if (sty->kind == TypeKind::Promise) {
-        sty = sty->data.promise.internal;
     } else if (sty->kind == TypeKind::TypeSymbol) {
         if (auto underlying_type = sty->data.type_symbol.underlying_type) {
             sty = underlying_type;
@@ -3144,7 +3151,9 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     m_ctx->array_of[elem] = type;
     type->data.array.internal = nullptr;
     type->is_placeholder = elem->is_placeholder;
-    type->global_id = fmt::format("runtime.Array<{}>", elem->global_id);
+    // Use to_string for element type since elem->global_id may be empty for anonymous types like lambdas
+    auto elem_str = elem->global_id.empty() ? to_string(elem) : elem->global_id;
+    type->global_id = fmt::format("runtime.Array<{}>", elem_str);
     return type;
 }
 
@@ -3152,41 +3161,31 @@ ChiType *Resolver::get_promise_type(ChiType *value) {
     if (auto cached = m_ctx->promise_of.get(value)) {
         return *cached;
     }
-    auto type = create_type(TypeKind::Promise);
-    type->data.promise.value = value;
+
+    // Use the Chi-native Promise<T> struct from runtime.xc
+    auto promise = m_ctx->rt_promise_type;
+    assert(promise && "Promise struct not found in runtime");
+
+    TypeList args;
+    args.add(value);
+    auto type = get_subtype(promise, &args);
     m_ctx->promise_of[value] = type;
-
-    // Create internal struct matching CxPromise runtime layout:
-    // struct CxPromise {
-    //     CxPromiseState state;  // uint32
-    //     void *value;           // pointer
-    //     void *error;           // pointer
-    //     CxLambda on_resolve;   // struct {void*, uint32, void*}
-    //     CxLambda on_reject;    // struct {void*, uint32, void*}
-    // };
-    auto stype = create_type(TypeKind::Struct);
-    auto &struct_ = stype->data.struct_;
-    type->data.promise.internal = stype;
-
-    // state: uint32
-    struct_.add_member(get_allocator(), "state", get_dummy_var("state"),
-                       get_system_types()->uint32);
-    // value: pointer to value type
-    struct_.add_member(get_allocator(), "value", get_dummy_var("value"),
-                       get_pointer_type(value, TypeKind::Pointer));
-    // error: pointer (void*)
-    struct_.add_member(get_allocator(), "error", get_dummy_var("error"),
-                       get_system_types()->null_ptr);
-    // on_resolve: lambda
-    TypeList cb_params = {};
-    auto lambda_type = get_lambda_for_fn(get_fn_type(get_system_types()->void_, &cb_params, false));
-    struct_.add_member(get_allocator(), "on_resolve", get_dummy_var("on_resolve"), lambda_type);
-    // on_reject: lambda
-    struct_.add_member(get_allocator(), "on_reject", get_dummy_var("on_reject"), lambda_type);
-
-    struct_.kind = ContainerKind::Struct;
-    type->is_placeholder = value->is_placeholder;
     return type;
+}
+
+bool Resolver::is_promise_type(ChiType *type) {
+    if (!m_ctx->rt_promise_type) {
+        return false;
+    }
+    if (type->kind == TypeKind::Subtype) {
+        return type->data.subtype.generic == m_ctx->rt_promise_type;
+    }
+    return false;
+}
+
+ChiType *Resolver::get_promise_value_type(ChiType *type) {
+    assert(is_promise_type(type));
+    return type->data.subtype.args[0];
 }
 
 ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
@@ -3477,6 +3476,30 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
     if (a->kind == b->kind) {
         if (a->kind == TypeKind::String) {
             return true;
+        }
+        // Structural comparison for FnLambda types
+        if (a->kind == TypeKind::FnLambda) {
+            return is_same_type(a->data.fn_lambda.fn, b->data.fn_lambda.fn);
+        }
+        // Structural comparison for Fn types
+        if (a->kind == TypeKind::Fn) {
+            auto &a_fn = a->data.fn;
+            auto &b_fn = b->data.fn;
+            if (a_fn.params.len != b_fn.params.len) {
+                return false;
+            }
+            for (int i = 0; i < a_fn.params.len; i++) {
+                if (!is_same_type(a_fn.params[i], b_fn.params[i])) {
+                    return false;
+                }
+            }
+            return is_same_type(a_fn.return_type, b_fn.return_type);
+        }
+        // Structural comparison for pointer-like types
+        if (a->kind == TypeKind::Pointer || a->kind == TypeKind::Reference ||
+            a->kind == TypeKind::MutRef || a->kind == TypeKind::Optional ||
+            a->kind == TypeKind::Box) {
+            return is_same_type(a->get_elem(), b->get_elem());
         }
     }
 

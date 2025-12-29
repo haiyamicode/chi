@@ -463,67 +463,17 @@ void cx_call(CxLambda *fn) {
     fn_ptr(fn->data);
 }
 
-// Promise functions
-void cx_promise_new(CxPromise *promise) {
-    promise->state = CX_PROMISE_PENDING;
-    promise->value = nullptr;
-    promise->error = nullptr;
-    promise->on_resolve = {};
-    promise->on_reject = {};
+// Invoke a callback with a value pointer (for async continuations)
+void cx_call_with_value(CxLambda *fn, void *value) {
+    auto fn_ptr = (void (*)(void *, void *))fn->ptr;
+    fn_ptr(fn->data, value);
 }
 
-void cx_promise_resolve(CxPromise *promise, void *value) {
-    if (promise->state != CX_PROMISE_PENDING) {
-        return; // Already settled
-    }
-    promise->state = CX_PROMISE_RESOLVED;
-    promise->value = value;
-
-    // If there's a continuation callback, call it
-    if (promise->on_resolve.ptr) {
-        // Call on_resolve(value) - the callback takes (data, value)
-        auto fn_ptr = (void (*)(void *, void *))promise->on_resolve.ptr;
-        fn_ptr(promise->on_resolve.data, value);
-    }
-}
-
-void cx_promise_reject(CxPromise *promise, void *error) {
-    if (promise->state != CX_PROMISE_PENDING) {
-        return; // Already settled
-    }
-    promise->state = CX_PROMISE_REJECTED;
-    promise->error = error;
-
-    // If there's an error callback, call it
-    if (promise->on_reject.ptr) {
-        auto fn_ptr = (void (*)(void *, void *))promise->on_reject.ptr;
-        fn_ptr(promise->on_reject.data, error);
-    }
-}
-
-void cx_promise_then(CxPromise *promise, CxLambda *on_resolve, CxLambda *on_reject) {
-    // If already resolved, call the callback immediately
-    if (promise->state == CX_PROMISE_RESOLVED && on_resolve && on_resolve->ptr) {
-        auto fn_ptr = (void (*)(void *, void *))on_resolve->ptr;
-        fn_ptr(on_resolve->data, promise->value);
-        return;
-    }
-
-    // If already rejected, call the error callback immediately
-    if (promise->state == CX_PROMISE_REJECTED && on_reject && on_reject->ptr) {
-        auto fn_ptr = (void (*)(void *, void *))on_reject->ptr;
-        fn_ptr(on_reject->data, promise->error);
-        return;
-    }
-
-    // Still pending, store the callbacks for later
-    if (on_resolve) {
-        cx_lambda_clone(&promise->on_resolve, on_resolve);
-    }
-    if (on_reject) {
-        cx_lambda_clone(&promise->on_reject, on_reject);
-    }
-}
+// DEPRECATED: Promise is now a Chi-native struct in runtime.xc
+// void cx_promise_init(CxPromise *promise) { ... }
+// void cx_promise_resolve(CxPromise *promise, void *value) { ... }
+// void cx_promise_reject(CxPromise *promise, void *error) { ... }
+// void cx_promise_then(CxPromise *promise, CxLambda *on_resolve, CxLambda *on_reject) { ... }
 
 void *cx_map_new() { return dic_new(0); }
 

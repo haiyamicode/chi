@@ -9,6 +9,7 @@
 
 #include <list>
 #include <set>
+#include <utility>
 
 #include "ast.h"
 #include "enum.h"
@@ -358,6 +359,8 @@ class Compiler {
     // Async/await codegen
     std::vector<AsyncSegment> collect_async_segments(ast::Node *body);
     void collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars);
+    std::pair<llvm::StructType *, std::vector<ast::Node *>> get_continuation_capture_info(
+        AsyncContext &ctx, int segment_index);
     llvm::Function *create_continuation_fn_decl(AsyncContext &ctx, int segment_index);
     void generate_async_continuation_body(AsyncContext &ctx, int segment_index);
     llvm::Value *build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,

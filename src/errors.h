@@ -68,6 +68,7 @@ constexpr auto SWITCH_EXPR_MUST_HAVE_ELSE = "switch expression must have an else
 constexpr auto EXPORT_DECL_MUST_HAVE_SYMBOLS = "export declaration must have symbol or alias";
 constexpr auto CANNOT_MODIFY_CONST = "cannot modify immutable constant '{}'";
 constexpr auto INVALID_MUT_TYPE = "Mut can only be used for reference type, got '{}'";
+constexpr auto ASYNC_MUST_RETURN_PROMISE = "async function must return Promise<T>";
 constexpr auto MUTATING_METHOD_ON_IMMUTABLE_REFERENCE =
     "cannot access mutating method '{}' on immutable reference {}";
 constexpr auto INVALID_THIS = "'this' keyword can only be used in a method scope";

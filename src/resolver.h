@@ -81,6 +81,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> promise_of = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
     ChiType *rt_array_type = nullptr;
+    ChiType *rt_promise_type = nullptr;
     ast::Node *rt_enum_base = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
@@ -267,6 +268,10 @@ class Resolver {
     ChiType *get_array_type(ChiType *elem);
 
     ChiType *get_promise_type(ChiType *value);
+
+    bool is_promise_type(ChiType *type);
+
+    ChiType *get_promise_value_type(ChiType *type);
 
     ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
                          ChiType *container = nullptr, bool is_extern = false,

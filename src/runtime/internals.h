@@ -54,19 +54,20 @@ struct CxLambda {
     void *data;    // captured data, lives on the heap
 };
 
-enum CxPromiseState : uint32_t {
-    CX_PROMISE_PENDING = 0,
-    CX_PROMISE_RESOLVED = 1,
-    CX_PROMISE_REJECTED = 2
-};
+// DEPRECATED: Promise is now a Chi-native struct in runtime.xc
+// enum CxPromiseState : uint32_t {
+//     CX_PROMISE_PENDING = 0,
+//     CX_PROMISE_RESOLVED = 1,
+//     CX_PROMISE_REJECTED = 2
+// };
 
-struct CxPromise {
-    CxPromiseState state;
-    void *value;              // resolved value (pointer to heap-allocated data)
-    void *error;              // rejection error (pointer to heap-allocated error)
-    CxLambda on_resolve;      // continuation callback for resolve
-    CxLambda on_reject;       // continuation callback for reject
-};
+// struct CxPromise {
+//     CxPromiseState state;
+//     void *value;
+//     void *error;
+//     CxLambda on_resolve;
+//     CxLambda on_reject;
+// };
 
 struct CxHash {
     char *data;
@@ -135,12 +136,13 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
 
 CHI_RT_EXPORT void cx_timeout(uint64_t delay, CxLambda *callback);
 CHI_RT_EXPORT void cx_call(CxLambda *callback);
+CHI_RT_EXPORT void cx_call_with_value(CxLambda *callback, void *value);
 
-// Promise functions
-CHI_RT_EXPORT void cx_promise_new(CxPromise *promise);
-CHI_RT_EXPORT void cx_promise_resolve(CxPromise *promise, void *value);
-CHI_RT_EXPORT void cx_promise_reject(CxPromise *promise, void *error);
-CHI_RT_EXPORT void cx_promise_then(CxPromise *promise, CxLambda *on_resolve, CxLambda *on_reject);
+// DEPRECATED: Promise is now a Chi-native struct in runtime.xc
+// CHI_RT_EXPORT void cx_promise_init(CxPromise *promise);
+// CHI_RT_EXPORT void cx_promise_resolve(CxPromise *promise, void *value);
+// CHI_RT_EXPORT void cx_promise_reject(CxPromise *promise, void *error);
+// CHI_RT_EXPORT void cx_promise_then(CxPromise *promise, CxLambda *on_resolve, CxLambda *on_reject);
 
 CHI_RT_EXPORT void cx_hbytes(CxAny *value, CxHash *result);
 CHI_RT_EXPORT void *cx_map_new();

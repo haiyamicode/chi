@@ -1,5 +1,5 @@
 getValue() returned a Promise
+p1.is_resolved=true, p1.get_value=42
 doubleValue(21) returned a Promise
-processValue() returned a Promise
-chainedAsync() returned a Promise
+p2.is_resolved=true, p2.get_value=42
 async/await test complete!

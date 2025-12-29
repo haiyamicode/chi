@@ -790,7 +790,8 @@ Node *Parser::parse_fn_type(Token *func) {
     }
     expect(TokenType::RPAREN);
     auto next_is_separator = next_is(TokenType::RPAREN) || next_is(TokenType::SEMICOLON) ||
-                             next_is(TokenType::COMMA) || next_is(TokenType::GT);
+                             next_is(TokenType::COMMA) || next_is(TokenType::GT) ||
+                             next_is(TokenType::ASS);  // For default values in struct fields
     if (!next_is_separator) {
         data.return_type = parse_type_expr(true);
     }

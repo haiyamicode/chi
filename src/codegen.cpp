@@ -6,6 +6,7 @@
 #include "resolver.h"
 #include "sema.h"
 #include "util.h"
+#include <set>
 
 namespace cx {
 namespace codegen {
@@ -674,8 +675,27 @@ llvm::Value *Compiler::compile_string_literal(const string &str) {
 
 llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
                                                   ChiType *dest_type) {
-    auto src_value = compile_expr(fn, expr);
     auto src_type = get_chitype(expr);
+
+    // Check if src_type has placeholder type params (for generic struct field defaults)
+    auto has_placeholder_params = [](ChiType *type) -> bool {
+        if (type->is_placeholder) return true;
+        if (type->kind == TypeKind::Struct && type->data.struct_.type_params.len > 0) {
+            return true;
+        }
+        return false;
+    };
+
+    // Handle ConstructExpr with placeholder type - use dest_type for compilation
+    if (expr->type == ast::NodeType::ConstructExpr && has_placeholder_params(src_type) &&
+        dest_type && !has_placeholder_params(dest_type)) {
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto ptr = fn->entry_alloca(compile_type(dest_type), "placeholder_tmp");
+        compile_construction(fn, ptr, dest_type, expr);
+        return builder.CreateLoad(compile_type(dest_type), ptr);
+    }
+
+    auto src_value = compile_expr(fn, expr);
     if (src_type->kind == TypeKind::Undefined) {
         return nullptr;
     }
@@ -1069,10 +1089,15 @@ llvm::Function *Compiler::create_continuation_fn_decl(AsyncContext &ctx, int seg
     auto &llvm_module = *m_ctx->llvm_module;
     auto parent_fn = ctx.parent_fn;
 
-    // Create the continuation function: void __fnname_cont_N(void* data, void* value)
+    // Get the previous segment's await value type (this is what we receive as callback arg)
+    auto &prev_segment = ctx.segments[segment_index - 1];
+    auto value_type_l = compile_type(prev_segment.await_value_type);
+
+    // Create the continuation function: void __fnname_cont_N(void* data, T value)
+    // This matches the lambda calling convention: bound_fn(data, arg0, arg1, ...)
     auto void_type = llvm::Type::getVoidTy(llvm_ctx);
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
-    auto fn_type = llvm::FunctionType::get(void_type, {ptr_type, ptr_type}, false);
+    auto fn_type = llvm::FunctionType::get(void_type, {ptr_type, value_type_l}, false);
     auto fn_name = parent_fn->qualified_name + "__cont_" + std::to_string(segment_index);
     auto llvm_fn = llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fn_name, llvm_module);
 
@@ -1088,6 +1113,28 @@ llvm::Function *Compiler::create_continuation_fn_decl(AsyncContext &ctx, int seg
     ctx.continuation_fn_objects.push_back(cont_fn);
 
     return llvm_fn;
+}
+
+std::pair<llvm::StructType *, std::vector<ast::Node *>>
+Compiler::get_continuation_capture_info(AsyncContext &ctx, int segment_index) {
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+
+    int prev_segment_idx = segment_index - 1;
+    auto &prev_segment = ctx.segments[prev_segment_idx];
+
+    // Build capture struct type: { result_promise_ptr, captured_vars... }
+    std::vector<llvm::Type *> capture_types;
+    capture_types.push_back(ptr_type); // result promise pointer
+
+    std::vector<ast::Node *> captured_vars_ordered;
+    for (auto var : prev_segment.vars_to_capture) {
+        captured_vars_ordered.push_back(var);
+        capture_types.push_back(compile_type(get_chitype(var)));
+    }
+
+    auto capture_struct_type = llvm::StructType::get(llvm_ctx, capture_types);
+    return {capture_struct_type, captured_vars_ordered};
 }
 
 void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_index) {
@@ -1109,23 +1156,12 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
     auto value_arg = llvm_fn->getArg(1);
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
-    // Previous segment that ended with an await
-    int prev_segment_idx = segment_index - 1;
-    auto &prev_segment = ctx.segments[prev_segment_idx];
-
-    // Build the capture struct type for this continuation
-    // { result_promise_ptr, captured_var1, captured_var2, ... }
-    std::vector<llvm::Type *> capture_types;
-    capture_types.push_back(ptr_type); // result promise pointer
-
-    std::vector<ast::Node *> captured_vars_ordered;
-    for (auto var : prev_segment.vars_to_capture) {
-        captured_vars_ordered.push_back(var);
-        capture_types.push_back(compile_type(get_chitype(var)));
-    }
-
-    auto capture_struct_type = llvm::StructType::get(llvm_ctx, capture_types);
+    // Get capture struct type and ordered list of captured variables
+    auto [capture_struct_type, captured_vars_ordered] = get_continuation_capture_info(ctx, segment_index);
     auto captures_ptr = builder.CreateBitCast(data_arg, capture_struct_type->getPointerTo());
+
+    // Previous segment (needed for await_var_decl)
+    auto &prev_segment = ctx.segments[segment_index - 1];
 
     // Extract result promise pointer
     auto result_promise_ptr_ptr = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
@@ -1157,9 +1193,8 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         // Allocate storage for the await result
         auto var_alloc = cont_fn->entry_alloca(var_type_l, var->name);
 
-        // Load value from value_arg (which is a pointer to the value)
-        auto result_value = builder.CreateLoad(var_type_l, value_arg);
-        builder.CreateStore(result_value, var_alloc);
+        // value_arg is the value itself (passed by value from the callback)
+        builder.CreateStore(value_arg, var_alloc);
 
         local_vars[var] = var_alloc;
         add_var(var, var_alloc);
@@ -1168,6 +1203,9 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
     // Check if this is the final segment (contains return)
     bool is_final = (segment_index == (int)ctx.segments.size() - 1);
 
+    // Push scope for continuation body
+    cont_fn->push_scope();
+
     // Compile the segment's statements
     for (auto stmt : segment.stmts) {
         if (stmt->type == ast::NodeType::ReturnStmt) {
@@ -1175,25 +1213,18 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
             auto &data = stmt->data.return_stmt;
             if (data.expr) {
                 auto ret_value = compile_expr(cont_fn, data.expr);
-                auto value_type = get_chitype(data.expr);
-                auto value_type_l = compile_type(value_type);
 
-                // Box the value on heap
-                auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
-                auto value_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l);
-                auto value_size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), value_size);
-                auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
-                auto boxed_value = builder.CreateCall(malloc_fn, {value_size_l, null_ptr}, "boxed");
-                builder.CreateStore(ret_value, boxed_value);
+                // Get the Promise<T> type and look up the resolve() method
+                auto promise_struct = get_resolver()->resolve_struct_type(ctx.promise_type);
+                auto resolve_member = promise_struct->find_member("resolve");
+                assert(resolve_member && "Promise.resolve() method not found");
+                auto resolve_method = get_fn(resolve_member->node);
 
-                // Call cx_promise_resolve
-                auto resolve_fn = get_system_fn("cx_promise_resolve");
-                builder.CreateCall(resolve_fn->llvm_fn, {result_promise_ptr, boxed_value});
+                // Call promise.resolve(value): takes this (Promise*) and value (T)
+                builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
             } else {
-                // void return
-                auto resolve_fn = get_system_fn("cx_promise_resolve");
-                auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
-                builder.CreateCall(resolve_fn->llvm_fn, {result_promise_ptr, null_ptr});
+                // void return - Promise<void> not yet supported, skip for now
+                // TODO: Handle Promise<void> when needed
             }
         } else if (contains_await(stmt)) {
             // This segment has another await - chain to next continuation
@@ -1209,6 +1240,7 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         emit_promise_chain(cont_fn, ctx, segment.await_expr, segment_index + 1, local_vars, result_promise_ptr);
     }
 
+    cont_fn->pop_scope();
     builder.CreateRetVoid();
 
     // Clean up temporary vars from var_table
@@ -1225,22 +1257,10 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
 
-    int prev_segment_idx = segment_index - 1;
-    auto &prev_segment = ctx.segments[prev_segment_idx];
-
-    // Build capture struct type: { result_promise_ptr, captured_vars... }
-    std::vector<llvm::Type *> capture_types;
-    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
-    capture_types.push_back(ptr_type); // result promise pointer
-
-    std::vector<ast::Node *> captured_vars_ordered;
-    for (auto var : prev_segment.vars_to_capture) {
-        captured_vars_ordered.push_back(var);
-        capture_types.push_back(compile_type(get_chitype(var)));
-    }
-
-    auto capture_struct_type = llvm::StructType::get(llvm_ctx, capture_types);
+    // Get capture struct type and ordered list of captured variables
+    auto [capture_struct_type, captured_vars_ordered] = get_continuation_capture_info(ctx, segment_index);
     auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
     // Allocate capture struct on heap
     auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
@@ -1304,20 +1324,29 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     // Compile the await expression to get the promise
     auto awaited_promise = compile_expr(fn, await_expr->data.await_expr.expr);
 
-    // Allocate storage for the promise
-    auto awaited_promise_ptr = fn->entry_alloca(ctx.promise_struct_type, "awaited");
-    builder.CreateStore(awaited_promise, awaited_promise_ptr);
+    // Get promise type info
+    auto promise_type = get_chitype(await_expr->data.await_expr.expr);
+    auto promise_struct_type = get_resolver()->resolve_struct_type(promise_type);
+    auto promise_type_l = compile_type(promise_type);
+
+    // Allocate storage for the promise and properly copy it
+    // Using compile_copy ensures copy_from is called, which increments Refc ref count
+    auto awaited_promise_ptr = fn->entry_alloca(promise_type_l, "awaited");
+    // Zero-initialize the destination before copy to avoid garbage in Refc.data
+    auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(promise_type_l);
+    builder.CreateMemSet(awaited_promise_ptr,
+        llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
+        size, {});
+    compile_copy(fn, awaited_promise, awaited_promise_ptr, promise_type, await_expr->data.await_expr.expr);
 
     // Build continuation lambda for next segment
     auto lambda = build_continuation_lambda(fn, ctx, next_segment_index, local_vars, result_promise_ptr);
 
-    // Store lambda and call cx_promise_then
-    auto lambda_ptr = fn->entry_alloca(compile_type(get_system_types()->lambda), "cont_lambda");
-    builder.CreateStore(lambda, lambda_ptr);
-
-    auto then_fn = get_system_fn("cx_promise_then");
-    auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
-    builder.CreateCall(then_fn->llvm_fn, {awaited_promise_ptr, lambda_ptr, null_ptr});
+    // Call Promise.then(callback) to register the continuation
+    auto then_member = promise_struct_type->find_member("then");
+    assert(then_member && "Promise.then() method not found");
+    auto then_method = get_fn(then_member->node);
+    builder.CreateCall(then_method->llvm_fn, {awaited_promise_ptr, lambda});
 }
 
 void Compiler::compile_async_fn_body(Function *fn) {
@@ -1329,9 +1358,10 @@ void Compiler::compile_async_fn_body(Function *fn) {
 
     // Get return type (Promise<T>)
     auto return_type = fn->fn_type->data.fn.return_type;
-    assert(return_type->kind == TypeKind::Promise);
+    assert(get_resolver()->is_promise_type(return_type));
 
-    auto promise_struct_type_l = (llvm::StructType *)compile_type(return_type->data.promise.internal);
+    // Promise<T> is now a Chi-native struct, compile it directly
+    auto promise_struct_type_l = (llvm::StructType *)compile_type(return_type);
 
     // Create AsyncContext
     AsyncContext ctx;
@@ -1350,9 +1380,12 @@ void Compiler::compile_async_fn_body(Function *fn) {
     // Allocate result promise
     ctx.result_promise_ptr = fn->entry_alloca(promise_struct_type_l, "result_promise");
 
-    // Initialize promise: cx_promise_new(&result)
-    auto promise_new_fn = get_system_fn("cx_promise_new");
-    builder.CreateCall(promise_new_fn->llvm_fn, {ctx.result_promise_ptr});
+    // Initialize promise by calling Promise.new() method
+    auto promise_struct = get_resolver()->resolve_struct_type(return_type);
+    auto new_member = promise_struct->find_member("new");
+    assert(new_member && "Promise.new() method not found");
+    auto new_method = get_fn(new_member->node);
+    builder.CreateCall(new_method->llvm_fn, {ctx.result_promise_ptr});
 
     // Create label for first segment code before generating continuations
     auto first_segment_label = fn->new_label("first_segment");
@@ -1380,6 +1413,9 @@ void Compiler::compile_async_fn_body(Function *fn) {
     auto &first_segment = ctx.segments[0];
     map<ast::Node *, llvm::Value *> local_vars;
 
+    // Push scope for first segment
+    fn->push_scope();
+
     for (auto stmt : first_segment.stmts) {
         if (stmt->type == ast::NodeType::VarDecl) {
             compile_stmt(fn, stmt);
@@ -1393,6 +1429,8 @@ void Compiler::compile_async_fn_body(Function *fn) {
     if (first_segment.await_expr) {
         emit_promise_chain(fn, ctx, first_segment.await_expr, 1, local_vars, ctx.result_promise_ptr);
     }
+
+    fn->pop_scope();
 
     // Store result promise in return_value
     auto result_promise = builder.CreateLoad(promise_struct_type_l, ctx.result_promise_ptr);
@@ -1544,8 +1582,26 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
     }
     case TypeKind::Optional: {
         if (from_type->kind == TypeKind::Pointer) {
+            // null pointer -> null optional
             return llvm::ConstantAggregateZero::get(compile_type(to_type));
         }
+        if (from_type->kind == TypeKind::Optional) {
+            // Same optional type - return as-is
+            return value;
+        }
+        // Implicit T -> ?T wrap: construct optional with has_value=true
+        auto &builder = *m_ctx->llvm_builder;
+        auto opt_type_l = compile_type(to_type);
+        auto opt_ptr = builder.CreateAlloca(opt_type_l, nullptr, "implicit_opt");
+        // Set has_value = true
+        auto has_value_p = builder.CreateStructGEP(opt_type_l, opt_ptr, 0);
+        builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
+                            has_value_p);
+        // Store the value (convert if needed)
+        auto value_p = builder.CreateStructGEP(opt_type_l, opt_ptr, 1);
+        auto inner_value = compile_conversion(fn, value, from_type, to_type->get_elem());
+        builder.CreateStore(inner_value, value_p);
+        return builder.CreateLoad(opt_type_l, opt_ptr);
     }
     case TypeKind::Struct: {
         if (ChiTypeStruct::is_interface(to_type)) {
@@ -2135,17 +2191,63 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
     }
     case TypeKind::Struct: {
         auto &data = type->data.struct_;
+
+        // Build set of fields explicitly initialized in construct expression
+        std::set<ChiStructMember *> explicit_inits;
+        for (auto field_init : expr->data.construct_expr.field_inits) {
+            explicit_inits.insert(field_init->data.field_init_expr.resolved_field);
+        }
+
+        // Apply default values for fields not explicitly initialized (before constructor)
+        for (auto field : data.fields) {
+            if (explicit_inits.count(field) > 0) continue;  // Explicitly initialized
+            if (!field->node) continue;
+            auto default_expr = field->node->data.var_decl.expr;
+            if (!default_expr) continue;  // No default value
+
+            auto field_gep =
+                builder.CreateStructGEP(compile_type(type), dest, field->field_index);
+
+            // Clear resolved_outlet on ConstructExpr to avoid using stale outlets from field declaration context
+            if (default_expr->type == ast::NodeType::ConstructExpr) {
+                // Clear outlets recursively for nested ConstructExprs
+                std::function<void(ast::Node *)> clear_outlets = [&](ast::Node *node) {
+                    if (!node) return;
+                    if (node->type == ast::NodeType::ConstructExpr) {
+                        node->data.construct_expr.resolved_outlet = nullptr;
+                        for (auto item : node->data.construct_expr.items) {
+                            clear_outlets(item);
+                        }
+                    }
+                };
+                clear_outlets(default_expr);
+                compile_construction(fn, field_gep, field->resolved_type, default_expr);
+            } else {
+                auto value = compile_assignment_to_type(fn, default_expr, field->resolved_type);
+                if (value) {
+                    builder.CreateStore(value, field_gep);
+                }
+            }
+        }
+
         auto constructor = ChiTypeStruct::get_constructor(type);
         if (constructor) {
-            auto constructor_fn = get_fn(constructor->node);
-            auto constructor_type = get_chitype(constructor->node);
-            auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
-            auto args = std::vector<llvm::Value *>{dest};
-            auto remaining_args =
-                compile_fn_args(fn, constructor_fn, expr->data.construct_expr.items, expr);
-            args.insert(args.end(), remaining_args.begin(), remaining_args.end());
-            builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
-            emit_dbg_location(expr);
+            auto id = get_resolver()->resolve_global_id(constructor->node);
+            auto entry = m_ctx->function_table.get(id);
+            if (!entry) {
+                // Constructor not compiled yet - skip calling it
+                // This can happen for field defaults in generic contexts
+            } else {
+                auto constructor_fn = *entry;
+                auto constructor_type = get_chitype(constructor->node);
+                auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
+                auto args = std::vector<llvm::Value *>{dest};
+                auto remaining_args =
+                    compile_fn_args(fn, constructor_fn, expr->data.construct_expr.items, expr);
+                args.insert(args.end(), remaining_args.begin(), remaining_args.end());
+                builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
+                emit_dbg_location(expr);
+            }
         }
 
         for (auto field_init : expr->data.construct_expr.field_inits) {
@@ -2888,37 +2990,37 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                             fn->node->data.fn_def.is_async();
             auto return_type = fn->fn_type->data.fn.return_type;
 
-            if (is_async && return_type->kind == TypeKind::Promise) {
-                // For async functions, wrap the return value in a Promise
-                auto value_type = return_type->data.promise.value;
-                auto value_type_l = compile_type(value_type);
-                auto promise_struct_type_l = compile_type(return_type->data.promise.internal);
+            if (is_async && get_resolver()->is_promise_type(return_type)) {
+                // For async functions, wrap the return value in a resolved Promise
+                // 1. Call Promise.new() to initialize the promise at fn->return_value
+                // 2. Compile the expression value
+                // 3. Call Promise.resolve(value) to resolve with the value
 
-                // Compile the expression value
-                auto ret_value = compile_assignment_value(fn, data.expr, stmt);
+                auto promise_struct = get_resolver()->resolve_struct_type(return_type);
+                auto return_type_l = compile_type(return_type);
 
-                // Allocate memory for the value on the heap
-                auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
-                auto value_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l);
-                auto value_size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), value_size);
-                auto null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0));
-                auto value_ptr = llvm_builder.CreateCall(malloc_fn, {value_size_l, null_ptr}, "value_ptr");
-                llvm_builder.CreateStore(ret_value, value_ptr);
+                // Zero-initialize return_value before calling Promise.new()
+                // This ensures Refc.data is null, not garbage
+                auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(return_type_l);
+                llvm_builder.CreateMemSet(fn->return_value,
+                    llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                    size, {});
 
-                // Initialize Promise fields in return_value
-                // state = CX_PROMISE_RESOLVED (1)
-                auto state_ptr = llvm_builder.CreateStructGEP(promise_struct_type_l, fn->return_value, 0, "state_ptr");
-                llvm_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), 1), state_ptr);
+                // Call Promise.new() to initialize promise at return_value
+                auto new_member = promise_struct->find_member("new");
+                assert(new_member && "Promise.new() method not found");
+                auto new_method = get_fn(new_member->node);
+                llvm_builder.CreateCall(new_method->llvm_fn, {fn->return_value});
 
-                // value = value_ptr
-                auto value_field_ptr = llvm_builder.CreateStructGEP(promise_struct_type_l, fn->return_value, 1, "value_field_ptr");
-                llvm_builder.CreateStore(value_ptr, value_field_ptr);
+                // Compile the expression value (using inner type T, not Promise<T>)
+                auto inner_type = get_resolver()->get_promise_value_type(return_type);
+                auto ret_value = compile_assignment_to_type(fn, data.expr, inner_type);
 
-                // error = nullptr
-                auto error_ptr = llvm_builder.CreateStructGEP(promise_struct_type_l, fn->return_value, 2, "error_ptr");
-                llvm_builder.CreateStore(null_ptr, error_ptr);
-
-                // on_resolve and on_reject are left as zero-initialized
+                // Call Promise.resolve(value)
+                auto resolve_member = promise_struct->find_member("resolve");
+                assert(resolve_member && "Promise.resolve() method not found");
+                auto resolve_method = get_fn(resolve_member->node);
+                llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
             } else {
                 auto ret_value = compile_assignment_value(fn, data.expr, stmt);
                 compile_copy(fn, ret_value, fn->return_value, get_chitype(stmt), data.expr);
@@ -3464,9 +3566,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         // TODO: implement actual error type
         return get_llvm_ptr_type();
     }
-    case TypeKind::Promise: {
-        return compile_type(type->data.promise.internal);
-    }
+    // Promise is now a Chi-native struct (TypeKind::Subtype), no special handling needed
     case TypeKind::Subtype: {
         return compile_type(type->data.subtype.final_type);
     }
