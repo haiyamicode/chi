@@ -40,10 +40,24 @@ func test_map() {
   printf("m.find(\"abc\")!! = {}\n", it1!!);
   var it2 = m.find("invalid");
   printf("m.find(\"invalid\") = {}\n", it2);
+  println("");
+}
+
+func test_refc() {
+  println("testing refc:");
+  var r1: Refc<int> = {42};
+  printf("r1.get()={}, ref_count={}\n", r1.get()!, r1.ref_count());
+
+  var r2: Refc<int> = r1;
+  printf("after copy: ref_count={}\n", r1.ref_count());
+
+  r1.set(100);
+  printf("after r1.set(100): r2.get()={}\n", r2.get()!);
 }
 
 func main() {
   test_optional();
   test_array();
   test_map();
+  test_refc();
 }

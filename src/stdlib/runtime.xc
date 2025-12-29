@@ -360,3 +360,56 @@ struct Buffer {
     return str;
   }
 }
+
+// Reference-counted pointer for shared ownership
+struct RefcData<T> {
+  ref_count: uint32 = 0;
+  value: T = undefined;
+}
+
+struct Refc<T> implements ops.CopyFrom<Refc<T>> {
+  protected data: *RefcData<T> = null;
+
+  func new(value: T) {
+    this.data = new RefcData<T>{};
+    this.data.ref_count = 1;
+    this.data.value = value;
+  }
+
+  func delete() {
+    this.release();
+  }
+
+  func copy_from(from: &Refc<T>) {
+    this.release();
+    this.data = from.data;
+    this.retain();
+  }
+
+  private func release() {
+    if this.data {
+      this.data.ref_count = this.data.ref_count - 1;
+      if this.data.ref_count == 0 {
+        delete this.data;
+      }
+    }
+  }
+
+  private func retain() {
+    if this.data {
+      this.data.ref_count = this.data.ref_count + 1;
+    }
+  }
+
+  func get() &T {
+    return &this.data.value;
+  }
+
+  func set(value: T) {
+    this.data.value = value;
+  }
+
+  func ref_count() uint32 {
+    return this.data.ref_count;
+  }
+}
