@@ -286,6 +286,13 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_INIT_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_INIT_FIELD(pointer, Pointer, ChiTypePointer)
+        case TypeKind::Optional:
+        case TypeKind::Reference:
+        case TypeKind::MutRef:
+        case TypeKind::Box:
+        case TypeKind::This:
+            new (&data.pointer) ChiTypePointer();
+            break;
             CHITYPE_CASE_INIT_FIELD(int_, Int, ChiTypeInt)
             CHITYPE_CASE_INIT_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_INIT_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
@@ -312,6 +319,13 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_DESTROY_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_DESTROY_FIELD(pointer, Pointer, ChiTypePointer)
+        case TypeKind::Optional:
+        case TypeKind::Reference:
+        case TypeKind::MutRef:
+        case TypeKind::Box:
+        case TypeKind::This:
+            data.pointer.~ChiTypePointer();
+            break;
             CHITYPE_CASE_DESTROY_FIELD(int_, Int, ChiTypeInt)
             CHITYPE_CASE_DESTROY_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_DESTROY_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
@@ -345,6 +359,13 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_CLONE_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_CLONE_FIELD(pointer, Pointer, ChiTypePointer)
+        case TypeKind::Optional:
+        case TypeKind::Reference:
+        case TypeKind::MutRef:
+        case TypeKind::Box:
+        case TypeKind::This:
+            b->data.pointer = data.pointer;
+            break;
             CHITYPE_CASE_CLONE_FIELD(int_, Int, ChiTypeInt)
             CHITYPE_CASE_CLONE_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_CLONE_FIELD(placeholder, Placeholder, ChiTypePlaceholder)

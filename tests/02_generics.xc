@@ -7,6 +7,16 @@ struct GenericBox<T> {
 	}
 }
 
+// Test optional type inside generic struct (regression test for ?T clone bug)
+struct Container<T> {
+	value: ?T = null;
+}
+
+// Test reference type inside generic struct
+struct RefContainer<T> {
+	ptr: *T = null;
+}
+
 struct Arr<T> {
 	data: *T = null;
 	size: uint32 = 0;
@@ -49,4 +59,15 @@ func main() {
 	a.add(3);
 	printf("a.size={}\n", a.size);
 	printf("a=[{},{},{}]\n", a.get(0), a.get(1), a.get(2));
+
+	// Test optional type inside generic struct
+	var c: Container<int> = {};
+	printf("c.value={}\n", c.value);
+	c.value! = 42;
+	printf("c.value={}\n", c.value!);
+
+	// Test with string type
+	var cs: Container<string> = {};
+	cs.value! = "hello";
+	printf("cs.value={}\n", cs.value!);
 }
