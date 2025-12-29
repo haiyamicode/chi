@@ -17,6 +17,25 @@ struct RefContainer<T> {
 	ptr: *T = null;
 }
 
+// Test nested generics (regression test for variant member lookup bug)
+struct Inner<T> {
+	value: T = undefined;
+}
+
+struct Wrapper<T> {
+	data: Refc<Inner<T>>;
+
+	func init(value: T) {
+		var inner: Inner<T> = {};
+		inner.value = value;
+		this.data = {inner};
+	}
+
+	func get_inner() &Inner<T> {
+		return this.data.get();  // Calls method on nested generic type
+	}
+}
+
 struct Arr<T> {
 	data: *T = null;
 	size: uint32 = 0;
@@ -70,4 +89,9 @@ func main() {
 	var cs: Container<string> = {};
 	cs.value! = "hello";
 	printf("cs.value={}\n", cs.value!);
+
+	// Test nested generics - calling method on Refc<Inner<T>> from within Wrapper<T>
+	var w: Wrapper<int> = {};
+	w.init(123);
+	printf("w.get_inner().value={}\n", w.get_inner().value);
 }

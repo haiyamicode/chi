@@ -7,3 +7,4 @@ a=[1,2,3]
 c.value=null
 c.value=42
 cs.value=hello
+w.get_inner().value=123

@@ -906,9 +906,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto decl = find_root_decl(data.op1);
                 if (decl) {
                     decl->escape.escaped = decl->can_escape();
-                } else {
-                    decl->escape.escaped = false;
                 }
+                // If decl is null (e.g., function call result), nothing to mark as escaped
             }
             return get_pointer_type(t, data.op_type == TokenType::MUTREF ? TypeKind::MutRef
                                                                          : TypeKind::Reference);
@@ -3830,6 +3829,9 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
         return find_root_decl(node->data.child_expr);
     case NodeType::IndexExpr:
         return find_root_decl(node->data.index_expr.expr);
+    case NodeType::FnCallExpr:
+        // Function call results are temporaries, return nullptr to indicate no root decl
+        return nullptr;
     default:
         panic("unhandled find_root_decl {}", PRINT_ENUM(node->type));
     }

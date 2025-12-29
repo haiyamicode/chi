@@ -2525,8 +2525,40 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         return builder.CreateCall(callee, args);
     }
 
-    auto container_type_id =
-        fn->container_type ? std::optional{fn->container_type->id} : std::nullopt;
+    // For method calls via DotExpr, use the actual receiver type's ID for variant lookup
+    // instead of the current function's container type
+    std::optional<TypeId> container_type_id = std::nullopt;
+    if (data.fn_ref_expr->type == ast::NodeType::DotExpr) {
+        auto &dot_data = data.fn_ref_expr->data.dot_expr;
+        if (dot_data.should_resolve_variant) {
+            // Get the raw type from the AST node, without converting Subtype to final_type
+            // This is necessary because variants are stored by Subtype ID, not final Struct ID
+            auto receiver_type = dot_data.expr->resolved_type;
+            // Unwrap pointer/reference types to get the struct type
+            while (receiver_type && (receiver_type->kind == TypeKind::Pointer ||
+                                     receiver_type->kind == TypeKind::Reference ||
+                                     receiver_type->kind == TypeKind::MutRef)) {
+                receiver_type = receiver_type->get_elem();
+            }
+            // If the receiver type has placeholders, substitute them using current context
+            if (receiver_type && receiver_type->is_placeholder && fn->container_subtype) {
+                if (fn->fn_type && fn->fn_type->data.fn.container_ref) {
+                    auto container_ref = fn->fn_type->data.fn.container_ref;
+                    auto container_struct = get_resolver()->resolve_struct_type(container_ref);
+                    if (container_struct) {
+                        receiver_type = get_resolver()->type_placeholders_sub_selective(
+                            receiver_type, fn->container_subtype, container_struct->node);
+                    }
+                }
+            }
+            if (receiver_type && receiver_type->kind == TypeKind::Subtype) {
+                container_type_id = receiver_type->id;
+            }
+        }
+    }
+    if (!container_type_id.has_value() && fn->container_type) {
+        container_type_id = fn->container_type->id;
+    }
     auto fn_decl = data.fn_ref_expr->get_decl(container_type_id);
     assert(fn_decl->type == ast::NodeType::FnDef);
     auto fn_type = get_chitype(fn_decl);
@@ -3415,7 +3447,11 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             return llvm::StructType::create(members, get_resolver()->to_string(type, true));
         }
         if (!data.fields.len) {
-            return compile_type(get_system_types()->void_);
+            // Empty structs need a placeholder byte for LLVM allocations
+            // (void type cannot be allocated)
+            std::vector<llvm::Type *> members;
+            members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
+            return llvm::StructType::create(members, get_resolver()->to_string(type, true));
         }
 
         std::vector<llvm::Type *> members;
