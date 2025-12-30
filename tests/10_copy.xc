@@ -23,17 +23,31 @@ struct Foo implements ops.CopyFrom<Foo> {
   }
 }
 
-func f() Foo {
-  var a: Foo = {"fa"};
+// Test 1: Return local variable (one copy expected)
+func return_local() Foo {
+  var a: Foo = {"local"};
   a.p! = 42;
   var b = a;
-  b.id = "fb";
-  println("f() done");
+  b.id = "local_b";
+  println("return_local() done");
   return b;
 }
 
+// Test 2: RVO - return ConstructExpr directly (zero copies expected)
+func return_construct() Foo {
+  println("return_construct() returning ConstructExpr");
+  return {"direct"};
+}
+
 func main() {
-  var foo = f();
-  printf("g: {}\n", foo.p!);
+  println("=== Test 1: Return local variable ===");
+  var foo = return_local();
+  printf("result: {}\n", foo.p!);
+
+  println("=== Test 2: RVO - return ConstructExpr ===");
+  var bar = return_construct();
+  bar.p! = 99;
+  printf("result: {}\n", bar.p!);
+
   println("done");
 }

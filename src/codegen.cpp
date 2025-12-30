@@ -3105,11 +3105,18 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
             } else {
                 auto ret_type = get_chitype(stmt);
-                auto ret_ref = compile_expr_ref(fn, data.expr);
-                if (!ret_ref.value) {
-                    ret_ref.value = llvm_builder.CreateLoad(compile_type(ret_type), ret_ref.address);
+
+                // RVO: For ConstructExpr, construct directly at return_value
+                if (data.expr->type == ast::NodeType::ConstructExpr) {
+                    compile_construction(fn, fn->return_value, ret_type, data.expr);
+                } else {
+                    // Original path for other expressions
+                    auto ret_ref = compile_expr_ref(fn, data.expr);
+                    if (!ret_ref.value) {
+                        ret_ref.value = llvm_builder.CreateLoad(compile_type(ret_type), ret_ref.address);
+                    }
+                    compile_copy_with_ref(fn, ret_ref, fn->return_value, ret_type, data.expr);
                 }
-                compile_copy_with_ref(fn, ret_ref, fn->return_value, ret_type, data.expr);
             }
         }
         llvm_builder.CreateBr(fn->return_label);

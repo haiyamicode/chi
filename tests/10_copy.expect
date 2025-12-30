@@ -1,11 +1,17 @@
-creating fa
-creating fa_copy
-copied fa_copy, p = 42
-f() done
-creating fb_copy
-copied fb_copy, p = 42
-deleting fa
-deleting fb
-g: 42
+=== Test 1: Return local variable ===
+creating local
+creating local_copy
+copied local_copy, p = 42
+return_local() done
+creating local_b_copy
+copied local_b_copy, p = 42
+deleting local
+deleting local_b
+result: 42
+=== Test 2: RVO - return ConstructExpr ===
+return_construct() returning ConstructExpr
+creating direct
+result: 99
 done
-deleting fb_copy
+deleting local_b_copy
+deleting direct
