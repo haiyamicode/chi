@@ -2638,7 +2638,8 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
     return call_args;
 }
 
-llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke) {
+llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke,
+                                       llvm::Value *sret_dest) {
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
 
@@ -2823,17 +2824,18 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     emit_dbg_location(expr);
     auto return_type = fn_type->data.fn.return_type;
     auto sret_type = fn_type->data.fn.should_use_sret() ? compile_type(return_type) : nullptr;
-    return create_fn_call_invoke(callee, args, sret_type, invoke);
+    return create_fn_call_invoke(callee, args, sret_type, invoke, sret_dest);
 }
 
 llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
                                              std::vector<llvm::Value *> args, llvm::Type *sret_type,
-                                             InvokeInfo *invoke) {
+                                             InvokeInfo *invoke, llvm::Value *sret_dest) {
     auto &builder = *m_ctx->llvm_builder.get();
     auto &llvm_ctx = *m_ctx->llvm_ctx.get();
     llvm::Value *sret_var = nullptr;
     if (sret_type) {
-        sret_var = builder.CreateAlloca(sret_type, nullptr, "sret");
+        // Use provided destination directly, or create temporary
+        sret_var = sret_dest ? sret_dest : builder.CreateAlloca(sret_type, nullptr, "sret");
         args.insert(args.begin(), sret_var);
     }
 
@@ -2849,6 +2851,15 @@ llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
         ret = builder.CreateCall(callee, args);
     }
 
+    // If sret with destination, function wrote directly to dest - return nullptr
+    if (sret_dest && sret_type) {
+        return nullptr;
+    }
+    // For non-sret with destination, store the return value
+    if (sret_dest && !sret_type) {
+        builder.CreateStore(ret, sret_dest);
+        return nullptr;
+    }
     return sret_type ? builder.CreateLoad(sret_type, sret_var) : ret;
 }
 
@@ -3021,9 +3032,30 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto var = compile_alloc(fn, stmt);
         add_var(stmt, var);
         auto var_type = get_chitype(stmt);
-        auto value = compile_assignment_to_type(fn, data.expr, var_type);
-        if (value && !data.expr->escape.moved) {
-            compile_copy(fn, value, var, get_chitype(stmt), data.expr);
+
+        if (data.expr) {
+            if (data.expr->type == ast::NodeType::FnCallExpr) {
+                auto &fn_call_data = data.expr->data.fn_call_expr;
+                // Only use direct sret for regular function calls, not lambdas
+                // Lambdas have a different calling convention that doesn't use sret_dest
+                bool is_lambda = fn_call_data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda;
+                if (!is_lambda) {
+                    // Pass var directly as sret destination - avoids intermediate copy
+                    compile_fn_call(fn, data.expr, nullptr, var);
+                } else {
+                    // Lambda calls - use original path
+                    auto value = compile_assignment_to_type(fn, data.expr, var_type);
+                    if (value && !data.expr->escape.moved) {
+                        compile_copy(fn, value, var, var_type, data.expr);
+                    }
+                }
+            } else {
+                // For all other expressions, use original path
+                auto value = compile_assignment_to_type(fn, data.expr, var_type);
+                if (value && !data.expr->escape.moved) {
+                    compile_copy(fn, value, var, var_type, data.expr);
+                }
+            }
         }
         break;
     }

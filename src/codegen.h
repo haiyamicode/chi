@@ -305,11 +305,13 @@ class Compiler {
 
     std::vector<llvm::Value *> compile_fn_args(Function *fn, Function *callee,
                                                array<ast::Node *> args, ast::Node *fn_call);
-    llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr);
+    llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr,
+                                 llvm::Value *sret_dest = nullptr);
 
     llvm::Value *create_fn_call_invoke(llvm::FunctionCallee callee, std::vector<llvm::Value *> args,
                                        llvm::Type *sret_type = nullptr,
-                                       InvokeInfo *invoke = nullptr);
+                                       InvokeInfo *invoke = nullptr,
+                                       llvm::Value *sret_dest = nullptr);
 
     llvm::Value *compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 
