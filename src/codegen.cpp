@@ -2115,9 +2115,11 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         emit_dbg_location(expr);
         return;
     }
+    case TypeKind::Subtype:
     case TypeKind::Array:
     case TypeKind::Struct: {
         auto sty = get_resolver()->resolve_struct_type(eval_type(type));
+        if (!sty) break;  // Not a struct type, fall through to default copy
         auto &builder = *m_ctx->llvm_builder;
         auto copy_fn_p = sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
         if (copy_fn_p) {
@@ -2139,6 +2141,43 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             call->setDebugLoc(loc);
             emit_dbg_location(expr);
             return;
+        }
+
+        // For structs without CopyFrom, check if any field needs special copying
+        // (has CopyFrom or destructor). If so, copy field-by-field.
+        if (type->kind == TypeKind::Struct) {
+            auto &data = type->data.struct_;
+            bool needs_field_copy = false;
+
+            for (auto field : data.fields) {
+                auto field_sty = get_resolver()->resolve_struct_type(eval_type(field->resolved_type));
+                if (field_sty) {
+                    auto field_copy_fn = field_sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+                    auto field_destructor = ChiTypeStruct::get_destructor(field->resolved_type);
+                    if (field_copy_fn || field_destructor) {
+                        needs_field_copy = true;
+                        break;
+                    }
+                }
+            }
+
+            if (needs_field_copy) {
+                auto from_address = src.address;
+                if (!from_address) {
+                    from_address = builder.CreateAlloca(compile_type(type), nullptr, "_struct_copy_src");
+                    builder.CreateStore(src.value, from_address);
+                }
+
+                auto llvm_type = compile_type(type);
+                for (auto field : data.fields) {
+                    auto field_src_gep = builder.CreateStructGEP(llvm_type, from_address, field->field_index);
+                    auto field_dest_gep = builder.CreateStructGEP(llvm_type, dest, field->field_index);
+                    auto field_llvm_type = compile_type(field->resolved_type);
+                    auto field_value = builder.CreateLoad(field_llvm_type, field_src_gep);
+                    compile_copy(fn, field_value, field_dest_gep, field->resolved_type, expr);
+                }
+                return;
+            }
         }
         break;
     }
@@ -2441,10 +2480,14 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             panic("unreachable");
             break;
         }
+        case TokenType::AND:
+        case TokenType::MUTREF:
+        case TokenType::SUB:
+            // These produce rvalues - return value only
+            return RefValue::from_value(compile_expr(fn, expr));
         default:
-            panic("operator not implemented: {}", PRINT_ENUM(data.op_type));
+            panic("compile_expr_ref UnaryOpExpr not implemented: {}", PRINT_ENUM(data.op_type));
         }
-        return {};
     }
     case ast::NodeType::IndexExpr: {
         auto &builder = *m_ctx->llvm_builder.get();
@@ -2480,8 +2523,15 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         emit_dbg_location(expr);
         return RefValue::from_address(var);
     }
+    // Rvalue expressions - return value only (no meaningful address)
+    case ast::NodeType::SwitchExpr:
+    case ast::NodeType::BinOpExpr:
+    case ast::NodeType::ConstructExpr:
+    case ast::NodeType::LiteralExpr:
+    case ast::NodeType::CastExpr:
+        return RefValue::from_value(compile_expr(fn, expr));
     default:
-        panic("not implemented: {}", PRINT_ENUM(expr->type));
+        panic("compile_expr_ref not implemented: {}", PRINT_ENUM(expr->type));
     }
     return {};
 }
@@ -3022,8 +3072,12 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto resolve_method = get_fn(resolve_member->node);
                 llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
             } else {
-                auto ret_value = compile_assignment_value(fn, data.expr, stmt);
-                compile_copy(fn, ret_value, fn->return_value, get_chitype(stmt), data.expr);
+                auto ret_type = get_chitype(stmt);
+                auto ret_ref = compile_expr_ref(fn, data.expr);
+                if (!ret_ref.value) {
+                    ret_ref.value = llvm_builder.CreateLoad(compile_type(ret_type), ret_ref.address);
+                }
+                compile_copy_with_ref(fn, ret_ref, fn->return_value, ret_type, data.expr);
             }
         }
         llvm_builder.CreateBr(fn->return_label);

@@ -387,9 +387,12 @@ struct Refc<T> implements ops.CopyFrom<Refc<T>> {
   }
 
   func copy_from(from: &Refc<T>) {
+    var new_data = from.data;
+    if new_data {
+      new_data.ref_count = new_data.ref_count + 1;
+    }
     this.release();
-    this.data = from.data;
-    this.retain();
+    this.data = new_data;
   }
 
   private func release() {
@@ -435,7 +438,7 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
   }
 
   func delete() {
-    // Refc handles cleanup automatically
+    this.data.delete();
   }
 
   func copy_from(from: &Promise<T>) {
@@ -446,7 +449,6 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
     if this.data.get().state != 0 { return; }
     this.data.get().state = 1;
     this.data.get().value = value;
-
     // Invoke all registered callbacks
     for var i = 0; i < this.data.get().callbacks.len; i = i + 1 {
       this.data.get().callbacks[i](value);
