@@ -2271,14 +2271,17 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 
         auto constructor = ChiTypeStruct::get_constructor(type);
         if (constructor) {
-            auto id = get_resolver()->resolve_global_id(constructor->node);
+            auto variant_type_id = resolve_variant_type_id(m_fn, expr->resolved_type);
+            auto constructor_node = get_variant_member_node(constructor, variant_type_id);
+
+            auto constructor_type = get_chitype(constructor_node);
+            auto id = get_resolver()->resolve_global_id(constructor_node);
             auto entry = m_ctx->function_table.get(id);
             if (!entry) {
                 // Constructor not compiled yet - skip calling it
                 // This can happen for field defaults in generic contexts
             } else {
                 auto constructor_fn = *entry;
-                auto constructor_type = get_chitype(constructor->node);
                 auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
                 auto args = std::vector<llvm::Value *>{dest};
                 auto remaining_args =
@@ -2679,34 +2682,11 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     }
 
     // For method calls via DotExpr, use the actual receiver type's ID for variant lookup
-    // instead of the current function's container type
     std::optional<TypeId> container_type_id = std::nullopt;
     if (data.fn_ref_expr->type == ast::NodeType::DotExpr) {
         auto &dot_data = data.fn_ref_expr->data.dot_expr;
         if (dot_data.should_resolve_variant) {
-            // Get the raw type from the AST node, without converting Subtype to final_type
-            // This is necessary because variants are stored by Subtype ID, not final Struct ID
-            auto receiver_type = dot_data.expr->resolved_type;
-            // Unwrap pointer/reference types to get the struct type
-            while (receiver_type && (receiver_type->kind == TypeKind::Pointer ||
-                                     receiver_type->kind == TypeKind::Reference ||
-                                     receiver_type->kind == TypeKind::MutRef)) {
-                receiver_type = receiver_type->get_elem();
-            }
-            // If the receiver type has placeholders, substitute them using current context
-            if (receiver_type && receiver_type->is_placeholder && fn->container_subtype) {
-                if (fn->fn_type && fn->fn_type->data.fn.container_ref) {
-                    auto container_ref = fn->fn_type->data.fn.container_ref;
-                    auto container_struct = get_resolver()->resolve_struct_type(container_ref);
-                    if (container_struct) {
-                        receiver_type = get_resolver()->type_placeholders_sub_selective(
-                            receiver_type, fn->container_subtype, container_struct->node);
-                    }
-                }
-            }
-            if (receiver_type && receiver_type->kind == TypeKind::Subtype) {
-                container_type_id = receiver_type->id;
-            }
+            container_type_id = resolve_variant_type_id(fn, dot_data.expr->resolved_type);
         }
     }
     if (!container_type_id.has_value() && fn->container_type) {
@@ -2861,6 +2841,51 @@ llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
         return nullptr;
     }
     return sret_type ? builder.CreateLoad(sret_type, sret_var) : ret;
+}
+
+std::optional<TypeId> Compiler::resolve_variant_type_id(Function *fn, ChiType *type) {
+    if (!type)
+        return std::nullopt;
+
+    // Unwrap pointer-like types
+    while (type && (type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
+                    type->kind == TypeKind::MutRef)) {
+        type = type->get_elem();
+    }
+
+    // Substitute placeholders using current function's context
+    if (type && type->is_placeholder && fn && fn->container_subtype) {
+        if (fn->fn_type && fn->fn_type->data.fn.container_ref) {
+            auto container_ref = fn->fn_type->data.fn.container_ref;
+            auto container_struct = get_resolver()->resolve_struct_type(container_ref);
+            if (container_struct) {
+                type = get_resolver()->type_placeholders_sub_selective(type, fn->container_subtype,
+                                                                       container_struct->node);
+            }
+        }
+    }
+
+    // Only return ID if it's a fully resolved Subtype
+    if (type && type->kind == TypeKind::Subtype && !type->is_placeholder) {
+        return type->id;
+    }
+    return std::nullopt;
+}
+
+ast::Node *Compiler::get_variant_member_node(ChiStructMember *member,
+                                             std::optional<TypeId> variant_type_id) {
+    if (!member)
+        return nullptr;
+
+    ast::Node *node = member->node;
+    if (variant_type_id.has_value()) {
+        auto base_member = member->root_variant ? member->root_variant : member;
+        auto variant_member = base_member->variants.get(*variant_type_id);
+        if (variant_member) {
+            node = (*variant_member)->node;
+        }
+    }
+    return node;
 }
 
 llvm::Value *Compiler::generate_method_proxy_function(Function *fn, ChiStructMember *method_member,

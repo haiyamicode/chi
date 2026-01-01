@@ -8,6 +8,7 @@
 #pragma once
 
 #include <list>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -357,6 +358,10 @@ class Compiler {
                                                 ChiType *lambda_type);
     llvm::Value *generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
                                                 ChiType *lambda_type, NodeList *captures);
+
+    // Variant lookup helpers
+    std::optional<TypeId> resolve_variant_type_id(Function *fn, ChiType *type);
+    ast::Node *get_variant_member_node(ChiStructMember *member, std::optional<TypeId> variant_type_id);
 
     // Async/await codegen
     std::vector<AsyncSegment> collect_async_segments(ast::Node *body);
