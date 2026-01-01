@@ -8,3 +8,4 @@ c.value=null
 c.value=42
 cs.value=hello
 w.get_inner().value=123
+rh.get()=999

@@ -19,20 +19,52 @@ struct RefContainer<T> {
 
 // Test nested generics (regression test for variant member lookup bug)
 struct Inner<T> {
-	value: T = undefined;
+	value: T;
+
+	func new(v: T) {
+		this.value = v;
+	}
 }
 
 struct Wrapper<T> {
 	data: Refc<Inner<T>>;
 
 	func init(value: T) {
-		var inner: Inner<T> = {};
-		inner.value = value;
+		var inner: Inner<T> = {value};
 		this.data = {inner};
 	}
 
 	func get_inner() &Inner<T> {
 		return this.data.get();  // Calls method on nested generic type
+	}
+}
+
+// Regression test: generic struct constructor calling `new` on another generic struct
+// This tests the fix for constructor variant lookup in compile_construction
+struct DataHolder<T> {
+	ref_count: uint32;
+	value: T;
+
+	func new(v: T) {
+		this.ref_count = 1;
+		this.value = v;
+	}
+}
+
+struct RefHolder<T> {
+	data: *DataHolder<T> = null;
+
+	func new(value: T) {
+		// This pattern was broken: calling `new DataHolder<T>{value}` inside a generic method
+		this.data = new DataHolder<T>{value};
+	}
+
+	func get() T {
+		return this.data.value;
+	}
+
+	func delete() {
+		delete this.data;
 	}
 }
 
@@ -94,4 +126,8 @@ func main() {
 	var w: Wrapper<int> = {};
 	w.init(123);
 	printf("w.get_inner().value={}\n", w.get_inner().value);
+
+	// Regression test: nested generic heap allocation in constructor
+	var rh: RefHolder<int> = {999};
+	printf("rh.get()={}\n", rh.get());
 }
