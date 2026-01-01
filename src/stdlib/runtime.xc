@@ -369,17 +369,20 @@ struct Buffer {
 
 // Reference-counted pointer for shared ownership
 struct RefcData<T> {
-  ref_count: uint32 = 0;
-  value: T = undefined;
+  ref_count: uint32;
+  value: T;
+
+  func new(v: T) {
+    this.ref_count = 1;
+    this.value = v;
+  }
 }
 
 struct Refc<T> implements ops.CopyFrom<Refc<T>> {
   protected data: *RefcData<T> = null;
 
   func new(value: T) {
-    this.data = new RefcData<T>{};
-    this.data.ref_count = 1;
-    this.data.value = value;
+    this.data = new RefcData<T>{value};
   }
 
   func delete() {
