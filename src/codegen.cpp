@@ -1858,7 +1858,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto value = compile_assignment_value(fn, data.op2, data.op1);
             assert(ref.address);
             if (!data.op2->escape.moved) {
-                compile_copy(fn, value, ref.address, get_chitype(data.op2), data.op2);
+                // Use destination type since value is already converted to dest type
+                compile_copy(fn, value, ref.address, get_chitype(data.op1), data.op2);
             }
             return value;
         }
@@ -2007,9 +2008,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::ConstructExpr: {
         auto &builder = *m_ctx->llvm_builder.get();
         auto &data = expr->data.construct_expr;
-        auto ptr = data.resolved_outlet ? compile_expr_ref(fn, data.resolved_outlet).address
-                                        : compile_alloc(fn, expr, data.is_new);
+        // Calculate element type first - for 'new' expressions, we need to allocate
+        // the element type, not the pointer type
         auto type = data.is_new ? get_chitype(expr)->get_elem() : get_chitype(expr);
+        auto ptr = data.resolved_outlet ? compile_expr_ref(fn, data.resolved_outlet).address
+                                        : compile_alloc(fn, expr, data.is_new, type);
         compile_construction(fn, ptr, type, expr);
         return data.is_new ? ptr : builder.CreateLoad(compile_type(type), ptr);
     }

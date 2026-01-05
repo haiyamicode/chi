@@ -2971,10 +2971,12 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     // Check if this is a generic function call that needs explicit type parameters
     if (fn->is_generic()) {
         // Resolve arguments first to get their types
+        // Clear move_outlet for function args - they're passed by value
+        auto arg_scope = scope.set_move_outlet(nullptr);
         array<ChiType *> arg_types;
         for (size_t i = 0; i < n_args; i++) {
             auto arg = args->at(i);
-            auto arg_type = resolve(arg, scope);
+            auto arg_type = resolve(arg, arg_scope);
             arg_types.add(arg_type);
         }
 
@@ -3112,8 +3114,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         for (size_t i = 0; i < n_args; i++) {
             auto param_type = fn->get_param_at(i);
             auto arg = args->at(i);
-            scope.value_type = param_type;
-            auto arg_type = resolve(arg, scope);
+            // Clear move_outlet for function args - they're passed by value,
+            // not written directly to any outer destination
+            auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
+            auto arg_type = resolve(arg, arg_scope);
 
             check_assignment(arg, arg_type, param_type);
         }

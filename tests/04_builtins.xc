@@ -55,9 +55,41 @@ func test_shared() {
   printf("after r1.set(100): r2.as_ref()={}\n", r2.as_ref()!);
 }
 
+// Regression test: nested {{}} construction with Shared
+// Tests fix for 'new' allocation size using element type instead of pointer type
+struct NestedState {
+  value: int = 0;
+  count: int = 0;
+}
+
+struct NestedShared {
+  data: Shared<NestedState>;
+
+  func new() {
+    // This {{}} pattern was allocating wrong size (pointer size instead of element size)
+    this.data = {{}};
+  }
+
+  func get_count() int {
+    return this.data.as_ref().count;
+  }
+
+  func ref_count() uint32 {
+    return this.data.ref_count();
+  }
+}
+
+func test_nested_shared() {
+  println("testing nested shared:");
+  var ns: NestedShared = {};
+  printf("ns.ref_count()={}\n", ns.ref_count());
+  printf("ns.get_count()={}\n", ns.get_count());
+}
+
 func main() {
   test_optional();
   test_array();
   test_map();
   test_shared();
+  test_nested_shared();
 }

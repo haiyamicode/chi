@@ -19,3 +19,6 @@ testing shared:
 r1.as_ref()=42, ref_count=1
 after copy: ref_count=2
 after r1.set(100): r2.as_ref()=100
+testing nested shared:
+ns.ref_count()=1
+ns.get_count()=0
