@@ -27,7 +27,7 @@ struct Inner<T> {
 }
 
 struct Wrapper<T> {
-	data: Refc<Inner<T>>;
+	data: Shared<Inner<T>>;
 
 	func init(value: T) {
 		var inner: Inner<T> = {value};
@@ -35,7 +35,7 @@ struct Wrapper<T> {
 	}
 
 	func get_inner() &Inner<T> {
-		return this.data.get();  // Calls method on nested generic type
+		return this.data.as_ref();  // Calls method on nested generic type
 	}
 }
 
@@ -122,7 +122,7 @@ func main() {
 	cs.value! = "hello";
 	printf("cs.value={}\n", cs.value!);
 
-	// Test nested generics - calling method on Refc<Inner<T>> from within Wrapper<T>
+	// Test nested generics - calling method on Shared<Inner<T>> from within Wrapper<T>
 	var w: Wrapper<int> = {};
 	w.init(123);
 	printf("w.get_inner().value={}\n", w.get_inner().value);

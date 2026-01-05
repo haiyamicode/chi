@@ -1350,9 +1350,9 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     auto promise_type_l = compile_type(promise_type);
 
     // Allocate storage for the promise and properly copy it
-    // Using compile_copy ensures copy_from is called, which increments Refc ref count
+    // Using compile_copy ensures copy_from is called, which increments Shared ref count
     auto awaited_promise_ptr = fn->entry_alloca(promise_type_l, "awaited");
-    // Zero-initialize the destination before copy to avoid garbage in Refc.data
+    // Zero-initialize the destination before copy to avoid garbage in Shared.data
     auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(promise_type_l);
     builder.CreateMemSet(awaited_promise_ptr,
         llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
@@ -3147,7 +3147,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto return_type_l = compile_type(return_type);
 
                 // Zero-initialize return_value before calling Promise.new()
-                // This ensures Refc.data is null, not garbage
+                // This ensures Shared.data is null, not garbage
                 auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(return_type_l);
                 llvm_builder.CreateMemSet(fn->return_value,
                     llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),

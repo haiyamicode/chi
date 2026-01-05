@@ -43,21 +43,21 @@ func test_map() {
   println("");
 }
 
-func test_refc() {
-  println("testing refc:");
-  var r1: Refc<int> = {42};
-  printf("r1.get()={}, ref_count={}\n", r1.get()!, r1.ref_count());
+func test_shared() {
+  println("testing shared:");
+  var r1: Shared<int> = {42};
+  printf("r1.as_ref()={}, ref_count={}\n", r1.as_ref()!, r1.ref_count());
 
-  var r2: Refc<int> = r1;
+  var r2: Shared<int> = r1;
   printf("after copy: ref_count={}\n", r1.ref_count());
 
   r1.set(100);
-  printf("after r1.set(100): r2.get()={}\n", r2.get()!);
+  printf("after r1.set(100): r2.as_ref()={}\n", r2.as_ref()!);
 }
 
 func main() {
   test_optional();
   test_array();
   test_map();
-  test_refc();
+  test_shared();
 }

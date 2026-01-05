@@ -15,7 +15,7 @@ m["ef"] = 0
 m.find("abc")!! = 1
 m.find("invalid") = null
 
-testing refc:
-r1.get()=42, ref_count=1
+testing shared:
+r1.as_ref()=42, ref_count=1
 after copy: ref_count=2
-after r1.set(100): r2.get()=100
+after r1.set(100): r2.as_ref()=100

@@ -368,7 +368,7 @@ struct Buffer {
 }
 
 // Reference-counted pointer for shared ownership
-struct RefcData<T> {
+struct SharedData<T> {
   ref_count: uint32;
   value: T;
 
@@ -378,18 +378,18 @@ struct RefcData<T> {
   }
 }
 
-struct Refc<T> implements ops.CopyFrom<Refc<T>> {
-  protected data: *RefcData<T> = null;
+struct Shared<T> implements ops.CopyFrom<Shared<T>> {
+  protected data: *SharedData<T> = null;
 
   func new(value: T) {
-    this.data = new RefcData<T>{value};
+    this.data = new SharedData<T>{value};
   }
 
   func delete() {
     this.release();
   }
 
-  func copy_from(from: &Refc<T>) {
+  func copy_from(from: &Shared<T>) {
     var new_data = from.data;
     if new_data {
       new_data.ref_count = new_data.ref_count + 1;
@@ -413,7 +413,7 @@ struct Refc<T> implements ops.CopyFrom<Refc<T>> {
     }
   }
 
-  func get() &T {
+  func as_ref() &T {
     return &this.data.value;
   }
 
@@ -434,7 +434,7 @@ struct PromiseState<T> {
 }
 
 struct Promise<T> implements ops.CopyFrom<Promise<T>> {
-  protected data: Refc<PromiseState<T>>;
+  protected data: Shared<PromiseState<T>>;
 
   func new() {
     this.data = {{}};
@@ -449,30 +449,32 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
   }
 
   func resolve(value: T) {
-    if this.data.get().state != 0 { return; }
-    this.data.get().state = 1;
-    this.data.get().value = value;
+    var state = this.data.as_ref();
+    if state.state != 0 { return; }
+    state.state = 1;
+    state.value = value;
     // Invoke all registered callbacks
-    for var i = 0; i < this.data.get().callbacks.len; i = i + 1 {
-      this.data.get().callbacks[i](value);
+    for var i = 0; i < state.callbacks.len; i = i + 1 {
+      state.callbacks[i](value);
     }
   }
 
   func is_resolved() bool {
-    return this.data.get().state == 1;
+    return this.data.as_ref().state == 1;
   }
 
   func get_value() T {
-    return this.data.get().value!;
+    return this.data.as_ref().value!;
   }
 
   func then(callback: func(value: T)) {
-    if this.data.get().state == 1 {
+    var state = this.data.as_ref();
+    if state.state == 1 {
       // Already resolved - invoke immediately
-      callback(this.data.get().value!);
+      callback(state.value!);
     } else {
       // Pending - add to callback list
-      this.data.get().callbacks.add(callback);
+      state.callbacks.add(callback);
     }
   }
 
