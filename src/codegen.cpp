@@ -838,8 +838,22 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         auto bstruct = lambda_type->data.fn_lambda.bind_struct;
         assert(bstruct);
         auto bstruct_l = compile_type(bstruct);
-        auto bind_var = builder.CreateAlloca(bstruct_l, nullptr, "lambda_captures");
         auto bind_size = llvm_type_size(bstruct_l);
+
+        // In managed mode, heap-allocate the bind_struct so it survives after the
+        // enclosing function returns (lambda captures can escape)
+        llvm::Value *bind_var;
+        if (is_managed()) {
+            auto alloc_fn = get_system_fn("cx_gc_alloc");
+            std::vector<llvm::Value *> args = {
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size),
+                llvm::ConstantPointerNull::get(
+                    llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0)),
+            };
+            bind_var = builder.CreateCall(alloc_fn->llvm_fn, args, "lambda_captures");
+        } else {
+            bind_var = builder.CreateAlloca(bstruct_l, nullptr, "lambda_captures");
+        }
         builder.CreateStore(bind_var, data_gep);
         builder.CreateStore(
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size), size_gep);
@@ -1118,14 +1132,14 @@ llvm::Function *Compiler::create_continuation_fn_decl(AsyncContext &ctx, int seg
 std::pair<llvm::StructType *, std::vector<ast::Node *>>
 Compiler::get_continuation_capture_info(AsyncContext &ctx, int segment_index) {
     auto &llvm_ctx = *m_ctx->llvm_ctx;
-    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
     int prev_segment_idx = segment_index - 1;
     auto &prev_segment = ctx.segments[prev_segment_idx];
 
-    // Build capture struct type: { result_promise_ptr, captured_vars... }
+    // Build capture struct type: { result_promise, captured_vars... }
+    // Store Promise by VALUE (not pointer) so it survives after stack frame is gone
     std::vector<llvm::Type *> capture_types;
-    capture_types.push_back(ptr_type); // result promise pointer
+    capture_types.push_back(ctx.promise_struct_type); // result promise VALUE
 
     std::vector<ast::Node *> captured_vars_ordered;
     for (auto var : prev_segment.vars_to_capture) {
@@ -1154,7 +1168,6 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
     // Get the arguments: data (captures) and value (resolved promise value)
     auto data_arg = llvm_fn->getArg(0);
     auto value_arg = llvm_fn->getArg(1);
-    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
     // Get capture struct type and ordered list of captured variables
     auto [capture_struct_type, captured_vars_ordered] = get_continuation_capture_info(ctx, segment_index);
@@ -1163,9 +1176,8 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
     // Previous segment (needed for await_var_decl)
     auto &prev_segment = ctx.segments[segment_index - 1];
 
-    // Extract result promise pointer
-    auto result_promise_ptr_ptr = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
-    auto result_promise_ptr = builder.CreateLoad(ptr_type, result_promise_ptr_ptr);
+    // Get pointer to the captured result promise (stored by value in captures)
+    auto result_promise_ptr = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
 
     // Extract captured variables and add to var table
     map<ast::Node *, llvm::Value *> local_vars;
@@ -1215,10 +1227,16 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
                 auto ret_value = compile_expr(cont_fn, data.expr);
 
                 // Get the Promise<T> type and look up the resolve() method
+                // Use variant lookup to get the specialized Promise<T>.resolve() method
                 auto promise_struct = get_resolver()->resolve_struct_type(ctx.promise_type);
                 auto resolve_member = promise_struct->find_member("resolve");
                 assert(resolve_member && "Promise.resolve() method not found");
-                auto resolve_method = get_fn(resolve_member->node);
+                std::optional<TypeId> variant_type_id = std::nullopt;
+                if (ctx.promise_type->kind == TypeKind::Subtype && !ctx.promise_type->is_placeholder) {
+                    variant_type_id = ctx.promise_type->id;
+                }
+                auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
+                auto resolve_method = get_fn(resolve_method_node);
 
                 // Call promise.resolve(value): takes this (Promise*) and value (T)
                 builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
@@ -1269,9 +1287,11 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
     auto capture_alloc = builder.CreateCall(malloc_fn, {size_l, null_ptr}, "captures");
     auto captures_ptr = builder.CreateBitCast(capture_alloc, capture_struct_type->getPointerTo());
 
-    // Store result promise pointer (passed as parameter)
-    auto result_ptr_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
-    builder.CreateStore(result_promise_ptr, result_ptr_gep);
+    // Store result promise VALUE (not pointer) - copy it so it survives after stack frame is gone
+    auto result_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
+    // Load the Promise value and copy it (compile_copy expects a value, not a pointer)
+    auto result_promise_val = builder.CreateLoad(ctx.promise_struct_type, result_promise_ptr);
+    compile_copy(fn, result_promise_val, result_gep, ctx.promise_type);
 
     // Store captured variables
     for (size_t i = 0; i < captured_vars_ordered.size(); i++) {
@@ -1343,9 +1363,16 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     auto lambda = build_continuation_lambda(fn, ctx, next_segment_index, local_vars, result_promise_ptr);
 
     // Call Promise.then(callback) to register the continuation
+    // Use variant lookup to get the specialized Promise<T>.then() method
     auto then_member = promise_struct_type->find_member("then");
     assert(then_member && "Promise.then() method not found");
-    auto then_method = get_fn(then_member->node);
+    std::optional<TypeId> variant_type_id = std::nullopt;
+    if (promise_type->kind == TypeKind::Subtype && !promise_type->is_placeholder) {
+        variant_type_id = promise_type->id;
+    }
+    auto then_method_node = get_variant_member_node(then_member, variant_type_id);
+    auto then_method = get_fn(then_method_node);
+    emit_dbg_location(await_expr);
     builder.CreateCall(then_method->llvm_fn, {awaited_promise_ptr, lambda});
 }
 
@@ -1381,10 +1408,16 @@ void Compiler::compile_async_fn_body(Function *fn) {
     ctx.result_promise_ptr = fn->entry_alloca(promise_struct_type_l, "result_promise");
 
     // Initialize promise by calling Promise.new() method
+    // Use variant lookup to get the specialized Promise<T>.new() method
     auto promise_struct = get_resolver()->resolve_struct_type(return_type);
     auto new_member = promise_struct->find_member("new");
     assert(new_member && "Promise.new() method not found");
-    auto new_method = get_fn(new_member->node);
+    std::optional<TypeId> variant_type_id = std::nullopt;
+    if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
+        variant_type_id = return_type->id;
+    }
+    auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+    auto new_method = get_fn(new_method_node);
     builder.CreateCall(new_method->llvm_fn, {ctx.result_promise_ptr});
 
     // Create label for first segment code before generating continuations
@@ -2133,8 +2166,15 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             builder.CreateMemSet(
                 dest, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
                 size, {});
+            // Use variant lookup to get the specialized copy_from method
+            auto eval_t = eval_type(type);
+            std::optional<TypeId> variant_type_id = std::nullopt;
+            if (eval_t && eval_t->kind == TypeKind::Subtype && !eval_t->is_placeholder) {
+                variant_type_id = eval_t->id;
+            }
+            auto copy_fn_node = get_variant_member_node(copy_fn, variant_type_id);
             auto loc = m_ctx->llvm_builder->getCurrentDebugLocation();
-            auto call = builder.CreateCall(get_fn(copy_fn->node)->llvm_fn, {
+            auto call = builder.CreateCall(get_fn(copy_fn_node)->llvm_fn, {
                                                                                dest,
                                                                                from_address,
                                                                            });
@@ -3113,10 +3153,17 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
                     size, {});
 
+                // Use variant lookup to get specialized Promise<T> methods
+                std::optional<TypeId> variant_type_id = std::nullopt;
+                if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
+                    variant_type_id = return_type->id;
+                }
+
                 // Call Promise.new() to initialize promise at return_value
                 auto new_member = promise_struct->find_member("new");
                 assert(new_member && "Promise.new() method not found");
-                auto new_method = get_fn(new_member->node);
+                auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+                auto new_method = get_fn(new_method_node);
                 llvm_builder.CreateCall(new_method->llvm_fn, {fn->return_value});
 
                 // Compile the expression value (using inner type T, not Promise<T>)
@@ -3126,7 +3173,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 // Call Promise.resolve(value)
                 auto resolve_member = promise_struct->find_member("resolve");
                 assert(resolve_member && "Promise.resolve() method not found");
-                auto resolve_method = get_fn(resolve_member->node);
+                auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
+                auto resolve_method = get_fn(resolve_method_node);
                 llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
             } else {
                 auto ret_type = get_chitype(stmt);
