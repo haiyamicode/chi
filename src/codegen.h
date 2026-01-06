@@ -212,6 +212,8 @@ struct CodegenContext {
     map<InterfaceImpl *, llvm::Value *> impl_table = {};
     map<ChiEnumVariant *, llvm::Value *> enum_variant_table = {};
     map<string, llvm::DICompileUnit *> module_cu_table = {};
+    map<ChiType *, Function *> destructor_table = {};  // Generated __delete functions
+    map<ChiType *, Function *> constructor_table = {}; // Generated __new functions
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx = {};
@@ -271,6 +273,10 @@ class Compiler {
     inline llvm::Type *compile_type_of(ast::Node *node);
 
     void compile_destruction(Function *fn, llvm::Value *address, ast::Node *node);
+    void compile_destruction_for_type(Function *fn, llvm::Value *address, ChiType *type);
+    Function *generate_destructor(ChiType *type, ChiType *container_type = nullptr);
+    Function *generate_destructor_optional(ChiType *type, ChiType *resolved_type);
+    Function *generate_constructor(ChiType *struct_type, ChiType *container_type = nullptr);
 
     void compile_construction(Function *fn, llvm::Value *dest, ChiType *type, ast::Node *expr);
 
@@ -304,8 +310,9 @@ class Compiler {
 
     RefValue compile_iden_ref(Function *fn, ast::Node *iden);
 
-    std::vector<llvm::Value *> compile_fn_args(Function *fn, Function *callee,
-                                               array<ast::Node *> args, ast::Node *fn_call);
+    std::vector<llvm::Value *> compile_fn_args(
+        Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call,
+        std::vector<std::pair<llvm::Value *, ast::Node *>> *out_temporaries = nullptr);
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr,
                                  llvm::Value *sret_dest = nullptr);
 

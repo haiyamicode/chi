@@ -1983,7 +1983,8 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
             auto container_ref = node->resolved_type->data.fn.container_ref;
             if (container_ref) {
                 auto container = container_ref->get_elem();
-                return fmt::format("{}.{}", to_string(container), node->name);
+                // Use for_display=true to get just the type name, not the full global_id
+                return fmt::format("{}.{}", to_string(container, true), node->name);
             }
             return node->name;
         }
@@ -2444,16 +2445,56 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
     }
 }
 
+// Check if a type needs destruction (has destructor or has fields that need destruction)
+bool Resolver::type_needs_destruction(ChiType *type) {
+    if (!type) return false;
+
+    // Strings need destruction
+    if (type->kind == TypeKind::String) return true;
+
+    // Optional needs destruction if its element type needs destruction
+    if (type->kind == TypeKind::Optional) {
+        auto elem_type = type->get_elem();
+        return elem_type && type_needs_destruction(elem_type);
+    }
+
+    // For Subtype (generic instantiation), check the final resolved type
+    if (type->kind == TypeKind::Subtype) {
+        auto final_type = type->data.subtype.final_type;
+        if (final_type) {
+            return type_needs_destruction(final_type);
+        }
+        // If final_type is not resolved yet, check the generic's destructor
+        auto generic = type->data.subtype.generic;
+        if (generic && generic->kind == TypeKind::Struct) {
+            return get_struct_member(generic, "delete") != nullptr;
+        }
+        return false;
+    }
+
+    // Only structs can have destructors or fields needing destruction
+    if (type->kind != TypeKind::Struct) return false;
+
+    // Has custom destructor
+    if (get_struct_member(type, "delete")) return true;
+
+    // Check if any field needs destruction
+    auto &fields = type->data.struct_.fields;
+    for (auto field : fields) {
+        if (type_needs_destruction(field->resolved_type)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool Resolver::should_destroy(ast::Node *node, ChiType *type_override) {
     auto is_managed = has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED);
     if (is_managed && node->is_heap_allocated()) {
         return false;
     }
     auto resolved_type = type_override ? type_override : node_get_type(node);
-    if (!resolved_type || resolved_type->kind == TypeKind::String) {
-        return false;
-    }
-    return is_struct_type(resolved_type) && get_struct_member(resolved_type, "delete");
+    return type_needs_destruction(resolved_type);
 }
 
 bool Resolver::should_resolve_fn_body(ResolveScope &scope) {

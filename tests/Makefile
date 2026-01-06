@@ -23,7 +23,8 @@ TESTS_LIST = 00_fib.test \
 		19_type_params.test \
 		20_numeric_types.test \
 		21_trait_bounds.test \
-		22_operator_overloading.test
+		22_auto_lifecycle.test \
+		23_operator_overloading.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

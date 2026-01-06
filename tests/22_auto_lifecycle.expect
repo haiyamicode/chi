@@ -1,0 +1,75 @@
+=== Test 1: Auto-destroy without custom delete ===
+Outer1.new
+  Inner1.new(1)
+Before function exit
+  Inner1.delete(1)
+After helper returned
+
+=== Test 2: __new initializes defaults before user's new() ===
+WithDefaults.new: a=10, b=20, setting c=30
+Final: a=10, b=20, c=30
+
+=== Test 3: Destruction order (reverse of declaration) ===
+OrderedContainer.new
+  OrderedField.new('first')
+  OrderedField.new('second')
+  OrderedField.new('third')
+Before function exit
+OrderedContainer.delete (user)
+  OrderedField.delete('third')
+  OrderedField.delete('second')
+  OrderedField.delete('first')
+After helper returned
+
+=== Test 4: Shared<T> field auto-destruction ===
+HoldsShared.new
+  RefCountedData.new(42)
+  RefCountedData.delete(42)
+  ref_count after construction: 1
+Before function exit
+  RefCountedData.delete(42)
+After helper - RefCountedData should be deleted
+
+=== Test 5: Nested auto-destruction (3 levels) ===
+Before function exit
+Level1.delete(1)
+  Level2.delete(10)
+    Level3.delete(100)
+After helper returned
+
+=== Test 6: Optional<Shared<T>> field auto-destruction ===
+HoldsOptionalShared.new
+  OptionalData.new(99)
+  OptionalData.delete(99)
+  ref_count: 1
+Before function exit (with value)
+  OptionalData.delete(99)
+After helper - OptionalData should be deleted
+Before function exit (null)
+After null helper - no crash expected
+
+=== Test 7: Optional<T> with direct struct ===
+HoldsOptionalDirect.new
+  DirectStruct.new(77)
+Before function exit
+  DirectStruct.delete(77)
+After helper - DirectStruct should be deleted
+
+=== Test 8: Both __new and __delete on same struct ===
+BothLifecycles.new: default_val=999
+  Inner1.new(88)
+Before function exit
+  Inner1.delete(88)
+After helper returned
+
+=== Test 9: Multiple local variables destruction order ===
+  TrackedVar.new('first')
+  TrackedVar.new('second')
+  TrackedVar.new('third')
+Before function exit - destroys in declaration order
+  TrackedVar.delete('first')
+  TrackedVar.delete('second')
+  TrackedVar.delete('third')
+After helper returned
+
+All tests completed!

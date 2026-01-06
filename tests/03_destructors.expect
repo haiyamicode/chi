@@ -1,4 +1,10 @@
 delete foo 3
+delete bar 32
+delete bar 31
 delete foo 2
+delete bar 22
+delete bar 21
 finished
 delete foo 1
+delete bar 12
+delete bar 11

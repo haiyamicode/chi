@@ -151,7 +151,18 @@ ChiType *Compiler::get_chitype(ast::Node *node) {
 }
 
 llvm::DICompileUnit *Compiler::get_module_cu(ast::Module *module) {
-    return m_ctx->module_cu_table[module->global_id()];
+    auto id = module->global_id();
+    auto entry = m_ctx->module_cu_table.get(id);
+    if (entry) {
+        return *entry;
+    }
+    // Create compile unit on-demand for cross-module function compilation
+    auto module_cu = m_ctx->dbg_builder->createCompileUnit(
+        llvm::dwarf::DW_LANG_C,
+        m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
+        "Chi Compiler", 0, "", 0);
+    m_ctx->module_cu_table[id] = module_cu;
+    return module_cu;
 }
 
 void Compiler::compile_module(ast::Module *module) {
@@ -307,6 +318,11 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         if (struct_type->data.struct_.interfaces.len) {
             compile_struct_vtables(struct_type);
         }
+    }
+
+    // Generate __delete if this type needs destruction
+    if (get_resolver()->type_needs_destruction(type)) {
+        generate_destructor(type, nullptr);
     }
 
     for (auto member : struct_type->data.struct_.members) {
@@ -594,7 +610,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
     // clean up & return
     fn->use_label(return_b);
-    for (auto var : fn->get_def()->cleanup_vars) {
+    auto cleanup_fn_def = fn->get_def();
+    for (auto var : cleanup_fn_def->cleanup_vars) {
         compile_destruction(fn, get_var(var), var);
     }
     for (auto ptr : fn->vararg_pointers) {
@@ -2028,8 +2045,14 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::KW_DELETE: {
             emit_dbg_location(expr);
-            auto free_fn = get_system_fn("cx_free");
             auto ptr = compile_expr(fn, data.expr);
+            // Call __delete on the pointed-to type before freeing
+            auto ptr_type = get_chitype(data.expr);
+            if (ptr_type && ptr_type->is_pointer_like()) {
+                auto elem_type = ptr_type->get_elem();
+                compile_destruction_for_type(fn, ptr, elem_type);
+            }
+            auto free_fn = get_system_fn("cx_free");
             builder.CreateCall(free_fn->llvm_fn, {ptr});
             return nullptr;
         }
@@ -2272,44 +2295,10 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         return compile_construction(fn, dest, struct_type, expr);
     }
     case TypeKind::Struct: {
-        auto &data = type->data.struct_;
-
-        // Build set of fields explicitly initialized in construct expression
-        std::set<ChiStructMember *> explicit_inits;
-        for (auto field_init : expr->data.construct_expr.field_inits) {
-            explicit_inits.insert(field_init->data.field_init_expr.resolved_field);
-        }
-
-        // Apply default values for fields not explicitly initialized (before constructor)
-        for (auto field : data.fields) {
-            if (explicit_inits.count(field) > 0) continue;  // Explicitly initialized
-            if (!field->node) continue;
-            auto default_expr = field->node->data.var_decl.expr;
-            if (!default_expr) continue;  // No default value
-
-            auto field_gep =
-                builder.CreateStructGEP(compile_type(type), dest, field->field_index);
-
-            // Clear resolved_outlet on ConstructExpr to avoid using stale outlets from field declaration context
-            if (default_expr->type == ast::NodeType::ConstructExpr) {
-                // Clear outlets recursively for nested ConstructExprs
-                std::function<void(ast::Node *)> clear_outlets = [&](ast::Node *node) {
-                    if (!node) return;
-                    if (node->type == ast::NodeType::ConstructExpr) {
-                        node->data.construct_expr.resolved_outlet = nullptr;
-                        for (auto item : node->data.construct_expr.items) {
-                            clear_outlets(item);
-                        }
-                    }
-                };
-                clear_outlets(default_expr);
-                compile_construction(fn, field_gep, field->resolved_type, default_expr);
-            } else {
-                auto value = compile_assignment_to_type(fn, default_expr, field->resolved_type);
-                if (value) {
-                    builder.CreateStore(value, field_gep);
-                }
-            }
+        // Call __new to initialize fields with default values
+        auto generated_ctor = generate_constructor(type, nullptr);
+        if (generated_ctor) {
+            builder.CreateCall(generated_ctor->llvm_fn, {dest});
         }
 
         auto constructor = ChiTypeStruct::get_constructor(type);
@@ -2327,11 +2316,18 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
                 auto constructor_fn = *entry;
                 auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
                 auto args = std::vector<llvm::Value *>{dest};
-                auto remaining_args =
-                    compile_fn_args(fn, constructor_fn, expr->data.construct_expr.items, expr);
+                // Track temporaries created for constructor arguments
+                std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
+                auto remaining_args = compile_fn_args(fn, constructor_fn,
+                                                      expr->data.construct_expr.items, expr,
+                                                      &arg_temporaries);
                 args.insert(args.end(), remaining_args.begin(), remaining_args.end());
                 builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
                 emit_dbg_location(expr);
+                // Destroy temporaries after the constructor call completes
+                for (auto &[temp_ptr, temp_node] : arg_temporaries) {
+                    compile_destruction(fn, temp_ptr, temp_node);
+                }
             }
         }
 
@@ -2640,8 +2636,9 @@ normal:
     return RefValue::from_address(get_var(data.decl));
 }
 
-std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *callee,
-                                                     array<ast::Node *> args, ast::Node *fn_call) {
+std::vector<llvm::Value *> Compiler::compile_fn_args(
+    Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call,
+    std::vector<std::pair<llvm::Value *, ast::Node *>> *out_temporaries) {
     std::vector<llvm::Value *> call_args = {};
     auto &builder = *m_ctx->llvm_builder.get();
     llvm::Value *va_ptr = nullptr;
@@ -2671,9 +2668,30 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
             builder.CreateStore(arg, ptr);
             continue;
         }
-        auto arg = args[i];
+        auto arg_node = args[i];
         auto param_type = fn_spec.get_param_at(i);
-        call_args.push_back(compile_assignment_to_type(fn, arg, param_type));
+
+        // Check if this argument is a ConstructExpr that will create a temporary
+        // that needs destruction after the call
+        if (out_temporaries && arg_node->type == ast::NodeType::ConstructExpr) {
+            auto &construct_data = arg_node->data.construct_expr;
+            // Only track non-new constructs without an outlet (these create temporaries)
+            if (!construct_data.is_new && !construct_data.resolved_outlet) {
+                auto arg_type = get_chitype(arg_node);
+                auto destructor = ChiTypeStruct::get_destructor(arg_type);
+                if (destructor) {
+                    // Compile the construct expr to get temporary address
+                    auto temp_ptr = compile_alloc(fn, arg_node, false, arg_type);
+                    compile_construction(fn, temp_ptr, arg_type, arg_node);
+                    auto value = builder.CreateLoad(compile_type(arg_type), temp_ptr);
+                    call_args.push_back(value);
+                    // Track for destruction after call
+                    out_temporaries->push_back({temp_ptr, arg_node});
+                    continue;
+                }
+            }
+        }
+        call_args.push_back(compile_assignment_to_type(fn, arg_node, param_type));
     }
 
     if (va_ptr) {
@@ -2823,6 +2841,9 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         callee = callee_fn->llvm_fn;
     }
 
+    // Track temporaries created for struct arguments that need destruction after the call
+    std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
+
     for (int i = 0; i < data.args.len; i++) {
         if (is_variadic && i >= va_start) {
             emit_dbg_location(data.args[i]);
@@ -2837,6 +2858,27 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         }
         auto arg = data.args[i];
         auto param_type = fn_spec.get_param_at(i);
+
+        // Check if this argument is a ConstructExpr that will create a temporary
+        // that needs destruction after the call
+        if (arg->type == ast::NodeType::ConstructExpr) {
+            auto &construct_data = arg->data.construct_expr;
+            // Only track non-new constructs without an outlet (these create temporaries)
+            if (!construct_data.is_new && !construct_data.resolved_outlet) {
+                auto arg_type = get_chitype(arg);
+                auto destructor = ChiTypeStruct::get_destructor(arg_type);
+                if (destructor) {
+                    // Compile the construct expr to get temporary address
+                    auto temp_ptr = compile_alloc(fn, arg, false, arg_type);
+                    compile_construction(fn, temp_ptr, arg_type, arg);
+                    auto value = builder.CreateLoad(compile_type(arg_type), temp_ptr);
+                    args.push_back(value);
+                    // Track for destruction after call
+                    arg_temporaries.push_back({temp_ptr, arg});
+                    continue;
+                }
+            }
+        }
         args.push_back(compile_assignment_to_type(fn, arg, param_type));
     }
     if (va_ptr) {
@@ -2847,7 +2889,14 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     emit_dbg_location(expr);
     auto return_type = fn_type->data.fn.return_type;
     auto sret_type = fn_type->data.fn.should_use_sret() ? compile_type(return_type) : nullptr;
-    return create_fn_call_invoke(callee, args, sret_type, invoke, sret_dest);
+    auto result = create_fn_call_invoke(callee, args, sret_type, invoke, sret_dest);
+
+    // Destroy temporaries after the call completes
+    for (auto &[temp_ptr, temp_node] : arg_temporaries) {
+        compile_destruction(fn, temp_ptr, temp_node);
+    }
+
+    return result;
 }
 
 llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
@@ -3388,24 +3437,334 @@ void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node
     }
 
     auto type = get_chitype(node);
+    compile_destruction_for_type(fn, address, type);
+}
+
+void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, ChiType *type) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    // Resolve Subtype to final type
+    auto original_type = type;
+    while (type && type->kind == TypeKind::Subtype) {
+        auto final_type = type->data.subtype.final_type;
+        if (final_type) {
+            type = final_type;
+        } else {
+            break;
+        }
+    }
+
+    if (!type) return;
+
+    // Handle strings
     if (type->kind == TypeKind::String) {
-        auto &builder = *m_ctx->llvm_builder;
-        emit_dbg_location(node);
         auto string_delete = get_system_fn("cx_string_delete");
         builder.CreateCall(string_delete->llvm_fn, {address});
         return;
     }
 
-    auto destructor = ChiTypeStruct::get_destructor(type);
-    if (destructor) {
-        auto &builder = *m_ctx->llvm_builder;
-        auto destructor_type = get_chitype(destructor->node);
-        auto destructor_fn = get_fn(destructor->node);
-        auto destructor_type_l = (llvm::FunctionType *)compile_type(destructor_type);
-        auto args = std::vector<llvm::Value *>{address};
-        emit_dbg_location(node);
-        builder.CreateCall(destructor_type_l, destructor_fn->llvm_fn, args);
+    // Handle optionals and structs via generated __delete
+    if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct) {
+        return;
     }
+
+    auto dtor = generate_destructor(original_type, nullptr);
+    if (dtor) {
+        builder.CreateCall(dtor->llvm_fn, {address});
+    }
+}
+
+Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) {
+    // Check if already generated
+    auto existing = m_ctx->destructor_table.get(type);
+    if (existing) {
+        return *existing;
+    }
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Resolve subtype if needed
+    auto resolved_type = type;
+    while (resolved_type && resolved_type->kind == TypeKind::Subtype) {
+        auto final_type = resolved_type->data.subtype.final_type;
+        if (final_type) {
+            resolved_type = final_type;
+        } else {
+            break;
+        }
+    }
+
+    if (!resolved_type) {
+        return nullptr;
+    }
+
+    // Handle Optional types
+    if (resolved_type->kind == TypeKind::Optional) {
+        return generate_destructor_optional(type, resolved_type);
+    }
+
+    if (resolved_type->kind != TypeKind::Struct) {
+        return nullptr;
+    }
+
+    // Create function type: void __delete(T*)
+    auto struct_ptr_type = get_llvm_ptr_type();
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
+
+    // Generate unique name for the destructor
+    auto type_name = get_resolver()->to_string(type, true);
+    auto fn_name = fmt::format("{}.__delete", type_name);
+
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    // Create Function object
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->destructor_table[type] = fn;
+
+    // Save current insert point
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    // Create entry block
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+
+    auto this_ptr = llvm_fn->getArg(0);
+    auto llvm_struct_type = compile_type(resolved_type);
+
+    // 1. Call user's delete() if it exists
+    auto user_destructor = ChiTypeStruct::get_destructor(resolved_type);
+    if (user_destructor) {
+        auto destructor_type = get_chitype(user_destructor->node);
+        auto destructor_id = get_resolver()->resolve_global_id(user_destructor->node);
+        auto destructor_fn_ptr = m_ctx->function_table.get(destructor_id);
+        Function *destructor_fn = nullptr;
+        if (!destructor_fn_ptr) {
+            // Compile on demand
+            auto proto = user_destructor->node->data.fn_def.fn_proto;
+            destructor_fn = compile_fn_proto(proto, user_destructor->node);
+            m_ctx->pending_fns.add(destructor_fn);
+        } else {
+            destructor_fn = *destructor_fn_ptr;
+        }
+        auto destructor_type_l = (llvm::FunctionType *)compile_type(destructor_type);
+        builder.CreateCall(destructor_type_l, destructor_fn->llvm_fn, {this_ptr});
+    }
+
+    // 2. Destroy fields that need destruction (in reverse order)
+    auto &struct_data = resolved_type->data.struct_;
+    auto fields = struct_data.fields;
+
+    // Iterate in reverse order
+    for (int i = fields.len - 1; i >= 0; i--) {
+        auto field = fields[i];
+        auto field_type = field->resolved_type;
+
+        // Resolve Subtype
+        while (field_type && field_type->kind == TypeKind::Subtype) {
+            auto final_type = field_type->data.subtype.final_type;
+            if (final_type) {
+                field_type = final_type;
+            } else {
+                break;
+            }
+        }
+
+        if (!field_type) continue;
+
+        // Check if field needs destruction using resolver's utility
+        if (!get_resolver()->type_needs_destruction(field_type)) {
+            continue;
+        }
+
+        auto field_gep = builder.CreateStructGEP(llvm_struct_type, this_ptr, field->field_index);
+        compile_destruction_for_type(fn, field_gep, field_type);
+    }
+
+    builder.CreateRetVoid();
+
+    // Restore insert point
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+
+    return fn;
+}
+
+Function *Compiler::generate_destructor_optional(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Get element type
+    auto elem_type = resolved_type->get_elem();
+    if (!elem_type || !get_resolver()->type_needs_destruction(elem_type)) {
+        return nullptr;
+    }
+
+    // Create function type: void __delete(T*)
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+
+    // Generate unique name for the destructor
+    auto type_name = get_resolver()->to_string(type, true);
+    auto fn_name = fmt::format("{}.__delete", type_name);
+
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    // Create Function object
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->destructor_table[type] = fn;
+
+    // Save current insert point
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    // Create blocks
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    auto destroy_bb = llvm::BasicBlock::Create(llvm_ctx, "destroy", llvm_fn);
+    auto end_bb = llvm::BasicBlock::Create(llvm_ctx, "end", llvm_fn);
+
+    // Entry: check has_value
+    builder.SetInsertPoint(entry_bb);
+    auto this_ptr = llvm_fn->getArg(0);
+    auto opt_type_l = compile_type(resolved_type);
+    auto has_value_ptr = builder.CreateStructGEP(opt_type_l, this_ptr, 0);
+    auto has_value = builder.CreateLoad(llvm::Type::getInt1Ty(llvm_ctx), has_value_ptr);
+    builder.CreateCondBr(has_value, destroy_bb, end_bb);
+
+    // Destroy: call destruction on inner value
+    builder.SetInsertPoint(destroy_bb);
+    auto value_ptr = builder.CreateStructGEP(opt_type_l, this_ptr, 1);
+    compile_destruction_for_type(fn, value_ptr, elem_type);
+    builder.CreateBr(end_bb);
+
+    // End: return
+    builder.SetInsertPoint(end_bb);
+    builder.CreateRetVoid();
+
+    // Restore insert point
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+
+    return fn;
+}
+
+Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *container_type) {
+    // Check if already generated
+    auto existing = m_ctx->constructor_table.get(struct_type);
+    if (existing) {
+        return *existing;
+    }
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Resolve subtype if needed
+    auto resolved_type = struct_type;
+    while (resolved_type && resolved_type->kind == TypeKind::Subtype) {
+        auto final_type = resolved_type->data.subtype.final_type;
+        if (final_type) {
+            resolved_type = final_type;
+        } else {
+            break;
+        }
+    }
+
+    if (!resolved_type || resolved_type->kind != TypeKind::Struct) {
+        return nullptr;
+    }
+
+    // Check if any field has a default value
+    auto &struct_data = resolved_type->data.struct_;
+    bool has_defaults = false;
+    for (auto field : struct_data.fields) {
+        if (!field->node) continue;
+        auto default_expr = field->node->data.var_decl.expr;
+        if (default_expr) {
+            has_defaults = true;
+            break;
+        }
+    }
+
+    if (!has_defaults) {
+        // No defaults - no need for __new
+        m_ctx->constructor_table[struct_type] = nullptr;
+        return nullptr;
+    }
+
+    // Create function type: void __new(T*)
+    auto struct_ptr_type = get_llvm_ptr_type();
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
+
+    // Generate unique name for the constructor
+    auto type_name = get_resolver()->to_string(struct_type, true);
+    auto fn_name = fmt::format("{}.__new", type_name);
+
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    // Create Function object
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->constructor_table[struct_type] = fn;
+
+    // Save current insert point
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    // Create entry block
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+
+    auto this_ptr = llvm_fn->getArg(0);
+    auto llvm_struct_type = compile_type(resolved_type);
+
+    // Initialize all fields with default values
+    for (auto field : struct_data.fields) {
+        if (!field->node) continue;
+        auto default_expr = field->node->data.var_decl.expr;
+        if (!default_expr) continue;
+
+        auto field_gep = builder.CreateStructGEP(llvm_struct_type, this_ptr, field->field_index);
+
+        // Clear resolved_outlet on ConstructExpr to avoid using stale outlets
+        if (default_expr->type == ast::NodeType::ConstructExpr) {
+            std::function<void(ast::Node *)> clear_outlets = [&](ast::Node *node) {
+                if (!node) return;
+                if (node->type == ast::NodeType::ConstructExpr) {
+                    node->data.construct_expr.resolved_outlet = nullptr;
+                    for (auto item : node->data.construct_expr.items) {
+                        clear_outlets(item);
+                    }
+                }
+            };
+            clear_outlets(default_expr);
+            compile_construction(fn, field_gep, field->resolved_type, default_expr);
+        } else {
+            auto value = compile_assignment_to_type(fn, default_expr, field->resolved_type);
+            if (value) {
+                builder.CreateStore(value, field_gep);
+            }
+        }
+    }
+
+    builder.CreateRetVoid();
+
+    // Restore insert point
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+
+    return fn;
 }
 
 llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node *block,

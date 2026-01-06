@@ -200,8 +200,6 @@ class Resolver {
 
     bool should_resolve_fn_body(ResolveScope &scope);
 
-    bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
-
     ChiType *resolve_comparator(ChiType *type, ResolveScope &scope);
 
     ChiType *resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
@@ -226,6 +224,9 @@ class Resolver {
     Resolver(ResolveContext *ctx);
 
     ResolveContext *get_context() { return m_ctx; }
+
+    bool type_needs_destruction(ChiType *type);
+    bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
 
     void context_init_primitives();
     void context_init_builtins(ast::Module *builtin_module);
