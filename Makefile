@@ -49,6 +49,10 @@ compile_example: build install
 run_example: compile_example
 	./local/test
 
+debug_example: compile_example
+	lldb -o run ./local/test
+
+
 compile_example_package: build install
 	$(CHI) -p $(INPUT_PACKAGE) -o local/test_package_exe -w local/build
 

@@ -849,6 +849,10 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     auto struct_type_l = compile_type(struct_type);
     auto var = builder.CreateAlloca(struct_type_l, nullptr, "lambda");
 
+    // Initialize to zero to ensure Shared data field is null
+    auto size = llvm_type_size(struct_type_l);
+    builder.CreateMemSet(var, llvm::ConstantInt::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0), size, {});
+
     // load captures
     if (captures && captures->len) {
         auto bstruct = lambda_type->data.fn_lambda.bind_struct;
@@ -913,35 +917,19 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
             builder.CreateStore(value, capture_gep);
         }
 
-        // Allocate SharedData<BindStruct> on heap: { uint32 ref_count, BindStruct value }
-        std::vector<llvm::Type *> shared_data_fields;
-        shared_data_fields.push_back(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx)); // ref_count
-        shared_data_fields.push_back(bstruct_l);                                  // value
-        auto shared_data_type = llvm::StructType::get(*m_ctx->llvm_ctx, shared_data_fields);
-        auto shared_data_size = llvm_type_size(shared_data_type);
-
-        // Always use malloc for refcounted data
-        auto malloc_fn = get_system_fn("cx_malloc");
-        std::vector<llvm::Value *> malloc_args = {
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), shared_data_size),
-            llvm::ConstantPointerNull::get(
-                llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0)),
-        };
-        auto shared_data_var = builder.CreateCall(malloc_fn->llvm_fn, malloc_args, "shared_data");
-
-        // Initialize ref_count to 1
-        auto ref_count_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 0);
-        builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), 1),
-                            ref_count_gep);
-
-        // Get pointer to the value field and copy bind_struct into it
-        auto value_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 1);
+        // Load the bind_struct value to pass to new_with_data
+        // Shared<T> will handle SharedData creation internally
         auto bind_struct_value = builder.CreateLoad(bstruct_l, bind_var);
-        builder.CreateStore(bind_struct_value, value_gep);
 
-        // Call __CxLambda.new_with_data(fn_ptr, size, shared_data_ptr)
+        // Call __CxLambda.new_with_data(fn_ptr, size, captures)
         auto lambda_struct = lambda_type->data.fn_lambda.internal;
-        auto new_member = lambda_struct->data.struct_.find_member("new_with_data");
+
+        // Get the actual struct type (handle Subtype case)
+        auto struct_type = lambda_struct->kind == TypeKind::Subtype
+            ? lambda_struct->data.subtype.final_type
+            : lambda_struct;
+
+        auto new_member = struct_type->data.struct_.find_member("new_with_data");
         assert(new_member && "new_with_data() method not found in __CxLambda");
 
         std::optional<TypeId> variant_type_id = std::nullopt;
@@ -952,13 +940,19 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         auto new_method = get_fn(new_method_node);
 
         auto size_value = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size);
-        builder.CreateCall(new_method->llvm_fn, {var, fn_ptr, size_value, shared_data_var});
+        builder.CreateCall(new_method->llvm_fn, {var, fn_ptr, size_value, bind_struct_value});
     } else {
         // For lambdas without captures, generate a proxy function and call new_no_captures()
         auto proxy_fn = generate_lambda_proxy_function(fn, fn_ptr, lambda_type, nullptr);
 
         auto lambda_struct = lambda_type->data.fn_lambda.internal;
-        auto new_member = lambda_struct->data.struct_.find_member("new_no_captures");
+
+        // Get the actual struct type (handle Subtype case)
+        auto struct_type_nc = lambda_struct->kind == TypeKind::Subtype
+            ? lambda_struct->data.subtype.final_type
+            : lambda_struct;
+
+        auto new_member = struct_type_nc->data.struct_.find_member("new_no_captures");
         assert(new_member && "new_no_captures() method not found in __CxLambda");
 
         std::optional<TypeId> variant_type_id = std::nullopt;
@@ -1704,6 +1698,34 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         if (from_type->kind == TypeKind::Fn) {
             return compile_lambda_alloc(fn, to_type, value, nullptr);
         }
+        // For FnLambda -> FnLambda with different capture types, convert the value
+        if (from_type->kind == TypeKind::FnLambda) {
+            auto &builder = *m_ctx->llvm_builder;
+            auto to_llvm_type = compile_type(to_type);
+
+            // Extract fields from source
+            auto fn_ptr = builder.CreateExtractValue(value, {0}, "fn_ptr");
+            auto size_val = builder.CreateExtractValue(value, {1}, "size");
+            auto src_shared = builder.CreateExtractValue(value, {2}, "src_shared");
+            auto shared_data_ptr = builder.CreateExtractValue(src_shared, {0}, "shared_data_ptr");
+
+            // Call cx_shared_retain to increment refcount
+            auto retain_fn = get_system_fn("cx_shared_retain");
+            builder.CreateCall(retain_fn->llvm_fn, {shared_data_ptr});
+
+            // Create new Shared with correct type
+            auto dest_shared_type = to_llvm_type->getStructElementType(2);
+            llvm::Value *dest_shared = llvm::UndefValue::get(dest_shared_type);
+            dest_shared = builder.CreateInsertValue(dest_shared, shared_data_ptr, {0});
+
+            // Build destination lambda struct
+            llvm::Value *dest_val = llvm::UndefValue::get(to_llvm_type);
+            dest_val = builder.CreateInsertValue(dest_val, fn_ptr, {0});
+            dest_val = builder.CreateInsertValue(dest_val, size_val, {1});
+            dest_val = builder.CreateInsertValue(dest_val, dest_shared, {2});
+
+            return dest_val;
+        }
         return value;
     }
     case TypeKind::Optional: {
@@ -2250,6 +2272,41 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         emit_dbg_location(expr);
         return;
     }
+    case TypeKind::FnLambda: {
+        // For lambda types, we need to manually copy fields and increment refcount
+        // because __CxLambda<T1> and __CxLambda<T2> can't use copy_from across types
+        auto &builder = *m_ctx->llvm_builder;
+        auto llvm_type = compile_type(type);
+
+        // Extract fn_ptr (field 0)
+        auto fn_ptr = builder.CreateExtractValue(src.value, {0}, "fn_ptr");
+
+        // Extract size (field 1)
+        auto size_val = builder.CreateExtractValue(src.value, {1}, "size");
+
+        // Extract Shared<T> data (field 2) - just get the pointer
+        auto src_shared = builder.CreateExtractValue(src.value, {2}, "src_shared");
+        auto shared_data_ptr = builder.CreateExtractValue(src_shared, {0}, "shared_data_ptr");
+
+        // Call cx_shared_retain to increment refcount (it handles null check internally)
+        auto retain_fn = get_system_fn("cx_shared_retain");
+        builder.CreateCall(retain_fn->llvm_fn, {shared_data_ptr});
+
+        // Create a new Shared<T> with the correct destination type
+        auto dest_shared_type = llvm_type->getStructElementType(2);  // Get Shared<DestT> type
+        llvm::Value *dest_shared = llvm::UndefValue::get(dest_shared_type);
+        dest_shared = builder.CreateInsertValue(dest_shared, shared_data_ptr, {0});
+
+        // Build the destination lambda struct
+        llvm::Value *dest_val = llvm::UndefValue::get(llvm_type);
+        dest_val = builder.CreateInsertValue(dest_val, fn_ptr, {0});
+        dest_val = builder.CreateInsertValue(dest_val, size_val, {1});
+        dest_val = builder.CreateInsertValue(dest_val, dest_shared, {2});
+
+        // Store the result
+        builder.CreateStore(dest_val, dest);
+        return;
+    }
     case TypeKind::Subtype:
     case TypeKind::Array:
     case TypeKind::Struct: {
@@ -2540,33 +2597,19 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto instance_gep = builder.CreateStructGEP(bind_struct_type, bind_alloca, 0);
             builder.CreateStore(instance_ptr, instance_gep);
 
-            // Allocate SharedData<BindStruct> on heap
-            std::vector<llvm::Type *> shared_data_fields;
-            shared_data_fields.push_back(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx)); // ref_count
-            shared_data_fields.push_back(bind_struct_type);                         // value
-            auto shared_data_type = llvm::StructType::get(*m_ctx->llvm_ctx, shared_data_fields);
-            auto shared_data_size =
-                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(shared_data_type);
-
-            auto malloc_fn = get_system_fn("cx_malloc");
-            std::vector<llvm::Value *> malloc_args = {
-                builder.getInt32(shared_data_size),
-                llvm::ConstantPointerNull::get(builder.getInt8PtrTy()),
-            };
-            auto shared_data_var = builder.CreateCall(malloc_fn->llvm_fn, malloc_args, "shared_data");
-
-            // Initialize ref_count to 1
-            auto ref_count_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 0);
-            builder.CreateStore(builder.getInt32(1), ref_count_gep);
-
-            // Store bind_struct into value field
-            auto value_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 1);
+            // Load bind_struct value to pass to new_with_data
+            // Shared<T> will handle SharedData creation internally
             auto bind_struct_value = builder.CreateLoad(bind_struct_type, bind_alloca);
-            builder.CreateStore(bind_struct_value, value_gep);
 
-            // Call __CxLambda.new_with_data(fn_ptr, size, shared_data_ptr)
+            // Call __CxLambda.new_with_data(fn_ptr, size, captures)
             auto lambda_struct = lambda_type->data.fn_lambda.internal;
-            auto new_member = lambda_struct->data.struct_.find_member("new_with_data");
+
+            // Get the actual struct type (handle Subtype case)
+            auto struct_type_method = lambda_struct->kind == TypeKind::Subtype
+                ? lambda_struct->data.subtype.final_type
+                : lambda_struct;
+
+            auto new_member = struct_type_method->data.struct_.find_member("new_with_data");
             assert(new_member && "new_with_data() method not found in __CxLambda");
 
             std::optional<TypeId> variant_type_id = std::nullopt;
@@ -2581,7 +2624,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto fn_ptr_cast = builder.CreateBitCast(proxy_fn, builder.getInt8PtrTy());
             builder.CreateCall(new_method->llvm_fn,
                              {lambda_alloca, fn_ptr_cast, builder.getInt32(struct_size),
-                              shared_data_var});
+                              bind_struct_value});
 
             return RefValue::from_address(lambda_alloca);
         } else if (type->is_pointer_like()) {
@@ -2827,15 +2870,20 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             variant_type_id = lambda_struct->id;
         }
 
+        // Get the actual struct type (handle Subtype case)
+        auto struct_type = lambda_struct->kind == TypeKind::Subtype
+            ? lambda_struct->data.subtype.final_type
+            : lambda_struct;
+
         // Call as_ptr() method to get the function pointer
-        auto as_ptr_member = lambda_struct->data.struct_.find_member("as_ptr");
+        auto as_ptr_member = struct_type->data.struct_.find_member("as_ptr");
         assert(as_ptr_member && "as_ptr() method not found in __CxLambda");
         auto as_ptr_method_node = get_variant_member_node(as_ptr_member, variant_type_id);
         auto as_ptr_method = get_fn(as_ptr_method_node);
         auto fn_ptr = builder.CreateCall(as_ptr_method->llvm_fn, {ref.address});
 
         // Call data_ptr() method to get the actual pointer to captures
-        auto data_ptr_member = lambda_struct->data.struct_.find_member("data_ptr");
+        auto data_ptr_member = struct_type->data.struct_.find_member("data_ptr");
         assert(data_ptr_member && "data_ptr() method not found in __CxLambda");
         auto data_ptr_method_node = get_variant_member_node(data_ptr_member, variant_type_id);
         auto data_ptr_method = get_fn(data_ptr_method_node);

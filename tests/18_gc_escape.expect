@@ -22,6 +22,7 @@ Non-escaping function returned value: 200 (object was destroyed)
 
 Test 5: Lambda capture escape
 GCBox(300) created
+GCBox(100) destroyed
 Lambda created with captured object
 Lambda executed successfully, captured object id: 300
 
@@ -49,4 +50,3 @@ GCBox(6) destroyed
 GCBox(7) destroyed
 GCBox(1004) destroyed
 GCBox(300) destroyed
-GCBox(100) destroyed

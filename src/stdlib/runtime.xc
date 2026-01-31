@@ -87,14 +87,23 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
     this.data = new SharedData<T>{value};
   }
 
+  func release() {
+    if this.data {
+      this.data.ref_count = this.data.ref_count - 1;
+      if this.data.ref_count == 0 {
+        delete this.data;
+      }
+    }
+  }
+
   func delete() {
-    cx_shared_release(this.data as *void);
+    this.release();
   }
 
   func copy_from(from: &Shared<T>) {
     var new_data = from.data as *void;
     cx_shared_retain(new_data);
-    cx_shared_release(this.data as *void);
+    this.release();
     this.data = from.data;
   }
 
@@ -116,34 +125,29 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
 }
 
 // Internal lambda struct for compiler-generated closures with refcounted captures
-// Non-generic to allow all lambdas to be compatible regardless of capture type
-struct __CxLambda implements ops.CopyFrom<__CxLambda> {
+// Generic over capture type T to enable proper destructor calls via Shared<T>
+// Type conversions allowed between __CxLambda<T1> and __CxLambda<T2> with matching signatures
+struct __CxLambda<T> implements ops.CopyFrom<__CxLambda<T>> {
     fn_ptr: *void = null;
     size: uint32 = 0;
-    data: *void = null;  // Points to SharedData<BindStruct> (type-erased)
+    data: Shared<T>;  // Compiler auto-generates delete() for this
 
-    func new_with_data(fn: *void, sz: uint32, shared_data_ptr: *void) {
+    func new_with_data(fn: *void, sz: uint32, captures: T) {
         this.fn_ptr = fn;
         this.size = sz;
-        this.data = shared_data_ptr;
+        this.data = {captures};
     }
 
     func new_no_captures(fn: *void) {
         this.fn_ptr = fn;
         this.size = 0;
-        this.data = null;
+        // this.data defaults to null (no captures)
     }
 
-    func delete() {
-        cx_shared_release(this.data);
-    }
-
-    func copy_from(from: &__CxLambda) {
-        cx_shared_retain(from.data);
-        cx_shared_release(this.data);
-        this.data = from.data;
+    func copy_from(from: &__CxLambda<T>) {
         this.fn_ptr = from.fn_ptr;
         this.size = from.size;
+        this.data.copy_from(&from.data);
     }
 
     func as_ptr() *void {
@@ -151,7 +155,8 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
     }
 
     func data_ptr() *void {
-        return cx_shared_get_value_ptr(this.data);
+        // Use type-erased helper to get value ptr, works across different T types
+        return cx_shared_get_value_ptr(this.data.data as *void);
     }
 }
 
