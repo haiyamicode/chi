@@ -544,7 +544,9 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
             auto param = fn_proto.params[idx];
             auto param_type = param_info.type;
-            auto var = compile_alloc(fn, param, param_type);
+            // Never heap-allocate parameters - use stack allocation regardless of escape status
+            // Parameters are function arguments and should always be stack-local
+            auto var = fn->entry_alloca(compile_type(param_type), param->name);
 
             emit_dbg_location(param);
 
