@@ -161,6 +161,11 @@ CHI_RT_EXPORT void cx_json_value_copy(void *data, void *result);
 
 CHI_RT_EXPORT void cx_file_read(CxString *path, CxString *result);
 
+// SharedData refcounting helpers for type-erased pointers
+CHI_RT_EXPORT void cx_shared_retain(void *ptr);
+CHI_RT_EXPORT void cx_shared_release(void *ptr);
+CHI_RT_EXPORT void *cx_shared_get_value_ptr(void *shared_data_ptr);
+
 #ifdef __cplusplus
 }
 #endif

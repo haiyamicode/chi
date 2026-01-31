@@ -1,0 +1,45 @@
+=== Test 1: Manual Promise with callbacks ===
+Resolving promise...
+Callback A: 100
+Callback B: 100
+Callback C (after resolve): 100
+
+=== Test 2: Async function without awaits ===
+simple_async(7)
+Got result: 17
+
+=== Test 3: Async/await chaining ===
+compute_chain: starting
+get_value(5)
+  step1 = 10
+get_value(10)
+  step2 = 20
+get_value(20)
+  step3 = 40
+compute_chain: done
+Got promise, is_resolved: true
+Final value: 40
+
+=== Test 4: Nested async calls ===
+get_value(3)
+Result: 106
+
+=== Test 5: Promise state checking ===
+Before resolve - is_resolved: false
+After resolve - is_resolved: true
+Value: 42
+
+=== Test 6: Multiple callbacks on same promise ===
+Callback 1: 99
+Callback 2: 99
+Callback 3: 99
+
+=== Test 7: Local variables across await ===
+compute_with_locals: starting
+  local1 = 10
+get_value(10)
+  awaited = 20
+  result = 30
+Final: 30
+
+All async/await tests passed!

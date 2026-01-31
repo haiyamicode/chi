@@ -17,21 +17,23 @@ func test_basic_lambda() {
   println("");
 }
 
-func test_lambda_with_timeout() {
-  println("testing lambda with timeout:");
-  
-  var counter: int = 0;
-  
-  // Test lambda passed to timeout function
-  timeout(100, func () {
-    counter = 42;
-    println("Timeout callback executed!");
-  });
-  
-  printf("Counter after timeout: {}\n", counter);
-  
-  println("");
-}
+// DISABLED: This test has undefined behavior - it captures a local stack variable
+// in an async callback that fires after the function returns.
+// func test_lambda_with_timeout() {
+//   println("testing lambda with timeout:");
+//
+//   var counter: int = 0;
+//
+//   // Test lambda passed to timeout function
+//   timeout(100, func () {
+//     counter = 42;
+//     println("Timeout callback executed!");
+//   });
+//
+//   printf("Counter after timeout: {}\n", counter);
+//
+//   println("");
+// }
 
 func test_lambda_capture() {
   println("testing lambda with capture:");
@@ -303,7 +305,7 @@ func test_function_to_lambda() {
 
 func main() {
   test_basic_lambda();
-  test_lambda_with_timeout();
+  // test_lambda_with_timeout(); // DISABLED - undefined behavior
   test_lambda_capture();
   test_nested_lambda_simple();
   test_nested_lambda_complex();
@@ -311,6 +313,6 @@ func main() {
   test_lambda_array_capture();
   test_method_to_lambda();
   test_function_to_lambda();
-  
+
   println("All lambda tests completed!");
 }

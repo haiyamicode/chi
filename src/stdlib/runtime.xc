@@ -47,8 +47,13 @@ extern "C" {
   func cx_json_array_length(data: *void) uint32;
   func cx_json_value_copy(data: *void, result: *void);
 
-  func cx_file_read(path: *string, result: *string); 
+  func cx_file_read(path: *string, result: *string);
   func cx_debug(ptr: *void);
+
+  // SharedData refcounting helpers for type-erased pointers
+  func cx_shared_retain(ptr: *void);
+  func cx_shared_release(ptr: *void);
+  func cx_shared_get_value_ptr(shared_data_ptr: *void) *void;
 }
 
 struct __CxEnumBase<T> implements ops.Display {
@@ -59,10 +64,95 @@ struct __CxEnumBase<T> implements ops.Display {
     var s = this.__display_name!;
     return stringf("{}", s);
   }
- 
+
   func discriminator() T {
     return this.__value;
   }
+}
+
+struct SharedData<T> {
+  ref_count: uint32;
+  value: T;
+
+  func new(v: T) {
+    this.ref_count = 1;
+    this.value = v;
+  }
+}
+
+struct Shared<T> implements ops.CopyFrom<Shared<T>> {
+  protected data: *SharedData<T> = null;
+
+  func new(value: T) {
+    this.data = new SharedData<T>{value};
+  }
+
+  func delete() {
+    cx_shared_release(this.data as *void);
+  }
+
+  func copy_from(from: &Shared<T>) {
+    var new_data = from.data as *void;
+    cx_shared_retain(new_data);
+    cx_shared_release(this.data as *void);
+    this.data = from.data;
+  }
+
+  func as_ref() &T {
+    return &this.data.value;
+  }
+
+  func set(value: T) {
+    if !this.data {
+      this.data = new SharedData<T>{value};
+    } else {
+      this.data.value = value;
+    }
+  }
+
+  func ref_count() uint32 {
+    return this.data.ref_count;
+  }
+}
+
+// Internal lambda struct for compiler-generated closures with refcounted captures
+// Non-generic to allow all lambdas to be compatible regardless of capture type
+struct __CxLambda implements ops.CopyFrom<__CxLambda> {
+    fn_ptr: *void = null;
+    size: uint32 = 0;
+    data: *void = null;  // Points to SharedData<BindStruct> (type-erased)
+
+    func new_with_data(fn: *void, sz: uint32, shared_data_ptr: *void) {
+        this.fn_ptr = fn;
+        this.size = sz;
+        this.data = shared_data_ptr;
+    }
+
+    func new_no_captures(fn: *void) {
+        this.fn_ptr = fn;
+        this.size = 0;
+        this.data = null;
+    }
+
+    func delete() {
+        cx_shared_release(this.data);
+    }
+
+    func copy_from(from: &__CxLambda) {
+        cx_shared_retain(from.data);
+        cx_shared_release(this.data);
+        this.data = from.data;
+        this.fn_ptr = from.fn_ptr;
+        this.size = from.size;
+    }
+
+    func as_ptr() *void {
+        return this.fn_ptr;
+    }
+
+    func data_ptr() *void {
+        return cx_shared_get_value_ptr(this.data);
+    }
 }
 
 enum JsonKind {
@@ -368,64 +458,6 @@ struct Buffer {
 }
 
 // Reference-counted pointer for shared ownership
-struct SharedData<T> {
-  ref_count: uint32;
-  value: T;
-
-  func new(v: T) {
-    this.ref_count = 1;
-    this.value = v;
-  }
-}
-
-struct Shared<T> implements ops.CopyFrom<Shared<T>> {
-  protected data: *SharedData<T> = null;
-
-  func new(value: T) {
-    this.data = new SharedData<T>{value};
-  }
-
-  func delete() {
-    this.release();
-  }
-
-  func copy_from(from: &Shared<T>) {
-    var new_data = from.data;
-    if new_data {
-      new_data.ref_count = new_data.ref_count + 1;
-    }
-    this.release();
-    this.data = new_data;
-  }
-
-  private func release() {
-    if this.data {
-      this.data.ref_count = this.data.ref_count - 1;
-      if this.data.ref_count == 0 {
-        delete this.data;
-      }
-    }
-  }
-
-  private func retain() {
-    if this.data {
-      this.data.ref_count = this.data.ref_count + 1;
-    }
-  }
-
-  func as_ref() &T {
-    return &this.data.value;
-  }
-
-  func set(value: T) {
-    this.data.value = value;
-  }
-
-  func ref_count() uint32 {
-    return this.data.ref_count;
-  }
-}
-
 // Promise for async operations
 struct PromiseState<T> {
   state: uint32 = 0;      // 0=pending, 1=resolved, 2=rejected

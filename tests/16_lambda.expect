@@ -2,9 +2,6 @@ testing basic lambda:
 Hello from lambda!
 add_lambda(5, 3) = 8
 
-testing lambda with timeout:
-Counter after timeout: 0
-
 testing lambda with capture:
 captured x + y = 30
 z before modification: 5
@@ -40,4 +37,3 @@ Function as lambda: 30
 Abstracted function lambda: 40
 
 All lambda tests completed!
-Timeout callback executed!

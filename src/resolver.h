@@ -82,6 +82,8 @@ struct ResolveContext {
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
     ChiType *rt_array_type = nullptr;
     ChiType *rt_promise_type = nullptr;
+    ChiType *rt_lambda_type = nullptr;
+    ChiType *rt_empty_bind_type = nullptr;
     ast::Node *rt_enum_base = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
@@ -279,6 +281,7 @@ class Resolver {
                          TypeList *type_params = nullptr);
 
     ChiType *get_lambda_for_fn(ChiType *fn);
+    void finalize_placeholder_lambda_params(ChiType *fn_type);
 
     ChiType *get_result_type(ChiType *value, ChiType *err);
 

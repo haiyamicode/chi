@@ -465,6 +465,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             }
+            // Finalize placeholder lambdas after __CxLambda is resolved
+            if (decl->type == NodeType::FnDef) {
+                auto fn_type = to_value_type(decl->resolved_type);
+                finalize_placeholder_lambda_params(fn_type);
+            }
             // if (decl->type == NodeType::FnDef &&
             //     decl->data.fn_def.fn_proto->data.fn_proto.type_params.len > 0) {
             //     auto fn_type = to_value_type(decl->resolved_type);
@@ -535,6 +540,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             bound_fn.return_type = fn_data.return_type;
             bound_fn.is_variadic = fn_data.is_variadic;
             bound_fn.container_ref = fn_data.container_ref;
+
+            // __CxLambda is now non-generic, just use it directly
+            auto rt_lambda = m_ctx->rt_lambda_type;
+            if (rt_lambda && rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
+                proto->data.fn_lambda.internal = to_value_type(rt_lambda);
+            } else {
+                // Defer if __CxLambda not resolved yet
+                proto->data.fn_lambda.internal = nullptr;
+            }
+
             return proto;
         }
 
@@ -1137,7 +1152,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Create a method lambda type - we'll generate a proxy function
             auto lambda_type = create_type(TypeKind::FnLambda);
             lambda_type->data.fn_lambda.fn = member->resolved_type;
-            lambda_type->data.fn_lambda.internal = get_system_types()->lambda;
             lambda_type->is_placeholder = member->resolved_type->is_placeholder;
 
             // Create a bound function type for the proxy (with binding struct as first param)
@@ -1172,6 +1186,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Set up the lambda type
             lambda_type->data.fn_lambda.bind_struct = bind_struct;
             lambda_type->data.fn_lambda.bound_fn = bound_fn;
+
+            // __CxLambda is now non-generic, just use it directly
+            auto rt_lambda = m_ctx->rt_lambda_type;
+            assert(rt_lambda && "__CxLambda type not found in runtime");
+
+            // Check if __CxLambda is fully resolved
+            if (rt_lambda->data.struct_.resolve_status < ResolveStatus::MemberTypesKnown) {
+                // Not resolved yet - defer
+                lambda_type->data.fn_lambda.internal = nullptr;
+                lambda_type->is_placeholder = true;
+            } else {
+                lambda_type->data.fn_lambda.internal = to_value_type(rt_lambda);
+            }
             lambda_type->data.fn_lambda.captures.add(instance_type);
 
             return lambda_type;
@@ -1468,6 +1495,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_array_type = struct_type;
                 } else if (node->name == "Promise") {
                     m_ctx->rt_promise_type = struct_type;
+                } else if (node->name == "__CxLambda") {
+                    m_ctx->rt_lambda_type = struct_type;
                 } else if (node->name == "__CxEnumBase") {
                     m_ctx->rt_enum_base = node;
                 }
@@ -3280,6 +3309,39 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
     return type;
 }
 
+void Resolver::finalize_placeholder_lambda_params(ChiType *fn_type) {
+    if (!fn_type || fn_type->kind != TypeKind::Fn) {
+        return;
+    }
+
+    bool had_placeholder = false;
+
+    // Walk through all function parameters and finalize placeholder lambdas
+    for (size_t i = 0; i < fn_type->data.fn.params.len; i++) {
+        auto param = fn_type->data.fn.params[i];
+        if (param->kind == TypeKind::FnLambda && param->is_placeholder && !param->data.fn_lambda.internal) {
+            // This is a placeholder lambda - finalize it now
+            auto bind_struct = param->data.fn_lambda.bind_struct;
+            if (!bind_struct) continue;
+
+            auto rt_lambda = m_ctx->rt_lambda_type;
+            if (!rt_lambda || rt_lambda->data.struct_.resolve_status < ResolveStatus::MemberTypesKnown) {
+                continue; // Still can't finalize
+            }
+
+            // __CxLambda is now non-generic, just use it directly
+            param->data.fn_lambda.internal = to_value_type(rt_lambda);
+            param->is_placeholder = false;
+            had_placeholder = true;
+        }
+    }
+
+    // If we finalized any placeholders, clear the function's placeholder flag
+    if (had_placeholder) {
+        fn_type->is_placeholder = false;
+    }
+}
+
 ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
     // Don't cache lambda types - keep them all unique to avoid conflicts
     // Each lambda instance should have its own type even with same signature
@@ -3287,17 +3349,19 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
     auto lambda = create_type(TypeKind::FnLambda);
     lambda->data.fn_lambda.fn = fn_type;
     lambda->is_placeholder = fn_type->is_placeholder;
-
-    // Use the system lambda type for all lambda internal structures
-    // This ensures LLVM compatibility across different lambda types
-    lambda->data.fn_lambda.internal = get_system_types()->lambda;
     auto &fn_data = fn_type->data.fn;
 
+    // Create or reuse bind_struct
+    ChiType *bstruct;
+
     if (fn_data.container_ref) {
+        // Method lambda - create unique bind struct
+        bstruct = create_type(TypeKind::Struct);
+        bstruct->data.struct_.kind = ContainerKind::Struct;
+        bstruct->name = "MethodLambdaBind";
+
         auto bound_type = create_type(TypeKind::Fn);
         lambda->data.fn_lambda.bound_fn = bound_type;
-        auto bstruct = create_type(TypeKind::Struct);
-        lambda->data.fn_lambda.bind_struct = bstruct;
         auto &bound_fn = bound_type->data.fn;
 
         bound_fn.params.add(get_system_types()->void_ref);
@@ -3308,10 +3372,18 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
         bound_fn.is_variadic = fn_data.is_variadic;
         bound_fn.container_ref = fn_data.container_ref;
     } else {
+        // Reuse cached empty bind struct for all lambdas with no captures
+        if (!m_ctx->rt_empty_bind_type) {
+            m_ctx->rt_empty_bind_type = create_type(TypeKind::Struct);
+            m_ctx->rt_empty_bind_type->data.struct_.kind = ContainerKind::Struct;
+            m_ctx->rt_empty_bind_type->name = "EmptyLambdaBind";
+            m_ctx->rt_empty_bind_type->global_id = "EmptyLambdaBind";
+            m_ctx->rt_empty_bind_type->data.struct_.resolve_status = ResolveStatus::MemberTypesKnown;
+        }
+        bstruct = m_ctx->rt_empty_bind_type;
+
         // Always create a bound function with binding struct as first parameter
         // This ensures consistent lambda calling convention
-
-        // Build the parameter list with binding struct first
         TypeList bound_params;
         bound_params.add(get_system_types()->void_ref);
 
@@ -3321,24 +3393,32 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
         }
 
         // Create the bound function type with all parameters
-        // Manually create the function type to avoid caching issues
         auto bound_fn_type = create_type(TypeKind::Fn);
         bound_fn_type->data.fn.return_type = fn_data.return_type;
         bound_fn_type->data.fn.is_variadic = fn_data.is_variadic;
         bound_fn_type->data.fn.params = bound_params;
-
-        // Mark this type as not having placeholders to prevent substitution
         bound_fn_type->is_placeholder = fn_type->is_placeholder;
         bound_fn_type->global_id = fmt::format("__lambda_bound_fn_{}", bound_fn_type->id);
 
         lambda->data.fn_lambda.bound_fn = bound_fn_type;
-
-        // Create an empty binding struct (no captures)
-        auto bstruct = create_type(TypeKind::Struct);
-        lambda->data.fn_lambda.bind_struct = bstruct;
-        bstruct->data.struct_.kind = ContainerKind::Struct;
-        bstruct->name = "EmptyLambdaBind";
     }
+
+    lambda->data.fn_lambda.bind_struct = bstruct;
+
+    // __CxLambda is now non-generic, just use it directly
+    auto rt_lambda = m_ctx->rt_lambda_type;
+    assert(rt_lambda && "__CxLambda type not found in runtime");
+
+    // Check if __CxLambda is fully resolved
+    if (rt_lambda->data.struct_.resolve_status < ResolveStatus::MemberTypesKnown) {
+        // Not resolved yet - defer instantiation by returning placeholder
+        // This happens when resolving runtime.xc itself, before __CxLambda is fully resolved
+        lambda->data.fn_lambda.internal = nullptr;
+        lambda->is_placeholder = true;
+        return lambda;
+    }
+
+    lambda->data.fn_lambda.internal = to_value_type(rt_lambda);
 
     return lambda;
 }

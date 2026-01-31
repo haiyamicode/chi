@@ -846,9 +846,6 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     auto struct_type = lambda_type->data.fn_lambda.internal;
     auto struct_type_l = compile_type(struct_type);
     auto var = builder.CreateAlloca(struct_type_l, nullptr, "lambda");
-    auto fn_ptr_gep = builder.CreateStructGEP(struct_type_l, var, 0);
-    auto size_gep = builder.CreateStructGEP(struct_type_l, var, 1);
-    auto data_gep = builder.CreateStructGEP(struct_type_l, var, 2);
 
     // load captures
     if (captures && captures->len) {
@@ -857,86 +854,119 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         auto bstruct_l = compile_type(bstruct);
         auto bind_size = llvm_type_size(bstruct_l);
 
-        // In managed mode, heap-allocate the bind_struct so it survives after the
-        // enclosing function returns (lambda captures can escape)
-        llvm::Value *bind_var;
-        if (is_managed()) {
-            auto alloc_fn = get_system_fn("cx_gc_alloc");
-            std::vector<llvm::Value *> args = {
-                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size),
-                llvm::ConstantPointerNull::get(
-                    llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0)),
-            };
-            bind_var = builder.CreateCall(alloc_fn->llvm_fn, args, "lambda_captures");
-        } else {
-            bind_var = builder.CreateAlloca(bstruct_l, nullptr, "lambda_captures");
-        }
-        builder.CreateStore(bind_var, data_gep);
-        builder.CreateStore(
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size), size_gep);
+        // Create bind_struct on stack to hold captures
+        auto bind_var = builder.CreateAlloca(bstruct_l, nullptr, "bind_struct");
 
-        // For lambdas with captures, use the original function directly
-        // The captures are handled by the binding struct
-        builder.CreateStore(fn_ptr, fn_ptr_gep);
-
+        // Store captures into bind_struct
         for (int i = 0; i < captures->len; i++) {
             auto capture = (*captures)[i];
-            llvm::Value *ref;
+            llvm::Value *value;
+            bool found = false;
 
-            // Check if the capture exists in current function's variable table AND
-            // the variable was declared in the current function (not a parent function)
-            if (m_ctx->var_table.get(capture) && capture->parent_fn == fn->node) {
-                ref = get_var(capture);
-            } else {
-                // Handle nested captures: the variable should be in the current function's captures
-                // since capture propagation ensures all intermediate functions capture the variable
-                bool found = false;
+            // First check if this is a nested capture: the variable is captured by the
+            // CURRENT function we're compiling. If so, we must load it from the current
+            // function's bind_ptr, not from the var_table (which would be an invalid reference
+            // to an outer function's alloca).
+            auto &current_captures = fn->node->data.fn_def.captures;
+            for (int j = 0; j < current_captures.len; j++) {
+                if (current_captures[j] == capture) {
+                    // This capture should be accessible from the current function's bind_ptr
+                    if (fn->bind_ptr) {
+                        auto current_fn_type = get_chitype(fn->node);
+                        if (current_fn_type->kind == TypeKind::FnLambda) {
+                            auto current_bstruct = current_fn_type->data.fn_lambda.bind_struct;
+                            auto current_bstruct_l =
+                                (llvm::StructType *)compile_type(current_bstruct);
 
-                // Find the capture index in the current function's captures
-                auto &current_captures = fn->node->data.fn_def.captures;
-                for (int j = 0; j < current_captures.len; j++) {
-                    if (current_captures[j] == capture) {
-                        // This capture should be accessible from the current function's bind_ptr
-                        if (fn->bind_ptr) {
-                            auto current_fn_type = get_chitype(fn->node);
-                            if (current_fn_type->kind == TypeKind::FnLambda) {
-                                auto current_bstruct = current_fn_type->data.fn_lambda.bind_struct;
-                                auto current_bstruct_l =
-                                    (llvm::StructType *)compile_type(current_bstruct);
-
-                                auto capture_gep =
-                                    builder.CreateStructGEP(current_bstruct_l, fn->bind_ptr, j);
-                                ref = builder.CreateLoad(current_bstruct_l->elements()[j],
-                                                         capture_gep);
-                                found = true;
-                                break;
-                            }
+                            auto capture_gep =
+                                builder.CreateStructGEP(current_bstruct_l, fn->bind_ptr, j);
+                            value = builder.CreateLoad(current_bstruct_l->elements()[j],
+                                                       capture_gep);
+                            found = true;
+                            break;
                         }
                     }
                 }
+            }
 
-                if (!found) {
-                    // The variable is not available in current scope - this should not happen
-                    // if capture propagation is working correctly
-                    ref = llvm::ConstantPointerNull::get(
-                        llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0));
+            if (!found) {
+                // The variable is declared in the current function or a direct parent -
+                // check the var_table for a local alloca
+                if (m_ctx->var_table.get(capture)) {
+                    // Captures are stored as references (pointers) in the bind struct
+                    // So we store the address of the variable, not its value
+                    value = get_var(capture);
+                    found = true;
                 }
             }
 
-            auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
-            builder.CreateStore(ref, capture_gep);
-        }
-    } else {
-        // For lambdas without captures, we still generate a proxy function for consistent calling
-        // convention Generate proxy function that ignores the binding struct parameter
-        auto proxy_fn = generate_lambda_proxy_function(fn, fn_ptr, lambda_type, nullptr);
-        builder.CreateStore(proxy_fn, fn_ptr_gep);
+            if (!found) {
+                // The variable is not available in current scope - this should not happen
+                // if capture propagation is working correctly
+                auto capture_type = compile_type(capture->resolved_type);
+                value = llvm::Constant::getNullValue(capture_type);
+            }
 
-        builder.CreateStore(llvm::ConstantPointerNull::get(
-                                llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0)),
-                            data_gep);
-        builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), 0),
-                            size_gep);
+            auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
+            builder.CreateStore(value, capture_gep);
+        }
+
+        // Allocate SharedData<BindStruct> on heap: { uint32 ref_count, BindStruct value }
+        std::vector<llvm::Type *> shared_data_fields;
+        shared_data_fields.push_back(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx)); // ref_count
+        shared_data_fields.push_back(bstruct_l);                                  // value
+        auto shared_data_type = llvm::StructType::get(*m_ctx->llvm_ctx, shared_data_fields);
+        auto shared_data_size = llvm_type_size(shared_data_type);
+
+        // Always use malloc for refcounted data
+        auto malloc_fn = get_system_fn("cx_malloc");
+        std::vector<llvm::Value *> malloc_args = {
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), shared_data_size),
+            llvm::ConstantPointerNull::get(
+                llvm::PointerType::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0)),
+        };
+        auto shared_data_var = builder.CreateCall(malloc_fn->llvm_fn, malloc_args, "shared_data");
+
+        // Initialize ref_count to 1
+        auto ref_count_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 0);
+        builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), 1),
+                            ref_count_gep);
+
+        // Get pointer to the value field and copy bind_struct into it
+        auto value_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 1);
+        auto bind_struct_value = builder.CreateLoad(bstruct_l, bind_var);
+        builder.CreateStore(bind_struct_value, value_gep);
+
+        // Call __CxLambda.new_with_data(fn_ptr, size, shared_data_ptr)
+        auto lambda_struct = lambda_type->data.fn_lambda.internal;
+        auto new_member = lambda_struct->data.struct_.find_member("new_with_data");
+        assert(new_member && "new_with_data() method not found in __CxLambda");
+
+        std::optional<TypeId> variant_type_id = std::nullopt;
+        if (lambda_struct->kind == TypeKind::Subtype && !lambda_struct->is_placeholder) {
+            variant_type_id = lambda_struct->id;
+        }
+        auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+        auto new_method = get_fn(new_method_node);
+
+        auto size_value = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size);
+        builder.CreateCall(new_method->llvm_fn, {var, fn_ptr, size_value, shared_data_var});
+    } else {
+        // For lambdas without captures, generate a proxy function and call new_no_captures()
+        auto proxy_fn = generate_lambda_proxy_function(fn, fn_ptr, lambda_type, nullptr);
+
+        auto lambda_struct = lambda_type->data.fn_lambda.internal;
+        auto new_member = lambda_struct->data.struct_.find_member("new_no_captures");
+        assert(new_member && "new_no_captures() method not found in __CxLambda");
+
+        std::optional<TypeId> variant_type_id = std::nullopt;
+        if (lambda_struct->kind == TypeKind::Subtype && !lambda_struct->is_placeholder) {
+            variant_type_id = lambda_struct->id;
+        }
+        auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+        auto new_method = get_fn(new_method_node);
+
+        builder.CreateCall(new_method->llvm_fn, {var, proxy_fn});
     }
 
     return builder.CreateLoad(struct_type_l, var);
@@ -1297,11 +1327,39 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
     auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
-    // Allocate capture struct on heap
-    auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
-    auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size);
-    auto null_ptr = llvm::ConstantPointerNull::get(ptr_type);
-    auto capture_alloc = builder.CreateCall(malloc_fn, {size_l, null_ptr}, "captures");
+    // Allocate capture struct on heap (use GC in managed mode)
+    llvm::Value *capture_alloc;
+    if (is_managed()) {
+        auto alloc_fn = get_system_fn("cx_gc_alloc");
+
+        // Check if any captured field needs destruction
+        llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(ptr_type);
+
+        bool needs_destruction = get_resolver()->type_needs_destruction(ctx.promise_type);
+        if (!needs_destruction) {
+            for (auto var : captured_vars_ordered) {
+                if (get_resolver()->type_needs_destruction(get_chitype(var))) {
+                    needs_destruction = true;
+                    break;
+                }
+            }
+        }
+
+        if (needs_destruction) {
+            auto dtor = generate_destructor_continuation(capture_struct_type, ctx.promise_type, captured_vars_ordered);
+            if (dtor) {
+                dtor_ptr = dtor->llvm_fn;
+            }
+        }
+
+        auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size);
+        capture_alloc = builder.CreateCall(alloc_fn->llvm_fn, {size_l, dtor_ptr}, "captures");
+    } else {
+        auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
+        auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size);
+        auto null_ptr = llvm::ConstantPointerNull::get(ptr_type);
+        capture_alloc = builder.CreateCall(malloc_fn, {size_l, null_ptr}, "captures");
+    }
     auto captures_ptr = builder.CreateBitCast(capture_alloc, capture_struct_type->getPointerTo());
 
     // Store result promise VALUE (not pointer) - copy it so it survives after stack frame is gone
@@ -1329,8 +1387,14 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
         builder.CreateStore(var_value, var_gep);
     }
 
+    // TODO: Fix async continuation lambda to use proper __CxLambda<CaptureStruct>
+    // This code was using invalid "system lambda type" and needs to be rewritten
+    // to use __CxLambda with proper refcounting
+
+    // OLD CODE (commented out for guidance):
+    /*
     // Build CxLambda struct: { ptr, size, data }
-    auto lambda_type = get_system_types()->lambda;
+    auto lambda_type = get_system_types()->lambda;  // INVALID - no such thing as system lambda type
     auto lambda_type_l = compile_type(lambda_type);
     auto lambda_struct_type = (llvm::StructType *)lambda_type_l;
 
@@ -1338,18 +1402,28 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
 
     // ptr = continuation function (segment N uses continuation at index N-1)
     auto cont_fn = ctx.continuations[segment_index - 1];
-    auto fn_ptr_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 0);
+    auto fn_ptr_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 0);  // MANUAL ACCESS - WRONG
     builder.CreateStore(cont_fn, fn_ptr_gep);
 
     // size = capture struct size
-    auto size_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 1);
+    auto size_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 1);  // MANUAL ACCESS - WRONG
     builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size), size_gep);
 
     // data = captures pointer
-    auto data_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 2);
+    auto data_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 2);  // MANUAL ACCESS - WRONG
     builder.CreateStore(capture_alloc, data_gep);
 
     return builder.CreateLoad(lambda_struct_type, lambda_alloc);
+    */
+
+    // NEW APPROACH NEEDED:
+    // 1. Create proper __CxLambda<CaptureStruct> type
+    // 2. The captures are already heap-allocated in capture_alloc
+    // 3. Need to wrap capture_alloc as SharedData<CaptureStruct> or use different approach
+    // 4. Call proper constructor method
+
+    assert(false && "Async continuation lambdas need to be fixed to use __CxLambda");
+    return nullptr;
 }
 
 void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
@@ -2464,22 +2538,48 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto instance_gep = builder.CreateStructGEP(bind_struct_type, bind_alloca, 0);
             builder.CreateStore(instance_ptr, instance_gep);
 
-            // Fill lambda structure: {ptr, size, data}
-            // ptr = proxy function pointer
-            auto fn_ptr_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloca, 0);
-            auto fn_ptr_cast = builder.CreateBitCast(proxy_fn, builder.getInt8PtrTy());
-            builder.CreateStore(fn_ptr_cast, fn_ptr_gep);
+            // Allocate SharedData<BindStruct> on heap
+            std::vector<llvm::Type *> shared_data_fields;
+            shared_data_fields.push_back(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx)); // ref_count
+            shared_data_fields.push_back(bind_struct_type);                         // value
+            auto shared_data_type = llvm::StructType::get(*m_ctx->llvm_ctx, shared_data_fields);
+            auto shared_data_size =
+                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(shared_data_type);
 
-            // size = size of binding struct
-            auto size_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloca, 1);
+            auto malloc_fn = get_system_fn("cx_malloc");
+            std::vector<llvm::Value *> malloc_args = {
+                builder.getInt32(shared_data_size),
+                llvm::ConstantPointerNull::get(builder.getInt8PtrTy()),
+            };
+            auto shared_data_var = builder.CreateCall(malloc_fn->llvm_fn, malloc_args, "shared_data");
+
+            // Initialize ref_count to 1
+            auto ref_count_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 0);
+            builder.CreateStore(builder.getInt32(1), ref_count_gep);
+
+            // Store bind_struct into value field
+            auto value_gep = builder.CreateStructGEP(shared_data_type, shared_data_var, 1);
+            auto bind_struct_value = builder.CreateLoad(bind_struct_type, bind_alloca);
+            builder.CreateStore(bind_struct_value, value_gep);
+
+            // Call __CxLambda.new_with_data(fn_ptr, size, shared_data_ptr)
+            auto lambda_struct = lambda_type->data.fn_lambda.internal;
+            auto new_member = lambda_struct->data.struct_.find_member("new_with_data");
+            assert(new_member && "new_with_data() method not found in __CxLambda");
+
+            std::optional<TypeId> variant_type_id = std::nullopt;
+            if (lambda_struct->kind == TypeKind::Subtype && !lambda_struct->is_placeholder) {
+                variant_type_id = lambda_struct->id;
+            }
+            auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+            auto new_method = get_fn(new_method_node);
+
             auto struct_size =
                 m_ctx->llvm_module->getDataLayout().getTypeAllocSize(bind_struct_type);
-            builder.CreateStore(builder.getInt32(struct_size), size_gep);
-
-            // data = binding struct pointer (heap allocated)
-            auto data_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloca, 2);
-            auto bind_void_ptr = builder.CreateBitCast(bind_alloca, builder.getInt8PtrTy());
-            builder.CreateStore(bind_void_ptr, data_gep);
+            auto fn_ptr_cast = builder.CreateBitCast(proxy_fn, builder.getInt8PtrTy());
+            builder.CreateCall(new_method->llvm_fn,
+                             {lambda_alloca, fn_ptr_cast, builder.getInt32(struct_size),
+                              shared_data_var});
 
             return RefValue::from_address(lambda_alloca);
         } else if (type->is_pointer_like()) {
@@ -2628,10 +2728,14 @@ normal:
         auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
 
         // Access the capture from current function's bind_ptr
+        // The bind struct field contains a POINTER to the captured variable
         auto gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, capture_idx);
-        auto ref = builder.CreateLoad(bstruct_l->elements()[capture_idx], gep);
 
-        return RefValue::from_address(ref);
+        // Load the pointer from the bind struct field
+        auto ptr_type = bstruct_l->elements()[capture_idx];
+        auto captured_var_ptr = builder.CreateLoad(ptr_type, gep);
+
+        return RefValue::from_address(captured_var_ptr);
     }
     return RefValue::from_address(get_var(data.decl));
 }
@@ -2710,21 +2814,32 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     if (data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda) {
         auto ref = compile_expr_ref(fn, data.fn_ref_expr);
         auto lambda_type = get_chitype(data.fn_ref_expr);
-        auto lambda_type_l = (llvm::StructType *)compile_type(lambda_type);
-        auto fn_gep = builder.CreateStructGEP(lambda_type_l, ref.address, 0);
-        auto fn_ptr = (llvm::Value *)builder.CreateLoad(lambda_type_l->elements()[0], fn_gep);
         auto &fn_spec = lambda_type->data.fn_lambda.bound_fn->data.fn;
         auto bound_fn_type_l =
             (llvm::FunctionType *)compile_type(lambda_type->data.fn_lambda.bound_fn);
         std::vector<llvm::Value *> args = {};
 
-        // Standard lambda calling - same for all lambdas now
-        auto &lambda_data = lambda_type->data.fn_lambda;
-        auto data_gep = builder.CreateStructGEP(lambda_type_l, ref.address, 2);
-        auto data_ptr = builder.CreateLoad(lambda_type_l->elements()[2], data_gep);
+        auto lambda_struct = lambda_type->data.fn_lambda.internal;
+        std::optional<TypeId> variant_type_id = std::nullopt;
+        if (lambda_struct->kind == TypeKind::Subtype && !lambda_struct->is_placeholder) {
+            variant_type_id = lambda_struct->id;
+        }
 
-        // Always pass binding struct as first argument for all lambdas
-        // This ensures consistent calling convention
+        // Call as_ptr() method to get the function pointer
+        auto as_ptr_member = lambda_struct->data.struct_.find_member("as_ptr");
+        assert(as_ptr_member && "as_ptr() method not found in __CxLambda");
+        auto as_ptr_method_node = get_variant_member_node(as_ptr_member, variant_type_id);
+        auto as_ptr_method = get_fn(as_ptr_method_node);
+        auto fn_ptr = builder.CreateCall(as_ptr_method->llvm_fn, {ref.address});
+
+        // Call data_ptr() method to get the actual pointer to captures
+        auto data_ptr_member = lambda_struct->data.struct_.find_member("data_ptr");
+        assert(data_ptr_member && "data_ptr() method not found in __CxLambda");
+        auto data_ptr_method_node = get_variant_member_node(data_ptr_member, variant_type_id);
+        auto data_ptr_method = get_fn(data_ptr_method_node);
+        auto data_ptr = builder.CreateCall(data_ptr_method->llvm_fn, {ref.address});
+
+        // Always pass binding struct pointer as first argument for all lambdas
         args.push_back(data_ptr);
 
         for (int i = 0; i < data.args.len; i++) {
@@ -3069,20 +3184,46 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
     builder.SetInsertPoint(entry_bb);
 
     // Prepare arguments for the original function call
+    // We need to determine if the original function takes a _binds parameter:
+    // - Lambda functions (including no-capture): YES, they take _binds as first parameter
+    // - Regular functions converted to lambda: NO, they don't take _binds
+    //
+    // Check by comparing parameter counts:
+    // - bound_fn_type has (_binds, user_args...)
+    // - original_fn_type has (user_args...)
+    // - If the original LLVM function has more params than original_fn_type, it's a lambda with _binds
+
     std::vector<llvm::Value *> original_args;
+    auto proxy_arg_count = proxy_llvm_fn->arg_size();
 
-    // Skip the first argument (binding struct) and pass the rest to the original function
-    auto arg_count = proxy_llvm_fn->arg_size();
+    // Get the LLVM function from the original_fn_ptr
+    auto original_llvm_fn = llvm::dyn_cast<llvm::Function>(original_fn_ptr);
+    auto original_fn_type_l = (llvm::FunctionType *)compile_type(original_fn_type);
 
-    // Start from index 1 to skip the binding struct (index 0)
-    for (unsigned i = 1; i < arg_count; ++i) {
+    // Determine if we should pass the _binds parameter
+    // If the original function has more parameters than the original type spec, it has _binds
+    bool original_has_binds = original_llvm_fn &&
+                             (original_llvm_fn->arg_size() > original_fn_type_l->getNumParams());
+
+    // Start index: skip _binds if original function doesn't take it
+    unsigned start_idx = original_has_binds ? 0 : 1;
+
+    for (unsigned i = start_idx; i < proxy_arg_count; ++i) {
         auto arg = proxy_llvm_fn->getArg(i);
         original_args.push_back(arg);
     }
 
-    // Call the original function
-    auto original_fn_type_l = (llvm::FunctionType *)compile_type(original_fn_type);
-    llvm::FunctionCallee original_callee(original_fn_type_l, original_fn_ptr);
+    // Call the original function with the appropriate signature
+    llvm::FunctionType *call_fn_type_l;
+    if (original_has_binds) {
+        // Lambda function - use bound_fn_type which includes _binds
+        call_fn_type_l = (llvm::FunctionType *)compile_type(bound_fn_type);
+    } else {
+        // Regular function - use original_fn_type without _binds
+        call_fn_type_l = original_fn_type_l;
+    }
+
+    llvm::FunctionCallee original_callee(call_fn_type_l, original_fn_ptr);
     auto result = builder.CreateCall(original_callee, original_args);
 
     // Return the result
@@ -3122,10 +3263,24 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new,
     if (alloc_fn) {
         auto ptr_type_l = llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0);
         auto size = llvm_type_size(var_type_l);
+
+        // In managed mode with cx_gc_alloc, provide destructor if type needs destruction
+        llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0));
+
+        if (is_managed() && alloc_fn->qualified_name == "cx_gc_alloc") {
+            auto alloc_type = type ? type : chi_type;
+            if (get_resolver()->type_needs_destruction(alloc_type)) {
+                auto dtor = generate_destructor(alloc_type, nullptr);
+                if (dtor) {
+                    dtor_ptr = dtor->llvm_fn;
+                }
+            }
+        }
+
         std::vector<llvm::Value *> args = {
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), size),
-            llvm::ConstantPointerNull::get(
-                llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)),
+            dtor_ptr,
         };
         auto result = llvm_builder.CreateCall(alloc_fn->llvm_fn, args);
         return result;
@@ -3657,6 +3812,65 @@ Function *Compiler::generate_destructor_optional(ChiType *type, ChiType *resolve
     return fn;
 }
 
+Function *Compiler::generate_destructor_continuation(llvm::StructType *capture_struct_type,
+                                                      ChiType *promise_type,
+                                                      const std::vector<ast::Node *> &captured_vars) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Create function type: void __delete(T*)
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+
+    // Generate unique name
+    static int continuation_dtor_counter = 0;
+    auto fn_name = fmt::format("__continuation_delete_{}", continuation_dtor_counter++);
+
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    // Create Function object
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+
+    // Save current insert point
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    // Create entry block
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+
+    auto this_ptr = llvm_fn->getArg(0);
+
+    // Destroy field 0: Promise
+    if (get_resolver()->type_needs_destruction(promise_type)) {
+        auto promise_gep = builder.CreateStructGEP(capture_struct_type, this_ptr, 0);
+        compile_destruction_for_type(fn, promise_gep, promise_type);
+    }
+
+    // Destroy fields 1..N: captured variables
+    for (size_t i = 0; i < captured_vars.size(); i++) {
+        auto var = captured_vars[i];
+        auto var_type = get_chitype(var);
+
+        if (get_resolver()->type_needs_destruction(var_type)) {
+            auto var_gep = builder.CreateStructGEP(capture_struct_type, this_ptr, i + 1);
+            compile_destruction_for_type(fn, var_gep, var_type);
+        }
+    }
+
+    builder.CreateRetVoid();
+
+    // Restore insert point
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+
+    return fn;
+}
+
 Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *container_type) {
     // Check if already generated
     auto existing = m_ctx->constructor_table.get(struct_type);
@@ -3849,13 +4063,12 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     } else {
         // Handle lambda types for non-specialized functions only
         if (ftype->kind == TypeKind::FnLambda) {
-            // Only add bind parameter if lambda has captures
+            // Always add bind parameter for lambdas (even if no captures)
+            // to match the bound_fn signature created in resolver
             auto &lambda_data = ftype->data.fn_lambda;
-            has_bind = lambda_data.captures.len > 0;
+            has_bind = true;
+            bind_name = "_binds";
             ftype = lambda_data.bound_fn;
-            if (has_bind) {
-                bind_name = "_binds";
-            }
             assert(ftype);
         }
     }

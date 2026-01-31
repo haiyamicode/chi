@@ -276,6 +276,9 @@ class Compiler {
     void compile_destruction_for_type(Function *fn, llvm::Value *address, ChiType *type);
     Function *generate_destructor(ChiType *type, ChiType *container_type = nullptr);
     Function *generate_destructor_optional(ChiType *type, ChiType *resolved_type);
+    Function *generate_destructor_continuation(llvm::StructType *capture_struct_type,
+                                               ChiType *promise_type,
+                                               const std::vector<ast::Node *> &captured_vars);
     Function *generate_constructor(ChiType *struct_type, ChiType *container_type = nullptr);
 
     void compile_construction(Function *fn, llvm::Value *dest, ChiType *type, ast::Node *expr);

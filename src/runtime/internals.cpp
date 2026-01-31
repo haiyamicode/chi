@@ -411,22 +411,16 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
 }
 
-static CxLambda *cx_lambda_clone(CxLambda *dest, CxLambda *callback) {
-    *dest = *callback;
-    if (callback->data) {
-        dest->data = malloc(callback->size);
-        memcpy(dest->data, callback->data, callback->size);
-    }
-    return dest;
-}
-
-static void cx_lambda_free(CxLambda *callback) {
-    free(callback->data);
-    delete callback;
-}
-
 void cx_timeout(uint64_t delay, CxLambda *callback) {
-    auto cb = cx_lambda_clone(new CxLambda(), callback);
+    // Clone the lambda struct and retain the SharedData
+    auto cb = new CxLambda();
+    cb->ptr = callback->ptr;
+    cb->size = callback->size;
+    cb->data = callback->data;
+
+    // Retain the SharedData (increment refcount)
+    cx_shared_retain(callback->data);
+
     uv_timer_t *timer = (uv_timer_t *)malloc(sizeof(uv_timer_t));
     uv_timer_init(uv_default_loop(), timer);
     timer->data = cb;
@@ -436,9 +430,16 @@ void cx_timeout(uint64_t delay, CxLambda *callback) {
         [](uv_timer_t *handle) {
             auto cb = (CxLambda *)handle->data;
             auto fn = (void (*)(void *))cb->ptr;
-            fn(cb->data);
+
+            // Get the actual bind struct pointer from SharedData
+            void *bind_ptr = cx_shared_get_value_ptr(cb->data);
+            fn(bind_ptr);
+
             uv_timer_stop(handle);
-            cx_lambda_free(cb);
+
+            // Release the SharedData (decrement refcount, free if 0)
+            cx_shared_release(cb->data);
+            delete cb;
             free(handle);
         },
         delay, 0);
@@ -586,4 +587,33 @@ void cx_file_read(CxString *path, CxString *result) {
 void cx_json_value_copy(void *data, void *result) {
     auto value = (boost::json::value *)data;
     create_cx_json_result(value, result);
+}
+
+// SharedData refcounting helpers for type-erased pointers
+// All SharedData<T> instances have ref_count as the first field at offset 0
+void cx_shared_retain(void *ptr) {
+    if (ptr) {
+        uint32_t *refcount = (uint32_t *)ptr;
+        (*refcount)++;
+    }
+}
+
+void cx_shared_release(void *ptr) {
+    if (ptr) {
+        uint32_t *refcount = (uint32_t *)ptr;
+        (*refcount)--;
+        if (*refcount == 0) {
+            free(ptr);
+        }
+    }
+}
+
+// Get pointer to value field in SharedData<T>
+// SharedData layout: { uint32 ref_count, [padding], T value }
+// The value field is at offset 8 due to struct padding for 8-byte alignment
+void *cx_shared_get_value_ptr(void *shared_data_ptr) {
+    if (!shared_data_ptr) {
+        return nullptr;
+    }
+    return (char *)shared_data_ptr + 8;
 }
