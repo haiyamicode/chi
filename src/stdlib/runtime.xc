@@ -344,7 +344,7 @@ struct Array<T> implements
 	}
 
   func delete() {
-		delete this.data;
+		cx_free(this.data as *void);
 	}
 
 	func add(item: T) {
@@ -354,7 +354,7 @@ struct Array<T> implements
 
   func clear() {
     if (this.data) {
-      delete this.data;
+      cx_free(this.data as *void);
     }
     cx_array_new(this);
   }

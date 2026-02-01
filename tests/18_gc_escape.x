@@ -101,12 +101,12 @@ func main() {
     returned_ptr = null;
     ptr1 = null;
     ptr2 = null;
-    
+
     // Final gc objects
     println("Final gc objects...");
     for var i = 0; i < 5; i++ {
         var temp: GCBox = {1000 + i};
     }
-    
+
     println("Test completed");
 }

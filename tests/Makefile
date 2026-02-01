@@ -48,6 +48,21 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	fi; \
        	rm -f $*.output
 
+# Special rule for GC tests - finalization order is non-deterministic,
+# so sort destruction lines (everything after "Test completed") before comparing.
+18_gc_escape.test: 18_gc_escape.expect
+	echo Test: 18_gc_escape...
+	@$(CHI) -o $(TMP).18_gc_escape -c 18_gc_escape.x && $(TMP).18_gc_escape 2>&1 >18_gc_escape.output
+	@awk '/^Test completed$$/{found=1; print; next} found{print | "sort"} !found{print}' 18_gc_escape.output > 18_gc_escape.sorted
+	@mv 18_gc_escape.sorted 18_gc_escape.output
+	@if [ "x`diff -qbu 18_gc_escape.expect 18_gc_escape.output`" != "x" ]; \
+	then \
+		echo "error in test 18_gc_escape"; \
+		diff -u 18_gc_escape.expect 18_gc_escape.output; \
+		exit 1; \
+	fi; \
+	rm -f 18_gc_escape.output
+
 # Special rule for package tests
 15_package.test: 15_package.expect
 	echo Test: 15_package...

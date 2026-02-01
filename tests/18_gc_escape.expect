@@ -44,9 +44,9 @@ GCBox(1003) created
 GCBox(1004) created
 Test completed
 GCBox(1) destroyed
+GCBox(100) destroyed
+GCBox(1004) destroyed
 GCBox(2) destroyed
+GCBox(300) destroyed
 GCBox(6) destroyed
 GCBox(7) destroyed
-GCBox(1004) destroyed
-GCBox(300) destroyed
-GCBox(100) destroyed

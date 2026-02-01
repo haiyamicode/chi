@@ -3796,6 +3796,11 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
             // Compile on demand
             auto proto = user_destructor->node->data.fn_def.fn_proto;
             destructor_fn = compile_fn_proto(proto, user_destructor->node);
+            // Set container subtype so generic type parameters can be resolved
+            if (type->kind == TypeKind::Subtype) {
+                destructor_fn->container_subtype = &type->data.subtype;
+                destructor_fn->container_type = type;
+            }
             m_ctx->pending_fns.add(destructor_fn);
         } else {
             destructor_fn = *destructor_fn_ptr;
@@ -3812,25 +3817,27 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     for (int i = fields.len - 1; i >= 0; i--) {
         auto field = fields[i];
         auto field_type = field->resolved_type;
+        auto resolved_field_type = field_type;
 
-        // Resolve Subtype
-        while (field_type && field_type->kind == TypeKind::Subtype) {
-            auto final_type = field_type->data.subtype.final_type;
+        // Resolve Subtype for checking
+        while (resolved_field_type && resolved_field_type->kind == TypeKind::Subtype) {
+            auto final_type = resolved_field_type->data.subtype.final_type;
             if (final_type) {
-                field_type = final_type;
+                resolved_field_type = final_type;
             } else {
                 break;
             }
         }
 
-        if (!field_type) continue;
+        if (!resolved_field_type) continue;
 
         // Check if field needs destruction using resolver's utility
-        if (!get_resolver()->type_needs_destruction(field_type)) {
+        if (!get_resolver()->type_needs_destruction(resolved_field_type)) {
             continue;
         }
 
         auto field_gep = builder.CreateStructGEP(llvm_struct_type, this_ptr, field->field_index);
+        // Pass original field_type to preserve Subtype info for container_subtype resolution
         compile_destruction_for_type(fn, field_gep, field_type);
     }
 
