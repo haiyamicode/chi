@@ -7,6 +7,7 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <sstream>
 #include <uv.h>
 
@@ -29,6 +30,14 @@ using namespace cx;
 struct StackTrace {
     string message;
     char trace[8096];
+};
+
+struct CxCapture {
+    uint32_t ref_count;
+    uint32_t payload_size;
+    TypeInfo *type;
+    void (*dtor)(void *);
+    void *data;
 };
 
 static tgc_t gc;
@@ -350,6 +359,65 @@ void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
     return dest->data;
 }
 
+extern "C" {
+void *cx_capture_new(uint32_t payload_size, TypeInfo *type, void *dtor) {
+    if (payload_size == 0) {
+        return nullptr;
+    }
+
+    auto capture = (CxCapture *)malloc(sizeof(CxCapture));
+    if (!capture) {
+        return nullptr;
+    }
+
+    capture->ref_count = 1;
+    capture->payload_size = payload_size;
+    capture->type = type;
+    capture->dtor = (void (*)(void *))dtor;
+
+    // Allocate and zero-init payload data
+    capture->data = malloc(payload_size);
+    if (!capture->data) {
+        free(capture);
+        return nullptr;
+    }
+    memset(capture->data, 0, payload_size);
+
+    return capture;
+}
+
+void cx_capture_retain(void *capture_ptr) {
+    if (!capture_ptr) return;
+    auto capture = (CxCapture *)capture_ptr;
+    capture->ref_count++;
+}
+
+void cx_capture_release(void *capture_ptr) {
+    if (!capture_ptr) return;
+    auto capture = (CxCapture *)capture_ptr;
+    capture->ref_count--;
+    if (capture->ref_count == 0) {
+        if (capture->dtor) {
+            capture->dtor(capture->data);
+        }
+        free(capture->data);
+        free(capture);
+    }
+}
+
+void *cx_capture_get_type(void *capture_ptr) {
+    if (!capture_ptr) return nullptr;
+    auto capture = (CxCapture *)capture_ptr;
+    return capture->type;
+}
+
+void *cx_capture_get_data(void *capture_ptr) {
+    if (!capture_ptr) return nullptr;
+    auto capture = (CxCapture *)capture_ptr;
+    return capture->data;
+}
+}
+
 void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
     auto p = tgc_alloc(&gc, size);
     if (dtor) {
@@ -411,38 +479,14 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
 }
 
-void cx_timeout(uint64_t delay, CxLambda *callback) {
-    // Clone the lambda struct and retain the SharedData
-    auto cb = new CxLambda();
-    cb->ptr = callback->ptr;
-    cb->size = callback->size;
-    cb->data = callback->data;
+void cx_timeout(uint64_t delay, void *callback) {
+    // Temporary stub: timeout/lambda scheduling will be redesigned.
+    (void)delay;
+    (void)callback;
 
-    // Retain the SharedData (increment refcount)
-    cx_shared_retain(callback->data);
-
-    uv_timer_t *timer = (uv_timer_t *)malloc(sizeof(uv_timer_t));
-    uv_timer_init(uv_default_loop(), timer);
-    timer->data = cb;
-
-    uv_timer_start(
-        timer,
-        [](uv_timer_t *handle) {
-            auto cb = (CxLambda *)handle->data;
-            auto fn = (void (*)(void *))cb->ptr;
-
-            // Get the actual bind struct pointer from SharedData
-            void *bind_ptr = cx_shared_get_value_ptr(cb->data);
-            fn(bind_ptr);
-
-            uv_timer_stop(handle);
-
-            // Release the SharedData (decrement refcount, free if 0)
-            cx_shared_release(cb->data);
-            delete cb;
-            free(handle);
-        },
-        delay, 0);
+    const char *msg_c = "cx_timeout not implemented";
+    CxString msg{(char *)msg_c, (uint32_t)strlen(msg_c), 1};
+    cx_panic(&msg);
 }
 
 static CxHash get_hbytes(CxAny *v) {
@@ -458,17 +502,6 @@ static CxHash get_hbytes(CxAny *v) {
 }
 
 void cx_hbytes(CxAny *v, CxHash *result) { *result = get_hbytes(v); }
-
-void cx_call(CxLambda *fn) {
-    auto fn_ptr = (void (*)(void *))fn->ptr;
-    fn_ptr(fn->data);
-}
-
-// Invoke a callback with a value pointer (for async continuations)
-void cx_call_with_value(CxLambda *fn, void *value) {
-    auto fn_ptr = (void (*)(void *, void *))fn->ptr;
-    fn_ptr(fn->data, value);
-}
 
 // DEPRECATED: Promise is now a Chi-native struct in runtime.xc
 // void cx_promise_init(CxPromise *promise) { ... }
@@ -591,29 +624,3 @@ void cx_json_value_copy(void *data, void *result) {
 
 // SharedData refcounting helpers for type-erased pointers
 // All SharedData<T> instances have ref_count as the first field at offset 0
-void cx_shared_retain(void *ptr) {
-    if (ptr) {
-        uint32_t *refcount = (uint32_t *)ptr;
-        (*refcount)++;
-    }
-}
-
-void cx_shared_release(void *ptr) {
-    if (ptr) {
-        uint32_t *refcount = (uint32_t *)ptr;
-        (*refcount)--;
-        if (*refcount == 0) {
-            free(ptr);
-        }
-    }
-}
-
-// Get pointer to value field in SharedData<T>
-// SharedData layout: { uint32 ref_count, [padding], T value }
-// The value field is at offset 8 due to struct padding for 8-byte alignment
-void *cx_shared_get_value_ptr(void *shared_data_ptr) {
-    if (!shared_data_ptr) {
-        return nullptr;
-    }
-    return (char *)shared_data_ptr + 8;
-}

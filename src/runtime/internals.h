@@ -48,26 +48,13 @@ struct CxRefc {
     int32_t *refcnt;
 };
 
-struct CxLambda {
-    void *ptr;
-    uint32_t size; // size of captured data
-    void *data;    // captured data, lives on the heap
-};
-
-// DEPRECATED: Promise is now a Chi-native struct in runtime.xc
-// enum CxPromiseState : uint32_t {
-//     CX_PROMISE_PENDING = 0,
-//     CX_PROMISE_RESOLVED = 1,
-//     CX_PROMISE_REJECTED = 2
-// };
-
-// struct CxPromise {
-//     CxPromiseState state;
-//     void *value;
-//     void *error;
-//     CxLambda on_resolve;
-//     CxLambda on_reject;
-// };
+// Type-erased refcounted capture allocation (header + payload). The runtime owns
+// refcounting and destruction so lambdas can be safely type-erased.
+CHI_RT_EXPORT void *cx_capture_new(uint32_t payload_size, TypeInfo *type, void *dtor);
+CHI_RT_EXPORT void cx_capture_retain(void *capture_ptr);
+CHI_RT_EXPORT void cx_capture_release(void *capture_ptr);
+CHI_RT_EXPORT void *cx_capture_get_type(void *capture_ptr);
+CHI_RT_EXPORT void *cx_capture_get_data(void *capture_ptr);
 
 struct CxHash {
     char *data;
@@ -134,15 +121,7 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context);
 
-CHI_RT_EXPORT void cx_timeout(uint64_t delay, CxLambda *callback);
-CHI_RT_EXPORT void cx_call(CxLambda *callback);
-CHI_RT_EXPORT void cx_call_with_value(CxLambda *callback, void *value);
-
-// DEPRECATED: Promise is now a Chi-native struct in runtime.xc
-// CHI_RT_EXPORT void cx_promise_init(CxPromise *promise);
-// CHI_RT_EXPORT void cx_promise_resolve(CxPromise *promise, void *value);
-// CHI_RT_EXPORT void cx_promise_reject(CxPromise *promise, void *error);
-// CHI_RT_EXPORT void cx_promise_then(CxPromise *promise, CxLambda *on_resolve, CxLambda *on_reject);
+CHI_RT_EXPORT void cx_timeout(uint64_t delay, void *callback);
 
 CHI_RT_EXPORT void cx_hbytes(CxAny *value, CxHash *result);
 CHI_RT_EXPORT void *cx_map_new();
@@ -160,11 +139,6 @@ CHI_RT_EXPORT uint32_t cx_json_array_length(void *data);
 CHI_RT_EXPORT void cx_json_value_copy(void *data, void *result);
 
 CHI_RT_EXPORT void cx_file_read(CxString *path, CxString *result);
-
-// SharedData refcounting helpers for type-erased pointers
-CHI_RT_EXPORT void cx_shared_retain(void *ptr);
-CHI_RT_EXPORT void cx_shared_release(void *ptr);
-CHI_RT_EXPORT void *cx_shared_get_value_ptr(void *shared_data_ptr);
 
 #ifdef __cplusplus
 }

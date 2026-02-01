@@ -541,12 +541,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             bound_fn.is_variadic = fn_data.is_variadic;
             bound_fn.container_ref = fn_data.container_ref;
 
-            // Instantiate __CxLambda<BindStruct> with the bind struct type
+            // Use __CxLambda directly (no longer generic)
             auto rt_lambda = m_ctx->rt_lambda_type;
             if (rt_lambda && rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
-                TypeList type_args;
-                type_args.add(bstruct);
-                proto->data.fn_lambda.internal = to_value_type(get_subtype(rt_lambda, &type_args));
+                proto->data.fn_lambda.internal = to_value_type(rt_lambda);
             } else {
                 // Defer if __CxLambda not resolved yet
                 proto->data.fn_lambda.internal = nullptr;
@@ -1189,7 +1187,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             lambda_type->data.fn_lambda.bind_struct = bind_struct;
             lambda_type->data.fn_lambda.bound_fn = bound_fn;
 
-            // Instantiate __CxLambda<BindStruct> with the bind struct type
+            // Use __CxLambda directly (no longer generic)
             auto rt_lambda = m_ctx->rt_lambda_type;
             assert(rt_lambda && "__CxLambda type not found in runtime");
 
@@ -1199,10 +1197,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 lambda_type->data.fn_lambda.internal = nullptr;
                 lambda_type->is_placeholder = true;
             } else {
-                // Instantiate __CxLambda<BindStruct>
-                TypeList type_args;
-                type_args.add(bind_struct);
-                lambda_type->data.fn_lambda.internal = to_value_type(get_subtype(rt_lambda, &type_args));
+                // Use __CxLambda directly
+                lambda_type->data.fn_lambda.internal = to_value_type(rt_lambda);
             }
             lambda_type->data.fn_lambda.captures.add(instance_type);
 
@@ -2486,6 +2482,12 @@ bool Resolver::type_needs_destruction(ChiType *type) {
     // Strings need destruction
     if (type->kind == TypeKind::String) return true;
 
+    // Lambdas may own type-erased captures that must be released.
+    if (type->kind == TypeKind::FnLambda) {
+        auto internal = type->data.fn_lambda.internal;
+        return internal ? type_needs_destruction(internal) : false;
+    }
+
     // Optional needs destruction if its element type needs destruction
     if (type->kind == TypeKind::Optional) {
         auto elem_type = type->get_elem();
@@ -3412,7 +3414,7 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
 
     lambda->data.fn_lambda.bind_struct = bstruct;
 
-    // Instantiate __CxLambda<BindStruct> with the bind struct type
+    // Use __CxLambda directly (no longer generic)
     auto rt_lambda = m_ctx->rt_lambda_type;
     assert(rt_lambda && "__CxLambda type not found in runtime");
 
@@ -3425,10 +3427,8 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
         return lambda;
     }
 
-    // Instantiate __CxLambda<BindStruct>
-    TypeList type_args;
-    type_args.add(bstruct);
-    lambda->data.fn_lambda.internal = to_value_type(get_subtype(rt_lambda, &type_args));
+    // Use __CxLambda directly
+    lambda->data.fn_lambda.internal = to_value_type(rt_lambda);
 
     return lambda;
 }

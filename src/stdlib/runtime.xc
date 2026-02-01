@@ -26,8 +26,6 @@ extern "C" {
   func cx_panic(message: *string);
   func cx_personality(...) int32;
   func cx_timeout(delay: uint64, callback: *void);
-  func cx_call(fn: *void);
-  func cx_call_with_value(fn: *void, value: *void);
   func cx_string_format(format: *string, values: *void, str: *string);
   func cx_string_from_chars(data: *void, size: uint32, str: *string);
   func cx_string_delete(dest: *string);
@@ -50,10 +48,12 @@ extern "C" {
   func cx_file_read(path: *string, result: *string);
   func cx_debug(ptr: *void);
 
-  // SharedData refcounting helpers for type-erased pointers
-  func cx_shared_retain(ptr: *void);
-  func cx_shared_release(ptr: *void);
-  func cx_shared_get_value_ptr(shared_data_ptr: *void) *void;
+  // Type-erased captures for lambdas (__CxLambda)
+  func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
+  func cx_capture_retain(capture_ptr: *void);
+  func cx_capture_release(capture_ptr: *void);
+  func cx_capture_get_type(capture_ptr: *void) *void;
+  func cx_capture_get_data(capture_ptr: *void) *void;
 }
 
 struct __CxEnumBase<T> implements ops.Display {
@@ -81,7 +81,7 @@ struct SharedData<T> {
 }
 
 struct Shared<T> implements ops.CopyFrom<Shared<T>> {
-  protected data: *SharedData<T> = null;
+  data: *SharedData<T> = null;
 
   func new(value: T) {
     this.data = new SharedData<T>{value};
@@ -101,8 +101,9 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
   }
 
   func copy_from(from: &Shared<T>) {
-    var new_data = from.data as *void;
-    cx_shared_retain(new_data);
+    if from.data {
+      from.data.ref_count = from.data.ref_count + 1;
+    }
     this.release();
     this.data = from.data;
   }
@@ -124,30 +125,45 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
   }
 }
 
-// Internal lambda struct for compiler-generated closures with refcounted captures
-// Generic over capture type T to enable proper destructor calls via Shared<T>
-// Type conversions allowed between __CxLambda<T1> and __CxLambda<T2> with matching signatures
-struct __CxLambda<T> implements ops.CopyFrom<__CxLambda<T>> {
+// Internal lambda struct for compiler-generated closures.
+// Captures are type-erased (CxCapture payload pointer) so lambdas can be converted across
+// capture types with the same call signature.
+struct __CxLambda implements ops.CopyFrom<__CxLambda> {
     fn_ptr: *void = null;
     size: uint32 = 0;
-    data: Shared<T>;  // Compiler auto-generates delete() for this
-
-    func new_with_data(fn: *void, sz: uint32, captures: T) {
+    captures: *void = null;        // CxCapture payload pointer (or null)
+    
+    func new(fn: *void, sz: uint32) {
         this.fn_ptr = fn;
         this.size = sz;
-        this.data = {captures};
     }
 
-    func new_no_captures(fn: *void) {
-        this.fn_ptr = fn;
-        this.size = 0;
-        // this.data defaults to null (no captures)
+    func set_captures_ptr(ptr: *void) {
+        this.captures = ptr;
     }
 
-    func copy_from(from: &__CxLambda<T>) {
+    func delete() {
+        if this.captures {
+            cx_capture_release(this.captures);
+            this.captures = null;
+        }
+    }
+
+    func copy_from(from: &__CxLambda) {
+        // Retain the source captures
+        if from.captures {
+            cx_capture_retain(from.captures);
+        }
+
+        // Release our current captures
+        if this.captures {
+            cx_capture_release(this.captures);
+        }
+
+        // Copy all fields
         this.fn_ptr = from.fn_ptr;
         this.size = from.size;
-        this.data.copy_from(&from.data);
+        this.captures = from.captures;
     }
 
     func as_ptr() *void {
@@ -155,8 +171,7 @@ struct __CxLambda<T> implements ops.CopyFrom<__CxLambda<T>> {
     }
 
     func data_ptr() *void {
-        // Use type-erased helper to get value ptr, works across different T types
-        return cx_shared_get_value_ptr(this.data.data as *void);
+        return cx_capture_get_data(this.captures);
     }
 }
 
