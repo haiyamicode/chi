@@ -331,6 +331,22 @@ class Compiler {
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                       NodeList *captures);
 
+    // __CxLambda construction helpers (shared by lambda alloc, method-to-lambda, async continuations)
+    struct CxLambdaInit {
+        llvm::Value *alloca_ptr;     // stack-allocated __CxLambda
+        llvm::Type *struct_type_l;   // LLVM type of __CxLambda
+    };
+    CxLambdaInit compile_cxlambda_init(Function *fn, llvm::Value *fn_ptr, uint32_t capture_size);
+
+    struct CxCaptureInfo {
+        llvm::Value *capture_ptr;       // CxCapture pointer (for set_captures_ptr)
+        llvm::Value *payload_data_ptr;  // raw payload pointer (for storing capture data)
+    };
+    CxCaptureInfo compile_cxcapture_create(uint32_t payload_size, llvm::Value *type_info,
+                                           llvm::Value *dtor);
+
+    void compile_cxlambda_set_captures(llvm::Value *lambda_alloca, llvm::Value *capture_ptr);
+
     llvm::Value *compile_number_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                            ChiType *to_type);
 

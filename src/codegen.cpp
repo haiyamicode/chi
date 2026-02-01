@@ -840,24 +840,74 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     return info_global;
 }
 
+// ============================================================================
+// __CxLambda construction helpers
+// ============================================================================
+
+Compiler::CxLambdaInit Compiler::compile_cxlambda_init(Function *fn, llvm::Value *fn_ptr,
+                                                     uint32_t capture_size) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+
+    auto rt_lambda = get_resolver()->get_context()->rt_lambda_type;
+    assert(rt_lambda && "__CxLambda type not found in runtime");
+    auto struct_type_l = compile_type(rt_lambda);
+    auto alloca_ptr = fn->entry_alloca(struct_type_l, "lambda");
+
+    // Call generated constructor to initialize default field values
+    auto generated_ctor = generate_constructor(rt_lambda, nullptr);
+    if (generated_ctor) {
+        builder.CreateCall(generated_ctor->llvm_fn, {alloca_ptr});
+    }
+
+    // Call __CxLambda.new(fn_ptr, size)
+    std::optional<TypeId> variant_type_id = std::nullopt;
+    auto new_member = rt_lambda->data.struct_.find_member("new");
+    assert(new_member && "new() method not found in __CxLambda");
+    auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+    auto new_method = get_fn(new_method_node);
+
+    auto fn_ptr_cast = builder.CreateBitCast(fn_ptr, ptr_type);
+    auto size_value = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size);
+    builder.CreateCall(new_method->llvm_fn, {alloca_ptr, fn_ptr_cast, size_value});
+
+    return {alloca_ptr, struct_type_l};
+}
+
+Compiler::CxCaptureInfo Compiler::compile_cxcapture_create(uint32_t payload_size,
+                                                         llvm::Value *type_info,
+                                                         llvm::Value *dtor) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    auto capture_new_fn = get_system_fn("cx_capture_new");
+    auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), payload_size);
+    auto capture_ptr = builder.CreateCall(capture_new_fn->llvm_fn, {size_l, type_info, dtor});
+
+    auto capture_get_data_fn = get_system_fn("cx_capture_get_data");
+    auto payload_data_ptr = builder.CreateCall(capture_get_data_fn->llvm_fn, {capture_ptr});
+
+    return {capture_ptr, payload_data_ptr};
+}
+
+void Compiler::compile_cxlambda_set_captures(llvm::Value *lambda_alloca, llvm::Value *capture_ptr) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    auto rt_lambda = get_resolver()->get_context()->rt_lambda_type;
+    assert(rt_lambda && "__CxLambda type not found in runtime");
+
+    std::optional<TypeId> variant_type_id = std::nullopt;
+    auto set_captures_ptr_member = rt_lambda->data.struct_.find_member("set_captures_ptr");
+    assert(set_captures_ptr_member && "set_captures_ptr() method not found in __CxLambda");
+    auto set_captures_ptr_node = get_variant_member_node(set_captures_ptr_member, variant_type_id);
+    auto set_captures_ptr_method = get_fn(set_captures_ptr_node);
+    builder.CreateCall(set_captures_ptr_method->llvm_fn, {lambda_alloca, capture_ptr});
+}
+
 llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                             NodeList *captures) {
     auto &builder = *(m_ctx->llvm_builder.get());
-    auto &llvm_module = *(m_ctx->llvm_module.get());
-
-    auto struct_type = lambda_type->data.fn_lambda.internal;
-    auto struct_type_l = compile_type(struct_type);
-    auto var = builder.CreateAlloca(struct_type_l, nullptr, "lambda");
-
-    // Call __new to initialize fields with defaults (data: Shared<?T> = {null})
-    auto generated_ctor = generate_constructor(struct_type, nullptr);
-    if (generated_ctor) {
-        builder.CreateCall(generated_ctor->llvm_fn, {var});
-    }
-
-    // __CxLambda is no longer generic, so just use it directly
-    auto actual_struct_type = lambda_type->data.fn_lambda.internal;
-    std::optional<TypeId> variant_type_id = std::nullopt;
 
     // Determine size and prepare fn_ptr
     llvm::Value *final_fn_ptr = nullptr;
@@ -873,15 +923,8 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         final_fn_ptr = generate_lambda_proxy_function(fn, fn_ptr, lambda_type, nullptr);
     }
 
-    // Call __CxLambda.new(fn_ptr, size)
-    auto new_member = actual_struct_type->data.struct_.find_member("new");
-    assert(new_member && "new() method not found in __CxLambda");
-
-    auto new_method_node = get_variant_member_node(new_member, variant_type_id);
-    auto new_method = get_fn(new_method_node);
-
-    auto size_value = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size);
-    builder.CreateCall(new_method->llvm_fn, {var, final_fn_ptr, size_value});
+    // Initialize __CxLambda struct
+    auto [var, struct_type_l] = compile_cxlambda_init(fn, final_fn_ptr, bind_size);
 
     // For lambdas with captures, set the data field
     if (captures && captures->len) {
@@ -935,7 +978,7 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
             builder.CreateStore(value, capture_gep);
         }
 
-        // Allocate type-erased capture box and store bind struct into it.
+        // Allocate type-erased capture box and store bind struct into it
         auto captures_ti = compile_type_info(bstruct);
         auto captures_ti_ptr = builder.CreateBitCast(captures_ti, builder.getInt8PtrTy());
 
@@ -946,28 +989,13 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
             }
         }
 
-        auto capture_new_fn = get_system_fn("cx_capture_new");
-        auto payload_size =
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), bind_size);
-        auto capture_ptr =
-            builder.CreateCall(capture_new_fn->llvm_fn, {payload_size, captures_ti_ptr, dtor_ptr});
-
-        // Get the payload data pointer from the CxCapture struct
-        auto capture_get_data_fn = get_system_fn("cx_capture_get_data");
-        auto captures_payload_ptr = builder.CreateCall(capture_get_data_fn->llvm_fn, {capture_ptr});
+        auto [capture_ptr, payload_data_ptr] = compile_cxcapture_create(bind_size, captures_ti_ptr, dtor_ptr);
 
         auto bind_struct_value = builder.CreateLoad(bstruct_l, bind_var);
-        auto payload_typed_ptr = builder.CreateBitCast(captures_payload_ptr, bstruct_l->getPointerTo());
+        auto payload_typed_ptr = builder.CreateBitCast(payload_data_ptr, bstruct_l->getPointerTo());
         builder.CreateStore(bind_struct_value, payload_typed_ptr);
 
-        // Store CxCapture pointer into the lambda.
-        auto set_captures_ptr_member =
-            actual_struct_type->data.struct_.find_member("set_captures_ptr");
-        assert(set_captures_ptr_member && "set_captures_ptr() method not found in __CxLambda");
-        auto set_captures_ptr_node =
-            get_variant_member_node(set_captures_ptr_member, variant_type_id);
-        auto set_captures_ptr_method = get_fn(set_captures_ptr_node);
-        builder.CreateCall(set_captures_ptr_method->llvm_fn, {var, capture_ptr});
+        compile_cxlambda_set_captures(var, capture_ptr);
     }
 
     return builder.CreateLoad(struct_type_l, var);
@@ -1328,44 +1356,37 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
     auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
-    // Allocate capture struct on heap (use GC in managed mode)
-    llvm::Value *capture_alloc;
-    if (is_managed()) {
-        auto alloc_fn = get_system_fn("cx_gc_alloc");
-
-        // Check if any captured field needs destruction
-        llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(ptr_type);
-
-        bool needs_destruction = get_resolver()->type_needs_destruction(ctx.promise_type);
-        if (!needs_destruction) {
-            for (auto var : captured_vars_ordered) {
-                if (get_resolver()->type_needs_destruction(get_chitype(var))) {
-                    needs_destruction = true;
-                    break;
-                }
+    // Generate destructor for capture struct (called by cx_capture_release when refcount hits 0)
+    llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(ptr_type);
+    bool needs_destruction = get_resolver()->type_needs_destruction(ctx.promise_type);
+    if (!needs_destruction) {
+        for (auto var : captured_vars_ordered) {
+            if (get_resolver()->type_needs_destruction(get_chitype(var))) {
+                needs_destruction = true;
+                break;
             }
         }
-
-        if (needs_destruction) {
-            auto dtor = generate_destructor_continuation(capture_struct_type, ctx.promise_type, captured_vars_ordered);
-            if (dtor) {
-                dtor_ptr = dtor->llvm_fn;
-            }
-        }
-
-        auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size);
-        capture_alloc = builder.CreateCall(alloc_fn->llvm_fn, {size_l, dtor_ptr}, "captures");
-    } else {
-        auto malloc_fn = m_ctx->llvm_module->getFunction("cx_malloc");
-        auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size);
-        auto null_ptr = llvm::ConstantPointerNull::get(ptr_type);
-        capture_alloc = builder.CreateCall(malloc_fn, {size_l, null_ptr}, "captures");
     }
-    auto captures_ptr = builder.CreateBitCast(capture_alloc, capture_struct_type->getPointerTo());
+    if (needs_destruction) {
+        auto dtor = generate_destructor_continuation(capture_struct_type, ctx.promise_type, captured_vars_ordered);
+        if (dtor) {
+            dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, ptr_type);
+        }
+    }
+
+    // Allocate capture via CxCapture (refcounted, type-erased)
+    auto null_ti = llvm::ConstantPointerNull::get(ptr_type); // no Chi type for ad-hoc capture struct
+    auto [capture_ptr, captures_payload_ptr] = compile_cxcapture_create((uint32_t)capture_size, null_ti, dtor_ptr);
+    auto captures_ptr = builder.CreateBitCast(captures_payload_ptr, capture_struct_type->getPointerTo());
+
+    // Zero-init the payload before populating (needed for compile_copy on Promise,
+    // since copy_from may release the old value which would be garbage otherwise)
+    builder.CreateMemSet(captures_payload_ptr,
+        llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
+        capture_size, {});
 
     // Store result promise VALUE (not pointer) - copy it so it survives after stack frame is gone
     auto result_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
-    // Load the Promise value and copy it (compile_copy expects a value, not a pointer)
     auto result_promise_val = builder.CreateLoad(ctx.promise_struct_type, result_promise_ptr);
     compile_copy(fn, result_promise_val, result_gep, ctx.promise_type);
 
@@ -1375,7 +1396,6 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
         auto var_type = get_chitype(var);
         auto var_type_l = compile_type(var_type);
 
-        // Get the variable value (either from local_vars or var_table)
         llvm::Value *var_ptr;
         if (local_vars.has_key(var)) {
             var_ptr = local_vars[var];
@@ -1388,43 +1408,13 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
         builder.CreateStore(var_value, var_gep);
     }
 
-    // TODO: Fix async continuation lambda to use proper __CxLambda<CaptureStruct>
-    // This code was using invalid "system lambda type" and needs to be rewritten
-    // to use __CxLambda with proper refcounting
+    // Build __CxLambda struct
+    emit_dbg_location(fn->node);
+    auto cont_fn_llvm = ctx.continuations[segment_index - 1];
+    auto [lambda_alloca, lambda_struct_type_l] = compile_cxlambda_init(fn, cont_fn_llvm, (uint32_t)capture_size);
+    compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
 
-    // OLD CODE (commented out for guidance):
-    /*
-    // Build CxLambda struct: { ptr, size, data }
-    auto lambda_type = get_system_types()->lambda;  // INVALID - no such thing as system lambda type
-    auto lambda_type_l = compile_type(lambda_type);
-    auto lambda_struct_type = (llvm::StructType *)lambda_type_l;
-
-    auto lambda_alloc = fn->entry_alloca(lambda_struct_type, "lambda");
-
-    // ptr = continuation function (segment N uses continuation at index N-1)
-    auto cont_fn = ctx.continuations[segment_index - 1];
-    auto fn_ptr_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 0);  // MANUAL ACCESS - WRONG
-    builder.CreateStore(cont_fn, fn_ptr_gep);
-
-    // size = capture struct size
-    auto size_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 1);  // MANUAL ACCESS - WRONG
-    builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), capture_size), size_gep);
-
-    // data = captures pointer
-    auto data_gep = builder.CreateStructGEP(lambda_struct_type, lambda_alloc, 2);  // MANUAL ACCESS - WRONG
-    builder.CreateStore(capture_alloc, data_gep);
-
-    return builder.CreateLoad(lambda_struct_type, lambda_alloc);
-    */
-
-    // NEW APPROACH NEEDED:
-    // 1. Create proper __CxLambda<CaptureStruct> type
-    // 2. The captures are already heap-allocated in capture_alloc
-    // 3. Need to wrap capture_alloc as SharedData<CaptureStruct> or use different approach
-    // 4. Call proper constructor method
-
-    assert(false && "Async continuation lambdas need to be fixed to use __CxLambda");
-    return nullptr;
+    return builder.CreateLoad(lambda_struct_type_l, lambda_alloca);
 }
 
 void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
@@ -2581,41 +2571,18 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             // Create a method lambda using proxy function approach
             auto lambda_type = get_chitype(expr);
             assert(lambda_type->kind == TypeKind::FnLambda);
-            auto lambda_struct_type = compile_type(lambda_type->data.fn_lambda.internal);
-
-            // Allocate lambda structure
-            auto lambda_alloca = builder.CreateAlloca(lambda_struct_type, nullptr, "method_lambda");
-
-            // Call __new to initialize fields with defaults
-            auto lambda_struct = lambda_type->data.fn_lambda.internal;
-            auto generated_ctor = generate_constructor(lambda_struct, nullptr);
-            if (generated_ctor) {
-                builder.CreateCall(generated_ctor->llvm_fn, {lambda_alloca});
-            }
-
-            // __CxLambda is no longer generic, so just use it directly
-            auto struct_type_method = lambda_struct;
-            std::optional<TypeId> variant_type_id = std::nullopt;
 
             // Generate a proxy function that wraps the method call
             auto proxy_fn =
                 generate_method_proxy_function(fn, data.resolved_struct_member, lambda_type);
 
             // Get bind struct size
-            auto bind_struct_type = compile_type(lambda_type->data.fn_lambda.bind_struct);
+            auto bind_struct_type_l = compile_type(lambda_type->data.fn_lambda.bind_struct);
             auto struct_size =
-                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(bind_struct_type);
+                (uint32_t)m_ctx->llvm_module->getDataLayout().getTypeAllocSize(bind_struct_type_l);
 
-            // Call __CxLambda.new(fn_ptr, size)
-            auto new_member = struct_type_method->data.struct_.find_member("new");
-            assert(new_member && "new() method not found in __CxLambda");
-
-            auto new_method_node = get_variant_member_node(new_member, variant_type_id);
-            auto new_method = get_fn(new_method_node);
-
-            auto fn_ptr_cast = builder.CreateBitCast(proxy_fn, builder.getInt8PtrTy());
-            builder.CreateCall(new_method->llvm_fn,
-                             {lambda_alloca, fn_ptr_cast, builder.getInt32(struct_size)});
+            // Initialize __CxLambda struct
+            auto [lambda_alloca, lambda_struct_type_l] = compile_cxlambda_init(fn, proxy_fn, struct_size);
 
             // Get the instance pointer
             llvm::Value *instance_ptr;
@@ -2627,13 +2594,13 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             }
 
             // Create binding struct to hold the instance pointer
-            auto bind_alloca = builder.CreateAlloca(bind_struct_type, nullptr, "method_bind");
+            auto bind_alloca = builder.CreateAlloca(bind_struct_type_l, nullptr, "method_bind");
 
             // Store instance pointer in binding struct
-            auto instance_gep = builder.CreateStructGEP(bind_struct_type, bind_alloca, 0);
+            auto instance_gep = builder.CreateStructGEP(bind_struct_type_l, bind_alloca, 0);
             builder.CreateStore(instance_ptr, instance_gep);
 
-            // Allocate type-erased capture box and store bind struct into it.
+            // Allocate type-erased capture box and store bind struct into it
             auto bind_struct_chi = lambda_type->data.fn_lambda.bind_struct;
             auto captures_ti = compile_type_info(bind_struct_chi);
             auto captures_ti_ptr = builder.CreateBitCast(captures_ti, builder.getInt8PtrTy());
@@ -2645,28 +2612,14 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                 }
             }
 
-            auto capture_new_fn = get_system_fn("cx_capture_new");
-            auto payload_size = builder.getInt32((uint32_t)struct_size);
-            auto capture_ptr =
-                builder.CreateCall(capture_new_fn->llvm_fn, {payload_size, captures_ti_ptr, dtor_ptr});
+            auto [capture_ptr, payload_data_ptr] = compile_cxcapture_create(struct_size, captures_ti_ptr, dtor_ptr);
 
-            // Get the payload data pointer from the CxCapture struct
-            auto capture_get_data_fn = get_system_fn("cx_capture_get_data");
-            auto captures_payload_ptr = builder.CreateCall(capture_get_data_fn->llvm_fn, {capture_ptr});
-
-            auto bind_struct_value = builder.CreateLoad(bind_struct_type, bind_alloca);
+            auto bind_struct_value = builder.CreateLoad(bind_struct_type_l, bind_alloca);
             auto payload_typed_ptr =
-                builder.CreateBitCast(captures_payload_ptr, bind_struct_type->getPointerTo());
+                builder.CreateBitCast(payload_data_ptr, bind_struct_type_l->getPointerTo());
             builder.CreateStore(bind_struct_value, payload_typed_ptr);
 
-            // Store CxCapture pointer into the lambda.
-            auto set_captures_ptr_member =
-                struct_type_method->data.struct_.find_member("set_captures_ptr");
-            assert(set_captures_ptr_member && "set_captures_ptr() method not found in __CxLambda");
-            auto set_captures_ptr_node =
-                get_variant_member_node(set_captures_ptr_member, variant_type_id);
-            auto set_captures_ptr_method = get_fn(set_captures_ptr_node);
-            builder.CreateCall(set_captures_ptr_method->llvm_fn, {lambda_alloca, capture_ptr});
+            compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
 
             return RefValue::from_address(lambda_alloca);
         } else if (type->is_pointer_like()) {
