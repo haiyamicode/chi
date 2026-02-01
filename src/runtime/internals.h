@@ -48,6 +48,13 @@ struct CxRefc {
     int32_t *refcnt;
 };
 
+// Mirrors the Chi __CxLambda struct layout: { fn_ptr, size, captures }
+struct CxLambda {
+    void *fn_ptr;
+    uint32_t size;
+    void *captures; // CxCapture pointer (or null)
+};
+
 // Type-erased refcounted capture allocation (header + payload). The runtime owns
 // refcounting and destruction so lambdas can be safely type-erased.
 CHI_RT_EXPORT void *cx_capture_new(uint32_t payload_size, TypeInfo *type, void *dtor);

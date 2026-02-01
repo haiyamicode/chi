@@ -479,14 +479,36 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
 }
 
-void cx_timeout(uint64_t delay, void *callback) {
-    // Temporary stub: timeout/lambda scheduling will be redesigned.
-    (void)delay;
-    (void)callback;
+struct TimeoutData {
+    void (*fn_ptr)(void *);
+    void *captures; // CxCapture pointer (retained)
+};
 
-    const char *msg_c = "cx_timeout not implemented";
-    CxString msg{(char *)msg_c, (uint32_t)strlen(msg_c), 1};
-    cx_panic(&msg);
+static void timeout_cb(uv_timer_t *handle) {
+    auto data = (TimeoutData *)handle->data;
+    void *payload = data->captures ? cx_capture_get_data(data->captures) : nullptr;
+    data->fn_ptr(payload);
+    if (data->captures)
+        cx_capture_release(data->captures);
+    delete data;
+    uv_close((uv_handle_t *)handle, [](uv_handle_t *h) { delete (uv_timer_t *)h; });
+}
+
+void cx_timeout(uint64_t delay, void *lambda_ptr) {
+    auto lambda = (CxLambda *)lambda_ptr;
+    auto fn_ptr = lambda->fn_ptr;
+    auto captures = lambda->captures;
+
+    auto td = new TimeoutData();
+    td->fn_ptr = (void (*)(void *))fn_ptr;
+    td->captures = captures;
+    if (captures)
+        cx_capture_retain(captures);
+
+    auto timer = new uv_timer_t();
+    timer->data = td;
+    uv_timer_init(uv_default_loop(), timer);
+    uv_timer_start(timer, timeout_cb, delay, 0);
 }
 
 static CxHash get_hbytes(CxAny *v) {

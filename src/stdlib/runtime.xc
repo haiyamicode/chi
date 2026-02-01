@@ -290,15 +290,6 @@ func timeout(delay: uint64, callback: func) {
   cx_timeout(delay, &callback);
 }
 
-// delay is temporarily disabled until Promise is fully integrated
-// func delay(ms: uint64) Promise<void> {
-//   var p: Promise<void> = {};
-//   timeout(ms, func () {
-//     // Need to capture p somehow
-//   });
-//   return p;
-// }
-
 func stringf(format: string, ...values: any) string {
   var str: string = "";
   cx_string_format(&format, &values, &str);
@@ -533,4 +524,12 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
   func ref_count() uint32 {
     return this.data.ref_count();
   }
+}
+
+func delay(ms: uint64) Promise<int> {
+    var p: Promise<int> = {};
+    timeout(ms, func () {
+        p.resolve(0);
+    });
+    return p;
 }
