@@ -411,6 +411,23 @@ ChiType *Resolver::to_value_type(ChiType *type) {
 ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     auto value_type = to_value_type(resolve(node, scope));
     if (ChiTypeStruct::is_generic(value_type)) {
+        // Check if all type params have defaults — if so, instantiate with defaults
+        auto &struct_ = value_type->data.struct_;
+        auto &decl_params = struct_.node->data.struct_decl.type_params;
+        bool all_have_defaults = true;
+        for (auto param : decl_params) {
+            if (!param->data.type_param.default_type) {
+                all_have_defaults = false;
+                break;
+            }
+        }
+        if (all_have_defaults) {
+            array<ChiType *> args;
+            for (auto param : decl_params) {
+                args.add(resolve_value(param->data.type_param.default_type, scope));
+            }
+            return to_value_type(get_subtype(value_type, &args));
+        }
         error(node, errors::MISSING_TYPE_ARGUMENTS, to_string(value_type));
     }
     return value_type;
@@ -1600,14 +1617,38 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_wrapped_type(elem_type, type->kind);
         }
         auto &params = type->data.struct_.type_params;
-        if (params.len != data.args.len) {
+        auto &decl_params = type->data.struct_.node->data.struct_decl.type_params;
+        if (data.args.len > params.len) {
             error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, to_string(type), params.len,
                   data.args.len);
             return nullptr;
         }
+        // Check that missing args all have defaults
+        for (auto i = data.args.len; i < params.len; i++) {
+            if (!decl_params[i]->data.type_param.default_type) {
+                error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, to_string(type), params.len,
+                      data.args.len);
+                return nullptr;
+            }
+        }
         array<ChiType *> args;
         for (auto arg : data.args) {
-            args.add(resolve_value(arg, scope));
+            auto resolved = resolve_value(arg, scope);
+            if (resolved && resolved->kind == TypeKind::Void) {
+                error(arg, "'void' cannot be used as a type parameter");
+                return nullptr;
+            }
+            args.add(resolved);
+        }
+        // Fill in defaults for missing type args
+        for (auto i = data.args.len; i < params.len; i++) {
+            auto resolved = resolve_value(decl_params[i]->data.type_param.default_type, scope);
+            if (resolved && resolved->kind == TypeKind::Void) {
+                error(decl_params[i]->data.type_param.default_type,
+                      "'void' cannot be used as a type parameter");
+                return nullptr;
+            }
+            args.add(resolved);
         }
         auto subtype = get_subtype(type, &args);
         return create_type_symbol({}, subtype);

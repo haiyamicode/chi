@@ -74,6 +74,25 @@ void CodegenContext::init_llvm() {
 
 Compiler::Compiler(CodegenContext *ctx) : m_ctx(ctx) {}
 
+// Check if a type contains placeholder descendants in its params
+// (is_placeholder may be false even when params contain placeholders)
+static bool has_placeholder_descendants(ChiType *type) {
+    switch (type->kind) {
+    case TypeKind::Fn:
+        for (auto p : type->data.fn.params) {
+            if (p->is_placeholder)
+                return true;
+        }
+        if (type->data.fn.return_type && type->data.fn.return_type->is_placeholder)
+            return true;
+        return false;
+    case TypeKind::FnLambda:
+        return has_placeholder_descendants(type->data.fn_lambda.fn);
+    default:
+        return false;
+    }
+}
+
 ChiType *Compiler::eval_type(ChiType *type) {
     if (type->is_placeholder && type->kind == TypeKind::Placeholder) {
         // Let's also check the placeholder's trait if it has one
@@ -126,6 +145,27 @@ ChiType *Compiler::eval_type(ChiType *type) {
         }
         if (type->is_placeholder && m_fn && m_fn->container_subtype) {
             type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
+        }
+    }
+
+    // Handle Fn/FnLambda types that contain placeholder params but aren't marked is_placeholder
+    // (is_placeholder on Fn only checks type_params and return_type, not params)
+    if (!type->is_placeholder && has_placeholder_descendants(type) && m_fn) {
+        if (m_fn->container_subtype && m_fn->fn_type && m_fn->fn_type->data.fn.container_ref) {
+            auto container_ref = m_fn->fn_type->data.fn.container_ref;
+            auto container_struct = get_resolver()->resolve_struct_type(container_ref);
+            if (container_struct) {
+                type = get_resolver()->type_placeholders_sub_selective(
+                    type, m_fn->container_subtype, container_struct->node);
+            }
+        }
+        if (has_placeholder_descendants(type) && m_fn->specialized_subtype &&
+            m_fn->specialized_subtype->kind == TypeKind::Subtype) {
+            if (m_fn->node) {
+                type = get_resolver()->type_placeholders_sub_selective(
+                    type, &m_fn->specialized_subtype->data.subtype,
+                    m_fn->node->get_root_node());
+            }
         }
     }
 
@@ -2687,8 +2727,10 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         case TypeKind::Struct: {
             auto ref = compile_expr_ref(fn, data.expr);
             auto method = data.resolved_method;
-            auto fn = get_fn(method->node);
-            auto call = builder.CreateCall(fn->llvm_fn, {ref.address, subscript});
+            auto variant_type_id = resolve_variant_type_id(fn, data.expr->resolved_type);
+            auto method_node = get_variant_member_node(method, variant_type_id);
+            auto index_fn = get_fn(method_node);
+            auto call = builder.CreateCall(index_fn->llvm_fn, {ref.address, subscript});
             emit_dbg_location(expr);
             return RefValue::from_address(call);
         }

@@ -1731,6 +1731,12 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
                 param_node->data.type_param.type_bound = parse_type_expr(true);
             }
 
+            // Check for = syntax for default type: T = int
+            if (next_is(TokenType::ASS)) {
+                consume(); // consume the =
+                param_node->data.type_param.default_type = parse_type_expr(true);
+            }
+
             param_node->data.type_param.index = params.len;
             param_node->data.type_param.source_decl = node;
             params.add(param_node);

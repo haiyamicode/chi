@@ -468,7 +468,9 @@ struct Buffer {
   }
 }
 
-// Reference-counted pointer for shared ownership
+// Unit type for use as a void-like value type (e.g. Promise<Unit>)
+struct Unit {}
+
 // Promise for async operations
 struct PromiseState<T> {
   state: uint32 = 0;      // 0=pending, 1=resolved, 2=rejected
@@ -526,10 +528,10 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
   }
 }
 
-func delay(ms: uint64) Promise<int> {
-    var p: Promise<int> = {};
+func delay(ms: uint64) Promise<Unit> {
+    var p: Promise<Unit> = {};
     timeout(ms, func () {
-        p.resolve(0);
+        p.resolve({});
     });
     return p;
 }
