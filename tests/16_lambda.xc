@@ -1,3 +1,23 @@
+import "std/ops" as ops;
+
+struct TrackedBox implements ops.CopyFrom<TrackedBox> {
+  id: int;
+
+  func new(id_val: int) {
+    this.id = id_val;
+    printf("TrackedBox({}) constructed\n", this.id);
+  }
+
+  func delete() {
+    printf("TrackedBox({}) destroyed\n", this.id);
+  }
+
+  func copy_from(from: &TrackedBox) {
+    printf("TrackedBox({}) copied from TrackedBox({})\n", this.id, from.id);
+    this.id = from.id;
+  }
+}
+
 func test_basic_lambda() {
   println("testing basic lambda:");
   
@@ -303,6 +323,68 @@ func test_function_to_lambda() {
   println("");
 }
 
+func test_lambda_copy_semantics() {
+  println("testing lambda copy semantics:");
+
+  // Test 1: Lambda copy via variable assignment
+  var x: int = 42;
+  var f1 = func() int {
+    return x;
+  };
+  var f2 = f1;  // Copy - should share captures
+
+  printf("f1(): {}, f2(): {}\n", f1(), f2());
+
+  // Reassign f1, f2 should still work with original capture
+  f1 = func() int { return 0; };
+  printf("After f1 reassignment - f1(): {}, f2(): {}\n", f1(), f2());
+
+  // Test 2: Lambda self-assignment (should be safe)
+  var y: int = 99;
+  var f3 = func() int { return y; };
+  f3 = f3;  // Self-assignment
+  printf("After self-assignment: {}\n", f3());
+
+  // Test 3: Lambda reassignment (should release old captures)
+  var a: int = 10;
+  var b: int = 20;
+  var f4 = func() int { return a; };
+  printf("First lambda: {}\n", f4());
+  f4 = func() int { return b; };  // Reassign
+  printf("After reassignment: {}\n", f4());
+
+  println("");
+}
+
+func test_lambda_capture_lifecycle() {
+  println("testing lambda capture lifecycle:");
+
+  var box: TrackedBox = {42};
+
+  // Create lambda that captures TrackedBox
+  var f1 = func() int {
+    return box.id;
+  };
+  printf("f1() = {}\n", f1());
+
+  // Copy lambda - should NOT copy the captured struct
+  var f2 = f1;
+  printf("f2() = {}\n", f2());
+
+  // Copy again - still no struct copy
+  var f3 = f1;
+  printf("f3() = {}\n", f3());
+
+  // Reassign f1 to new lambda with different capture
+  var box2: TrackedBox = {99};
+  f1 = func() int {
+    return box2.id;
+  };
+  printf("f1() = {}, f2() = {}, f3() = {}\n", f1(), f2(), f3());
+
+  println("");
+}
+
 func main() {
   test_basic_lambda();
   // test_lambda_with_timeout(); // DISABLED - undefined behavior
@@ -313,6 +395,8 @@ func main() {
   test_lambda_array_capture();
   test_method_to_lambda();
   test_function_to_lambda();
+  test_lambda_copy_semantics();
+  test_lambda_capture_lifecycle();
 
   println("All lambda tests completed!");
 }

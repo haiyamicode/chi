@@ -36,4 +36,21 @@ testing function to lambda conversion:
 Function as lambda: 30
 Abstracted function lambda: 40
 
+testing lambda copy semantics:
+f1(): 42, f2(): 42
+After f1 reassignment - f1(): 0, f2(): 42
+After self-assignment: 99
+First lambda: 10
+After reassignment: 20
+
+testing lambda capture lifecycle:
+TrackedBox(42) constructed
+f1() = 42
+f2() = 42
+f3() = 42
+TrackedBox(99) constructed
+f1() = 99, f2() = 42, f3() = 42
+
+TrackedBox(42) destroyed
+TrackedBox(99) destroyed
 All lambda tests completed!
