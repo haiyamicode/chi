@@ -581,6 +581,19 @@ Node *Parser::parse_type_expr(bool type_only) {
 Node *Parser::parse_fn_lambda() {
     auto token = expect(TokenType::KW_FUNC);
     auto fn = create_node(NodeType::FnDef, token);
+
+    // Parse optional by-value capture list: func [x, y] (params) { ... }
+    if (next_is(TokenType::LBRACK)) {
+        read(); // consume [
+        while (!next_is(TokenType::RBRACK)) {
+            auto iden = expect(TokenType::IDEN);
+            fn->data.fn_def.value_captures.add(iden->str);
+            if (!next_is(TokenType::COMMA)) break;
+            read(); // consume ,
+        }
+        expect(TokenType::RBRACK);
+    }
+
     auto proto = parse_fn_proto(token, fn);
     fn->name = "";
     fn->data.fn_def.fn_kind = FnKind::Lambda;

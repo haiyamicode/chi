@@ -116,12 +116,13 @@ ChiType *Compiler::eval_type(ChiType *type) {
     // Handle function generic placeholders using selective substitution
     if (type->is_placeholder && m_fn && m_fn->specialized_subtype &&
         m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-        // Use selective substitution to only replace placeholders that belong to the current
-        // function
-        if (m_fn->node) {
-            auto old_type = type;
+        // Use selective substitution to only replace placeholders that belong to the
+        // specialized function. Use the subtype's root_node as the filter to handle
+        // nested lambdas correctly (the lambda's node != the parent function's node).
+        auto &subtype_data = m_fn->specialized_subtype->data.subtype;
+        if (subtype_data.root_node) {
             type = get_resolver()->type_placeholders_sub_selective(
-                type, &m_fn->specialized_subtype->data.subtype, m_fn->node->get_root_node());
+                type, &subtype_data, subtype_data.root_node);
         }
     }
 
@@ -161,10 +162,10 @@ ChiType *Compiler::eval_type(ChiType *type) {
         }
         if (has_placeholder_descendants(type) && m_fn->specialized_subtype &&
             m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-            if (m_fn->node) {
+            auto &subtype_data = m_fn->specialized_subtype->data.subtype;
+            if (subtype_data.root_node) {
                 type = get_resolver()->type_placeholders_sub_selective(
-                    type, &m_fn->specialized_subtype->data.subtype,
-                    m_fn->node->get_root_node());
+                    type, &subtype_data, subtype_data.root_node);
             }
         }
     }
@@ -946,7 +947,7 @@ void Compiler::compile_cxlambda_set_captures(llvm::Value *lambda_alloca, llvm::V
 }
 
 llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
-                                            NodeList *captures) {
+                                            array<ast::FnCapture> *captures) {
     auto &builder = *(m_ctx->llvm_builder.get());
 
     // Determine size and prepare fn_ptr
@@ -974,60 +975,73 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         // Create bind_struct on stack to hold captures
         auto bind_var = builder.CreateAlloca(bstruct_l, nullptr, "bind_struct");
 
+        // Zero-init bind struct before populating
+        auto bind_size_bytes = llvm_type_size(bstruct_l);
+        builder.CreateMemSet(bind_var,
+            llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+            bind_size_bytes, {});
+
         // Store captures into bind_struct
         for (int i = 0; i < captures->len; i++) {
-            auto capture = (*captures)[i];
-            llvm::Value *value;
-            bool found = false;
+            auto &cap = (*captures)[i];
+            auto capture = cap.decl;
+            auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
 
-            // First check if this is a nested capture
+            // Get source address of the captured variable
+            llvm::Value *src_addr = nullptr;
             auto &current_captures = fn->node->data.fn_def.captures;
             for (int j = 0; j < current_captures.len; j++) {
-                if (current_captures[j] == capture) {
-                    if (fn->bind_ptr) {
-                        auto current_fn_type = get_chitype(fn->node);
-                        if (current_fn_type->kind == TypeKind::FnLambda) {
-                            auto current_bstruct = current_fn_type->data.fn_lambda.bind_struct;
-                            auto current_bstruct_l =
-                                (llvm::StructType *)compile_type(current_bstruct);
-
-                            auto capture_gep =
-                                builder.CreateStructGEP(current_bstruct_l, fn->bind_ptr, j);
-                            value = builder.CreateLoad(current_bstruct_l->elements()[j],
-                                                       capture_gep);
-                            found = true;
-                            break;
-                        }
+                if (current_captures[j].decl == capture && fn->bind_ptr) {
+                    auto current_fn_type = get_chitype(fn->node);
+                    if (current_fn_type->kind == TypeKind::FnLambda) {
+                        auto current_bstruct = current_fn_type->data.fn_lambda.bind_struct;
+                        auto current_bstruct_l =
+                            (llvm::StructType *)compile_type(current_bstruct);
+                        auto nested_gep =
+                            builder.CreateStructGEP(current_bstruct_l, fn->bind_ptr, j);
+                        src_addr = builder.CreateLoad(current_bstruct_l->elements()[j],
+                                                       nested_gep);
+                        break;
                     }
                 }
             }
 
-            if (!found) {
+            if (!src_addr) {
                 if (m_ctx->var_table.get(capture)) {
-                    value = get_var(capture);
-                    found = true;
+                    src_addr = get_var(capture);
                 }
             }
 
-            if (!found) {
-                auto capture_type = compile_type(capture->resolved_type);
-                value = llvm::Constant::getNullValue(capture_type);
+            if (cap.mode == ast::CaptureMode::ByValue) {
+                // By-value: copy value directly into bind struct field
+                assert(src_addr && "by-value capture source not found");
+                auto value_type = capture->resolved_type;
+                auto value_type_l = compile_type(value_type);
+                auto val = builder.CreateLoad(value_type_l, src_addr);
+                auto dbg_loc = builder.getCurrentDebugLocation();
+                compile_copy(fn, val, capture_gep, value_type, nullptr);
+                builder.SetCurrentDebugLocation(dbg_loc);
+            } else {
+                // By-reference: store pointer to original variable
+                if (!src_addr) {
+                    auto capture_type = compile_type(capture->resolved_type);
+                    src_addr = llvm::Constant::getNullValue(capture_type);
+                }
+                builder.CreateStore(src_addr, capture_gep);
             }
-
-            auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
-            builder.CreateStore(value, capture_gep);
         }
 
-        // Allocate type-erased capture box and store bind struct into it
-        auto captures_ti = compile_type_info(bstruct);
-        auto captures_ti_ptr = builder.CreateBitCast(captures_ti, builder.getInt8PtrTy());
-
+        // Generate destructor for CxCapture cleanup
         llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
         if (get_resolver()->type_needs_destruction(bstruct)) {
             if (auto dtor = generate_destructor(bstruct, nullptr)) {
                 dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, builder.getInt8PtrTy());
             }
         }
+
+        // Allocate type-erased capture box and store bind struct into it
+        auto captures_ti = compile_type_info(bstruct);
+        auto captures_ti_ptr = builder.CreateBitCast(captures_ti, builder.getInt8PtrTy());
 
         auto [capture_ptr, payload_data_ptr] = compile_cxcapture_create(bind_size, captures_ti_ptr, dtor_ptr);
 
@@ -1733,37 +1747,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         if (from_type->kind == TypeKind::Fn) {
             return compile_lambda_alloc(fn, to_type, value, nullptr);
         }
-        // For FnLambda -> FnLambda with different capture types, convert the value
-        if (from_type->kind == TypeKind::FnLambda) {
-            auto &builder = *m_ctx->llvm_builder;
-            auto to_llvm_type = compile_type(to_type);
-
-            // Extract fields from source
-            auto fn_ptr = builder.CreateExtractValue(value, {0}, "fn_ptr");
-            auto size_val = builder.CreateExtractValue(value, {1}, "size");
-            auto captures_ptr = builder.CreateExtractValue(value, {2}, "captures");
-            llvm::Value *typeinfo_val = nullptr;
-            if (to_llvm_type->getStructNumElements() > 3) {
-                typeinfo_val = builder.CreateExtractValue(value, {3}, "captures_ti");
-            } else {
-                typeinfo_val = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
-            }
-
-            // Retain type-erased captures (null-safe).
-            auto retain_fn = get_system_fn("cx_capture_retain");
-            builder.CreateCall(retain_fn->llvm_fn, {captures_ptr});
-
-            // Build destination lambda struct
-            llvm::Value *dest_val = llvm::UndefValue::get(to_llvm_type);
-            dest_val = builder.CreateInsertValue(dest_val, fn_ptr, {0});
-            dest_val = builder.CreateInsertValue(dest_val, size_val, {1});
-            dest_val = builder.CreateInsertValue(dest_val, captures_ptr, {2});
-            if (to_llvm_type->getStructNumElements() > 3) {
-                dest_val = builder.CreateInsertValue(dest_val, typeinfo_val, {3});
-            }
-
-            return dest_val;
-        }
+        // For FnLambda -> FnLambda, just pass through (no retain here - compile_copy handles it)
         return value;
     }
     case TypeKind::Optional: {
@@ -2155,6 +2139,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             lambda_name = "__lambda_" + std::to_string(expr->id);
         }
         auto lambda_fn = compile_fn_proto(data.fn_proto, expr, lambda_name);
+        // Propagate parent's specialized_subtype to nested lambdas so that
+        // placeholder types inside the lambda can be substituted correctly
+        if (fn && fn->specialized_subtype && !lambda_fn->specialized_subtype) {
+            lambda_fn->specialized_subtype = fn->specialized_subtype;
+        }
         m_ctx->pending_fns.add(lambda_fn);
         return compile_lambda_alloc(fn, get_chitype(expr), lambda_fn->llvm_fn, &data.captures);
     }
@@ -2809,14 +2798,17 @@ normal:
         auto bstruct = fn_type->data.fn_lambda.bind_struct;
         auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
 
-        // Access the capture from current function's bind_ptr
-        // The bind struct field contains a POINTER to the captured variable
         auto gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, capture_idx);
 
-        // Load the pointer from the bind struct field
+        auto field_type = bstruct->data.struct_.fields[capture_idx]->resolved_type;
+        if (field_type->kind != TypeKind::Reference) {
+            // By-value capture: the field IS the value
+            return RefValue::from_address(gep);
+        }
+
+        // By-reference capture: the field is a pointer, load it
         auto ptr_type = bstruct_l->elements()[capture_idx];
         auto captured_var_ptr = builder.CreateLoad(ptr_type, gep);
-
         return RefValue::from_address(captured_var_ptr);
     }
     return RefValue::from_address(get_var(data.decl));
@@ -3152,6 +3144,16 @@ std::optional<TypeId> Compiler::resolve_variant_type_id(Function *fn, ChiType *t
         }
     }
 
+    // Also handle specialized_subtype for generic function parameters (e.g., Promise<T> in promise<T>)
+    if (type && type->is_placeholder && fn && fn->specialized_subtype &&
+        fn->specialized_subtype->kind == TypeKind::Subtype) {
+        auto &subtype_data = fn->specialized_subtype->data.subtype;
+        if (subtype_data.root_node) {
+            type = get_resolver()->type_placeholders_sub_selective(type, &subtype_data,
+                                                                   subtype_data.root_node);
+        }
+    }
+
     // Only return ID if it's a fully resolved Subtype
     if (type && type->kind == TypeKind::Subtype && !type->is_placeholder) {
         return type->id;
@@ -3406,6 +3408,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto value = compile_assignment_to_type(fn, data.expr, var_type);
                 if (value && !data.expr->escape.moved) {
                     compile_copy(fn, value, var, var_type, data.expr);
+                    // For lambda expressions with captures, compile_copy retains the captures
+                    // but the temp value (from compile_lambda_alloc) already has refcount 1.
+                    // Release the temp's captures to transfer ownership to the variable.
+                    if (var_type->kind == TypeKind::FnLambda && value) {
+                        auto captures_ptr = llvm_builder.CreateExtractValue(value, {2});
+                        auto release_fn = get_system_fn("cx_capture_release");
+                        llvm_builder.CreateCall(release_fn->llvm_fn, {captures_ptr});
+                    }
                 }
             }
         }
@@ -3719,6 +3729,11 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
 }
 
 Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) {
+    // Don't generate destructors for placeholder types
+    if (type->is_placeholder) {
+        return nullptr;
+    }
+
     // Check if already generated
     auto existing = m_ctx->destructor_table.get(type);
     if (existing) {
@@ -3739,7 +3754,7 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         }
     }
 
-    if (!resolved_type) {
+    if (!resolved_type || resolved_type->is_placeholder) {
         return nullptr;
     }
 

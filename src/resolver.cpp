@@ -117,6 +117,7 @@ ChiType *Resolver::create_type_symbol(optional<string> name, ChiType *type) {
     tysym->name = name;
     tysym->data.type_symbol.giving_type = type;
     tysym->data.type_symbol.underlying_type = type;
+    tysym->is_placeholder = type->is_placeholder;
     return tysym;
 }
 
@@ -513,8 +514,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             resolve(data.body, local_fn_scope);
 
             // resolve captures
-            for (auto decl : data.captures) {
-                auto type = resolve(decl, scope);
+            for (auto &cap : data.captures) {
+                auto type = resolve(cap.decl, scope);
                 proto->data.fn_lambda.captures.add(type);
             }
 
@@ -535,12 +536,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             if (data.captures.len > 0) {
                 // Add capture fields to binding struct
+                // By-ref captures: pointer (Reference) to original variable
+                // By-value captures: value type directly in struct
                 for (int i = 0; i < data.captures.len; i++) {
-                    auto capture = data.captures[i];
+                    auto &cap = data.captures[i];
                     auto name = fmt::format("capture_{}", i);
+                    auto field_type = (cap.mode == ast::CaptureMode::ByValue)
+                        ? cap.decl->resolved_type
+                        : get_pointer_type(cap.decl->resolved_type, TypeKind::Reference);
                     bstruct_data.add_member(
-                        get_allocator(), capture->name, get_dummy_var(name),
-                        get_pointer_type(capture->resolved_type, TypeKind::Reference));
+                        get_allocator(), cap.decl->name, get_dummy_var(name), field_type);
+                }
+                // Mark bind struct as placeholder if any field has placeholder types
+                for (auto field : bstruct_data.fields) {
+                    if (field->resolved_type->is_placeholder) {
+                        bstruct->is_placeholder = true;
+                        break;
+                    }
                 }
             }
 
@@ -728,7 +740,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     int32_t capture_idx;
                     if (!existing) {
                         capture_idx = captures.len;
-                        captures.add(data.decl);
+                        // Check if this capture is explicitly by-value
+                        auto mode = ast::CaptureMode::ByRef;
+                        for (auto &vc : fn_def.value_captures) {
+                            if (vc == data.decl->name) {
+                                mode = ast::CaptureMode::ByValue;
+                                break;
+                            }
+                        }
+                        captures.add({data.decl, mode});
                         capture_map[data.decl] = capture_idx;
                     } else {
                         capture_idx = *existing;
@@ -2602,6 +2622,7 @@ template <typename PlaceholderHandler, typename RecursiveCallHandler>
 ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
                                           PlaceholderHandler handle_placeholder,
                                           RecursiveCallHandler make_recursive_call) {
+    if (!type) return nullptr;
     switch (type->kind) {
     case TypeKind::Placeholder:
         return handle_placeholder(type, subs);
@@ -2654,10 +2675,33 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         return fn_type;
     }
 
+    case TypeKind::Struct: {
+        // Only substitute placeholder structs (e.g. lambda bind structs with generic fields)
+        if (!type->is_placeholder) return type;
+        auto &data = type->data.struct_;
+        auto new_struct = create_type(TypeKind::Struct);
+        new_struct->display_name = type->display_name;
+        auto &new_data = new_struct->data.struct_;
+        new_data.kind = data.kind;
+        for (auto field : data.fields) {
+            auto new_type = make_recursive_call(field->resolved_type, subs);
+            auto name = fmt::format("field_{}", new_data.fields.len);
+            new_data.add_member(get_allocator(), field->get_name(), get_dummy_var(name), new_type);
+        }
+        new_struct->is_placeholder = false;
+        for (auto field : new_data.fields) {
+            if (field->resolved_type->is_placeholder) {
+                new_struct->is_placeholder = true;
+                break;
+            }
+        }
+        return new_struct;
+    }
+
     case TypeKind::FnLambda: {
         auto &data = type->data.fn_lambda;
-        auto fn = make_recursive_call(data.fn, subs);
-        auto internal = make_recursive_call(data.internal, subs);
+        auto fn = data.fn ? make_recursive_call(data.fn, subs) : nullptr;
+        auto internal = data.internal ? make_recursive_call(data.internal, subs) : nullptr;
         auto bound_fn = data.bound_fn ? make_recursive_call(data.bound_fn, subs) : nullptr;
         auto bind_struct = data.bind_struct ? make_recursive_call(data.bind_struct, subs) : nullptr;
 
@@ -2666,7 +2710,18 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         lambda_type->data.fn_lambda.internal = internal;
         lambda_type->data.fn_lambda.bound_fn = bound_fn;
         lambda_type->data.fn_lambda.bind_struct = bind_struct;
-        lambda_type->is_placeholder = fn->is_placeholder;
+
+        // If internal is null (was deferred), check if we can finalize now
+        // __CxLambda is not generic, so use it directly
+        if (!internal) {
+            auto rt_lambda = m_ctx->rt_lambda_type;
+            if (rt_lambda && rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
+                lambda_type->data.fn_lambda.internal = to_value_type(rt_lambda);
+            }
+        }
+
+        // is_placeholder if fn is placeholder or internal couldn't be resolved
+        lambda_type->is_placeholder = (fn && fn->is_placeholder) || !lambda_type->data.fn_lambda.internal;
         return lambda_type;
     }
 
@@ -3357,6 +3412,42 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
     return type;
 }
 
+// Helper to recursively finalize a single FnLambda type and its nested lambdas
+bool Resolver::finalize_lambda_type_recursive(ChiType *type) {
+    if (!type) return false;
+
+    bool changed = false;
+
+    if (type->kind == TypeKind::FnLambda) {
+        // Finalize this lambda's internal if needed
+        // __CxLambda is not generic, so use it directly
+        if (type->is_placeholder && !type->data.fn_lambda.internal) {
+            auto rt_lambda = m_ctx->rt_lambda_type;
+            if (rt_lambda && rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
+                type->data.fn_lambda.internal = to_value_type(rt_lambda);
+                type->is_placeholder = false;
+                changed = true;
+            }
+        }
+
+        // Recurse into the lambda's fn type to finalize nested lambdas
+        if (type->data.fn_lambda.fn) {
+            changed = finalize_lambda_type_recursive(type->data.fn_lambda.fn) || changed;
+        }
+    } else if (type->kind == TypeKind::Fn) {
+        // Recurse into function params to find nested lambdas
+        for (auto param : type->data.fn.params) {
+            changed = finalize_lambda_type_recursive(param) || changed;
+        }
+        // Also check return type
+        if (type->data.fn.return_type) {
+            changed = finalize_lambda_type_recursive(type->data.fn.return_type) || changed;
+        }
+    }
+
+    return changed;
+}
+
 void Resolver::finalize_placeholder_lambda_params(ChiType *fn_type) {
     if (!fn_type || fn_type->kind != TypeKind::Fn) {
         return;
@@ -3364,31 +3455,46 @@ void Resolver::finalize_placeholder_lambda_params(ChiType *fn_type) {
 
     bool had_placeholder = false;
 
-    // Walk through all function parameters and finalize placeholder lambdas
+    // Walk through all function parameters and finalize placeholder lambdas recursively
     for (size_t i = 0; i < fn_type->data.fn.params.len; i++) {
         auto param = fn_type->data.fn.params[i];
-        if (param->kind == TypeKind::FnLambda && param->is_placeholder && !param->data.fn_lambda.internal) {
-            // This is a placeholder lambda - finalize it now
-            auto bind_struct = param->data.fn_lambda.bind_struct;
-            if (!bind_struct) continue;
-
-            auto rt_lambda = m_ctx->rt_lambda_type;
-            if (!rt_lambda || rt_lambda->data.struct_.resolve_status < ResolveStatus::MemberTypesKnown) {
-                continue; // Still can't finalize
-            }
-
-            // Instantiate __CxLambda<BindStruct>
-            TypeList type_args;
-            type_args.add(bind_struct);
-            param->data.fn_lambda.internal = to_value_type(get_subtype(rt_lambda, &type_args));
-            param->is_placeholder = false;
+        if (finalize_lambda_type_recursive(param)) {
             had_placeholder = true;
         }
     }
 
-    // If we finalized any placeholders, clear the function's placeholder flag
+    // Also check return type for lambdas
+    if (fn_type->data.fn.return_type) {
+        if (finalize_lambda_type_recursive(fn_type->data.fn.return_type)) {
+            had_placeholder = true;
+        }
+    }
+
+    // If we finalized any placeholders, recompute the function's placeholder flag
+    // Don't just clear it - the function might still be placeholder due to type params or return type
     if (had_placeholder) {
         fn_type->is_placeholder = false;
+        // Check if any function type parameter is still a placeholder
+        for (auto tp : fn_type->data.fn.type_params) {
+            if (tp->is_placeholder) {
+                fn_type->is_placeholder = true;
+                break;
+            }
+        }
+        // Check if return type is still a placeholder
+        if (!fn_type->is_placeholder && fn_type->data.fn.return_type &&
+            fn_type->data.fn.return_type->is_placeholder) {
+            fn_type->is_placeholder = true;
+        }
+        // Check if any param is still a placeholder
+        if (!fn_type->is_placeholder) {
+            for (auto p : fn_type->data.fn.params) {
+                if (p->is_placeholder) {
+                    fn_type->is_placeholder = true;
+                    break;
+                }
+            }
+        }
     }
 }
 

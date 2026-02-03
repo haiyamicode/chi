@@ -329,7 +329,7 @@ class Compiler {
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
 
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
-                                      NodeList *captures);
+                                      array<ast::FnCapture> *captures);
 
     // __CxLambda construction helpers (shared by lambda alloc, method-to-lambda, async continuations)
     struct CxLambdaInit {

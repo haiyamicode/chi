@@ -281,6 +281,7 @@ class Resolver {
                          TypeList *type_params = nullptr);
 
     ChiType *get_lambda_for_fn(ChiType *fn);
+    bool finalize_lambda_type_recursive(ChiType *type);
     void finalize_placeholder_lambda_params(ChiType *fn_type);
 
     ChiType *get_result_type(ChiType *value, ChiType *err);

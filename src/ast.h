@@ -134,14 +134,21 @@ struct FnProto {
 };
 
 MAKE_ENUM(FnKind, TopLevel, Method, Constructor, Destructor, Lambda);
+MAKE_ENUM(CaptureMode, ByRef, ByValue);
+
+struct FnCapture {
+    Node *decl = nullptr;
+    CaptureMode mode = CaptureMode::ByRef;
+};
 
 struct FnDef {
     Node *fn_proto = nullptr;
     Node *body = nullptr;
     FnKind fn_kind = FnKind::TopLevel;
     DeclSpec *decl_spec = nullptr;
-    array<Node *> captures = {};
+    array<FnCapture> captures = {};
     map<Node *, int32_t> capture_map = {};
+    array<string> value_captures = {};  // parsed [ident, ...] names, consumed during resolution
     bool is_generated = false;
     array<Node *> cleanup_vars = {};
     bool has_try = false;

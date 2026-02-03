@@ -89,8 +89,9 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
 
   func release() {
     if this.data {
-      this.data.ref_count = this.data.ref_count - 1;
-      if this.data.ref_count == 0 {
+      var rc = this.data.ref_count - 1;
+      this.data.ref_count = rc;
+      if rc == 0 {
         delete this.data;
       }
     }
@@ -498,7 +499,6 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
     if state.state != 0 { return; }
     state.state = 1;
     state.value = value;
-    // Invoke all registered callbacks
     for var i = 0; i < state.callbacks.len; i = i + 1 {
       state.callbacks[i](value);
     }
@@ -528,10 +528,18 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
   }
 }
 
-func delay(ms: uint64) Promise<Unit> {
-    var p: Promise<Unit> = {};
-    timeout(ms, func () {
-        p.resolve({});
+func promise<T>(executor: func(resolve: func(value: T))) Promise<T> {
+    var p: Promise<T> = {};
+    executor(func [p] (value: T) {
+      p.resolve(value);
     });
     return p;
+}
+
+func delay(ms: uint64) Promise<Unit> {
+    return promise<Unit>(func (resolve: func(value: Unit)) {
+        timeout(ms, func [resolve] () {
+            resolve({});
+        });
+    });
 }
