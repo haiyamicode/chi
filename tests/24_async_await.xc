@@ -175,6 +175,67 @@ func test_locals_across_await() {
     println("");
 }
 
+// =============================================================================
+// Test 8: timeout() function
+// =============================================================================
+func test_timeout() {
+    println("=== Test 8: timeout() function ===");
+
+    var called = false;
+    timeout(10, func () {
+        println("timeout callback executed");
+    });
+
+    println("timeout scheduled");
+    println("");
+}
+
+// =============================================================================
+// Test 9: delay() function returns Promise
+// =============================================================================
+func test_delay() {
+    println("=== Test 9: delay() function ===");
+
+    delay(10).then(func (u: Unit) {
+        println("delay resolved");
+    });
+
+    println("delay scheduled");
+    println("");
+}
+
+// =============================================================================
+// Test 10: By-value capture with delay (tests func [x] syntax)
+// =============================================================================
+func test_delay_value_capture() {
+    println("=== Test 10: By-value capture with delay ===");
+
+    var counter = 42;
+    delay(10).then(func [counter] (u: Unit) {
+        printf("captured counter: {}\n", counter);
+    });
+
+    // Mutate original to prove captured value is independent
+    counter = 999;
+    printf("original counter after mutate: {}\n", counter);
+    println("");
+}
+
+// =============================================================================
+// Test 11: promise<T>() helper function
+// =============================================================================
+func test_promise_helper() {
+    println("=== Test 11: promise<T>() helper ===");
+
+    var p = promise<int>(func (resolve: func(value: int)) {
+        println("executor called");
+        resolve(123);
+    });
+
+    printf("promise resolved with: {}\n", p.get_value());
+    println("");
+}
+
 func main() {
     test_manual_promise();
     test_async_no_await();
@@ -183,5 +244,9 @@ func main() {
     test_promise_state();
     test_multiple_callbacks();
     test_locals_across_await();
+    test_timeout();
+    test_delay();
+    test_delay_value_capture();
+    test_promise_helper();
     println("All async/await tests passed!");
 }
