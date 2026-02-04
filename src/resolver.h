@@ -346,6 +346,8 @@ class Resolver {
     // Type inference using visitor pattern
     bool infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
                               map<ChiType *, ChiType *> *inferred_types);
+    bool infer_from_return_type(ChiTypeFn *fn, ChiType *expected_type,
+                                map<ChiType *, ChiType *> *inferred_types);
 
     template <typename PlaceholderHandler, typename RecursiveCallHandler>
     bool visit_type_recursive(ChiType *param_type, ChiType *arg_type,

@@ -3150,6 +3150,85 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
     return true;
 }
 
+// Infer type parameters from expected return type
+// This enables bidirectional type inference: type params can be inferred from
+// the expected return type, not just from arguments.
+// For example: `Promise<Unit> x = promise(func (resolve) { ... })` can infer T=Unit
+// from the expected return type Promise<Unit>.
+bool Resolver::infer_from_return_type(ChiTypeFn *fn, ChiType *expected_type,
+                                      map<ChiType *, ChiType *> *inferred_types) {
+    if (!expected_type || !fn->return_type) {
+        return false;
+    }
+
+    // Use visitor pattern to unify return type with expected type
+    auto handle_placeholder = [fn, inferred_types](ChiType *placeholder,
+                                                   ChiType *concrete) -> bool {
+        size_t placeholder_index = placeholder->data.placeholder.index;
+        if (placeholder_index >= fn->type_params.len) {
+            return false;
+        }
+
+        ChiType *corresponding_type_param = fn->type_params[placeholder_index];
+        auto existing = inferred_types->get(corresponding_type_param);
+        if (existing) {
+            // Check consistency
+            return *existing == concrete;
+        } else {
+            // New inference
+            (*inferred_types)[corresponding_type_param] = concrete;
+            return true;
+        }
+    };
+
+    auto make_recursive_call = [this, fn, inferred_types](ChiType *param,
+                                                          ChiType *arg) -> bool {
+        return this->visit_type_recursive(
+            param, arg,
+            [fn, inferred_types](ChiType *placeholder, ChiType *concrete) -> bool {
+                size_t placeholder_index = placeholder->data.placeholder.index;
+                if (placeholder_index >= fn->type_params.len) {
+                    return false;
+                }
+
+                ChiType *corresponding_type_param = fn->type_params[placeholder_index];
+                auto existing = inferred_types->get(corresponding_type_param);
+                if (existing) {
+                    return *existing == concrete;
+                } else {
+                    (*inferred_types)[corresponding_type_param] = concrete;
+                    return true;
+                }
+            },
+            [this, fn, inferred_types](ChiType *param, ChiType *arg) -> bool {
+                return this->visit_type_recursive(
+                    param, arg,
+                    [fn, inferred_types](ChiType *placeholder, ChiType *concrete) -> bool {
+                        size_t placeholder_index = placeholder->data.placeholder.index;
+                        if (placeholder_index >= fn->type_params.len) {
+                            return false;
+                        }
+
+                        ChiType *corresponding_type_param = fn->type_params[placeholder_index];
+                        auto existing = inferred_types->get(corresponding_type_param);
+                        if (existing) {
+                            return *existing == concrete;
+                        } else {
+                            (*inferred_types)[corresponding_type_param] = concrete;
+                            return true;
+                        }
+                    },
+                    [](ChiType *param, ChiType *arg) -> bool {
+                        return param == arg ||
+                               (param->kind == arg->kind && param->global_id == arg->global_id);
+                    });
+            });
+    };
+
+    return visit_type_recursive(fn->return_type, expected_type, handle_placeholder,
+                                make_recursive_call);
+}
+
 bool Resolver::is_struct_type(ChiType *type) {
     switch (type->kind) {
     case TypeKind::This:
@@ -3332,45 +3411,18 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         }
     }
 
-    // Debug: check type params
     // Check if this is a generic function call that needs explicit type parameters
     if (fn->is_generic()) {
-        // Resolve arguments first to get their types
-        // Clear move_outlet for function args - they're passed by value
-        // Also pass expected parameter types for lambda type inference
-        array<ChiType *> arg_types;
-        for (size_t i = 0; i < n_args; i++) {
-            auto arg = args->at(i);
-            auto param_type = fn->get_param_at(i);
-            auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
-            auto arg_type = resolve(arg, arg_scope);
-            arg_types.add(arg_type);
-        }
-
-        // Get explicit type parameters from function call
         array<ChiType *> type_args;
+        map<ChiType *, ChiType *> type_substitutions;
+        bool has_explicit_type_args = false;
+
+        // Check for explicit type arguments first (e.g., promise<Unit>)
         if (node->type == ast::NodeType::FnCallExpr) {
             auto &fn_call_data = node->data.fn_call_expr;
+            if (fn_call_data.type_args.len > 0) {
+                has_explicit_type_args = true;
 
-            // Check if explicit type parameters were provided
-            if (fn_call_data.type_args.len == 0) {
-                // Try automatic type inference
-                map<ChiType *, ChiType *> inferred_types;
-                if (!infer_type_arguments(fn, &arg_types, &inferred_types)) {
-                    error(node, "Failed to infer type parameters for generic function call");
-                    return fn->return_type;
-                }
-
-                // Convert inferred types to type_args array for compatibility
-                for (auto type_param : fn->type_params) {
-                    auto inferred = inferred_types.get(type_param);
-                    if (!inferred) {
-                        error(node, "Could not infer type parameter");
-                        return fn->return_type;
-                    }
-                    type_args.add(*inferred);
-                }
-            } else {
                 // Check if the number of type parameters matches
                 if (fn_call_data.type_args.len != fn->type_params.len) {
                     error(node, "Wrong number of type parameters: expected {}, got {}",
@@ -3378,29 +3430,109 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                     return fn->return_type;
                 }
 
-                // Resolve the explicit type parameters
-                for (auto type_arg_node : fn_call_data.type_args) {
-                    auto type_arg = resolve_value(type_arg_node, scope);
+                // Resolve the explicit type parameters and build substitution map
+                for (size_t i = 0; i < fn->type_params.len; i++) {
+                    auto type_arg = resolve_value(fn_call_data.type_args[i], scope);
                     type_args.add(type_arg);
+
+                    auto type_param = fn->type_params[i];
+                    auto lookup_key = type_param;
+                    if (type_param->kind == TypeKind::TypeSymbol) {
+                        lookup_key = type_param->data.type_symbol.giving_type;
+                    }
+                    type_substitutions.emplace(lookup_key, type_arg);
                 }
             }
-        } else {
-            // For non-FnCallExpr (like constructors), this shouldn't happen with new logic
-            error(node, "Generic function call requires explicit type parameters");
-            return fn->return_type;
         }
 
-        // Create type substitution map for parameter type checking
-        map<ChiType *, ChiType *> type_substitutions;
+        // Try to infer type parameters from expected return type (bidirectional inference)
+        // This enables: `Promise<Unit> x = promise(func (resolve) { ... })` to infer T=Unit
+        map<ChiType *, ChiType *> return_type_inferred;
+        bool has_return_type_inference = false;
+        if (!has_explicit_type_args && scope.value_type) {
+            if (infer_from_return_type(fn, scope.value_type, &return_type_inferred)) {
+                // Check if we inferred all type parameters
+                bool all_inferred = true;
+                for (auto type_param : fn->type_params) {
+                    if (!return_type_inferred.get(type_param)) {
+                        all_inferred = false;
+                        break;
+                    }
+                }
+                if (all_inferred) {
+                    has_return_type_inference = true;
+                    // Build type_args and type_substitutions from inferred types
+                    for (size_t i = 0; i < fn->type_params.len; i++) {
+                        auto type_param = fn->type_params[i];
+                        auto inferred = return_type_inferred.get(type_param);
+                        type_args.add(*inferred);
+
+                        auto lookup_key = type_param;
+                        if (type_param->kind == TypeKind::TypeSymbol) {
+                            lookup_key = type_param->data.type_symbol.giving_type;
+                        }
+                        type_substitutions.emplace(lookup_key, *inferred);
+                    }
+                }
+            }
+        }
+
+        // Resolve arguments with substituted parameter types (for lambda type inference)
+        array<ChiType *> arg_types;
+        for (size_t i = 0; i < n_args; i++) {
+            auto arg = args->at(i);
+            auto param_type = fn->get_param_at(i);
+
+            // If we have type args (explicit or inferred from return type), substitute
+            // placeholders in parameter types for proper lambda parameter inference
+            if (has_explicit_type_args || has_return_type_inference) {
+                param_type = type_placeholders_sub_map(param_type, &type_substitutions);
+            }
+
+            auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
+            auto arg_type = resolve(arg, arg_scope);
+            arg_types.add(arg_type);
+        }
+
+        // If no explicit type args and no return type inference, try argument-based inference
+        if (!has_explicit_type_args && !has_return_type_inference) {
+            if (node->type != ast::NodeType::FnCallExpr) {
+                error(node, "Generic function call requires explicit type parameters");
+                return fn->return_type;
+            }
+
+            map<ChiType *, ChiType *> inferred_types;
+            if (!infer_type_arguments(fn, &arg_types, &inferred_types)) {
+                error(node, "Failed to infer type parameters for generic function call");
+                return fn->return_type;
+            }
+
+            // Convert inferred types to type_args array and build substitution map
+            for (size_t i = 0; i < fn->type_params.len; i++) {
+                auto type_param = fn->type_params[i];
+                auto inferred = inferred_types.get(type_param);
+                if (!inferred) {
+                    error(node, "Could not infer type parameter");
+                    return fn->return_type;
+                }
+                type_args.add(*inferred);
+
+                auto lookup_key = type_param;
+                if (type_param->kind == TypeKind::TypeSymbol) {
+                    lookup_key = type_param->data.type_symbol.giving_type;
+                }
+                type_substitutions.emplace(lookup_key, *inferred);
+            }
+        }
+
+        // Check that type arguments satisfy trait bounds
         for (size_t i = 0; i < fn->type_params.len; i++) {
             auto type_param = fn->type_params[i];
             auto lookup_key = type_param;
             if (type_param->kind == TypeKind::TypeSymbol) {
                 lookup_key = type_param->data.type_symbol.giving_type;
             }
-            type_substitutions.emplace(lookup_key, type_args[i]);
 
-            // Check that type argument satisfies trait bounds
             if (lookup_key->kind == TypeKind::Placeholder && lookup_key->data.placeholder.trait) {
                 auto trait_type = lookup_key->data.placeholder.trait;
                 auto type_arg = type_args[i];
@@ -3451,7 +3583,6 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         }
 
         // Create or get the specialized function type
-        // Get the original function declaration node to access its function type
         auto &fn_call_data = node->data.fn_call_expr;
         auto fn_decl_node = fn_call_data.fn_ref_expr->get_decl();
         assert(fn_decl_node && fn_decl_node->type == ast::NodeType::FnDef);
@@ -3459,18 +3590,14 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         assert(original_fn_type && original_fn_type->kind == TypeKind::Fn);
 
         auto fn_variant = get_fn_variant(original_fn_type, &type_args, fn_decl_node);
-        auto generated_fn_type = fn_variant->data.generated_fn.fn_subtype;
 
         // Store the specialized function for codegen to use
-        assert(node->type == ast::NodeType::FnCallExpr);
         node->data.fn_call_expr.generated_fn = fn_variant;
 
-        // Now check types with the explicit concrete types
+        // Check argument types against substituted parameter types
         for (size_t i = 0; i < n_args; i++) {
             auto param_type = fn->get_param_at(i);
             auto arg_type = arg_types[i];
-
-            // Substitute placeholders with explicit types
             auto concrete_param_type = type_placeholders_sub_map(param_type, &type_substitutions);
             check_assignment(args->at(i), arg_type, concrete_param_type);
         }

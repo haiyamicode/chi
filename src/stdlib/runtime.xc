@@ -541,7 +541,7 @@ func promise<T>(executor: func(resolve: func(value: T))) Promise<T> {
 }
 
 func delay(ms: uint64) Promise<Unit> {
-    return promise<Unit>(func (resolve: func(value: Unit)) {
+    return promise(func (resolve) {
         timeout(ms, func [resolve] () {
             resolve({});
         });

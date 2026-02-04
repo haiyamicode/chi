@@ -2866,7 +2866,19 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto data_ptr_method = get_fn(data_ptr_method_node);
         auto data_ptr = builder.CreateCall(data_ptr_method->llvm_fn, {ref.address});
 
-        // Always pass binding struct pointer as first argument for all lambdas
+        // Check if the return type needs sret (struct return)
+        auto return_type = fn_spec.return_type;
+        bool use_sret = fn_spec.should_use_sret();
+        llvm::Value *sret_var = nullptr;
+
+        if (use_sret) {
+            // For struct returns, allocate space and pass as first argument
+            auto return_type_l = compile_type(return_type);
+            sret_var = fn->entry_alloca(return_type_l, "lambda_sret");
+            args.push_back(sret_var);
+        }
+
+        // Always pass binding struct pointer as argument for all lambdas
         args.push_back(data_ptr);
 
         for (int i = 0; i < data.args.len; i++) {
@@ -2878,10 +2890,24 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         }
 
         llvm::FunctionCallee callee(bound_fn_type_l, fn_ptr);
+        llvm::Value *ret = nullptr;
         if (invoke) {
-            return m_ctx->llvm_builder->CreateInvoke(callee, invoke->normal, invoke->landing, args);
+            ret = builder.CreateInvoke(callee, invoke->normal, invoke->landing, args);
+            if (use_sret) {
+                // For invoke with sret, the load happens later in the normal block
+                invoke->sret = sret_var;
+                invoke->sret_type = compile_type(return_type);
+            }
+            // Invoke is a terminator - return value will be loaded by caller if needed
+            return ret;
+        } else {
+            ret = builder.CreateCall(callee, args);
+            // For sret, load and return the struct value
+            if (use_sret) {
+                return builder.CreateLoad(compile_type(return_type), sret_var);
+            }
+            return ret;
         }
-        return builder.CreateCall(callee, args);
     }
 
     // For method calls via DotExpr, use the actual receiver type's ID for variant lookup
@@ -3242,8 +3268,14 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
     bool original_has_binds = original_llvm_fn &&
                              (original_llvm_fn->arg_size() > original_fn_type_l->getNumParams());
 
-    // Start index: skip _binds if original function doesn't take it
-    unsigned start_idx = original_has_binds ? 0 : 1;
+    // Check if the function uses sret (struct return)
+    bool use_sret = bound_fn_type->data.fn.should_use_sret();
+
+    // Start index: skip sret arg (if present), then skip _binds if original doesn't take it
+    unsigned start_idx = use_sret ? 1 : 0;  // Skip sret if present
+    if (!original_has_binds) {
+        start_idx++;  // Skip _binds
+    }
 
     for (unsigned i = start_idx; i < proxy_arg_count; ++i) {
         auto arg = proxy_llvm_fn->getArg(i);
@@ -3260,11 +3292,17 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
         call_fn_type_l = original_fn_type_l;
     }
 
+    // For sret, insert the sret pointer at the beginning of args
+    if (use_sret) {
+        auto sret_arg = proxy_llvm_fn->getArg(0);  // First arg is the sret pointer
+        original_args.insert(original_args.begin(), sret_arg);
+    }
+
     llvm::FunctionCallee original_callee(call_fn_type_l, original_fn_ptr);
     auto result = builder.CreateCall(original_callee, original_args);
 
-    // Return the result
-    if (original_fn_spec.return_type->kind == TypeKind::Void) {
+    // Return the result (for sret, return void since result is written to sret pointer)
+    if (original_fn_spec.return_type->kind == TypeKind::Void || use_sret) {
         builder.CreateRetVoid();
     } else {
         builder.CreateRet(result);

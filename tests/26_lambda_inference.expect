@@ -35,4 +35,16 @@ apply_int(8, func(n: int) => n + 100) = 108
 Test 12: Arrow bool return
 filter_positive(10, func(n) => n > 5) = 10
 
+Test 13: Return type inference
+make_wrapper inferred T=int from return type: 42
+
+Test 14: String type inference
+make_wrapper inferred T=string from return type: hello
+
+Test 15: Lambda returning struct
+lambda returning struct: Point(10, 20)
+
+Test 16: Struct return type inference
+make_wrapper inferred T=Point: Point(30, 40)
+
 All lambda inference tests passed!

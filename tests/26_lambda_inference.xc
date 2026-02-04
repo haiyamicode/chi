@@ -1,5 +1,30 @@
 // Test lambda function type inference
 
+// Simple struct for testing lambda struct returns
+struct Point {
+    x: int;
+    y: int;
+
+    func new(x: int, y: int) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+// Generic wrapper for return type inference testing
+struct Wrapper<T> {
+    value: T;
+
+    func new(v: T) {
+        this.value = v;
+    }
+}
+
+// Generic function that creates a Wrapper - T is inferred from return type
+func make_wrapper<T>(provider: func() T) Wrapper<T> {
+    return {provider()};
+}
+
 // Helper function that takes a lambda with int param and int return
 func apply_int(x: int, f: func(n: int) int) int {
     return f(x);
@@ -95,6 +120,27 @@ func main() {
     printf("\nTest 12: Arrow bool return\n");
     var arrow4 = filter_positive(10, func(n) => n > 5);
     printf("filter_positive(10, func(n) => n > 5) = {}\n", arrow4);
+
+    // Test 13: Return type inference for generic functions
+    printf("\nTest 13: Return type inference\n");
+    var wrapper: Wrapper<int> = make_wrapper(func() { return 42; });
+    printf("make_wrapper inferred T=int from return type: {}\n", wrapper.value);
+
+    // Test 14: Return type inference with string type
+    printf("\nTest 14: String type inference\n");
+    var str_wrapper: Wrapper<string> = make_wrapper(func() { return "hello"; });
+    printf("make_wrapper inferred T=string from return type: {}\n", str_wrapper.value);
+
+    // Test 15: Lambda returning struct (tests sret codegen fix)
+    printf("\nTest 15: Lambda returning struct\n");
+    var point_fn: func() Point = func() { return {10, 20}; };
+    var p = point_fn();
+    printf("lambda returning struct: Point({}, {})\n", p.x, p.y);
+
+    // Test 16: Generic function with struct return type inference
+    printf("\nTest 16: Struct return type inference\n");
+    var point_wrapper: Wrapper<Point> = make_wrapper(func() { return {30, 40}; });
+    printf("make_wrapper inferred T=Point: Point({}, {})\n", point_wrapper.value.x, point_wrapper.value.y);
 
     printf("\nAll lambda inference tests passed!\n");
 }
