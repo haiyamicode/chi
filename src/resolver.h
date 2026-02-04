@@ -266,10 +266,14 @@ class Resolver {
 
     ChiType *node_get_type(ast::Node *node);
 
-    string to_string(ChiType *type, bool for_display = false);
-    string to_string(TypeList *types, bool for_display = false);
+    string format_type(ChiType *type, bool for_display = false);
+    string format_type_list(TypeList *types, bool for_display = false);
 
-    string to_string(TypeKind kind, ChiType::Data *data, bool for_display = false);
+    // Convenience wrappers for common use cases
+    string to_display_string(ChiType *type) { return format_type(type, true); }
+    string to_unique_id(ChiType *type) { return format_type(type, false); }
+
+    string format_type_data(TypeKind kind, ChiType::Data *data, bool for_display = false);
 
     string resolve_global_id(ast::Node *node);
 

@@ -25,7 +25,7 @@ static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) 
     auto type = decl->resolved_type;
     auto kind = get_symbol_kind(decl);
     return fmt::format("({}) {}: {}", kind, decl->name.size() ? decl->name : "<anonymous>",
-                       type ? resolver.to_string(type, true) : "unknown");
+                       type ? resolver.format_type(type, true) : "unknown");
 }
 
 static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &resolver) {
@@ -49,7 +49,7 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
         boost::json::object completion;
         completion["label"] = member->get_name();
         completion["kind"] = "Field";
-        completion["detail"] = resolver.to_string(member->resolved_type, true);
+        completion["detail"] = resolver.format_type(member->resolved_type, true);
         completions.push_back(completion);
     }
     return completions;
@@ -123,7 +123,7 @@ static napi_value Method(napi_env env, napi_callback_info info) {
                         completion["label"] = symbol->name;
                         completion["kind"] = get_symbol_kind(symbol);
                         if (symbol->resolved_type) {
-                            completion["detail"] = resolver.to_string(symbol->resolved_type, true);
+                            completion["detail"] = resolver.format_type(symbol->resolved_type, true);
                         }
                         completion["data"] = index;
                         completions.push_back(completion);

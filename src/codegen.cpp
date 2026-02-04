@@ -455,7 +455,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
                 cu = *p;
             }
         }
-        auto name = m_ctx->resolver.to_string(type, true);
+        auto name = m_ctx->resolver.format_type(type, true);
         auto file = llvm_db.createFile(cu->getFilename(), cu->getDirectory());
         auto line_no = 0;
         if (data.node) {
@@ -478,7 +478,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     default:
         auto size = llvm_type_size(compile_type(type));
-        return llvm_db.createBasicType(m_ctx->resolver.to_string(type, true), size,
+        return llvm_db.createBasicType(m_ctx->resolver.format_type(type, true), size,
                                        llvm::dwarf::DW_ATE_unsigned);
     }
 }
@@ -759,7 +759,7 @@ void Compiler::compile_struct_vtables(ChiType *type) {
     auto vtable_data_l = llvm::ConstantArray::get(vtable_type_l, methods);
     auto global = new llvm::GlobalVariable(*m_ctx->llvm_module, vtable_type_l, true,
                                            llvm::GlobalValue::PrivateLinkage, vtable_data_l,
-                                           "vtables." + get_resolver()->to_string(type, true));
+                                           "vtables." + get_resolver()->format_type(type, true));
 
     for (auto &vtable : vtables) {
         m_ctx->impl_table[vtable.impl] = global + vtable.offset;
@@ -832,7 +832,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
 
     auto info_global =
         new llvm::GlobalVariable(llvm_module, ti_type_l, true, llvm::GlobalValue::PrivateLinkage,
-                                 info_l, "typeinfo." + get_resolver()->to_string(type, true));
+                                 info_l, "typeinfo." + get_resolver()->format_type(type, true));
     return info_global;
 }
 
@@ -3727,7 +3727,7 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
     // Generate unique name for the destructor
-    auto type_name = get_resolver()->to_string(type, true);
+    auto type_name = get_resolver()->format_type(type, true);
     auto fn_name = fmt::format("{}.__delete", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -3835,7 +3835,7 @@ Function *Compiler::generate_destructor_optional(ChiType *type, ChiType *resolve
     auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
 
     // Generate unique name for the destructor
-    auto type_name = get_resolver()->to_string(type, true);
+    auto type_name = get_resolver()->format_type(type, true);
     auto fn_name = fmt::format("{}.__delete", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -3989,7 +3989,7 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
     auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
     // Generate unique name for the constructor
-    auto type_name = get_resolver()->to_string(struct_type, true);
+    auto type_name = get_resolver()->format_type(struct_type, true);
     auto fn_name = fmt::format("{}.__new", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -4107,7 +4107,7 @@ Function *Compiler::get_fn(ast::Node *node) {
             auto container = fn_type->data.fn.container_ref->get_elem();
             // Build ID using the container's global_id (includes module prefix)
             auto container_id = container->global_id.empty()
-                ? get_resolver()->to_string(container, false)
+                ? get_resolver()->format_type(container, false)
                 : container->global_id;
             auto subst_id = fmt::format("{}.{}.{}",
                 node->module->global_id(),
@@ -4147,7 +4147,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
         }
         name += ".<";
         for (auto arg : subtype_data.args) {
-            name += get_resolver()->to_string(arg, false) + ",";
+            name += get_resolver()->format_type(arg, false) + ",";
         }
         name += ">";
 
@@ -4280,7 +4280,7 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
     }
 
     type = eval_type(type);
-    auto key = get_resolver()->to_string(type);
+    auto key = get_resolver()->format_type(type);
     auto it = m_ctx->type_table.get(key);
     if (it) {
         return *it;
@@ -4363,7 +4363,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt1Ty(llvm_ctx)); // bool has_value
         members.push_back(elem_type_l);                     // elem
-        return llvm::StructType::create(members, get_resolver()->to_string(type, true));
+        return llvm::StructType::create(members, get_resolver()->format_type(type, true));
     }
     case TypeKind::Array: {
         return compile_type(type->data.array.internal);
@@ -4380,28 +4380,28 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return compile_type(data.internal);
     }
     case TypeKind::Struct: {
-        auto key = get_resolver()->to_string(type);
+        auto key = get_resolver()->format_type(type);
         auto &data = type->data.struct_;
         if (data.kind == ContainerKind::Interface) {
             std::vector<llvm::Type *> members;
             members.push_back(get_llvm_ptr_type()); // typeinfo
             members.push_back(get_llvm_ptr_type()); // data
             members.push_back(get_llvm_ptr_type()); // vtable
-            return llvm::StructType::create(members, get_resolver()->to_string(type, true));
+            return llvm::StructType::create(members, get_resolver()->format_type(type, true));
         }
         if (!data.fields.len) {
             // Empty structs need a placeholder byte for LLVM allocations
             // (void type cannot be allocated)
             std::vector<llvm::Type *> members;
             members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
-            return llvm::StructType::create(members, get_resolver()->to_string(type, true));
+            return llvm::StructType::create(members, get_resolver()->format_type(type, true));
         }
 
         std::vector<llvm::Type *> members;
         for (auto &member : data.fields) {
             members.push_back(compile_type(member->resolved_type));
         }
-        return llvm::StructType::create(members, get_resolver()->to_string(type, true));
+        return llvm::StructType::create(members, get_resolver()->format_type(type, true));
     }
     case TypeKind::Error: {
         // TODO: implement actual error type
@@ -4445,7 +4445,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         // variant data field
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx),
                                                std::max(enum_->compiled_data_size, 1)));
-        return llvm::StructType::create(members, get_resolver()->to_string(type, true));
+        return llvm::StructType::create(members, get_resolver()->format_type(type, true));
     }
     case TypeKind::Undefined: {
         return get_llvm_ptr_type();
