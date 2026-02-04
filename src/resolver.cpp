@@ -153,6 +153,11 @@ void Resolver::resolve(ast::Module *module) {
     for (const auto &pair : m_ctx->array_of.get()) {
         resolve_struct_type(pair.second);
     }
+
+    // Dump generic instantiations if requested (for debugging)
+    if (getenv("DUMP_GENERICS")) {
+        m_ctx->generics.dump(this);
+    }
 }
 
 bool Resolver::can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit) {
@@ -2659,26 +2664,75 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
             fn_type->data.fn.type_params.add(type_param);
         }
         fn_type->data.fn.is_variadic = data.is_variadic;
-        fn_type->data.fn.container_ref = data.container_ref;
+        fn_type->data.fn.container_ref = data.container_ref
+            ? make_recursive_call(data.container_ref, subs) : nullptr;
         fn_type->data.fn.is_extern = data.is_extern;
 
-        // Mark as placeholder if any preserved type parameters are actually placeholders
+        // Mark as placeholder if any component is still a placeholder
+        // This must be consistent with get_fn_type()
         fn_type->is_placeholder = false;
-        for (auto type_param : fn_type->data.fn.type_params) {
-            if (type_param->is_placeholder) {
+
+        // Check params
+        for (auto param : fn_type->data.fn.params) {
+            if (param->is_placeholder) {
                 fn_type->is_placeholder = true;
                 break;
             }
         }
+
+        // Check type_params
+        if (!fn_type->is_placeholder) {
+            for (auto type_param : fn_type->data.fn.type_params) {
+                if (type_param->is_placeholder) {
+                    fn_type->is_placeholder = true;
+                    break;
+                }
+            }
+        }
+
+        // Check return type
         fn_type->is_placeholder = fn_type->is_placeholder || ret->is_placeholder;
 
         return fn_type;
     }
 
     case TypeKind::Struct: {
-        // Only substitute placeholder structs (e.g. lambda bind structs with generic fields)
-        if (!type->is_placeholder) return type;
         auto &data = type->data.struct_;
+
+        // If struct has placeholder type_params, substitute them to get a Subtype
+        // This handles "specialized structs" created by resolve_subtype for generic
+        // instantiations like Promise<T> where T is still a placeholder
+        if (data.type_params.len > 0) {
+            bool has_placeholder_param = false;
+            array<ChiType *> subst_args;
+            for (auto tp : data.type_params) {
+                auto subst = make_recursive_call(tp, subs);
+                subst_args.add(subst);
+                if (tp != subst) has_placeholder_param = true;
+            }
+            if (has_placeholder_param) {
+                // Find the base generic struct by looking up through subtypes
+                // The base generic has the same node but global_id without type args
+                ChiType *base_generic = nullptr;
+                if (data.node) {
+                    // Look for the base struct in the node's resolved_type
+                    auto node_type = data.node->resolved_type;
+                    if (node_type && node_type->kind == TypeKind::TypeSymbol) {
+                        auto underlying = node_type->data.type_symbol.underlying_type;
+                        if (underlying && underlying->kind == TypeKind::Struct) {
+                            base_generic = underlying;
+                        }
+                    }
+                }
+                if (base_generic) {
+                    return get_subtype(base_generic, &subst_args);
+                }
+            }
+        }
+
+        // For placeholder structs (e.g. lambda bind structs with generic fields),
+        // create a new struct with substituted field types
+        if (!type->is_placeholder) return type;
         auto new_struct = create_type(TypeKind::Struct);
         new_struct->display_name = type->display_name;
         auto &new_data = new_struct->data.struct_;
@@ -3019,14 +3073,11 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
     }
     if (sty->kind == TypeKind::Array) {
         if (!sty->data.array.internal) {
-            auto array = m_ctx->rt_array_type;
-            assert(array);
-            auto sub = create_type(TypeKind::Subtype);
-            sub->data.subtype.generic = to_value_type(array);
-            sub->data.subtype.args.add(sty->data.array.elem);
-            sub->is_placeholder = sty->data.array.elem->is_placeholder;
-            sub->global_id = sty->global_id;
-            auto astype = resolve_subtype(sub);
+            auto rt_array = m_ctx->rt_array_type;
+            assert(rt_array);
+            array<ChiType *> args;
+            args.add(sty->data.array.elem);
+            auto astype = get_subtype(to_value_type(rt_array), &args);
             sty->data.array.internal = astype;
             sty = astype;
         } else {
@@ -3821,9 +3872,23 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
         }
     }
     gen.subtypes.add(sub);
-    if (gen.resolve_status >= ResolveStatus::MemberTypesKnown) {
+    // Only resolve concrete subtypes - placeholder subtypes shouldn't be resolved
+    // until we have concrete type arguments (the base may not have interfaces yet)
+    if (gen.resolve_status >= ResolveStatus::MemberTypesKnown && !sub->is_placeholder) {
         resolve_subtype(sub);
     }
+
+    // Record to monomorphization plan
+    if (!sub->is_placeholder) {
+        map<ChiType *, ChiType *> subs;
+        for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
+            // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in
+            // struct members contain raw Placeholder types, not TypeSymbol wrappers
+            subs[to_value_type(gen.type_params[i])] = type_args->at(i);
+        }
+        m_ctx->generics.record_struct(sub->global_id, sub->global_id, generic, subs);
+    }
+
     return sub;
 }
 
@@ -3892,6 +3957,44 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
         auto proto_param = new_proto->data.fn_proto.params[i];
         proto_param->resolved_type = resolved_fn_type->data.fn.params[i];
     }
+
+    // Record to monomorphization plan
+    if (!sub->is_placeholder) {
+        map<ChiType *, ChiType *> subs;
+
+        // Include container struct's type parameters if this is a method
+        // Use resolved_fn_type which has the specialized container_ref (e.g., &Container<int>)
+        auto container_ref = resolved_fn_type->data.fn.container_ref;
+        if (container_ref) {
+            auto container = container_ref->get_elem();
+            // For specialized methods, look up the container's type_env from struct_envs
+            if (container->kind == TypeKind::Struct) {
+                auto container_id = container->global_id;
+                if (auto entry = m_ctx->generics.struct_envs.get(container_id)) {
+                    for (auto &kv : entry->subs.data) {
+                        subs[kv.first] = kv.second;
+                    }
+                }
+            } else if (container->kind == TypeKind::Subtype) {
+                auto &container_data = container->data.subtype;
+                auto &container_base = container_data.generic->data.struct_;
+                for (size_t i = 0; i < container_base.type_params.len && i < container_data.args.len; i++) {
+                    subs[to_value_type(container_base.type_params[i])] = container_data.args[i];
+                }
+            }
+        }
+
+        // Include the function's own type parameters
+        for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
+            // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in
+            // params/return contain raw Placeholder types, not TypeSymbol wrappers
+            subs[to_value_type(gen.type_params[i])] = type_args->at(i);
+        }
+        auto fn_name = fn_node->name + "<" + to_string(type_args) + ">";
+        auto variant_id = resolve_global_id(generated_fn);
+        m_ctx->generics.record_fn(variant_id, fn_name, fn_node, generic_fn, subs);
+    }
+
     return generated_fn;
 }
 
@@ -4397,4 +4500,72 @@ bool Resolver::interface_satisfies_trait(ChiType *interface_type, ChiType *requi
     }
 
     return false;
+}
+
+// ============================================================================
+// GenericResolver implementation - tracks generic instantiations and type envs
+// ============================================================================
+
+void GenericResolver::record_fn(const string &id, const string &name, ast::Node *node,
+                         ChiType *generic_fn, map<ChiType *, ChiType *> subs) {
+    if (fn_envs.get(id)) {
+        return; // Already recorded
+    }
+    TypeEnvEntry entry;
+    entry.name = name;
+    entry.node = node;
+    entry.generic_type = generic_fn;
+    entry.subs = subs;
+    fn_envs[id] = entry;
+}
+
+void GenericResolver::record_struct(const string &id, const string &name, ChiType *generic,
+                             map<ChiType *, ChiType *> subs) {
+    if (struct_envs.get(id)) {
+        return; // Already recorded
+    }
+    TypeEnvEntry entry;
+    entry.name = name;
+    entry.node = generic->data.struct_.node;
+    entry.generic_type = generic;
+    entry.subs = subs;
+    struct_envs[id] = entry;
+}
+
+void GenericResolver::dump(Resolver *resolver) {
+    print("=== Generic Instantiations ===\n\n");
+
+    print("[Functions] ({})\n", fn_envs.size());
+    for (auto &pair : fn_envs.get()) {
+        auto &id = pair.first;
+        auto &entry = pair.second;
+        print("  {}\n", entry.name);
+        print("    id: {}\n", id);
+        if (entry.subs.size() > 0) {
+            print("    TypeEnv:\n");
+            for (auto &sub_pair : entry.subs.get()) {
+                print("      {} → {}\n",
+                      resolver->to_string(sub_pair.first),
+                      resolver->to_string(sub_pair.second));
+            }
+        }
+    }
+
+    print("\n[Structs] ({})\n", struct_envs.size());
+    for (auto &pair : struct_envs.get()) {
+        auto &id = pair.first;
+        auto &entry = pair.second;
+        print("  {}\n", entry.name);
+        print("    id: {}\n", id);
+        if (entry.subs.size() > 0) {
+            print("    TypeEnv:\n");
+            for (auto &sub_pair : entry.subs.get()) {
+                print("      {} → {}\n",
+                      resolver->to_string(sub_pair.first),
+                      resolver->to_string(sub_pair.second));
+            }
+        }
+    }
+
+    print("\n=== End Generic Instantiations ===\n");
 }

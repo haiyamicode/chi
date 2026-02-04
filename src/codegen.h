@@ -66,6 +66,7 @@ struct Function {
     ChiTypeSubtype *container_subtype = nullptr;
     ChiType *fn_type = nullptr;
     ChiType *specialized_subtype = nullptr; // For specialized generic functions
+    map<ChiType *, ChiType *> *type_env = nullptr; // TypeEnv from GenericResolver (placeholder → concrete)
     label_t *next_end_label = nullptr;
     array<llvm::Value *> vararg_pointers = {};
 
@@ -214,6 +215,10 @@ struct CodegenContext {
     map<string, llvm::DICompileUnit *> module_cu_table = {};
     map<ChiType *, Function *> destructor_table = {};  // Generated __delete functions
     map<ChiType *, Function *> constructor_table = {}; // Generated __new functions
+
+    // Tracing: track what codegen actually compiles (for comparison with GenericResolver)
+    std::set<string> compiled_generic_fns = {};    // function global_ids compiled
+    std::set<string> compiled_generic_structs = {}; // struct global_ids compiled
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx = {};
@@ -427,6 +432,7 @@ class Compiler {
 
     void emit_dbg_location(ast::Node *node);
     void emit_output();
+    void dump_generics_comparison();
 };
 } // namespace codegen
 } // namespace cx

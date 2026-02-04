@@ -65,6 +65,7 @@ void Builder::build_single_file(const string &file_name) {
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
+    compiler.dump_generics_comparison();
     compiler.emit_output();
 
     // produce executable
@@ -197,6 +198,7 @@ void Builder::build_package(const string &package_dir) {
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
+    compiler.dump_generics_comparison();
     compiler.emit_output();
 
     // Check for C compiler configuration

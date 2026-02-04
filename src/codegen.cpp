@@ -94,86 +94,22 @@ static bool has_placeholder_descendants(ChiType *type) {
 }
 
 ChiType *Compiler::eval_type(ChiType *type) {
-    if (type->is_placeholder && type->kind == TypeKind::Placeholder) {
-        // Let's also check the placeholder's trait if it has one
-        if (type->data.placeholder.trait) {
-        }
+    // Use TypeEnv from GenericResolver (set by compile_fn_proto)
+    if (m_fn && m_fn->type_env && (type->is_placeholder || has_placeholder_descendants(type))) {
+        type = get_resolver()->type_placeholders_sub_map(type, m_fn->type_env);
     }
 
-    // Handle struct/container type parameters using selective substitution
-    if (type->is_placeholder && m_fn && m_fn->container_subtype) {
-        // Use selective substitution to only replace placeholders that belong to the struct
-        if (m_fn->fn_type && m_fn->fn_type->data.fn.container_ref) {
-            auto container_ref = m_fn->fn_type->data.fn.container_ref;
-            auto container_struct = get_resolver()->resolve_struct_type(container_ref);
-            if (container_struct) {
-                type = get_resolver()->type_placeholders_sub_selective(
-                    type, m_fn->container_subtype, container_struct->node);
-            }
-        }
-    }
-
-    // Handle function generic placeholders using selective substitution
-    if (type->is_placeholder && m_fn && m_fn->specialized_subtype &&
-        m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-        // Use selective substitution to only replace placeholders that belong to the
-        // specialized function. Use the subtype's root_node as the filter to handle
-        // nested lambdas correctly (the lambda's node != the parent function's node).
-        auto &subtype_data = m_fn->specialized_subtype->data.subtype;
-        if (subtype_data.root_node) {
-            type = get_resolver()->type_placeholders_sub_selective(
-                type, &subtype_data, subtype_data.root_node);
-        }
-    }
-
-    if (type->is_placeholder && type->kind == TypeKind::Fn && m_fn_eval_subtype &&
+    // Handle m_fn_eval_subtype (for function proto compilation, before m_fn exists)
+    if (type->is_placeholder && m_fn_eval_subtype &&
         m_fn_eval_subtype->kind == TypeKind::Subtype) {
-        auto subtype_data = &m_fn_eval_subtype->data.subtype;
-        auto old_type = type;
-        type = get_resolver()->type_placeholders_sub_selective(type, subtype_data,
-                                                               subtype_data->root_node);
+        type = get_resolver()->type_placeholders_sub(type, &m_fn_eval_subtype->data.subtype);
     }
 
-    // Handle placeholders with unknown source
-    if (type->is_placeholder && type->kind == TypeKind::Placeholder &&
-        !type->data.placeholder.source_decl) {
-
-        // General fallback for other unknown source placeholders
-        if (m_fn && m_fn->specialized_subtype &&
-            m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-            type = get_resolver()->type_placeholders_sub(type,
-                                                         &m_fn->specialized_subtype->data.subtype);
-        }
-        if (type->is_placeholder && m_fn && m_fn->container_subtype) {
-            type = get_resolver()->type_placeholders_sub(type, m_fn->container_subtype);
-        }
-    }
-
-    // Handle Fn/FnLambda types that contain placeholder params but aren't marked is_placeholder
-    // (is_placeholder on Fn only checks type_params and return_type, not params)
-    if (!type->is_placeholder && has_placeholder_descendants(type) && m_fn) {
-        if (m_fn->container_subtype && m_fn->fn_type && m_fn->fn_type->data.fn.container_ref) {
-            auto container_ref = m_fn->fn_type->data.fn.container_ref;
-            auto container_struct = get_resolver()->resolve_struct_type(container_ref);
-            if (container_struct) {
-                type = get_resolver()->type_placeholders_sub_selective(
-                    type, m_fn->container_subtype, container_struct->node);
-            }
-        }
-        if (has_placeholder_descendants(type) && m_fn->specialized_subtype &&
-            m_fn->specialized_subtype->kind == TypeKind::Subtype) {
-            auto &subtype_data = m_fn->specialized_subtype->data.subtype;
-            if (subtype_data.root_node) {
-                type = get_resolver()->type_placeholders_sub_selective(
-                    type, &subtype_data, subtype_data.root_node);
-            }
-        }
-    }
-
+    // Resolve special type kinds
     if (type->kind == TypeKind::Subtype) {
         return type->data.subtype.final_type;
     }
-    if (type->kind == TypeKind::This) {
+    if (type->kind == TypeKind::This && m_fn) {
         return m_fn->fn_type->data.fn.container_ref;
     }
     return type;
@@ -304,6 +240,8 @@ void Compiler::compile_struct(ast::Node *node) {
             if (subtype->is_placeholder) {
                 continue;
             }
+            // Track this struct specialization for comparison with GenericResolver
+            m_ctx->compiled_generic_structs.insert(subtype->global_id);
             _compile_struct(node, subtype);
         }
 
@@ -338,6 +276,17 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
                         } else {
                             fn->container_type = type;
                         }
+                        // For method variants, look up the function's TypeEnv from fn_envs
+                        // This includes both struct type params AND method type params
+                        auto fn_id = get_resolver()->resolve_global_id(variant);
+                        if (auto entry = get_resolver()->get_generics()->fn_envs.get(fn_id)) {
+                            fn->type_env = &entry->subs;
+                        } else if (subtype) {
+                            // Fallback to struct's type_env if no function-specific entry
+                            if (auto entry = get_resolver()->get_generics()->struct_envs.get(subtype->global_id)) {
+                                fn->type_env = &entry->subs;
+                            }
+                        }
                         m_ctx->pending_fns.add(fn);
                     }
                 }
@@ -348,6 +297,12 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             if (subtype) {
                 fn->container_subtype = &subtype->data.subtype;
                 fn->container_type = subtype;
+                // Look up the TypeEnv for this struct specialization
+                if (auto entry = get_resolver()->get_generics()->struct_envs.get(subtype->global_id)) {
+                    fn->type_env = &entry->subs;
+                } else if (getenv("DUMP_GENERICS")) {
+                    print("WARNING: No TypeEnv found for struct method, struct: {}\n", subtype->global_id);
+                }
             } else {
                 fn->container_type = type;
             };
@@ -2139,10 +2094,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             lambda_name = "__lambda_" + std::to_string(expr->id);
         }
         auto lambda_fn = compile_fn_proto(data.fn_proto, expr, lambda_name);
-        // Propagate parent's specialized_subtype to nested lambdas so that
+        // Propagate parent's type_env to nested lambdas so that
         // placeholder types inside the lambda can be substituted correctly
-        if (fn && fn->specialized_subtype && !lambda_fn->specialized_subtype) {
-            lambda_fn->specialized_subtype = fn->specialized_subtype;
+        if (fn && fn->type_env && !lambda_fn->type_env) {
+            lambda_fn->type_env = fn->type_env;
         }
         m_ctx->pending_fns.add(lambda_fn);
         return compile_lambda_alloc(fn, get_chitype(expr), lambda_fn->llvm_fn, &data.captures);
@@ -3810,6 +3765,10 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
             if (type->kind == TypeKind::Subtype) {
                 destructor_fn->container_subtype = &type->data.subtype;
                 destructor_fn->container_type = type;
+                // Look up TypeEnv from GenericResolver
+                if (auto entry = get_resolver()->get_generics()->struct_envs.get(type->global_id)) {
+                    destructor_fn->type_env = &entry->subs;
+                }
             }
             m_ctx->pending_fns.add(destructor_fn);
         } else {
@@ -4138,6 +4097,26 @@ Function *Compiler::add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn
 Function *Compiler::get_fn(ast::Node *node) {
     auto id = get_resolver()->resolve_global_id(node);
     auto entry = m_ctx->function_table.get(id);
+
+    // If not found and we have type_env, the function type may have placeholder
+    // container types that need substitution to find the correct specialized method
+    if (!entry && m_fn && m_fn->type_env && node->resolved_type &&
+        node->resolved_type->is_placeholder) {
+        auto fn_type = eval_type(node->resolved_type);
+        if (fn_type->kind == TypeKind::Fn && fn_type->data.fn.container_ref) {
+            auto container = fn_type->data.fn.container_ref->get_elem();
+            // Build ID using the container's global_id (includes module prefix)
+            auto container_id = container->global_id.empty()
+                ? get_resolver()->to_string(container, false)
+                : container->global_id;
+            auto subst_id = fmt::format("{}.{}.{}",
+                node->module->global_id(),
+                container_id,
+                node->name);
+            entry = m_ctx->function_table.get(subst_id);
+        }
+    }
+
     if (!entry) {
         panic("Function not found: {}", id);
     }
@@ -4171,6 +4150,10 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
             name += get_resolver()->to_string(arg, false) + ",";
         }
         name += ">";
+
+        // Track this function specialization for comparison with GenericResolver
+        // Use the node's global_id (same as GenericResolver uses)
+        m_ctx->compiled_generic_fns.insert(get_resolver()->resolve_global_id(fn));
     } else {
         // Handle lambda types for non-specialized functions only
         if (ftype->kind == TypeKind::FnLambda) {
@@ -4205,9 +4188,16 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     auto new_fn = add_fn(fn_l, fn, ftype);
 
-    // Store the specialized type for lookup if this is a specialized function
+    // Store the specialized type and look up TypeEnv from GenericResolver
     if (subtype) {
         new_fn->specialized_subtype = subtype;
+        // Look up the TypeEnv for this function specialization
+        auto fn_id = get_resolver()->resolve_global_id(fn);
+        if (auto entry = get_resolver()->get_generics()->fn_envs.get(fn_id)) {
+            new_fn->type_env = &entry->subs;
+        } else if (getenv("DUMP_GENERICS")) {
+            print("WARNING: No TypeEnv found for function: {}\n", fn_id);
+        }
     }
 
     // Build parameter information
@@ -4302,7 +4292,6 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 }
 
 llvm::Type *Compiler::_compile_type(ChiType *type) {
-    auto key = get_resolver()->to_string(type);
     assert(!type->is_placeholder && "compile_type called on placeholder type");
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
@@ -4482,6 +4471,78 @@ void Compiler::emit_dbg_location(ast::Node *node) {
     auto col_no = node->token->pos.col_number();
     builder->SetCurrentDebugLocation(
         llvm::DILocation::get(llvm_ctx, line_no, col_no, scope, nullptr));
+}
+
+void Compiler::dump_generics_comparison() {
+    if (!getenv("DUMP_GENERICS")) {
+        return;
+    }
+
+    auto *generics = get_resolver()->get_generics();
+
+    print("\n=== Codegen Compiled Generics ===\n");
+    print("Functions ({}):\n", m_ctx->compiled_generic_fns.size());
+    for (auto &id : m_ctx->compiled_generic_fns) {
+        print("  [codegen] {}\n", id);
+    }
+    print("Structs ({}):\n", m_ctx->compiled_generic_structs.size());
+    for (auto &id : m_ctx->compiled_generic_structs) {
+        print("  [codegen] {}\n", id);
+    }
+
+    print("\n=== Comparison ===\n");
+
+    // Check for functions in GenericResolver but not compiled
+    print("Functions in GenericResolver but NOT compiled:\n");
+    int fn_missing = 0;
+    for (auto &[id, entry] : generics->fn_envs.data) {
+        if (m_ctx->compiled_generic_fns.find(id) == m_ctx->compiled_generic_fns.end()) {
+            print("  MISSING: {} (name: {})\n", id, entry.name);
+            fn_missing++;
+        }
+    }
+    if (fn_missing == 0) print("  (none)\n");
+
+    // Check for functions compiled but not in GenericResolver
+    print("Functions compiled but NOT in GenericResolver:\n");
+    int fn_extra = 0;
+    for (auto &id : m_ctx->compiled_generic_fns) {
+        if (!generics->fn_envs.has_key(id)) {
+            print("  EXTRA: {}\n", id);
+            fn_extra++;
+        }
+    }
+    if (fn_extra == 0) print("  (none)\n");
+
+    // Check for structs in GenericResolver but not compiled
+    print("Structs in GenericResolver but NOT compiled:\n");
+    int struct_missing = 0;
+    for (auto &[id, entry] : generics->struct_envs.data) {
+        if (m_ctx->compiled_generic_structs.find(id) == m_ctx->compiled_generic_structs.end()) {
+            print("  MISSING: {} (name: {})\n", id, entry.name);
+            struct_missing++;
+        }
+    }
+    if (struct_missing == 0) print("  (none)\n");
+
+    // Check for structs compiled but not in GenericResolver
+    print("Structs compiled but NOT in GenericResolver:\n");
+    int struct_extra = 0;
+    for (auto &id : m_ctx->compiled_generic_structs) {
+        if (!generics->struct_envs.has_key(id)) {
+            print("  EXTRA: {}\n", id);
+            struct_extra++;
+        }
+    }
+    if (struct_extra == 0) print("  (none)\n");
+
+    print("\n=== Summary ===\n");
+    print("GenericResolver: {} fns, {} structs\n",
+          generics->fn_envs.size(), generics->struct_envs.size());
+    print("Codegen compiled: {} fns, {} structs\n",
+          m_ctx->compiled_generic_fns.size(), m_ctx->compiled_generic_structs.size());
+    print("Missing from codegen: {} fns, {} structs\n", fn_missing, struct_missing);
+    print("Extra in codegen (not tracked): {} fns, {} structs\n", fn_extra, struct_extra);
 }
 
 void Compiler::emit_output() {

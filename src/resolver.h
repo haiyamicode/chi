@@ -66,11 +66,35 @@ struct SystemTypes {
     ChiType *lambda = nullptr;
 };
 
+// Forward declaration for GenericResolver
+class Resolver;
+
+// Tracks a single generic instantiation and its type environment
+struct TypeEnvEntry {
+    string name;                           // e.g., "promise<Unit>", "Array<int>.add"
+    map<ChiType *, ChiType *> subs;        // placeholder → concrete type
+    ast::Node *node = nullptr;             // source node (FnDef or StructDecl)
+    ChiType *generic_type = nullptr;       // the generic type being instantiated
+};
+
+// Records all generic instantiations during resolution
+struct GenericResolver {
+    map<string, TypeEnvEntry> fn_envs;      // function instantiations
+    map<string, TypeEnvEntry> struct_envs;  // struct instantiations
+
+    void record_fn(const string &id, const string &name, ast::Node *node,
+                   ChiType *generic_fn, map<ChiType *, ChiType *> subs);
+    void record_struct(const string &id, const string &name, ChiType *generic,
+                       map<ChiType *, ChiType *> subs);
+    void dump(Resolver *resolver);
+};
+
 struct ResolveContext {
     ResolveContext(const ResolveContext &) = delete;
     ResolveContext &operator=(const ResolveContext &) = delete;
 
     Context *allocator = nullptr;
+    GenericResolver generics;
     array<ast::Node *> builtins = {};
     SystemTypes system_types = {};
     array<ast::Node *> internal_methods = {};
@@ -226,6 +250,7 @@ class Resolver {
     Resolver(ResolveContext *ctx);
 
     ResolveContext *get_context() { return m_ctx; }
+    GenericResolver *get_generics() { return &m_ctx->generics; }
 
     bool type_needs_destruction(ChiType *type);
     bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
