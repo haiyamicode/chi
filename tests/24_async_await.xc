@@ -42,7 +42,7 @@ func test_async_no_await() {
     println("=== Test 2: Async function without awaits ===");
 
     var p = simple_async(7);
-    printf("Got result: {}\n", p.get_value());
+    printf("Got result: {}\n", p.value()!);
 
     println("");
 }
@@ -97,7 +97,7 @@ func test_nested() {
     println("=== Test 4: Nested async calls ===");
 
     var p = nested_async(3);
-    printf("Result: {}\n", p.get_value());
+    printf("Result: {}\n", p.value()!);
 
     println("");
 }
@@ -117,7 +117,7 @@ func test_promise_state() {
 
     p.resolve(42);
     printf("After resolve - is_resolved: {}\n", p.is_resolved());
-    printf("Value: {}\n", p.get_value());
+    printf("Value: {}\n", p.value()!);
 
     println("");
 }
@@ -170,7 +170,7 @@ func test_locals_across_await() {
     println("=== Test 7: Local variables across await ===");
 
     var p = compute_with_locals(5, 10);
-    printf("Final: {}\n", p.get_value());
+    printf("Final: {}\n", p.value()!);
 
     println("");
 }
@@ -232,7 +232,7 @@ func test_promise_helper() {
         resolve(123);
     });
 
-    printf("promise resolved with: {}\n", p.get_value());
+    printf("promise resolved with: {}\n", p.value()!);
     println("");
 }
 

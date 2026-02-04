@@ -3281,7 +3281,13 @@ bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
     }
     auto a_sty = resolve_struct_type(a);
     auto b_sty = resolve_struct_type(b);
-    return a_sty->global_id == b_sty->global_id;
+    if (!a_sty || !b_sty || !a_sty->node || !b_sty->node) {
+        return false;
+    }
+    // Use resolve_global_id on the AST node to get the canonical struct ID.
+    // This handles generic instantiations correctly - both the base generic
+    // and all instantiations share the same node, so they're considered friends.
+    return resolve_global_id(a_sty->node) == resolve_global_id(b_sty->node);
 }
 
 ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,

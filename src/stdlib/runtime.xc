@@ -2,7 +2,7 @@ import "std/ops" as ops;
 
 struct HashBytes {
   private data: *void = null;
-  protected size: uint32 = 0;
+  protected length: uint32 = 0;
 }
 
 extern "C" {
@@ -70,7 +70,7 @@ struct __CxEnumBase<T> implements ops.Display {
   }
 }
 
-struct SharedData<T> {
+private struct SharedData<T> {
   ref_count: uint32;
   value: T;
 
@@ -81,13 +81,19 @@ struct SharedData<T> {
 }
 
 struct Shared<T> implements ops.CopyFrom<Shared<T>> {
-  data: *SharedData<T> = null;
+  private data: *SharedData<T> = null;
 
   func new(value: T) {
     this.data = new SharedData<T>{value};
   }
 
-  func release() {
+  private func retain() {
+    if this.data {
+      this.data.ref_count = this.data.ref_count + 1;
+    }
+  }
+
+  private func release() {
     if this.data {
       var rc = this.data.ref_count - 1;
       this.data.ref_count = rc;
@@ -102,9 +108,7 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
   }
 
   func copy_from(from: &Shared<T>) {
-    if from.data {
-      from.data.ref_count = from.data.ref_count + 1;
-    }
+    from.retain();
     this.release();
     this.data = from.data;
   }
@@ -131,12 +135,12 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
 // capture types with the same call signature.
 struct __CxLambda implements ops.CopyFrom<__CxLambda> {
     fn_ptr: *void = null;
-    size: uint32 = 0;
+    length: uint32 = 0;
     captures: *void = null;        // CxCapture payload pointer (or null)
-    
-    func new(fn: *void, sz: uint32) {
+
+    func new(fn: *void, len: uint32) {
         this.fn_ptr = fn;
-        this.size = sz;
+        this.length = len;
     }
 
     func set_captures_ptr(ptr: *void) {
@@ -163,7 +167,7 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
 
         // Copy all fields
         this.fn_ptr = from.fn_ptr;
-        this.size = from.size;
+        this.length = from.length;
         this.captures = from.captures;
     }
 
@@ -322,13 +326,13 @@ struct Array<T> implements
   ops.Display
 {
   private data: *T = null;
-	protected len: uint32 = 0;
+	protected length: uint32 = 0;
 	protected capacity: uint32 = 0;
 
 	func new(...values: T) {
 		cx_array_new(this);
-    if (values.len > 0) {
-      cx_array_reserve(this, sizeof T, values.len);
+    if (values.length > 0) {
+      cx_array_reserve(this, sizeof T, values.length);
       for value in values {
         this.add(value);
       }
@@ -352,7 +356,7 @@ struct Array<T> implements
   }
 
 	func index(index: uint32) &mut<T> {
-		assert(index < this.len, "index out of bounds");
+		assert(index < this.length, "index out of bounds");
 		return &mut this.data[index];
 	}
 
@@ -361,7 +365,7 @@ struct Array<T> implements
   }
 
   func end() uint32 {
-    return this.len;
+    return this.length;
   }
 
   func next(index: uint32) uint32 {
@@ -464,7 +468,7 @@ struct Buffer {
 
   func to_string() string {
     var str: string = "";
-    cx_string_from_chars(this.bytes.raw_data(), this.bytes.len, &str);
+    cx_string_from_chars(this.bytes.raw_data(), this.bytes.length, &str);
     return str;
   }
 }
@@ -499,7 +503,7 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
     if state.state != 0 { return; }
     state.state = 1;
     state.value = value;
-    for var i = 0; i < state.callbacks.len; i = i + 1 {
+    for var i = 0; i < state.callbacks.length; i = i + 1 {
       state.callbacks[i](value);
     }
   }
@@ -508,8 +512,8 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
     return this.data.as_ref().state == 1;
   }
 
-  func get_value() T {
-    return this.data.as_ref().value!;
+  func value() ?T {
+    return this.data.as_ref().value;
   }
 
   func then(callback: func(value: T)) {

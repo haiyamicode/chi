@@ -48,10 +48,10 @@ struct CxRefc {
     int32_t *refcnt;
 };
 
-// Mirrors the Chi __CxLambda struct layout: { fn_ptr, size, captures }
+// Mirrors the Chi __CxLambda struct layout: { fn_ptr, length, captures }
 struct CxLambda {
     void *fn_ptr;
-    uint32_t size;
+    uint32_t length;
     void *captures; // CxCapture pointer (or null)
 };
 

@@ -18,8 +18,8 @@ func test_array() {
   var b = a;
   a.clear();
   a.add(3);
-  printf("a.size: {}\n", a.len);
-  printf("b.size: {}\n", b.len);
+  printf("a.length: {}\n", a.length);
+  printf("b.length: {}\n", b.length);
   printf("a[0]: {}\n", a[0]);
   printf("b[0]: {}\n", b[0]);
 }
