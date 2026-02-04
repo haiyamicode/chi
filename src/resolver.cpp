@@ -241,6 +241,14 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     from_type = from_type->eval();
     to_type = to_type->eval();
 
+    // If either type is Infer with inferred_type, use the inferred type
+    if (from_type->kind == TypeKind::Infer && from_type->data.infer.inferred_type) {
+        from_type = from_type->data.infer.inferred_type;
+    }
+    if (to_type->kind == TypeKind::Infer && to_type->data.infer.inferred_type) {
+        to_type = to_type->data.infer.inferred_type;
+    }
+
     if (is_same_type(from_type, to_type)) {
         return true;
     }
@@ -518,6 +526,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto local_fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
             resolve(data.body, local_fn_scope);
 
+            // After body resolution, sync the FnLambda's is_placeholder with the inner Fn type
+            // This is needed when return type was inferred from the body (placeholder -> concrete)
+            if (proto->kind == TypeKind::FnLambda && !lambda_fn_type->is_placeholder) {
+                proto->is_placeholder = false;
+            }
+
             // resolve captures
             for (auto &cap : data.captures) {
                 auto type = resolve(cap.decl, scope);
@@ -633,7 +647,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.return_type) {
             return_type = resolve_value(data.return_type, fn_scope);
         } else if (expected_fn) {
-            return_type = expected_fn->return_type;
+            auto expected_return = expected_fn->return_type;
+            // If expected return type is a placeholder, create an Infer type instead.
+            // This allows us to infer the actual type from the lambda body rather than
+            // copying the placeholder directly.
+            if (expected_return && expected_return->kind == TypeKind::Placeholder) {
+                auto infer_type = create_type(TypeKind::Infer);
+                infer_type->data.infer.placeholder = expected_return;
+                infer_type->is_placeholder = true;  // Mark as placeholder until inferred
+                return_type = infer_type;
+            } else {
+                return_type = expected_return;
+            }
         } else {
             return_type = get_system_types()->void_;
         }
@@ -1100,6 +1125,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             value_type_hint = get_promise_value_type(return_type);
         }
 
+        // Don't use placeholder or Infer as value type hint - let expression infer its type
+        if (value_type_hint && (value_type_hint->kind == TypeKind::Placeholder ||
+                                value_type_hint->kind == TypeKind::Infer)) {
+            value_type_hint = nullptr;
+        }
+
         auto expr_scope = scope.set_is_escaping(true).set_value_type(value_type_hint);
         auto expr_type = data.expr ? resolve(data.expr, expr_scope) : get_system_types()->void_;
 
@@ -1108,7 +1139,33 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (scope.parent_fn_def()->is_async() && is_promise_type(return_type)) {
             expected_type = get_promise_value_type(return_type);
         }
-        check_assignment(data.expr, expr_type, expected_type);
+
+        // If return type is an Infer type, set the inferred_type to the expression type.
+        // This enables proper type inference for generic type parameters (e.g., map<U>).
+        if (return_type && return_type->kind == TypeKind::Infer && expr_type &&
+            expr_type->kind != TypeKind::Placeholder && expr_type->kind != TypeKind::Infer) {
+            return_type->data.infer.inferred_type = expr_type;
+            // Clear is_placeholder if the inferred type is concrete - this allows
+            // codegen to compile the type correctly
+            if (!expr_type->is_placeholder) {
+                return_type->is_placeholder = false;
+            }
+        }
+
+        // For Infer types, check assignment against the inferred type if available
+        if (expected_type && expected_type->kind == TypeKind::Infer) {
+            auto inferred = expected_type->data.infer.inferred_type;
+            if (inferred) {
+                expected_type = inferred;
+            } else {
+                // First return in this lambda - no check needed, we're setting the type
+                expected_type = nullptr;
+            }
+        }
+
+        if (expected_type) {
+            check_assignment(data.expr, expr_type, expected_type);
+        }
         return return_type;
     }
     case NodeType::ParenExpr: {
@@ -2736,6 +2793,17 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Placeholder:
         return handle_placeholder(type, subs);
 
+    case TypeKind::Infer: {
+        // For Infer types, return the inferred type if available
+        auto inferred = type->data.infer.inferred_type;
+        if (inferred) {
+            // Recursively substitute in case the inferred type has placeholders
+            return make_recursive_call(inferred, subs);
+        }
+        // If no inferred type, return as-is (should not happen in normal flow)
+        return type;
+    }
+
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
@@ -2972,8 +3040,36 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
                                     RecursiveCallHandler make_recursive_call) {
     // Handle different type kinds with same structure as recursive_type_replace
     switch (param_type->kind) {
-    case TypeKind::Placeholder:
-        return handle_placeholder(param_type, arg_type);
+    case TypeKind::Placeholder: {
+        // If arg_type is an Infer type with inferred_type, use the inferred type
+        ChiType *concrete_arg = arg_type;
+        if (arg_type->kind == TypeKind::Infer && arg_type->data.infer.inferred_type) {
+            concrete_arg = arg_type->data.infer.inferred_type;
+        }
+        return handle_placeholder(param_type, concrete_arg);
+    }
+
+    case TypeKind::Infer: {
+        // For Infer types, if we have an inferred_type, use it to bind the original placeholder.
+        // This allows type inference from lambda return types to propagate to generic type params.
+        auto &infer_data = param_type->data.infer;
+        if (infer_data.inferred_type && infer_data.placeholder) {
+            // Bind the placeholder to the inferred type
+            return handle_placeholder(infer_data.placeholder, infer_data.inferred_type);
+        }
+        // If arg_type is also an Infer with inferred_type, use that
+        if (arg_type->kind == TypeKind::Infer) {
+            auto &arg_infer = arg_type->data.infer;
+            if (arg_infer.inferred_type && infer_data.placeholder) {
+                return handle_placeholder(infer_data.placeholder, arg_infer.inferred_type);
+            }
+        }
+        // Otherwise, just try to unify with the arg_type directly
+        if (infer_data.placeholder) {
+            return handle_placeholder(infer_data.placeholder, arg_type);
+        }
+        return false;
+    }
 
     case TypeKind::Pointer:
     case TypeKind::Reference:
@@ -3011,11 +3107,17 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
 
     case TypeKind::Fn: {
         // Must be function types with unifiable signatures
-        if (arg_type->kind != TypeKind::Fn) {
+        // Also accept FnLambda as argument (extract inner Fn type)
+        ChiTypeFn *arg_fn = nullptr;
+        if (arg_type->kind == TypeKind::Fn) {
+            arg_fn = &arg_type->data.fn;
+        } else if (arg_type->kind == TypeKind::FnLambda) {
+            arg_fn = &arg_type->data.fn_lambda.fn->data.fn;
+        } else {
             return false;
         }
         auto &param_data = param_type->data.fn;
-        auto &arg_data = arg_type->data.fn;
+        auto &arg_data = *arg_fn;
 
         // Check return type
         if (!make_recursive_call(param_data.return_type, arg_data.return_type)) {
@@ -3595,11 +3697,18 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         node->data.fn_call_expr.generated_fn = fn_variant;
 
         // Check argument types against substituted parameter types
+        // Also update argument resolved_type to substitute any Infer types
         for (size_t i = 0; i < n_args; i++) {
             auto param_type = fn->get_param_at(i);
             auto arg_type = arg_types[i];
             auto concrete_param_type = type_placeholders_sub_map(param_type, &type_substitutions);
             check_assignment(args->at(i), arg_type, concrete_param_type);
+
+            // Substitute Infer types in the argument's resolved_type so codegen sees concrete types
+            // Check for FnLambda since it may contain Infer types even when is_placeholder is false
+            if (arg_type->is_placeholder || arg_type->kind == TypeKind::FnLambda) {
+                args->at(i)->resolved_type = type_placeholders_sub_map(arg_type, &type_substitutions);
+            }
         }
 
         return fn_variant->resolved_type->data.fn.return_type;
@@ -3709,12 +3818,22 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
     }
 
     auto key = format_type_data(TypeKind::Fn, (ChiType::Data *)&fn);
-    if (auto cached = m_ctx->composite_types.get(key)) {
-        return *cached;
+
+    // Don't cache function types with placeholder return types - they may be
+    // modified during lambda body resolution for type inference
+    bool should_cache = !ret->is_placeholder;
+    if (should_cache) {
+        if (auto cached = m_ctx->composite_types.get(key)) {
+            return *cached;
+        }
     }
+
     auto type = create_type(TypeKind::Fn);
     type->data.fn = fn;
-    m_ctx->composite_types[key] = type;
+
+    if (should_cache) {
+        m_ctx->composite_types[key] = type;
+    }
     for (auto param : fn.params) {
         if (param->is_placeholder) {
             type->is_placeholder = true;
@@ -4054,6 +4173,14 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
 bool Resolver::is_same_type(ChiType *a, ChiType *b) {
     a = to_value_type(a);
     b = to_value_type(b);
+
+    // If either type is Infer with inferred_type, use the inferred type
+    if (a->kind == TypeKind::Infer && a->data.infer.inferred_type) {
+        a = a->data.infer.inferred_type;
+    }
+    if (b->kind == TypeKind::Infer && b->data.infer.inferred_type) {
+        b = b->data.infer.inferred_type;
+    }
 
     // First check pointer equality
     if (a == b) {

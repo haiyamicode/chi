@@ -80,10 +80,12 @@ static bool has_placeholder_descendants(ChiType *type) {
     switch (type->kind) {
     case TypeKind::Fn:
         for (auto p : type->data.fn.params) {
-            if (p->is_placeholder)
+            if (p->is_placeholder || p->kind == TypeKind::Infer)
                 return true;
         }
-        if (type->data.fn.return_type && type->data.fn.return_type->is_placeholder)
+        if (type->data.fn.return_type &&
+            (type->data.fn.return_type->is_placeholder ||
+             type->data.fn.return_type->kind == TypeKind::Infer))
             return true;
         return false;
     case TypeKind::FnLambda:
@@ -94,6 +96,11 @@ static bool has_placeholder_descendants(ChiType *type) {
 }
 
 ChiType *Compiler::eval_type(ChiType *type) {
+    // Handle Infer types - extract the inferred concrete type
+    if (type->kind == TypeKind::Infer && type->data.infer.inferred_type) {
+        return eval_type(type->data.infer.inferred_type);
+    }
+
     // Use TypeEnv from GenericResolver (set by compile_fn_proto)
     if (m_fn && m_fn->type_env && (type->is_placeholder || has_placeholder_descendants(type))) {
         type = get_resolver()->type_placeholders_sub_map(type, m_fn->type_env);
@@ -4450,6 +4457,15 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return compile_type(type->data.subtype.final_type);
     }
     case TypeKind::Placeholder: {
+        return compile_type(get_system_types()->void_);
+    }
+    case TypeKind::Infer: {
+        // For Infer types, use the inferred type if available
+        auto inferred = type->data.infer.inferred_type;
+        if (inferred) {
+            return compile_type(inferred);
+        }
+        // Fallback to void if no inferred type (should not happen)
         return compile_type(get_system_types()->void_);
     }
     case TypeKind::Enum: {

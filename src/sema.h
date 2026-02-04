@@ -235,6 +235,14 @@ struct ChiTypeModule {
     Scope *scope = nullptr;
 };
 
+// Infer type - marks a type position where the type should be inferred from usage.
+// Used for lambda return type inference when the expected type contains a placeholder.
+// After inference, inferred_type is set to the concrete type.
+struct ChiTypeInfer {
+    ChiType *placeholder = nullptr;    // The original placeholder this replaces (e.g., U)
+    ChiType *inferred_type = nullptr;  // Set after body resolution to the inferred concrete type
+};
+
 struct ChiType {
     TypeKind kind = TypeKind::Void;
     optional<string> name = {};
@@ -263,6 +271,7 @@ struct ChiType {
         ChiTypeModule module;
         ChiTypeEnum enum_;
         ChiTypeEnumValue enum_value;
+        ChiTypeInfer infer;
 
         Data() {}
 
@@ -302,6 +311,7 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(module, Module, ChiTypeModule)
             CHITYPE_CASE_INIT_FIELD(enum_, Enum, ChiTypeEnum)
             CHITYPE_CASE_INIT_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
+            CHITYPE_CASE_INIT_FIELD(infer, Infer, ChiTypeInfer)
         default:
             break;
         }
@@ -335,6 +345,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(module, Module, ChiTypeModule)
             CHITYPE_CASE_DESTROY_FIELD(enum_, Enum, ChiTypeEnum)
             CHITYPE_CASE_DESTROY_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
+            CHITYPE_CASE_DESTROY_FIELD(infer, Infer, ChiTypeInfer)
         default:
             break;
         }
@@ -375,6 +386,7 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(module, Module, ChiTypeModule)
             CHITYPE_CASE_CLONE_FIELD(enum_, Enum, ChiTypeEnum)
             CHITYPE_CASE_CLONE_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
+            CHITYPE_CASE_CLONE_FIELD(infer, Infer, ChiTypeInfer)
         default:
             break;
         }

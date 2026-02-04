@@ -142,5 +142,33 @@ func main() {
     var point_wrapper: Wrapper<Point> = make_wrapper(func() { return {30, 40}; });
     printf("make_wrapper inferred T=Point: Point({}, {})\n", point_wrapper.value.x, point_wrapper.value.y);
 
+    // Test 17: Array.filter with lambda
+    printf("\nTest 17: Array.filter\n");
+    var nums: Array<int> = {1, 2, 3, 4, 5, 6};
+    var evens = nums.filter(func(n) => n % 2 == 0);
+    printf("filter evens from [1,2,3,4,5,6]: ");
+    for n in evens {
+        printf("{} ", n);
+    }
+    printf("\n");
+
+    // Test 18: Array.map with lambda
+    printf("\nTest 18: Array.map\n");
+    var doubled_arr = nums.map<int>(func(n) => n * 2);
+    printf("map *2 on [1,2,3,4,5,6]: ");
+    for n in doubled_arr {
+        printf("{} ", n);
+    }
+    printf("\n");
+
+    // Test 19: Array.map returning struct (tests struct return through generic)
+    printf("\nTest 19: Array.map returning struct\n");
+    var points = nums.map<Point>(func(n) { return Point{n, n * 10}; });
+    printf("map to Points: ");
+    for p in points {
+        printf("({},{}) ", p.x, p.y);
+    }
+    printf("\n");
+
     printf("\nAll lambda inference tests passed!\n");
 }
