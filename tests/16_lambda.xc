@@ -328,7 +328,7 @@ func test_lambda_copy_semantics() {
 
   // Test 1: Lambda copy via variable assignment
   var x: int = 42;
-  var f1 = func() int {
+  var f1 = func () int {
     return x;
   };
   var f2 = f1;  // Copy - should share captures
@@ -336,21 +336,21 @@ func test_lambda_copy_semantics() {
   printf("f1(): {}, f2(): {}\n", f1(), f2());
 
   // Reassign f1, f2 should still work with original capture
-  f1 = func() int { return 0; };
+  f1 = func () int { return 0; };
   printf("After f1 reassignment - f1(): {}, f2(): {}\n", f1(), f2());
 
   // Test 2: Lambda self-assignment (should be safe)
   var y: int = 99;
-  var f3 = func() int { return y; };
+  var f3 = func () int { return y; };
   f3 = f3;  // Self-assignment
   printf("After self-assignment: {}\n", f3());
 
   // Test 3: Lambda reassignment (should release old captures)
   var a: int = 10;
   var b: int = 20;
-  var f4 = func() int { return a; };
+  var f4 = func () int { return a; };
   printf("First lambda: {}\n", f4());
-  f4 = func() int { return b; };  // Reassign
+  f4 = func () int { return b; };  // Reassign
   printf("After reassignment: {}\n", f4());
 
   println("");
@@ -362,7 +362,7 @@ func test_lambda_capture_lifecycle() {
   var box: TrackedBox = {42};
 
   // Create lambda that captures TrackedBox
-  var f1 = func() int {
+  var f1 = func () int {
     return box.id;
   };
   printf("f1() = {}\n", f1());
@@ -377,7 +377,7 @@ func test_lambda_capture_lifecycle() {
 
   // Reassign f1 to new lambda with different capture
   var box2: TrackedBox = {99};
-  f1 = func() int {
+  f1 = func () int {
     return box2.id;
   };
   printf("f1() = {}, f2() = {}, f3() = {}\n", f1(), f2(), f3());

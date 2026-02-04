@@ -3,6 +3,6 @@ struct Outer {
     struct Inner {
         enum State {
             A {
-                var field: func(int) -> {
+                var field: func (int) -> {
                     struct VeryNested {
                         var x

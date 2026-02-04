@@ -227,7 +227,7 @@ func test_delay_value_capture() {
 func test_promise_helper() {
     println("=== Test 11: promise<T>() helper ===");
 
-    var p = promise<int>(func (resolve: func(value: int)) {
+    var p = promise<int>(func (resolve: func (value: int)) {
         println("executor called");
         resolve(123);
     });

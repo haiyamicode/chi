@@ -1,8 +1,8 @@
 // Malformed lambdas
 func main() {
-    var f = func(x: int {
+    var f = func (x: int {
         return x + ;
     
-    var g = func() -> {
+    var g = func () -> {
         if (true {
-            var nested = func(
+            var nested = func (

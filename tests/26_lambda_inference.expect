@@ -24,16 +24,16 @@ Test 8: Mixed explicit/inferred
 apply_int(3, n: int => n + 10) = 13
 
 Test 9: Arrow syntax
-apply_int(4, func(n) => n * 3) = 12
+apply_int(4, func (n) => n * 3) = 12
 
 Test 10: Arrow multiple params
-combine(5, 7, func(x, y) => x * y) = 35
+combine(5, 7, func (x, y) => x * y) = 35
 
 Test 11: Arrow explicit params
-apply_int(8, func(n: int) => n + 100) = 108
+apply_int(8, func (n: int) => n + 100) = 108
 
 Test 12: Arrow bool return
-filter_positive(10, func(n) => n > 5) = 10
+filter_positive(10, func (n) => n > 5) = 10
 
 Test 13: Return type inference
 make_wrapper inferred T=int from return type: 42

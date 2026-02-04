@@ -13,7 +13,7 @@ func identity<T>(value: T) T {
 }
 
 // Generic function that transforms values
-func transform<T, U>(value: T, transformer: func(value: T) U) U {
+func transform<T, U>(value: T, transformer: func (value: T) U) U {
     return transformer(value);
 }
 
@@ -28,7 +28,7 @@ struct Container<T: ops.Add> {
         return this.value;
     }
 
-    func zmap<U>(transform: func(value: T) U) Container<U> {
+    func zmap<U>(transform: func (value: T) U) Container<U> {
         return {transform(this.value)};
     }
 
@@ -55,11 +55,11 @@ func main() {
     printf("identity('A') [inferred] = {}\n", char_result_inferred);
     
     // Test generic transform function
-    var doubled = transform<int, int>(5, func(x: int) int { return x * 2; });
+    var doubled = transform<int, int>(5, func (x: int) int { return x * 2; });
     printf("transform<int, int>(5, double) = {}\n", doubled);
     
     // Test with inferred type parameters
-    var doubled_inferred = transform(5, func(x: int) int { return x * 2; });
+    var doubled_inferred = transform(5, func (x: int) int { return x * 2; });
     printf("transform(5, double) [inferred] = {}\n", doubled_inferred);
     
     // Test generic struct with method type parameters
@@ -78,13 +78,13 @@ func main() {
     printf("final value [inferred]: {}\n", final_value_inferred);
     
     // Test another method type parameter usage
-    var float_container = container.zmap<float>(func(i: int) float { 
+    var float_container = container.zmap<float>(func (i: int) float { 
         return i as float * 0.5; 
     });
     printf("float result: {}\n", float_container.get());
     
     // Test with inferred method type parameter
-    var float_container_inferred = container.zmap(func(i: int) float {
+    var float_container_inferred = container.zmap(func (i: int) float {
         return i as float * 0.5;
     });
     printf("float result [inferred]: {}\n", float_container_inferred.get());

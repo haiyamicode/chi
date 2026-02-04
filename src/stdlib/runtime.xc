@@ -393,7 +393,7 @@ struct Array<T> implements
     return this.data;
   }
 
-  func filter(predicate: func(value: T) bool) Array<T> {
+  func filter(predicate: func (value: T) bool) Array<T> {
     var result: Array<T> = {};
     for item in this {
       if predicate(item) {
@@ -403,7 +403,7 @@ struct Array<T> implements
     return result;
   }
 
-  func map<U>(transform: func(value: T) U) Array<U> {
+  func map<U>(transform: func (value: T) U) Array<U> {
     var result: Array<U> = {};
     for item in this {
       result.add(transform(item));
@@ -480,7 +480,7 @@ struct Unit {}
 struct PromiseState<T> {
   state: uint32 = 0;      // 0=pending, 1=resolved, 2=rejected
   value: ?T = null;
-  callbacks: Array<func(value: T)> = {};
+  callbacks: Array<func (value: T)> = {};
 }
 
 struct Promise<T> implements ops.CopyFrom<Promise<T>> {
@@ -516,7 +516,7 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
     return this.data.as_ref().value;
   }
 
-  func then(callback: func(value: T)) {
+  func then(callback: func (value: T)) {
     var state = this.data.as_ref();
     if state.state == 1 {
       // Already resolved - invoke immediately
@@ -532,7 +532,7 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
   }
 }
 
-func promise<T>(executor: func(resolve: func(value: T))) Promise<T> {
+func promise<T>(executor: func (resolve: func (value: T))) Promise<T> {
     var p: Promise<T> = {};
     executor(func [p] (value) {
       p.resolve(value);
