@@ -239,7 +239,7 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
   func to_array() Array<JsonValue> {
     let result: Array<JsonValue> = {};
     let len = this.length();
-    for var i=0; i<len; i++ {
+    for var i = 0; i < len; i++ {
       let new_value: JsonValue = {};
       cx_json_array_index(this.data, i, &new_value);
       result.add(new_value);

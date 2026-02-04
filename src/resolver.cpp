@@ -838,7 +838,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             var_type = resolve_value(data.type, scope);
         }
         if (data.expr) {
-            auto var_scope = var_type ? scope.set_value_type(var_type) : scope;
+            // Use explicit type, or scope.value_type as hint for type inference
+            auto type_hint = var_type ? var_type : scope.value_type;
+            auto var_scope = type_hint ? scope.set_value_type(type_hint) : scope;
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
             if (var_type) {
@@ -896,7 +898,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto var_scope = scope.set_value_type(t1).set_move_outlet(data.op1);
             t2 = resolve(data.op2, var_scope);
         } else {
-            t2 = resolve(data.op2, scope);
+            // Propagate type context for literal inference (e.g., `x == 0` where x is uint32)
+            auto op2_scope = scope.set_value_type(t1);
+            t2 = resolve(data.op2, op2_scope);
         }
 
         // For assignment operators, just check assignment validity
@@ -1444,7 +1448,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             value_type->data.enum_value.discriminator_field = discriminator_field;
             auto discriminator_type = data.discriminator_type
                                           ? to_value_type(resolve(data.discriminator_type, scope))
-                                          : m_ctx->system_types.int_;
+                                          : m_ctx->system_types.uint32;
 
             // Validate discriminator type - only int is supported for now
             if (discriminator_type->kind != TypeKind::Int) {
@@ -1726,14 +1730,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::IndexExpr: {
         auto &data = node->data.index_expr;
         auto expr_type = resolve(data.expr, scope);
-        auto subscript_type = resolve(data.subscript, scope);
-        if (!expr_type || !subscript_type) {
+        if (!expr_type) {
             return nullptr;
         }
 
+        // Determine the expected index type based on expr_type
+        ChiType *expected_index_type = nullptr;
         switch (expr_type->kind) {
         case TypeKind::Pointer:
-            check_assignment(data.subscript, subscript_type, get_system_types()->int_);
+            expected_index_type = get_system_types()->uint32;
             break;
         case TypeKind::Struct:
         case TypeKind::Subtype: {
@@ -1743,21 +1748,32 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(node, errors::CANNOT_SUBSCRIPT, format_type(expr_type));
                 return nullptr;
             }
-
             auto method_p = struct_->member_table.get("index");
             assert(method_p);
             auto method = *method_p;
-
-            auto index_type = method->resolved_type->data.fn.get_param_at(0);
-            check_assignment(data.subscript, subscript_type, index_type);
+            expected_index_type = method->resolved_type->data.fn.get_param_at(0);
             data.resolved_method = method;
-            return method->resolved_type->data.fn.return_type->get_elem();
+            break;
         }
         default:
             error(node, errors::CANNOT_SUBSCRIPT, format_type(expr_type));
             return nullptr;
         }
-        return expr_type->get_elem();
+
+        // Resolve subscript with expected type context for literal inference
+        auto subscript_scope = scope.set_value_type(expected_index_type);
+        auto subscript_type = resolve(data.subscript, subscript_scope);
+        if (!subscript_type) {
+            return nullptr;
+        }
+
+        check_assignment(data.subscript, subscript_type, expected_index_type);
+
+        if (expr_type->kind == TypeKind::Pointer) {
+            return expr_type->get_elem();
+        } else {
+            return data.resolved_method->resolved_type->data.fn.return_type->get_elem();
+        }
     }
     case NodeType::EnumVariant: {
         auto &data = node->data.enum_variant;
@@ -1829,8 +1845,33 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
+
+        // Try to infer loop variable type from condition (e.g., `for var i=0; i<len; i++`)
+        ChiType *loop_var_hint = nullptr;
+        if (data.init && data.condition && data.init->type == NodeType::VarDecl) {
+            auto &init_data = data.init->data.var_decl;
+            // Only if var has no explicit type and has an initializer
+            if (!init_data.type && init_data.expr) {
+                // Check if condition is a comparison with the loop var
+                if (data.condition->type == NodeType::BinOpExpr) {
+                    auto &cond_data = data.condition->data.bin_op_expr;
+                    auto op = cond_data.op_type;
+                    if (op == TokenType::LT || op == TokenType::LE ||
+                        op == TokenType::GT || op == TokenType::GE) {
+                        // Check if op1 is the loop variable
+                        if (cond_data.op1->type == NodeType::Identifier &&
+                            cond_data.op1->name == data.init->name) {
+                            // Resolve op2 to get the type hint
+                            loop_var_hint = resolve(cond_data.op2, scope);
+                        }
+                    }
+                }
+            }
+        }
+
         if (data.init) {
-            resolve(data.init, scope);
+            auto init_scope = loop_var_hint ? scope.set_value_type(loop_var_hint) : scope;
+            resolve(data.init, init_scope);
         }
         if (data.condition) {
             auto cond_type = resolve(data.condition, scope);
@@ -1914,7 +1955,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::KW_SIZEOF: {
             auto type = resolve_value(data.expr, scope);
             data.expr->resolved_type = type;
-            return get_system_types()->int_;
+            return get_system_types()->uint32;
         }
         default:
             panic("unhandled prefix operator {}", data.prefix->to_string());
@@ -2309,6 +2350,24 @@ void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *t
     // If from_type is null (failed to resolve), skip assignment check
     if (!from_type || !to_type) {
         return;
+    }
+
+    // Check for negative literal being assigned to unsigned type
+    if (!is_explicit && to_type->kind == TypeKind::Int && to_type->data.int_.is_unsigned) {
+        if (value->type == ast::NodeType::LiteralExpr &&
+            value->token->type == TokenType::INT) {
+            // Check if the literal is negative (preceded by unary minus)
+            // Note: This is handled by UnaryOpExpr, not here
+        } else if (value->type == ast::NodeType::UnaryOpExpr) {
+            auto &unary = value->data.unary_op_expr;
+            if (unary.op_type == TokenType::SUB &&
+                unary.op1->type == ast::NodeType::LiteralExpr &&
+                unary.op1->token->type == TokenType::INT) {
+                error(value, "cannot convert negative literal to unsigned type {}",
+                      format_type(to_type, true));
+                return;
+            }
+        }
     }
 
     if (!can_assign(from_type, to_type, is_explicit)) {
