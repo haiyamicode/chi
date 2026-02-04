@@ -602,7 +602,35 @@ Node *Parser::parse_fn_lambda() {
     fn->parent_fn =
         get_scope()->find_parent(NodeType::FnDef); // Set parent function for nested lambda chain
     proto->data.fn_proto.fn_def_node = fn;
-    parse_fn_block(fn);
+
+    // Check for arrow syntax: func(x) => expr
+    if (next_is(TokenType::ARROW)) {
+        auto arrow = read(); // consume =>
+
+        // Create scope and add params
+        auto scope = m_ctx->resolver->push_scope(fn);
+        auto &fn_proto = proto->data.fn_proto;
+        for (auto param : fn_proto.params) {
+            add_to_scope(param);
+            param->parent_fn = fn;
+        }
+
+        // Parse expression and wrap in return statement
+        auto expr = parse_expr();
+        auto ret = create_node(NodeType::ReturnStmt, arrow);
+        ret->data.return_stmt.expr = expr;
+
+        // Create block containing the return statement
+        auto block = create_node(NodeType::Block, arrow);
+        block->data.block.scope = scope;
+        block->data.block.statements.add(ret);
+        block->data.block.is_arrow = true;
+        fn->data.fn_def.body = block;
+
+        m_ctx->resolver->pop_scope();
+    } else {
+        parse_fn_block(fn);
+    }
     return fn;
 }
 
@@ -779,7 +807,8 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
         proto->data.fn_proto.is_vararg = true;
     }
     expect(TokenType::RPAREN);
-    if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON)) {
+    // Don't parse return type if next is {, ;, or => (arrow for lambda expression body)
+    if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON) && !next_is(TokenType::ARROW)) {
         proto->data.fn_proto.return_type = parse_type_expr(true);
     }
 
@@ -856,17 +885,14 @@ Node *Parser::parse_fn_param() {
     }
     auto iden = expect(TokenType::IDEN);
 
-    // Check if type is missing (e.g., at end of parameter list)
+    // Check if type is provided (colon indicates type annotation)
     auto token = get();
-    Node *type;
-    if (token->type == TokenType::END || token->type == TokenType::RPAREN ||
-        token->type == TokenType::COMMA) {
-        // Missing type - create error node but continue parsing
-        error(iden, "missing type declaration for parameter '{}'", iden->str);
-        type = create_error_node();
-    } else {
+    Node *type = nullptr;
+    if (token->type == TokenType::COLON) {
+        // Has type annotation
         type = parse_type_expr();
     }
+    // If no colon, type remains nullptr - will be inferred during resolution
 
     auto param = create_node(NodeType::ParamDecl, iden);
     param->data.param_decl.type = type;

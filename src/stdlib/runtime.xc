@@ -530,7 +530,7 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
 
 func promise<T>(executor: func(resolve: func(value: T))) Promise<T> {
     var p: Promise<T> = {};
-    executor(func [p] (value: T) {
+    executor(func [p] (value) {
       p.resolve(value);
     });
     return p;

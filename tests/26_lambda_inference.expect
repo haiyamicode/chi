@@ -1,0 +1,38 @@
+Test 1: Basic inference
+apply_int(5, n => n * 2) = 10
+
+Test 2: Multiple params
+combine(10, 20, (x, y) => x + y) = 30
+
+Test 3: Explicit return, inferred params
+apply_int(7, n => n * 2) = 14
+
+Test 4: Char type
+apply_char('a', to_upper) = 'A'
+
+Test 5: Transform with inference
+transform_int(6, x => x * x) = 36
+
+Test 6: Bool return
+filter_positive(42, n => n > 0) = 42
+filter_positive(-5, n => n > 0) = 0
+
+Test 7: Void return
+for_each got: 100
+
+Test 8: Mixed explicit/inferred
+apply_int(3, n: int => n + 10) = 13
+
+Test 9: Arrow syntax
+apply_int(4, func(n) => n * 3) = 12
+
+Test 10: Arrow multiple params
+combine(5, 7, func(x, y) => x * y) = 35
+
+Test 11: Arrow explicit params
+apply_int(8, func(n: int) => n + 100) = 108
+
+Test 12: Arrow bool return
+filter_positive(10, func(n) => n > 5) = 10
+
+All lambda inference tests passed!

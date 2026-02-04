@@ -225,7 +225,7 @@ static bool is_safe_int_conversion(ChiType *from, ChiType *to) {
         return false;
     }
 
-    // If target is larger, it's always safe
+    // If target is larger or equal size, it's safe
     if (to_size >= from_size) {
         return true;
     }
@@ -618,8 +618,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             type_param_types.add(type_param);
         }
 
-        auto return_type = data.return_type ? resolve_value(data.return_type, fn_scope)
-                                            : get_system_types()->void_;
+        // Get expected function type from context (for lambda type inference)
+        ChiTypeFn *expected_fn = nullptr;
+        if (is_lambda && scope.value_type) {
+            if (scope.value_type->kind == TypeKind::Fn) {
+                expected_fn = &scope.value_type->data.fn;
+            } else if (scope.value_type->kind == TypeKind::FnLambda) {
+                expected_fn = &scope.value_type->data.fn_lambda.fn->data.fn;
+            }
+        }
+
+        // Infer return type from expected function type if not provided
+        ChiType *return_type = nullptr;
+        if (data.return_type) {
+            return_type = resolve_value(data.return_type, fn_scope);
+        } else if (expected_fn) {
+            return_type = expected_fn->return_type;
+        } else {
+            return_type = get_system_types()->void_;
+        }
 
         // Async functions must explicitly return Promise<T>
         bool is_async = node->declspec().is_async();
@@ -643,7 +660,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(param, errors::VARIADIC_NOT_FINAL, param->name);
                 return create_type(TypeKind::Fn);
             }
-            auto param_type = resolve_value(param, fn_scope);
+            // Pass expected parameter type for inference if available
+            ChiType *expected_param_type = nullptr;
+            if (expected_fn && (size_t)i < expected_fn->params.len) {
+                expected_param_type = expected_fn->params[i];
+            }
+            auto param_scope = expected_param_type ? fn_scope.set_value_type(expected_param_type) : fn_scope;
+            auto param_type = resolve_value(param, param_scope);
             if (pdata.is_variadic) {
                 param_type = get_array_type(param_type);
                 param->resolved_type = param_type;
@@ -790,7 +813,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ParamDecl: {
         auto &data = node->data.param_decl;
-        auto result = resolve_value(data.type, scope);
+        ChiType *result = nullptr;
+        if (data.type) {
+            result = resolve_value(data.type, scope);
+        } else if (scope.value_type) {
+            // Infer type from context (lambda type inference)
+            result = scope.value_type;
+        } else {
+            error(node, "missing type annotation for parameter '{}'", node->name);
+            return create_type(TypeKind::Void);
+        }
         // Resolve default value if present
         if (data.default_value) {
             auto default_scope = scope.set_value_type(result);
@@ -936,7 +968,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.op_type == TokenType::MUTREF) {
             scope = scope.set_is_lhs(true);
         }
-        auto t = resolve(data.op1, scope);
+        // For unary arithmetic operators, don't propagate value_type context to operand
+        // because the operator determines its own result type (e.g., -1 should be int, not uint64)
+        auto operand_scope = scope;
+        if (data.op_type == TokenType::SUB || data.op_type == TokenType::ADD) {
+            operand_scope = scope.set_value_type(nullptr);
+        }
+        auto t = resolve(data.op1, operand_scope);
         switch (auto tt = data.op_type) {
         case TokenType::SUB:
         case TokenType::ADD:
@@ -3234,10 +3272,12 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     if (fn->is_generic()) {
         // Resolve arguments first to get their types
         // Clear move_outlet for function args - they're passed by value
-        auto arg_scope = scope.set_move_outlet(nullptr);
+        // Also pass expected parameter types for lambda type inference
         array<ChiType *> arg_types;
         for (size_t i = 0; i < n_args; i++) {
             auto arg = args->at(i);
+            auto param_type = fn->get_param_at(i);
+            auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
             auto arg_type = resolve(arg, arg_scope);
             arg_types.add(arg_type);
         }
