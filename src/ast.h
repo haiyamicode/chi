@@ -175,6 +175,7 @@ struct FnDef {
 struct ParamDecl {
     Node *type = nullptr;
     bool is_variadic = false;
+    Node *default_value = nullptr;
 };
 
 struct TypeParam {

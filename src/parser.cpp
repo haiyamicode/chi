@@ -833,6 +833,18 @@ bool Parser::parse_fn_params(NodeList *params) {
         }
         consume();
     }
+
+    // Validate: required params cannot come after optional params
+    bool seen_optional = false;
+    for (auto param : *params) {
+        bool has_default = param->data.param_decl.default_value != nullptr;
+        if (has_default) {
+            seen_optional = true;
+        } else if (seen_optional && !param->data.param_decl.is_variadic) {
+            error(param->token, "required parameter cannot follow optional parameter");
+        }
+    }
+
     return false;
 }
 
@@ -859,6 +871,13 @@ Node *Parser::parse_fn_param() {
     auto param = create_node(NodeType::ParamDecl, iden);
     param->data.param_decl.type = type;
     param->data.param_decl.is_variadic = is_variadic;
+
+    // Check for default value
+    if (next_is(TokenType::ASS)) {
+        consume();  // consume '='
+        param->data.param_decl.default_value = parse_expr();
+    }
+
     return param;
 }
 

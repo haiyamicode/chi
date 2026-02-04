@@ -1,0 +1,10 @@
+Hello, Alice!
+Hi, Bob!
+n=42, width=0, fill=' '
+n=42, width=5, fill=' '
+n=42, width=5, fill='0'
+add_offset(5) = 25
+add_offset(5, 100) = 105
+Hey World!
+Hey World?
+Hello Chi!

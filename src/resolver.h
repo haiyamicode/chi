@@ -216,7 +216,8 @@ class Resolver {
 
     void resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node);
 
-    ChiType *resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn, NodeList *args);
+    ChiType *resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn, NodeList *args,
+                             ast::Node *fn_decl = nullptr);
 
     array<IntrinsicSymbol> interface_get_intrinsics(ChiType *interface_type);
 

@@ -791,6 +791,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::ParamDecl: {
         auto &data = node->data.param_decl;
         auto result = resolve_value(data.type, scope);
+        // Resolve default value if present
+        if (data.default_value) {
+            auto default_scope = scope.set_value_type(result);
+            auto default_type = resolve(data.default_value, default_scope);
+            check_assignment(data.default_value, default_type, result);
+        }
         return result;
     }
     case NodeType::VarDecl: {
@@ -1276,7 +1282,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
         if (constructor) {
             auto &fn_type = constructor->resolved_type->data.fn;
-            resolve_fn_call(node, scope, &fn_type, &data.items);
+            resolve_fn_call(node, scope, &fn_type, &data.items, constructor->node);
         } else {
             if (result_type->kind == TypeKind::Optional) {
                 if (data.items.len != 1) {
@@ -1328,7 +1334,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto &fn = fn_type->data.fn;
-        return resolve_fn_call(node, scope, &fn, &data.args);
+        auto fn_decl = data.fn_ref_expr->get_decl();
+        return resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
     }
     case NodeType::IfStmt: {
         auto &data = node->data.if_stmt;
@@ -3181,14 +3188,45 @@ bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
 }
 
 ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,
-                                   NodeList *args) {
+                                   NodeList *args, ast::Node *fn_decl) {
     auto n_args = args->len;
     auto n_params = fn->params.len;
-    auto params_required = n_params - (fn->is_variadic ? 1 : 0);
-    bool ok = fn->is_variadic ? n_args >= params_required : n_args == n_params;
+
+    // Count required parameters (those without defaults, excluding variadic)
+    size_t params_required = n_params - (fn->is_variadic ? 1 : 0);
+    size_t max_args = params_required;
+    if (fn_decl) {
+        auto &fn_proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
+        params_required = 0;
+        for (size_t i = 0; i < fn_proto.params.len; i++) {
+            auto param = fn_proto.params[i];
+            if (!param->data.param_decl.default_value && !param->data.param_decl.is_variadic) {
+                params_required++;
+            }
+        }
+        max_args = n_params - (fn->is_variadic ? 1 : 0);
+    }
+
+    // Validate: n_args must be >= required and <= total (non-variadic) or >= required (variadic)
+    bool ok = n_args >= params_required && (fn->is_variadic || n_args <= max_args);
     if (!ok) {
-        error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, params_required, n_args);
+        if (fn_decl && params_required != max_args) {
+            error(node, "wrong number of arguments: expected {} to {}, got {}", params_required,
+                  max_args, n_args);
+        } else {
+            error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, params_required, n_args);
+        }
         return fn->return_type;
+    }
+
+    // Inject default values for missing arguments
+    if (fn_decl && n_args < max_args) {
+        auto &fn_proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
+        for (size_t i = n_args; i < max_args; i++) {
+            auto param = fn_proto.params[i];
+            assert(param->data.param_decl.default_value);
+            args->add(param->data.param_decl.default_value);
+        }
     }
 
     // Debug: check type params
