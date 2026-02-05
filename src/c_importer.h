@@ -20,11 +20,32 @@ struct CFunction {
     std::string name;
     std::string return_type;
     std::vector<std::pair<std::string, std::string>> params;  // (type, name)
+    bool is_variadic = false;
 };
 
 struct CEnumConstant {
     std::string name;
     int64_t value;
+};
+
+struct CMacro {
+    std::string name;
+    std::string value;  // String representation of the macro value
+};
+
+struct CStructField {
+    std::string name;
+    std::string type;
+};
+
+struct CStruct {
+    std::string name;
+    std::vector<CStructField> fields;
+};
+
+struct CTypedef {
+    std::string name;
+    std::string underlying_type;
 };
 
 struct CImportConfig {
@@ -47,6 +68,15 @@ public:
     // Get extracted enum constants
     const std::vector<CEnumConstant>& get_enum_constants() const { return enum_constants_; }
 
+    // Get extracted macros
+    const std::vector<CMacro>& get_macros() const { return macros_; }
+
+    // Get extracted structs
+    const std::vector<CStruct>& get_structs() const { return structs_; }
+
+    // Get extracted typedefs
+    const std::vector<CTypedef>& get_typedefs() const { return typedefs_; }
+
     // Get error message if import failed
     const std::string& get_error() const { return error_; }
 
@@ -58,6 +88,9 @@ private:
 
     std::vector<CFunction> functions_;
     std::vector<CEnumConstant> enum_constants_;
+    std::vector<CMacro> macros_;
+    std::vector<CStruct> structs_;
+    std::vector<CTypedef> typedefs_;
     std::set<std::string> symbol_filter_;
     std::string error_;
 
@@ -73,6 +106,15 @@ private:
 
     // Process an enum constant declaration
     void process_enum_constant(CXCursor cursor);
+
+    // Process a macro definition
+    void process_macro(CXCursor cursor);
+
+    // Process a struct declaration
+    void process_struct(CXCursor cursor);
+
+    // Process a typedef declaration
+    void process_typedef(CXCursor cursor);
 #endif
 };
 
@@ -81,7 +123,10 @@ cx::ast::Module* create_native_module(
     cx::CompilationContext* ctx,
     const std::string& module_name,
     const std::vector<CFunction>& functions,
-    const std::vector<CEnumConstant>& enum_constants
+    const std::vector<CEnumConstant>& enum_constants,
+    const std::vector<CMacro>& macros,
+    const std::vector<CStruct>& structs,
+    const std::vector<CTypedef>& typedefs
 );
 
 } // namespace cx

@@ -5,3 +5,6 @@ sqrt(16) = 4
 sin(π/2) = 1
 cos(0) = 1
 pow(2, 8) = 256
+Variadic test: single arg
+Variadic test: 10 + 20 = 30
+Variadic test: int=42, float=3.140000

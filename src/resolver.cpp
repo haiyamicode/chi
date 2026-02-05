@@ -46,6 +46,7 @@ void Resolver::context_init_primitives() {
     system_types.int32 = create_int_type(32, false);
     system_types.uint32 = create_int_type(32, true);
     system_types.int64 = create_int_type(64, false);
+    system_types.uint64 = create_int_type(64, true);
     system_types.float_ = create_float_type(32);
     system_types.float64 = create_float_type(64);
     system_types.void_ = create_type(TypeKind::Void);
@@ -889,7 +890,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (var_type->kind == TypeKind::Void) {
             error(node, errors::INVALID_VARIABLE_TYPE, format_type(var_type));
         }
-        if (data.is_const) {
+        // Compile-time constants must be evaluable at compile time
+        if (data.kind == ast::VarKind::Constant) {
             data.resolved_value = resolve_constant_value(data.expr);
             return var_type;
         }
@@ -911,7 +913,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (is_assignment_op(data.op_type)) {
             auto var = data.op1->get_decl();
             if (var && var->type == NodeType::VarDecl) {
-                if (var->data.var_decl.is_const) {
+                // Cannot assign to immutable or constant variables
+                if (var->data.var_decl.kind != ast::VarKind::Mutable) {
                     error(node, errors::ASSIGNMENT_TO_CONST, var->name);
                 }
             }
@@ -1725,7 +1728,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto not_needed = member->data.var_decl.is_embed &&
                                       (get_struct_member(struct_type, "new") ||
                                        struct_->kind == ContainerKind::Interface);
-                    if (!not_needed) {
+                    // Skip initialization check for extern C structs
+                    auto is_extern = data.decl_spec && data.decl_spec->is_extern();
+                    if (!not_needed && !is_extern) {
                         error(member, errors::UNINITIALIZED_FIELD, member->name,
                               format_type(struct_type));
                     }
@@ -3741,7 +3746,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
             auto arg_type = resolve(arg, arg_scope);
 
-            check_assignment(arg, arg_type, param_type);
+            // For C variadic functions, param_type is nullptr for variadic args (any type allowed)
+            if (param_type) {
+                check_assignment(arg, arg_type, param_type);
+            }
         }
     }
 
@@ -4179,7 +4187,7 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
     }
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
-        if (data.is_const && data.resolved_value.has_value()) {
+        if (data.kind == ast::VarKind::Constant && data.resolved_value.has_value()) {
             return data.resolved_value;
         }
     }

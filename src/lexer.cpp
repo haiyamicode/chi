@@ -35,6 +35,7 @@ void Lexer::setup_keywords() {
     s_keywords["break"] = TokenType::KW_BREAK;
     s_keywords["case"] = TokenType::KW_CASE;
     s_keywords["let"] = TokenType::KW_LET;
+    s_keywords["const"] = TokenType::KW_CONST;
     s_keywords["continue"] = TokenType::KW_CONTINUE;
     s_keywords["else"] = TokenType::KW_ELSE;
     s_keywords["enum"] = TokenType::KW_ENUM;

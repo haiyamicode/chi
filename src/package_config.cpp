@@ -75,7 +75,8 @@ void tag_invoke(boost::json::value_from_tag, boost::json::value &jv, const CInte
     jv = {{"enabled", config.enabled},
           {"include_directories", config.include_directories},
           {"source_files", config.source_files},
-          {"link_libraries", config.link_libraries}};
+          {"link_libraries", config.link_libraries},
+          {"library_paths", config.library_paths}};
 }
 
 CInteropConfig tag_invoke(boost::json::value_to_tag<CInteropConfig>, const boost::json::value &jv) {
@@ -108,6 +109,12 @@ CInteropConfig tag_invoke(boost::json::value_to_tag<CInteropConfig>, const boost
     if (obj.if_contains("link_libraries")) {
         config.link_libraries =
             boost::json::value_to<std::vector<std::string>>(obj.at("link_libraries"));
+    }
+
+    // Parse library paths
+    if (obj.if_contains("library_paths")) {
+        config.library_paths =
+            boost::json::value_to<std::vector<std::string>>(obj.at("library_paths"));
     }
 
     // Parse native modules (new libclang-based approach)

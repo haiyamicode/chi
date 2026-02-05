@@ -13,7 +13,7 @@ static std::string get_symbol_kind(cx::ast::Node *node) {
     case cx::ast::NodeType::StructDecl:
         return "struct";
     case cx::ast::NodeType::VarDecl:
-        return node->data.var_decl.is_const ? "constant" : "variable";
+        return node->data.var_decl.kind == cx::ast::VarKind::Constant ? "constant" : "variable";
     case cx::ast::NodeType::Primitive:
         return "interface";
     default:

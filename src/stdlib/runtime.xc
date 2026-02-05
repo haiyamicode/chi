@@ -30,6 +30,7 @@ extern "C" {
   func cx_string_from_chars(data: *void, size: uint32, str: *string);
   func cx_string_delete(dest: *string);
   func cx_string_copy(dest: *string, src: *string);
+  func cx_string_to_c(str: *string) *char;
   func cx_hbytes(value: *any, result: *HashBytes);
   func cx_map_new() *void;
   func cx_map_delete(data: *void);

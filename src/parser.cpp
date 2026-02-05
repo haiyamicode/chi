@@ -154,6 +154,7 @@ bool Parser::is_declaration_start(TokenType type) {
     case TokenType::KW_ENUM:
     case TokenType::KW_VAR:
     case TokenType::KW_LET:
+    case TokenType::KW_CONST:
     case TokenType::KW_EXTERN:
     case TokenType::KW_IMPORT:
     case TokenType::KW_EXPORT:
@@ -404,6 +405,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
         return parse_typedef();
     case TokenType::KW_VAR:
     case TokenType::KW_LET:
+    case TokenType::KW_CONST:
         return parse_var_decl(false);
     case TokenType::KW_FUNC: {
         return parse_fn_decl(FN_BODY_REQUIRED, decl_spec);
@@ -696,10 +698,13 @@ void Parser::parse_fn_block(Node *fn) {
 
 Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
-    bool is_const = false;
+    VarKind var_kind = VarKind::Mutable;
     if (!as_field) {
         if (next_is(TokenType::KW_LET)) {
-            is_const = true;
+            var_kind = VarKind::Immutable;
+            consume();
+        } else if (next_is(TokenType::KW_CONST)) {
+            var_kind = VarKind::Constant;
             consume();
         } else {
             expect(TokenType::KW_VAR);
@@ -717,16 +722,16 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     }
     auto node = create_node(NodeType::VarDecl, iden);
     node->data.var_decl.identifier = iden;
-    node->data.var_decl.is_const = is_const;
+    node->data.var_decl.kind = var_kind;
     node->data.var_decl.is_field = as_field;
     node->data.var_decl.decl_spec = decl_spec;
     node->data.var_decl.is_embed = is_embed;
 
     if (!as_field) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
-        // In malformed code, parent_fn might be null
-        if (!node->parent_fn) {
-            error(iden, "variable declaration outside of function");
+        // Allow top-level const declarations, but not var/let outside functions
+        if (!node->parent_fn && var_kind != VarKind::Constant) {
+            error(iden, "variable declaration outside of function (use 'const' for top-level constants)");
         }
     }
     if (!next_is(TokenType::ASS)) {

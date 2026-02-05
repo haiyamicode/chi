@@ -176,7 +176,7 @@ array<ast::Node *> Scope::get_all_recursive() {
 
 ast::Node *Scope::find_parent(ast::NodeType type) {
     for (auto scope = this; scope; scope = scope->parent) {
-        if (!scope) {
+        if (!scope || !scope->owner) {
             break;
         }
         if (scope->owner->type == type) {
@@ -189,10 +189,19 @@ ast::Node *Scope::find_parent(ast::NodeType type) {
 void Scope::put(const string &name, ast::Node *node) { symbols[name] = node; }
 
 ChiType *ChiTypeFn::get_param_at(size_t index) {
-    return index < get_va_start() ? params[index] : params.last()->get_elem();
+    if (index < get_va_start()) {
+        return params[index];
+    }
+    // For extern C variadic functions, there's no variadic parameter in params
+    // Return nullptr to indicate any type is allowed for variadic args
+    if (is_extern && is_variadic) {
+        return nullptr;
+    }
+    // For Chi variadic functions, the last parameter is Array<T>, get its element type
+    return params.last()->get_elem();
 }
 
-int ChiTypeFn::get_va_start() { return params.len - (int)is_variadic; }
+int ChiTypeFn::get_va_start() { return params.len - (int)(is_variadic && !is_extern); }
 
 ChiType *ChiType::get_elem() {
     switch (kind) {

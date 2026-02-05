@@ -198,11 +198,17 @@ struct ReturnStmt {
     Node *expr = nullptr;
 };
 
+enum class VarKind {
+    Mutable,    // var - can be reassigned
+    Immutable,  // let - cannot be reassigned (runtime value OK)
+    Constant    // const - compile-time constant (must be evaluable at compile time)
+};
+
 struct VarDecl {
     Token *identifier = nullptr;
     Node *type = nullptr;
     Node *expr = nullptr;
-    bool is_const = false;
+    VarKind kind = VarKind::Mutable;
     bool is_field = false;
     bool is_embed = false;
     ChiStructMember *resolved_field = nullptr;
@@ -688,7 +694,7 @@ struct Node {
     bool is_mutable() {
         switch (type) {
         case NodeType::VarDecl:
-            return !data.var_decl.is_const;
+            return data.var_decl.kind == VarKind::Mutable;
         default:
             return false;
         }

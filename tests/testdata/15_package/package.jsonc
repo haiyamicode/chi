@@ -8,7 +8,19 @@
     "enabled": true, // Enable C interop
     "include_directories": ["native"], // Include directories for C headers
     "source_files": ["**/*.c"], // Glob pattern for C source files
-    "link_libraries": ["m"] // Math library
+    "link_libraries": ["m"], // Math library
+
+    // New: libclang-based native module imports
+    "native_modules": {
+      "stdio": {
+        "includes": ["stdio.h"],
+        "symbols": ["printf", "s*"]  // Test wildcard: s* will match snprintf, sprintf, etc.
+      },
+      "math": {
+        "includes": ["math.h"],
+        "symbols": ["M_*", "*f"]  // Test wildcards: M_* for constants, *f for float functions
+      }
+    }
   }
   // End of configuration
 }

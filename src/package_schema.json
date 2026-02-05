@@ -54,6 +54,15 @@
           },
           "default": []
         },
+        "library_paths": {
+          "type": "array",
+          "description": "List of library search paths for linking",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
         "native_modules": {
           "type": "object",
           "description": "Native C modules imported via libclang",

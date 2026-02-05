@@ -212,6 +212,21 @@ void Compiler::compile_module(ast::Module *module) {
         case ast::NodeType::EnumDecl:
             compile_enum(decl);
             break;
+        case ast::NodeType::VarDecl: {
+            // Top-level declarations (used for C macros, global constants)
+            auto &var_data = decl->data.var_decl;
+            if (var_data.kind == ast::VarKind::Constant) {
+                // Compile-time constants are inlined at use sites
+                // No code generation needed here - just skip
+                break;
+            }
+            // Global mutable/immutable variables would need different handling
+            panic("global mutable/immutable variables not yet supported");
+            break;
+        }
+        case ast::NodeType::TypedefDecl:
+            // Typedefs are type aliases, no code generation needed
+            break;
         default:
             panic("not implemented: {}", PRINT_ENUM(decl->type));
         }
@@ -2095,6 +2110,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::DotExpr: {
         auto member = expr->data.dot_expr.resolved_struct_member;
         auto ref = compile_expr_ref(fn, expr);
+        // For constants/values, return the value directly
+        if (ref.value && !ref.address) {
+            return ref.value;
+        }
         assert(ref.address);
         auto &builder = *m_ctx->llvm_builder.get();
         auto type_l = compile_type(get_chitype(expr));
@@ -2539,8 +2558,14 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         builder.CreateStore(lambda_val, lambda_ptr);
         return RefValue::from_address(lambda_ptr);
     }
-    case ast::NodeType::VarDecl:
+    case ast::NodeType::VarDecl: {
+        auto &var_data = expr->data.var_decl;
+        if (var_data.kind == ast::VarKind::Constant && var_data.expr) {
+            // Inline compile-time constant values
+            return compile_expr_ref(fn, var_data.expr);
+        }
         return RefValue::from_address(get_var(expr));
+    }
     case ast::NodeType::Identifier:
         return compile_iden_ref(fn, expr);
     case ast::NodeType::FieldInitExpr: {
@@ -2629,6 +2654,29 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             type = type->get_elem();
             ptr = compile_expr(fn, data.expr);
         } else {
+            // Check if this is module member access (e.g., sdl.SDL_Init)
+            if (data.expr->type == ast::NodeType::Identifier &&
+                data.expr->data.identifier.decl &&
+                data.expr->data.identifier.decl->type == ast::NodeType::ImportDecl) {
+                // Module member access - use resolved_decl if available
+                if (data.resolved_decl) {
+                    // Resolver already found the declaration, compile it directly
+                    return compile_expr_ref(fn, data.resolved_decl);
+                }
+                // Fallback: look up the member from the module directly
+                auto import_decl = data.expr->data.identifier.decl;
+                auto imported_module = import_decl->data.import_decl.resolved_module;
+                if (!imported_module || !imported_module->scope) {
+                    panic("ImportDecl for '{}' has no resolved module", data.expr->name);
+                }
+                auto member_name = data.field->str;
+                auto member_node = imported_module->scope->find_one(member_name);
+                if (!member_node) {
+                    panic("Module '{}' has no member '{}'", data.expr->name, member_name);
+                }
+                return compile_expr_ref(fn, member_node);
+            }
+
             auto ref = compile_expr_ref(fn, data.expr);
             if (type->kind == TypeKind::Fn) {
                 ptr = ref.value;
@@ -2733,12 +2781,16 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     }
     if (data.decl->type == ast::NodeType::VarDecl) {
         auto &var = data.decl->data.var_decl;
-        if (var.is_const && var.resolved_value.has_value() && !data.decl->parent_fn) {
-            return RefValue::from_value(
-                compile_constant_value(fn, *var.resolved_value, get_chitype(data.decl)));
-        } else {
-            goto normal;
+        if (var.kind == ast::VarKind::Constant && !data.decl->parent_fn) {
+            if (var.resolved_value.has_value()) {
+                return RefValue::from_value(
+                    compile_constant_value(fn, *var.resolved_value, get_chitype(data.decl)));
+            } else if (var.expr) {
+                // Inline the expression if resolved_value wasn't set
+                return compile_expr_ref(fn, var.expr);
+            }
         }
+        goto normal;
     }
     if (data.decl->type == ast::NodeType::FnDef) {
         auto fn_obj = get_fn(data.decl);
@@ -2753,6 +2805,12 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
         // Otherwise, return the raw function pointer
         auto type_l = compile_type(iden_type);
         return RefValue::from_value(fn_obj->llvm_fn);
+    }
+    if (data.decl->type == ast::NodeType::ImportDecl) {
+        // Module identifiers (import aliases) should not be compiled directly
+        // They should only appear as part of DotExpr for module member access
+        panic("Cannot compile module identifier '{}' directly - module member access should be resolved",
+              iden->name);
     }
 
 normal:
@@ -2799,7 +2857,10 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(
     auto va_start = fn_spec.get_va_start();
 
     bool is_variadic = callee->fn_type->data.fn.is_variadic;
-    if (is_variadic) {
+    bool is_extern = callee->fn_type->data.fn.is_extern;
+
+    // Only use array-based variadic for Chi functions, not extern C functions
+    if (is_variadic && !is_extern) {
         auto array_type = fn_spec.params.last();
         va_type = array_type->get_elem();
         va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
@@ -2809,7 +2870,7 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(
     }
 
     for (int i = 0; i < args.len; i++) {
-        if (is_variadic && i >= va_start) {
+        if (is_variadic && !is_extern && i >= va_start) {
             emit_dbg_location(args[i]);
             auto add_fn = get_system_fn("cx_array_add");
             auto arg = compile_assignment_to_type(fn, args[i], va_type);
@@ -2818,6 +2879,13 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(
             auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
             auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
             builder.CreateStore(arg, ptr);
+            continue;
+        }
+        // For extern variadic functions, pass variadic args directly
+        if (is_variadic && is_extern && i >= va_start) {
+            // Compile the argument without wrapping in array
+            auto arg = compile_expr(fn, args[i]);
+            call_args.push_back(arg);
             continue;
         }
         auto arg_node = args[i];
@@ -2843,7 +2911,12 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(
                 }
             }
         }
-        call_args.push_back(compile_assignment_to_type(fn, arg_node, param_type));
+        // For C variadic args (param_type is nullptr), compile the expression directly
+        if (param_type) {
+            call_args.push_back(compile_assignment_to_type(fn, arg_node, param_type));
+        } else {
+            call_args.push_back(compile_expr(fn, arg_node));
+        }
     }
 
     if (va_ptr) {
@@ -2971,12 +3044,14 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
 
     auto &fn_spec = fn_type->data.fn;
     auto is_variadic = fn_spec.is_variadic;
+    auto is_extern = fn_spec.is_extern;
     auto va_start = fn_spec.get_va_start();
 
     std::vector<llvm::Value *> args;
     llvm::Value *va_ptr = nullptr;
     ChiType *va_type = nullptr;
-    if (is_variadic) {
+    // Only use array-based variadic for Chi functions, not extern C functions
+    if (is_variadic && !is_extern) {
         auto array_type = fn_spec.params.last();
         va_type = array_type->get_elem();
         va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
@@ -3032,7 +3107,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
 
     for (int i = 0; i < data.args.len; i++) {
-        if (is_variadic && i >= va_start) {
+        if (is_variadic && !is_extern && i >= va_start) {
             emit_dbg_location(data.args[i]);
             auto add_fn = get_system_fn("cx_array_add");
             auto arg = compile_assignment_to_type(fn, data.args[i], va_type);
@@ -3041,6 +3116,13 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
             auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
             builder.CreateStore(arg, ptr);
+            continue;
+        }
+        // For extern variadic functions, pass variadic args directly
+        if (is_variadic && is_extern && i >= va_start) {
+            // Compile the argument without wrapping in array
+            auto arg = compile_expr(fn, data.args[i]);
+            args.push_back(arg);
             continue;
         }
         auto arg = data.args[i];
@@ -3066,7 +3148,12 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 }
             }
         }
-        args.push_back(compile_assignment_to_type(fn, arg, param_type));
+        // For C variadic args (param_type is nullptr), compile the expression directly
+        if (param_type) {
+            args.push_back(compile_assignment_to_type(fn, arg, param_type));
+        } else {
+            args.push_back(compile_expr(fn, arg));
+        }
     }
     if (va_ptr) {
         args.push_back(builder.CreateLoad(compile_type(fn_spec.params.last()), va_ptr));
@@ -4400,11 +4487,19 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         if (data.container_ref) {
             param_types.push_back(compile_type(data.container_ref));
         }
-        for (size_t i = 0; i < data.params.len; i++) {
+        // For extern C variadic functions, exclude the varargs parameter from the param list
+        // (LLVM handles it separately with the isVarArg flag)
+        auto param_count = data.params.len;
+        if (data.is_variadic && data.is_extern) {
+            param_count = data.get_va_start();
+        }
+        for (size_t i = 0; i < param_count; i++) {
             auto param = data.params[i];
             param_types.push_back(compile_type(param));
         }
-        return llvm::FunctionType::get(ret_type_l, param_types, false);
+        // For extern variadic functions, use LLVM's native variadic support
+        bool is_llvm_vararg = data.is_variadic && data.is_extern;
+        return llvm::FunctionType::get(ret_type_l, param_types, is_llvm_vararg);
     }
     case TypeKind::Pointer:
     case TypeKind::Reference:

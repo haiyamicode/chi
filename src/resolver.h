@@ -44,6 +44,7 @@ struct SystemTypes {
     ChiType *int32 = nullptr;
     ChiType *uint32 = nullptr;
     ChiType *int64 = nullptr;
+    ChiType *uint64 = nullptr;
     ChiType *uint8 = nullptr;
     ChiType *float_ = nullptr;
     ChiType *float64 = nullptr;

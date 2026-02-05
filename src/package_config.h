@@ -38,6 +38,7 @@ struct CInteropConfig {
     std::vector<std::string> include_directories;
     std::vector<std::string> source_files;
     std::vector<std::string> link_libraries;
+    std::vector<std::string> library_paths;
 
     // New: native modules using libclang
     std::map<std::string, NativeModuleConfig> native_modules;

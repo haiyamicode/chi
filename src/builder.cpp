@@ -185,10 +185,17 @@ void Builder::build_package(const string &package_dir) {
 
             // Process each header file
             for (const auto &header : module_config.includes) {
+                // Detect if this is a local header (has .h and no path separator for system headers)
+                bool is_local = (!module_config.include_paths.empty() || header.find('/') != std::string::npos);
+
                 // Create a temporary wrapper header
                 auto tmp_header_path = get_tmp_file_path(module_name + "_wrapper.h");
                 std::ofstream tmp_header(tmp_header_path);
-                tmp_header << "#include <" << header << ">\n";
+                if (is_local) {
+                    tmp_header << "#include \"" << header << "\"\n";
+                } else {
+                    tmp_header << "#include <" << header << ">\n";
+                }
                 tmp_header.close();
 
                 bool success = importer.import_header(tmp_header_path, import_config);
@@ -200,16 +207,40 @@ void Builder::build_package(const string &package_dir) {
 
             print("extracted {} functions", importer.get_functions().size());
             if (!importer.get_enum_constants().empty()) {
-                print(", {} constants", importer.get_enum_constants().size());
+                print(", {} enum constants", importer.get_enum_constants().size());
+            }
+            if (!importer.get_macros().empty()) {
+                print(", {} macros", importer.get_macros().size());
+            }
+            if (!importer.get_structs().empty()) {
+                print(", {} structs", importer.get_structs().size());
+            }
+            if (!importer.get_typedefs().empty()) {
+                print(", {} typedefs", importer.get_typedefs().size());
             }
             print("\n");
 
             // Debug: print extracted symbols
             for (const auto &func : importer.get_functions()) {
-                print("    {} -> {}\n", func.name, func.return_type);
+                print("    func {}(", func.name);
+                for (size_t i = 0; i < func.params.size(); i++) {
+                    if (i > 0) print(", ");
+                    print("{}", func.params[i].first);
+                }
+                if (func.is_variadic) print(", ...");
+                print(") -> {}\n", func.return_type);
             }
             for (const auto &constant : importer.get_enum_constants()) {
-                print("    {} = {}\n", constant.name, constant.value);
+                print("    const {} = {}\n", constant.name, constant.value);
+            }
+            for (const auto &macro : importer.get_macros()) {
+                print("    macro {} = {}\n", macro.name, macro.value);
+            }
+            for (const auto &struct_ : importer.get_structs()) {
+                print("    struct {} ({} fields)\n", struct_.name, struct_.fields.size());
+            }
+            for (const auto &typedef_ : importer.get_typedefs()) {
+                print("    typedef {} = {}\n", typedef_.name, typedef_.underlying_type);
             }
 
             // Debug: Check if system types are initialized
@@ -223,8 +254,15 @@ void Builder::build_package(const string &package_dir) {
                 &m_ctx,
                 module_name,
                 importer.get_functions(),
-                importer.get_enum_constants()
+                importer.get_enum_constants(),
+                importer.get_macros(),
+                importer.get_structs(),
+                importer.get_typedefs()
             );
+
+            // Resolve the virtual module to set up types
+            auto resolver = m_ctx.create_resolver();
+            resolver.resolve(virtual_module);
 
             // Register in module map so import resolver can find it
             m_ctx.module_map[module_name] = virtual_module;
@@ -323,13 +361,21 @@ void Builder::build_package(const string &package_dir) {
         obj_files += " " + c_obj;
     }
 
+    // Add library search paths
+    string library_path_flags = "";
+    if (config.c_interop.has_value()) {
+        for (auto &lib_path : config.c_interop->library_paths) {
+            library_path_flags += fmt::format("-L{} ", lib_path);
+        }
+    }
+
     // Add external library flags
     string library_flags = "";
     for (auto &lib : link_libraries) {
         library_flags += fmt::format("-l{} ", lib);
     }
 
-    auto cmd = fmt::format("c++ {} -g -o {} -lchrt {}", obj_files, output_file_name, library_flags);
+    auto cmd = fmt::format("c++ {} -g -o {} {}-lchrt {}", obj_files, output_file_name, library_path_flags, library_flags);
 
     if (debug_mode) {
         print("running: {}\n", cmd);

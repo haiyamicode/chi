@@ -48,13 +48,13 @@ bool CImporter::import_header(const std::string& header_path, const CImportConfi
     // Default include path
     args.push_back("-I/usr/include");
 
-    // Parse the header
+    // Parse the header with detailed preprocessing to capture macros
     tu_ = clang_parseTranslationUnit(
         index_,
         header_path.c_str(),
         args.data(), args.size(),
         nullptr, 0,
-        CXTranslationUnit_None
+        CXTranslationUnit_DetailedPreprocessingRecord
     );
 
     if (!tu_) {
@@ -89,28 +89,96 @@ std::string CImporter::to_string(CXString cx_str) {
     return result;
 }
 
+// Check if a name matches a pattern (supports * wildcard)
+static bool matches_pattern(const std::string& name, const std::string& pattern) {
+    size_t name_idx = 0;
+    size_t pattern_idx = 0;
+    size_t star_idx = std::string::npos;
+    size_t match_idx = 0;
+
+    while (name_idx < name.length()) {
+        if (pattern_idx < pattern.length() && pattern[pattern_idx] == '*') {
+            // Remember the position of * and the current match position
+            star_idx = pattern_idx;
+            match_idx = name_idx;
+            pattern_idx++;
+        } else if (pattern_idx < pattern.length() &&
+                   (pattern[pattern_idx] == name[name_idx] || pattern[pattern_idx] == '?')) {
+            // Characters match or pattern has ?
+            name_idx++;
+            pattern_idx++;
+        } else if (star_idx != std::string::npos) {
+            // No match, but we have a * - backtrack
+            pattern_idx = star_idx + 1;
+            match_idx++;
+            name_idx = match_idx;
+        } else {
+            // No match and no * to fall back on
+            return false;
+        }
+    }
+
+    // Skip any trailing * in pattern
+    while (pattern_idx < pattern.length() && pattern[pattern_idx] == '*') {
+        pattern_idx++;
+    }
+
+    return pattern_idx == pattern.length();
+}
+
 CXChildVisitResult CImporter::visitor_callback(CXCursor cursor, CXCursor parent, CXClientData client_data) {
     auto* importer = static_cast<CImporter*>(client_data);
     CXCursorKind kind = clang_getCursorKind(cursor);
+    std::string name = to_string(clang_getCursorSpelling(cursor));
 
-    if (kind == CXCursor_FunctionDecl) {
-        std::string name = to_string(clang_getCursorSpelling(cursor));
+    // Check filter (empty filter means accept all)
+    bool passes_filter = importer->symbol_filter_.empty();
+    if (!passes_filter) {
+        // Check if name matches any pattern in the filter
+        for (const auto& pattern : importer->symbol_filter_) {
+            if (matches_pattern(name, pattern)) {
+                passes_filter = true;
+                break;
+            }
+        }
+    }
 
-        // Check if this symbol is in our filter
-        if (importer->symbol_filter_.empty() || importer->symbol_filter_.count(name)) {
+    switch (kind) {
+    case CXCursor_FunctionDecl:
+        if (passes_filter) {
             importer->process_function(cursor);
         }
-    }
-    else if (kind == CXCursor_EnumConstantDecl) {
-        std::string name = to_string(clang_getCursorSpelling(cursor));
+        break;
 
-        // Check if this symbol is in our filter
-        if (importer->symbol_filter_.empty() || importer->symbol_filter_.count(name)) {
+    case CXCursor_EnumConstantDecl:
+        if (passes_filter) {
             importer->process_enum_constant(cursor);
         }
+        break;
+
+    case CXCursor_MacroDefinition:
+        if (passes_filter) {
+            importer->process_macro(cursor);
+        }
+        break;
+
+    case CXCursor_StructDecl:
+        if (passes_filter && !name.empty()) {  // Skip anonymous structs
+            importer->process_struct(cursor);
+        }
+        return CXChildVisit_Continue;  // Don't recurse into struct members here
+
+    case CXCursor_TypedefDecl:
+        if (passes_filter) {
+            importer->process_typedef(cursor);
+        }
+        break;
+
+    default:
+        break;
     }
 
-    return CXChildVisit_Continue;
+    return CXChildVisit_Recurse;
 }
 
 void CImporter::process_function(CXCursor cursor) {
@@ -119,14 +187,21 @@ void CImporter::process_function(CXCursor cursor) {
 
     CXType func_type = clang_getCursorType(cursor);
     CXType return_type = clang_getResultType(func_type);
-    func.return_type = to_string(clang_getTypeSpelling(return_type));
+    // Resolve typedefs to get the actual underlying type
+    CXType canonical_return = clang_getCanonicalType(return_type);
+    func.return_type = to_string(clang_getTypeSpelling(canonical_return));
+
+    // Check if function is variadic
+    func.is_variadic = clang_isFunctionTypeVariadic(func_type) != 0;
 
     // Extract parameters
     int num_args = clang_Cursor_getNumArguments(cursor);
     for (int i = 0; i < num_args; i++) {
         CXCursor arg = clang_Cursor_getArgument(cursor, i);
         CXType arg_type = clang_getCursorType(arg);
-        std::string arg_type_str = to_string(clang_getTypeSpelling(arg_type));
+        // Resolve typedefs to get the actual underlying type
+        CXType canonical_arg = clang_getCanonicalType(arg_type);
+        std::string arg_type_str = to_string(clang_getTypeSpelling(canonical_arg));
         std::string arg_name = to_string(clang_getCursorSpelling(arg));
 
         func.params.push_back({arg_type_str, arg_name});
@@ -140,6 +215,69 @@ void CImporter::process_enum_constant(CXCursor cursor) {
     constant.name = to_string(clang_getCursorSpelling(cursor));
     constant.value = clang_getEnumConstantDeclValue(cursor);
     enum_constants_.push_back(constant);
+}
+
+void CImporter::process_macro(CXCursor cursor) {
+    CMacro macro;
+    macro.name = to_string(clang_getCursorSpelling(cursor));
+
+    // Get macro tokens to extract the value
+    CXSourceRange range = clang_getCursorExtent(cursor);
+    CXToken* tokens = nullptr;
+    unsigned num_tokens = 0;
+    clang_tokenize(tu_, range, &tokens, &num_tokens);
+
+    // Skip the macro name token and extract the value
+    std::string value;
+    for (unsigned i = 1; i < num_tokens; i++) {
+        std::string token_str = to_string(clang_getTokenSpelling(tu_, tokens[i]));
+        if (!value.empty()) value += " ";
+        value += token_str;
+    }
+
+    clang_disposeTokens(tu_, tokens, num_tokens);
+
+    // Only keep macros that have simple numeric/string values
+    if (!value.empty()) {
+        macro.value = value;
+        macros_.push_back(macro);
+    }
+}
+
+void CImporter::process_struct(CXCursor cursor) {
+    CStruct struct_decl;
+    struct_decl.name = to_string(clang_getCursorSpelling(cursor));
+
+    // Visit struct fields
+    clang_visitChildren(cursor, [](CXCursor c, CXCursor parent, CXClientData client_data) -> CXChildVisitResult {
+        auto* struct_ptr = static_cast<CStruct*>(client_data);
+
+        if (clang_getCursorKind(c) == CXCursor_FieldDecl) {
+            CStructField field;
+            field.name = to_string(clang_getCursorSpelling(c));
+            // Resolve typedefs to get the actual underlying type
+            CXType field_type = clang_getCursorType(c);
+            CXType canonical_type = clang_getCanonicalType(field_type);
+            field.type = to_string(clang_getTypeSpelling(canonical_type));
+            struct_ptr->fields.push_back(field);
+        }
+
+        return CXChildVisit_Continue;
+    }, &struct_decl);
+
+    structs_.push_back(struct_decl);
+}
+
+void CImporter::process_typedef(CXCursor cursor) {
+    CTypedef typedef_decl;
+    typedef_decl.name = to_string(clang_getCursorSpelling(cursor));
+
+    CXType underlying = clang_getTypedefDeclUnderlyingType(cursor);
+    // Resolve nested typedefs to get the actual underlying type
+    CXType canonical = clang_getCanonicalType(underlying);
+    typedef_decl.underlying_type = to_string(clang_getTypeSpelling(canonical));
+
+    typedefs_.push_back(typedef_decl);
 }
 #endif
 
@@ -156,8 +294,8 @@ static ChiType* parse_c_type(CompilationContext* ctx, const std::string& c_type_
     while ((pos = type_str.find("volatile ")) != std::string::npos) {
         type_str.erase(pos, 9);
     }
-    while ((pos = type_str.find("restrict ")) != std::string::npos) {
-        type_str.erase(pos, 9);
+    while ((pos = type_str.find("restrict")) != std::string::npos) {
+        type_str.erase(pos, 8);
     }
 
     // Trim whitespace
@@ -225,7 +363,10 @@ ast::Module* create_native_module(
     CompilationContext* ctx,
     const std::string& module_name,
     const std::vector<CFunction>& functions,
-    const std::vector<CEnumConstant>& enum_constants
+    const std::vector<CEnumConstant>& enum_constants,
+    const std::vector<CMacro>& macros,
+    const std::vector<CStruct>& structs,
+    const std::vector<CTypedef>& typedefs
 ) {
     // Create a dummy token for position info
     auto* dummy_token = ctx->create_token();
@@ -282,7 +423,7 @@ ast::Module* create_native_module(
             auto* fn_proto = ctx->create_node(ast::NodeType::FnProto);
             fn_proto->data.fn_proto.params = {};
             fn_proto->data.fn_proto.return_type = nullptr;
-            fn_proto->data.fn_proto.is_vararg = false;  // TODO: handle variadic
+            fn_proto->data.fn_proto.is_vararg = func.is_variadic;
 
             // Parse return type
             ChiType* return_type = parse_c_type(ctx, func.return_type);
@@ -313,12 +454,13 @@ ast::Module* create_native_module(
                 fn_type->data.fn.params.add(param->resolved_type);
             }
             fn_type->data.fn.is_extern = true;
-            fn_type->data.fn.is_variadic = false;
+            fn_type->data.fn.is_variadic = func.is_variadic;
 
             // Create FnDef node
             auto* fn_def = ctx->create_node(ast::NodeType::FnDef);
             fn_def->name = func.name;
-            fn_def->global_id = func.name;  // Use C linkage - no mangling
+            // Use module-namespaced global_id to avoid collisions with Chi functions
+            fn_def->global_id = module_name + "." + func.name;
             fn_def->module = module;
             fn_def->token = name_token;
             fn_def->start_token = name_token;
@@ -361,12 +503,150 @@ ast::Module* create_native_module(
 
         const_node->data.var_decl.expr = value_node;
         const_node->data.var_decl.decl_spec = ctx->create_decl_spec();
-        const_node->data.var_decl.is_const = true;
+        const_node->data.var_decl.kind = ast::VarKind::Constant;
 
         // Add to module and scope
         module->root->data.root.top_level_decls.add(const_node);
         module->exports.add(const_node);
         module->scope->put(constant.name, const_node);
+    }
+
+    // Create const declarations for macro constants
+    for (const auto& macro : macros) {
+        std::string value = macro.value;
+
+        // Detect and strip integer suffixes, determining the type
+        bool is_unsigned = false;
+        bool is_long = false;
+        bool is_long_long = false;
+
+        // Check for suffixes (case-insensitive combinations)
+        if (value.size() >= 3) {
+            std::string suffix = value.substr(value.size() - 3);
+            std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
+            if (suffix == "ull") {
+                is_unsigned = true;
+                is_long_long = true;
+                value.erase(value.size() - 3);
+            }
+        }
+        if (!is_long_long && value.size() >= 2) {
+            std::string suffix = value.substr(value.size() - 2);
+            std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
+            if (suffix == "ul" || suffix == "lu") {
+                is_unsigned = true;
+                is_long = true;
+                value.erase(value.size() - 2);
+            } else if (suffix == "ll") {
+                is_long_long = true;
+                value.erase(value.size() - 2);
+            }
+        }
+        if (!is_unsigned && !is_long && !is_long_long && !value.empty()) {
+            char last = value.back();
+            if (last == 'u' || last == 'U') {
+                is_unsigned = true;
+                value.pop_back();
+            } else if (last == 'l' || last == 'L') {
+                is_long = true;
+                value.pop_back();
+            }
+        }
+
+        // Try to parse the value as an integer
+        char* endptr;
+        long long int_value = std::strtoll(value.c_str(), &endptr, 0);
+
+        // Only create const for simple integer macros
+        if (*endptr == '\0' || *endptr == ' ') {
+            auto* const_node = ctx->create_node(ast::NodeType::VarDecl);
+            const_node->name = macro.name;
+            const_node->module = module;
+
+            // Determine the correct type based on suffix
+            ChiType* type;
+            if (is_long_long) {
+                type = is_unsigned ? ctx->resolve_ctx.system_types.uint64
+                                   : ctx->resolve_ctx.system_types.int64;
+            } else if (is_long) {
+                type = is_unsigned ? ctx->resolve_ctx.system_types.uint64
+                                   : ctx->resolve_ctx.system_types.int64;
+            } else {
+                type = is_unsigned ? ctx->resolve_ctx.system_types.uint32
+                                   : ctx->resolve_ctx.system_types.int32;
+            }
+            const_node->resolved_type = type;
+
+            auto* value_token = ctx->create_token();
+            value_token->type = TokenType::INT;
+            value_token->val.i = int_value;
+
+            auto* value_node = ctx->create_node(ast::NodeType::LiteralExpr);
+            value_node->token = value_token;
+            value_node->module = module;
+            value_node->resolved_type = type;
+
+            const_node->data.var_decl.expr = value_node;
+            const_node->data.var_decl.decl_spec = ctx->create_decl_spec();
+            const_node->data.var_decl.kind = ast::VarKind::Constant;
+
+            module->root->data.root.top_level_decls.add(const_node);
+            module->exports.add(const_node);
+            module->scope->put(macro.name, const_node);
+        }
+    }
+
+    // Create struct declarations
+    for (const auto& c_struct : structs) {
+        // Create struct declaration node
+        auto* struct_decl = ctx->create_node(ast::NodeType::StructDecl);
+        struct_decl->name = c_struct.name;
+        struct_decl->module = module;
+        struct_decl->data.struct_decl.kind = ContainerKind::Struct;
+        struct_decl->data.struct_decl.decl_spec = ctx->create_decl_spec();
+        struct_decl->data.struct_decl.decl_spec->flags = ast::DECL_EXTERN;  // Mark as extern C struct
+
+        // Create field declarations as VarDecl nodes
+        for (const auto& field : c_struct.fields) {
+            auto* field_node = ctx->create_node(ast::NodeType::VarDecl);
+            field_node->name = field.name;
+            field_node->module = module;
+            field_node->parent = struct_decl;
+
+            auto* field_token = ctx->create_token();
+            field_token->type = TokenType::IDEN;
+            field_token->str = field.name;
+            field_node->token = field_token;
+
+            // Parse and set field type
+            field_node->resolved_type = parse_c_type(ctx, field.type);
+            field_node->data.var_decl.is_field = true;
+
+            struct_decl->data.struct_decl.members.add(field_node);
+        }
+
+        module->root->data.root.top_level_decls.add(struct_decl);
+        module->exports.add(struct_decl);
+        module->scope->put(c_struct.name, struct_decl);
+    }
+
+    // Create typedef declarations
+    for (const auto& c_typedef : typedefs) {
+        auto* typedef_node = ctx->create_node(ast::NodeType::TypedefDecl);
+        typedef_node->name = c_typedef.name;
+        typedef_node->module = module;
+
+        auto* typedef_token = ctx->create_token();
+        typedef_token->type = TokenType::IDEN;
+        typedef_token->str = c_typedef.name;
+        typedef_node->data.typedef_decl.identifier = typedef_token;
+
+        // Parse the underlying type (we'll resolve this later)
+        typedef_node->resolved_type = parse_c_type(ctx, c_typedef.underlying_type);
+
+        module->root->data.root.top_level_decls.add(typedef_node);
+        module->exports.add(typedef_node);
+        module->scope->put(c_typedef.name, typedef_node);
     }
 
     return module;

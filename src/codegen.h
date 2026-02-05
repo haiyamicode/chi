@@ -82,7 +82,29 @@ struct Function {
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
 
-    string get_llvm_name() const { return qualified_name; }
+    string get_llvm_name() const {
+        // Check if this is the entry point main function
+        if (node && node->module && node->module->package &&
+            node->module->package->entry_fn == node) {
+            return "main";
+        }
+
+        // Check if this is an extern function (C linkage)
+        if (node && node->type == ast::NodeType::FnDef) {
+            auto& fn_def = node->data.fn_def;
+            if (fn_def.decl_spec && (fn_def.decl_spec->flags & ast::DECL_EXTERN)) {
+                // Extern functions use their original name (C linkage)
+                return qualified_name;
+            }
+        }
+
+        // Chi functions get prefixed with __chi_<module_id>_
+        if (node && node->module) {
+            return "__chi_" + node->module->id_path + "_" + qualified_name;
+        }
+
+        return "__chi_" + qualified_name;
+    }
     bool use_sret() { return get_sret_param() != nullptr; }
     llvm::Value *get_this_arg() {
         auto bind_param = get_bind_param();
@@ -297,7 +319,14 @@ class Compiler {
 
     void add_var(ast::Node *node, llvm::Value *value) { m_ctx->var_table[node] = value; }
 
-    llvm::Value *&get_var(ast::Node *node) { return m_ctx->var_table.at(node); }
+    llvm::Value *&get_var(ast::Node *node) {
+        if (!m_ctx->var_table.has_key(node)) {
+            panic("Variable '{}' not found in var_table (node type: {}, resolved_type: {})",
+                  node->name, (int)node->type,
+                  node->resolved_type ? "set" : "null");
+        }
+        return m_ctx->var_table.at(node);
+    }
 
     llvm::Value *compile_comparator(Function *fn, ast::Node *expr, ChiType *type = nullptr);
 

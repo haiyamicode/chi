@@ -147,7 +147,17 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
         if (!data.is_field) {
-            print(data.is_const ? "const" : "var");
+            switch (data.kind) {
+            case ast::VarKind::Mutable:
+                print("var");
+                break;
+            case ast::VarKind::Immutable:
+                print("let");
+                break;
+            case ast::VarKind::Constant:
+                print("const");
+                break;
+            }
             print(" ");
         }
         if (data.is_embed) {

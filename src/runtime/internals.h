@@ -90,6 +90,8 @@ CHI_RT_EXPORT void cx_string_format(CxString *format, CxSlice *values, CxString 
 
 CHI_RT_EXPORT void cx_string_from_chars(const char *data, uint32_t size, CxString *str);
 
+CHI_RT_EXPORT char *cx_string_to_c(CxString *str);
+
 CHI_RT_EXPORT void cx_printf(CxString *format, CxSlice *values);
 
 CHI_RT_EXPORT void cx_print(CxString str);

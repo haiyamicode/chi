@@ -91,6 +91,14 @@ void cx_string_copy(CxString *dest, CxString *src) {
     dest->size = s.size();
 }
 
+char *cx_string_to_c(CxString *str) {
+    // Allocate buffer with space for null terminator
+    char *result = (char *)malloc(str->size + 1);
+    memcpy(result, str->data, str->size);
+    result[str->size] = '\0';  // Add null terminator
+    return result;
+}
+
 static std::string istringf(const CxAny &v) {
     auto typedata = &v.type->data;
     auto &spec = typedata->int_;
