@@ -174,9 +174,7 @@ void Builder::build_package(const string &package_dir) {
 
     // Process native modules (C interop via libclang)
     if (config.c_interop.has_value() && !config.c_interop->native_modules.empty()) {
-        print("Processing native modules...\n");
         for (const auto &[module_name, module_config] : config.c_interop->native_modules) {
-            print("  Module '{}': ", module_name);
 
             CImporter importer;
             CImportConfig import_config;
@@ -205,45 +203,7 @@ void Builder::build_package(const string &package_dir) {
                 }
             }
 
-            print("extracted {} functions", importer.get_functions().size());
-            if (!importer.get_enum_constants().empty()) {
-                print(", {} enum constants", importer.get_enum_constants().size());
-            }
-            if (!importer.get_macros().empty()) {
-                print(", {} macros", importer.get_macros().size());
-            }
-            if (!importer.get_structs().empty()) {
-                print(", {} structs", importer.get_structs().size());
-            }
-            if (!importer.get_typedefs().empty()) {
-                print(", {} typedefs", importer.get_typedefs().size());
-            }
-            print("\n");
-
-            // Debug: print extracted symbols
-            for (const auto &func : importer.get_functions()) {
-                print("    func {}(", func.name);
-                for (size_t i = 0; i < func.params.size(); i++) {
-                    if (i > 0) print(", ");
-                    print("{}", func.params[i].first);
-                }
-                if (func.is_variadic) print(", ...");
-                print(") -> {}\n", func.return_type);
-            }
-            for (const auto &constant : importer.get_enum_constants()) {
-                print("    const {} = {}\n", constant.name, constant.value);
-            }
-            for (const auto &macro : importer.get_macros()) {
-                print("    macro {} = {}\n", macro.name, macro.value);
-            }
-            for (const auto &struct_ : importer.get_structs()) {
-                print("    struct {} ({} fields)\n", struct_.name, struct_.fields.size());
-            }
-            for (const auto &typedef_ : importer.get_typedefs()) {
-                print("    typedef {} = {}\n", typedef_.name, typedef_.underlying_type);
-            }
-
-            // Debug: Check if system types are initialized
+            // Check if system types are initialized
             if (m_ctx.resolve_ctx.system_types.int32 == nullptr) {
                 print("ERROR: System types not initialized!\n");
                 exit(1);
@@ -266,7 +226,6 @@ void Builder::build_package(const string &package_dir) {
 
             // Register in module map so import resolver can find it
             m_ctx.module_map[module_name] = virtual_module;
-            print("  Registered virtual module '{}'\n", module_name);
         }
     }
 
