@@ -91,12 +91,28 @@ void cx_string_copy(CxString *dest, CxString *src) {
     dest->size = s.size();
 }
 
-char *cx_string_to_c(CxString *str) {
+char *cx_string_to_cstring(CxString *str) {
     // Allocate buffer with space for null terminator
     char *result = (char *)malloc(str->size + 1);
     memcpy(result, str->data, str->size);
     result[str->size] = '\0';  // Add null terminator
     return result;
+}
+
+void cx_string_concat(CxString *dest, CxString *s1, CxString *s2) {
+    dest->is_static = 0;
+    dest->size = s1->size + s2->size;
+    dest->data = (char *)malloc(dest->size);
+    memcpy(dest->data, s1->data, s1->size);
+    memcpy(dest->data + s1->size, s2->data, s2->size);
+}
+
+char *cx_cstring_copy(char *src) {
+    if (src == nullptr) return nullptr;
+    size_t len = strlen(src);
+    char *copy = (char *)malloc(len + 1);
+    strcpy(copy, src);
+    return copy;
 }
 
 static std::string istringf(const CxAny &v) {

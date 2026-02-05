@@ -31,13 +31,13 @@ func main() {
 
   // Test C variadic function (printf via stdio module)
   var msg1 = "Variadic test: single arg\n";
-  stdio.printf(cx_string_to_c(&msg1));
+  stdio.printf(cx_string_to_cstring(&msg1));
 
   // Test printf with multiple integer arguments
   var fmt1 = "Variadic test: %d + %d = %d\n";
-  stdio.printf(cx_string_to_c(&fmt1), 10, 20, 30);
+  stdio.printf(cx_string_to_cstring(&fmt1), 10, 20, 30);
 
   // Test printf with mixed argument types
   var fmt2 = "Variadic test: int=%d, float=%f\n";
-  stdio.printf(cx_string_to_c(&fmt2), 42, 3.14);
+  stdio.printf(cx_string_to_cstring(&fmt2), 42, 3.14);
 }

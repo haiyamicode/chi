@@ -90,7 +90,11 @@ CHI_RT_EXPORT void cx_string_format(CxString *format, CxSlice *values, CxString 
 
 CHI_RT_EXPORT void cx_string_from_chars(const char *data, uint32_t size, CxString *str);
 
-CHI_RT_EXPORT char *cx_string_to_c(CxString *str);
+CHI_RT_EXPORT char *cx_string_to_cstring(CxString *str);
+
+CHI_RT_EXPORT void cx_string_concat(CxString *dest, CxString *s1, CxString *s2);
+
+CHI_RT_EXPORT char *cx_cstring_copy(char *src);
 
 CHI_RT_EXPORT void cx_printf(CxString *format, CxSlice *values);
 

@@ -30,8 +30,9 @@ extern "C" {
   func cx_string_from_chars(data: *void, size: uint32, str: *string);
   func cx_string_delete(dest: *string);
   func cx_string_copy(dest: *string, src: *string);
-  func cx_string_to_c(str: *string) *char;
+  func cx_string_to_cstring(str: *string) *char;
   func cx_string_concat(dest: *string, s1: *string, s2: *string);
+  func cx_cstring_copy(src: *char) *char;
   func cx_hbytes(value: *any, result: *HashBytes);
   func cx_map_new() *void;
   func cx_map_delete(data: *void);
@@ -414,10 +415,60 @@ struct Array<T> implements
   }
 }
 
-struct __CxString {
+struct CString implements ops.CopyFrom<CString> {
+  data: *char = null;
+
+  mut func new(ptr: *char) {
+    this.data = ptr;
+  }
+
+  mut func copy_from(from: &CString) {
+    if this.data != null {
+      cx_free(this.data as *void);
+    }
+    this.data = cx_cstring_copy(from.data);
+  }
+
+  mut func delete() {
+    if this.data != null {
+      cx_free(this.data as *void);
+      this.data = null;
+    }
+  }
+
+  func as_ptr() *char {
+    return this.data;
+  }
+}
+
+struct __CxString implements ops.Add {
   private data: *char = null;
   protected length: uint32 = 0;
   private is_static: uint32 = 0;
+
+  func is_empty() bool {
+    return this.length == 0;
+  }
+
+  func to_cstring() CString {
+    return {cx_string_to_cstring(this as *string)};
+  }
+
+  func add(rhs: string) string {
+    var result: string = {};
+    cx_string_concat(&result as *string, this as *string, &rhs as *string);
+    return result;
+  }
+
+  func as_chars() Array<char> {
+    var result: Array<char> = {};
+    var i: uint32 = 0;
+    while i < this.length {
+      result.add(this.data[i]);
+      i = i + 1;
+    }
+    return result;
+  }
 }
 
 struct Map<K, V> implements ops.Index<K, V> {

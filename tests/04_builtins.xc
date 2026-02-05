@@ -84,6 +84,21 @@ func test_nested_shared() {
   var ns: NestedShared = {};
   printf("ns.ref_count()={}\n", ns.ref_count());
   printf("ns.get_count()={}\n", ns.get_count());
+  println("");
+}
+
+func test_string() {
+  println("testing string:");
+  var s1 = "Hello";
+  printf("s1.length={}\n", s1.length);
+  printf("s1.is_empty()={}\n", s1.is_empty());
+
+  var s2 = s1.add(" World");
+  printf("s1.add(\" World\")={}\n", s2);
+
+  var empty = "";
+  printf("empty.is_empty()={}\n", empty.is_empty());
+  println("");
 }
 
 func main() {
@@ -92,4 +107,5 @@ func main() {
   test_map();
   test_shared();
   test_nested_shared();
+  test_string();
 }
