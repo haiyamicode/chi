@@ -108,6 +108,7 @@ struct ResolveContext {
     ChiType *rt_array_type = nullptr;
     ChiType *rt_promise_type = nullptr;
     ChiType *rt_lambda_type = nullptr;
+    ChiType *rt_string_type = nullptr;
     ChiType *rt_empty_bind_type = nullptr;
     ast::Node *rt_enum_base = nullptr;
 

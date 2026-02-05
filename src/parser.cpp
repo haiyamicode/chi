@@ -18,6 +18,7 @@ const int LOWEST_PREC = -1;
 const int COMMA_PREC = 0;
 const int DEFAULT_PREC = COMMA_PREC + 1;
 const int TERNARY_PREC = 1;
+const int UNARY_PREC = 8;  // For parsing unary operator operands
 
 static string get_token_type_repr(TokenType token_type) {
     switch (token_type) {
@@ -82,6 +83,9 @@ int Parser::get_op_precedence(TokenType op_type) {
     case TokenType::RSHIFT:
     case TokenType::AND:
         return 6;
+
+    case TokenType::KW_AS:
+        return 7; // Higher than mul/div, but lower than unary/postfix operators
 
     default:
         return LOWEST_PREC;
@@ -1080,13 +1084,6 @@ Node *Parser::parse_expr() {
         consume();
         break;
 
-    case TokenType::KW_AS: {
-        auto node = create_node(NodeType::CastExpr, read());
-        node->data.cast_expr.dest_type = parse_type_expr(true);
-        node->data.cast_expr.expr = lhs;
-        return node;
-    }
-
     default:
         return lhs;
     }
@@ -1127,17 +1124,22 @@ Node *Parser::parse_binary_expr(bool lhs, Node *parent, int prec) {
         if (op_prec < prec) {
             return op1;
         }
-        //        if (op->type == TokenType::QUES) {
-        //            parse_ternary_expr(x, x);
-        //        } else {
         consume();
-        auto op2 = parse_binary_expr(lhs, parent, op_prec + 1);
-        auto node = create_node(NodeType::BinOpExpr, op_token);
-        node->data.bin_op_expr.op1 = op1;
-        node->data.bin_op_expr.op_type = tok_type;
-        node->data.bin_op_expr.op2 = op2;
-        op1 = node;
-        //        }
+
+        // Special handling for 'as' cast operator - RHS is a type expression, not value expression
+        if (tok_type == TokenType::KW_AS) {
+            auto node = create_node(NodeType::CastExpr, op_token);
+            node->data.cast_expr.expr = op1;
+            node->data.cast_expr.dest_type = parse_type_expr(true);
+            op1 = node;
+        } else {
+            auto op2 = parse_binary_expr(lhs, parent, op_prec + 1);
+            auto node = create_node(NodeType::BinOpExpr, op_token);
+            node->data.bin_op_expr.op1 = op1;
+            node->data.bin_op_expr.op_type = tok_type;
+            node->data.bin_op_expr.op2 = op2;
+            op1 = node;
+        }
     }
     return op1;
 }
@@ -1171,7 +1173,7 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
             node->data.unary_op_expr.op_type = TokenType::MUTREF;
         }
 
-        auto operand = parse_child_expr(lhs, parent);
+        auto operand = parse_binary_expr(lhs, parent, UNARY_PREC);
         if (operand && operand->type == NodeType::Error) {
             // If operand parsing failed, return error node instead of malformed unary expr
             return operand;
@@ -1183,14 +1185,14 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
     case TokenType::KW_TRY: {
         consume();
         auto node = create_node(NodeType::TryExpr, token);
-        node->data.try_expr.expr = parse_child_expr(lhs, parent);
+        node->data.try_expr.expr = parse_binary_expr(lhs, parent, UNARY_PREC);
         return node;
     }
 
     case TokenType::KW_AWAIT: {
         consume();
         auto node = create_node(NodeType::AwaitExpr, token);
-        node->data.await_expr.expr = parse_child_expr(lhs, parent);
+        node->data.await_expr.expr = parse_binary_expr(lhs, parent, UNARY_PREC);
         return node;
     }
 
@@ -1207,15 +1209,6 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
         case TokenType::DOT:
             node = parse_dot_expr(node);
             break;
-
-        case TokenType::KW_AS: {
-            auto expr = node;
-            node = create_node(NodeType::CastExpr, token);
-            consume();
-            node->data.cast_expr.dest_type = parse_type_expr(true);
-            node->data.cast_expr.expr = expr;
-            break;
-        }
 
         case TokenType::LBRACK:
             node = parse_index_expr(node);

@@ -416,6 +416,14 @@ struct ChiType {
             // In interfaces, This might not have elem set
             return data.pointer.elem ? get_elem() : this;
         }
+        // Recursively evaluate pointer/reference types
+        if (kind == TypeKind::Pointer || kind == TypeKind::Reference || kind == TypeKind::MutRef) {
+            auto elem = get_elem();
+            if (elem && elem->kind == TypeKind::This) {
+                // Element needs evaluation - this pointer type wraps an unevaluated This
+                return this;  // Return as-is, let the caller handle substitution
+            }
+        }
         return this;
     }
 

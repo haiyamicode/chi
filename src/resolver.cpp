@@ -317,6 +317,13 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                     // Allow void* to any pointer
                     return from_elem->kind == TypeKind::Void;
                 }
+                // Allow __CxString pointer/reference to convert to *string
+                else if (to_type->kind == TypeKind::Pointer && to_elem->kind == TypeKind::String) {
+                    if (from_elem->kind == TypeKind::Struct && m_ctx->rt_string_type &&
+                        is_same_type(from_elem, m_ctx->rt_string_type)) {
+                        return true;
+                    }
+                }
             }
         }
 
@@ -359,6 +366,12 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Struct: {
         if (from_type == to_type) {
             return true;
+        }
+        // Allow primitive string to convert to __CxString
+        if (m_ctx->rt_string_type && is_same_type(to_type, m_ctx->rt_string_type)) {
+            if (from_type->kind == TypeKind::String) {
+                return true;
+            }
         }
         if (ChiTypeStruct::is_interface(to_type) && ChiTypeStruct::is_pointer_type(from_type)) {
             auto ft = from_type->get_elem();
@@ -1650,6 +1663,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_promise_type = struct_type;
                 } else if (node->name == "__CxLambda") {
                     m_ctx->rt_lambda_type = struct_type;
+                } else if (node->name == "__CxString") {
+                    m_ctx->rt_string_type = struct_type;
                 } else if (node->name == "__CxEnumBase") {
                     m_ctx->rt_enum_base = node;
                 }
@@ -3392,6 +3407,10 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
         } else {
             sty = sty->data.array.internal;
         }
+    } else if (sty->kind == TypeKind::String) {
+        auto rt_string = m_ctx->rt_string_type;
+        assert(rt_string);
+        sty = rt_string;
     } else if (sty->kind == TypeKind::Result) {
         sty = sty->data.result.internal;
     } else if (sty->kind == TypeKind::EnumValue) {
@@ -3481,7 +3500,8 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
 }
 
 bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
-    if (a->kind == TypeKind::Array || b->kind == TypeKind::Array) {
+    if (a->kind == TypeKind::Array || b->kind == TypeKind::Array ||
+        a->kind == TypeKind::String || b->kind == TypeKind::String) {
         return b->kind == a->kind;
     }
     auto a_sty = resolve_struct_type(a);
@@ -4207,6 +4227,14 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
     }
     if (b->kind == TypeKind::Infer && b->data.infer.inferred_type) {
         b = b->data.infer.inferred_type;
+    }
+
+    // Normalize string types: TypeKind::String -> __CxString struct
+    if (a->kind == TypeKind::String && m_ctx->rt_string_type) {
+        a = m_ctx->rt_string_type;
+    }
+    if (b->kind == TypeKind::String && m_ctx->rt_string_type) {
+        b = m_ctx->rt_string_type;
     }
 
     // First check pointer equality
