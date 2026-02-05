@@ -150,16 +150,28 @@ llvm::DICompileUnit *Compiler::get_module_cu(ast::Module *module) {
 }
 
 void Compiler::compile_module(ast::Module *module) {
+    // Skip if module already compiled
+    if (m_ctx->compiled_modules.count(module)) {
+        return;
+    }
+    m_ctx->compiled_modules.insert(module);
+
     for (auto import : module->imports) {
         compile_module(import);
     }
 
-    auto module_cu = m_ctx->dbg_builder->createCompileUnit(
-        llvm::dwarf::DW_LANG_C,
-        m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
-        "Chi Compiler", 0, "", 0);
-    m_ctx->module_cu_table[module->global_id()] = module_cu;
-    m_ctx->dbg_cu = module_cu;
+    // Skip debug info for virtual modules (C interop)
+    bool is_virtual = module->path.size() >= 8 && module->path.substr(0, 8) == "<virtual";
+    llvm::DICompileUnit* module_cu = nullptr;
+
+    if (!is_virtual) {
+        module_cu = m_ctx->dbg_builder->createCompileUnit(
+            llvm::dwarf::DW_LANG_C,
+            m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
+            "Chi Compiler", 0, "", 0);
+        m_ctx->module_cu_table[module->global_id()] = module_cu;
+        m_ctx->dbg_cu = module_cu;
+    }
 
     m_ctx->pending_fns.clear();
     auto &root = module->root->data.root;

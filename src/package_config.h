@@ -19,34 +19,47 @@
 
 namespace cx {
 
+struct NativeModuleConfig {
+    std::string name;                       // Module name (e.g., "C", "SDL")
+    std::vector<std::string> includes;      // Header files to parse
+    std::vector<std::string> symbols;       // Filter: only import these symbols
+    std::vector<std::string> include_paths; // Additional include directories
+    std::vector<std::string> link;          // Libraries to link
+    std::string pkg_config;                 // Optional: use pkg-config
+};
+
+void tag_invoke(boost::json::value_from_tag, boost::json::value &jv,
+                const NativeModuleConfig &config);
+NativeModuleConfig tag_invoke(boost::json::value_to_tag<NativeModuleConfig>,
+                              const boost::json::value &jv);
+
 struct CInteropConfig {
     bool enabled = false;
     std::vector<std::string> include_directories;
     std::vector<std::string> source_files;
     std::vector<std::string> link_libraries;
 
-    // Validate the configuration
-    bool validate(std::string &error_message) const;
+    // New: native modules using libclang
+    std::map<std::string, NativeModuleConfig> native_modules;
 };
+
+void tag_invoke(boost::json::value_from_tag, boost::json::value &jv,
+                const CInteropConfig &config);
+CInteropConfig tag_invoke(boost::json::value_to_tag<CInteropConfig>,
+                          const boost::json::value &jv);
 
 struct PackageConfig {
     std::string entry_file;
     std::optional<CInteropConfig> c_interop;
-
-    // Validate the configuration using custom validation
-    bool validate(std::string &error_message) const;
 
     // Validate against JSON schema
     static bool validate_with_schema(const boost::json::value &json,
                                      const boost::json::value &schema, std::string &error_message);
 };
 
-// Boost.JSON serialization support for CInteropConfig
-void tag_invoke(boost::json::value_from_tag, boost::json::value &jv, const CInteropConfig &config);
-CInteropConfig tag_invoke(boost::json::value_to_tag<CInteropConfig>, const boost::json::value &jv);
-
-// Boost.JSON serialization support for PackageConfig
-void tag_invoke(boost::json::value_from_tag, boost::json::value &jv, const PackageConfig &config);
-PackageConfig tag_invoke(boost::json::value_to_tag<PackageConfig>, const boost::json::value &jv);
+void tag_invoke(boost::json::value_from_tag, boost::json::value &jv,
+                const PackageConfig &config);
+PackageConfig tag_invoke(boost::json::value_to_tag<PackageConfig>,
+                         const boost::json::value &jv);
 
 } // namespace cx

@@ -7,6 +7,7 @@
 
 #include "resolver.h"
 #include "ast.h"
+#include "context.h"
 #include "enum.h"
 #include "errors.h"
 #include "fmt/core.h"
@@ -34,7 +35,7 @@ ast::Node *Resolver::add_primitive(const string &name, ChiType *type) {
 
 void Resolver::context_init_primitives() {
     if (m_ctx->system_types.any) {
-        panic("primitives already initialized");
+        // Already initialized, skip
         return;
     }
     auto &system_types = m_ctx->system_types;
@@ -2037,23 +2038,35 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::ExportDecl: {
         auto is_export = node->type == NodeType::ExportDecl;
         auto &data = is_export ? node->data.export_decl : node->data.import_decl;
-        auto path_info = m_ctx->allocator->find_module_path(data.path->str, scope.module->path);
-        if (!path_info) {
-            error(node, errors::MODULE_NOT_FOUND, data.path->str);
-            return nullptr;
-        }
 
-        if (path_info->is_directory && !path_info->entry_path.size()) {
-            error(node, errors::MODULE_INDEX_NOT_FOUND, data.path->str);
-            return nullptr;
-        }
+        // Check if this is a virtual module (e.g., from C interop)
+        ast::Module* module = nullptr;
+        auto* comp_ctx = static_cast<CompilationContext*>(m_ctx->allocator);
+        auto virtual_mod = comp_ctx->module_map.get(data.path->str);
+        if (virtual_mod) {
+            // Use the virtual module directly (already resolved)
+            module = *virtual_mod;
+            // Note: Virtual modules are pre-resolved, no need to resolve again
+        } else {
+            // Regular file-based module lookup
+            auto path_info = m_ctx->allocator->find_module_path(data.path->str, scope.module->path);
+            if (!path_info) {
+                error(node, errors::MODULE_NOT_FOUND, data.path->str);
+                return nullptr;
+            }
 
-        auto target_package = m_ctx->allocator->get_or_create_package(path_info->package_id_path);
-        auto path = path_info->entry_path;
-        auto src = io::Buffer::from_file(path);
-        auto module = m_ctx->allocator->process_source(target_package, &src, path);
-        Resolver resolver(m_ctx);
-        resolver.resolve(module);
+            if (path_info->is_directory && !path_info->entry_path.size()) {
+                error(node, errors::MODULE_INDEX_NOT_FOUND, data.path->str);
+                return nullptr;
+            }
+
+            auto target_package = m_ctx->allocator->get_or_create_package(path_info->package_id_path);
+            auto path = path_info->entry_path;
+            auto src = io::Buffer::from_file(path);
+            module = m_ctx->allocator->process_source(target_package, &src, path);
+            Resolver resolver(m_ctx);
+            resolver.resolve(module);
+        }
 
         data.resolved_module = module;
         auto type = create_type(TypeKind::Module);
@@ -2203,6 +2216,12 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
 }
 
 string Resolver::resolve_global_id(ast::Node *node) {
+    // For extern "C" functions, use C linkage (no module prefix)
+    if (node->type == ast::NodeType::FnDef &&
+        node->data.fn_def.decl_spec &&
+        node->data.fn_def.decl_spec->is_extern()) {
+        return node->name;
+    }
     return fmt::format("{}.{}", node->module->global_id(), resolve_qualified_name(node));
 }
 

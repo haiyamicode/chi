@@ -10,6 +10,7 @@
 #include "analyzer.h"
 #include "ast_printer.h"
 #include "builder.h"
+#include "c_importer.h"
 #include "package_config.h"
 #include "parser.h"
 #include "util.h"
@@ -115,6 +116,10 @@ void Builder::build_package(const string &package_dir) {
     }
     m_ctx.flags = flags;
 
+    // Initialize system types early (needed for C interop native modules)
+    auto resolver = m_ctx.create_resolver();
+    resolver.context_init_primitives();
+
     if (!working_dir.empty()) {
         if (!fs::exists(working_dir)) {
             fs::create_directories(working_dir);
@@ -166,10 +171,65 @@ void Builder::build_package(const string &package_dir) {
 
     // Parse configuration using Boost.JSON native serialization
     auto config = boost::json::value_to<PackageConfig>(config_json);
-    string validation_error;
-    if (!config.validate(validation_error)) {
-        print("error: invalid package.jsonc configuration:\n{}", validation_error);
-        exit(1);
+
+    // Process native modules (C interop via libclang)
+    if (config.c_interop.has_value() && !config.c_interop->native_modules.empty()) {
+        print("Processing native modules...\n");
+        for (const auto &[module_name, module_config] : config.c_interop->native_modules) {
+            print("  Module '{}': ", module_name);
+
+            CImporter importer;
+            CImportConfig import_config;
+            import_config.symbols = module_config.symbols;
+            import_config.include_paths = module_config.include_paths;
+
+            // Process each header file
+            for (const auto &header : module_config.includes) {
+                // Create a temporary wrapper header
+                auto tmp_header_path = get_tmp_file_path(module_name + "_wrapper.h");
+                std::ofstream tmp_header(tmp_header_path);
+                tmp_header << "#include <" << header << ">\n";
+                tmp_header.close();
+
+                bool success = importer.import_header(tmp_header_path, import_config);
+                if (!success) {
+                    print("error: failed to import {}: {}\n", header, importer.get_error());
+                    exit(1);
+                }
+            }
+
+            print("extracted {} functions", importer.get_functions().size());
+            if (!importer.get_enum_constants().empty()) {
+                print(", {} constants", importer.get_enum_constants().size());
+            }
+            print("\n");
+
+            // Debug: print extracted symbols
+            for (const auto &func : importer.get_functions()) {
+                print("    {} -> {}\n", func.name, func.return_type);
+            }
+            for (const auto &constant : importer.get_enum_constants()) {
+                print("    {} = {}\n", constant.name, constant.value);
+            }
+
+            // Debug: Check if system types are initialized
+            if (m_ctx.resolve_ctx.system_types.int32 == nullptr) {
+                print("ERROR: System types not initialized!\n");
+                exit(1);
+            }
+
+            // Create virtual module from extracted symbols
+            auto* virtual_module = cx::create_native_module(
+                &m_ctx,
+                module_name,
+                importer.get_functions(),
+                importer.get_enum_constants()
+            );
+
+            // Register in module map so import resolver can find it
+            m_ctx.module_map[module_name] = virtual_module;
+            print("  Registered virtual module '{}'\n", module_name);
+        }
     }
 
     string entry_file = config.entry_file;

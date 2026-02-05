@@ -15,6 +15,61 @@
 
 namespace cx {
 
+// Boost.JSON serialization for NativeModuleConfig
+void tag_invoke(boost::json::value_from_tag, boost::json::value &jv,
+                const NativeModuleConfig &config) {
+    boost::json::object obj;
+    obj["name"] = config.name;
+    obj["includes"] = boost::json::value_from(config.includes);
+    obj["symbols"] = boost::json::value_from(config.symbols);
+
+    if (!config.include_paths.empty()) {
+        obj["include_paths"] = boost::json::value_from(config.include_paths);
+    }
+    if (!config.link.empty()) {
+        obj["link"] = boost::json::value_from(config.link);
+    }
+    if (!config.pkg_config.empty()) {
+        obj["pkg_config"] = config.pkg_config;
+    }
+
+    jv = obj;
+}
+
+NativeModuleConfig tag_invoke(boost::json::value_to_tag<NativeModuleConfig>,
+                              const boost::json::value &jv) {
+    NativeModuleConfig config;
+
+    if (!jv.is_object()) {
+        return config;
+    }
+
+    const auto &obj = jv.as_object();
+
+    if (obj.if_contains("includes")) {
+        config.includes = boost::json::value_to<std::vector<std::string>>(obj.at("includes"));
+    }
+
+    if (obj.if_contains("symbols")) {
+        config.symbols = boost::json::value_to<std::vector<std::string>>(obj.at("symbols"));
+    }
+
+    if (obj.if_contains("include_paths")) {
+        config.include_paths =
+            boost::json::value_to<std::vector<std::string>>(obj.at("include_paths"));
+    }
+
+    if (obj.if_contains("link")) {
+        config.link = boost::json::value_to<std::vector<std::string>>(obj.at("link"));
+    }
+
+    if (obj.if_contains("pkg_config")) {
+        config.pkg_config = boost::json::value_to<std::string>(obj.at("pkg_config"));
+    }
+
+    return config;
+}
+
 // Boost.JSON serialization for CInteropConfig
 void tag_invoke(boost::json::value_from_tag, boost::json::value &jv, const CInteropConfig &config) {
     jv = {{"enabled", config.enabled},
@@ -55,52 +110,18 @@ CInteropConfig tag_invoke(boost::json::value_to_tag<CInteropConfig>, const boost
             boost::json::value_to<std::vector<std::string>>(obj.at("link_libraries"));
     }
 
-    return config;
-}
-
-bool CInteropConfig::validate(std::string &error_message) const {
-    std::ostringstream errors;
-    bool valid = true;
-
-    if (enabled) {
-        // If C interop is enabled, we should have at least some source files
-        if (source_files.empty()) {
-            errors << "c_interop.source_files: At least one source file must be specified when C "
-                      "interop is enabled\n";
-            valid = false;
-        }
-
-        // Validate that source file patterns are not empty
-        for (const auto &pattern : source_files) {
-            if (pattern.empty()) {
-                errors << "c_interop.source_files: Source file patterns cannot be empty\n";
-                valid = false;
-                break;
-            }
-        }
-
-        // Validate that include directories are not empty if specified
-        for (const auto &dir : include_directories) {
-            if (dir.empty()) {
-                errors
-                    << "c_interop.include_directories: Include directory paths cannot be empty\n";
-                valid = false;
-                break;
-            }
-        }
-
-        // Validate that library names are not empty if specified
-        for (const auto &lib : link_libraries) {
-            if (lib.empty()) {
-                errors << "c_interop.link_libraries: Library names cannot be empty\n";
-                valid = false;
-                break;
-            }
+    // Parse native modules (new libclang-based approach)
+    if (obj.if_contains("native_modules")) {
+        const auto &modules_obj = obj.at("native_modules").as_object();
+        for (const auto &[module_name, module_config] : modules_obj) {
+            NativeModuleConfig nm_config = boost::json::value_to<NativeModuleConfig>(module_config);
+            std::string name_str(module_name);
+            nm_config.name = name_str;
+            config.native_modules[name_str] = nm_config;
         }
     }
 
-    error_message = errors.str();
-    return valid;
+    return config;
 }
 
 // Boost.JSON serialization for PackageConfig
@@ -132,29 +153,6 @@ PackageConfig tag_invoke(boost::json::value_to_tag<PackageConfig>, const boost::
     }
 
     return config;
-}
-
-bool PackageConfig::validate(std::string &error_message) const {
-    std::ostringstream errors;
-    bool valid = true;
-
-    // Validate entry file
-    if (entry_file.empty()) {
-        errors << "entry_file: Entry file must be specified\n";
-        valid = false;
-    }
-
-    // Validate C interop configuration if present
-    if (c_interop.has_value()) {
-        std::string c_interop_error;
-        if (!c_interop->validate(c_interop_error)) {
-            errors << c_interop_error;
-            valid = false;
-        }
-    }
-
-    error_message = errors.str();
-    return valid;
 }
 
 bool PackageConfig::validate_with_schema(const boost::json::value &json,

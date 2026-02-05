@@ -5,6 +5,14 @@
   "type": "object",
   "required": ["entry_file"],
   "properties": {
+    "name": {
+      "type": "string",
+      "description": "Package name"
+    },
+    "version": {
+      "type": "string",
+      "description": "Package version"
+    },
     "entry_file": {
       "type": "string",
       "description": "The main entry file for the package",
@@ -45,6 +53,39 @@
             "minLength": 1
           },
           "default": []
+        },
+        "native_modules": {
+          "type": "object",
+          "description": "Native C modules imported via libclang",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "includes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "C header files to import"
+              },
+              "symbols": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Symbols to import (filter)"
+              },
+              "include_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Additional include directories"
+              },
+              "link": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Libraries to link"
+              },
+              "pkg_config": {
+                "type": "string",
+                "description": "pkg-config package name"
+              }
+            }
+          }
         }
       },
       "additionalProperties": false,

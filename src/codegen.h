@@ -219,6 +219,7 @@ struct CodegenContext {
     // Tracing: track what codegen actually compiles (for comparison with GenericResolver)
     std::set<string> compiled_generic_fns = {};    // function global_ids compiled
     std::set<string> compiled_generic_structs = {}; // struct global_ids compiled
+    std::set<ast::Module*> compiled_modules = {};  // modules already compiled
 
     // llvm
     box<llvm::LLVMContext> llvm_ctx = {};
