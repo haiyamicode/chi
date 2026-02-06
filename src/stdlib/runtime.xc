@@ -65,7 +65,7 @@ struct __CxEnumBase<T> implements ops.Display {
 
   func display() string {
     var s = this.__display_name!;
-    return stringf("{}", s);
+    return string.format("{}", s);
   }
 
   func discriminator() T {
@@ -212,7 +212,7 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
 
   func assert_kind(kind: JsonKind) {
     if (this.kind != kind) {
-      panic(stringf("expected {}, got {}",
+      panic(string.format("expected {}, got {}",
         json_kind_display(kind),
         json_kind_display(this.kind)));
     }
@@ -306,7 +306,7 @@ func stringf(format: string, ...values: any) string {
 
 func assert(cond: bool, message: string) {
   if !cond {
-    panic(stringf("assertion failed: {}", message));
+    panic(string.format("assertion failed: {}", message));
   }
 }
 
@@ -379,7 +379,7 @@ struct Array<T> implements
     var buf: Buffer = {};
     buf.write("[");
     for item in this {
-      buf.write(stringf("{}, ", item));
+      buf.write(string.format("{}, ", item));
     }
     buf.write("]");
     return buf.to_string();
@@ -445,6 +445,12 @@ struct __CxString implements ops.Add {
   private data: *char = null;
   protected length: uint32 = 0;
   private is_static: uint32 = 0;
+
+  static func format(fmt: string, ...values: any) string {
+    var result: string = "";
+    cx_string_format(&fmt, &values, &result);
+    return result;
+  }
 
   func is_empty() bool {
     return this.length == 0;

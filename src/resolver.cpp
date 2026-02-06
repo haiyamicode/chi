@@ -1238,6 +1238,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.field->node = member->node;
                 return member->resolved_type;
             }
+            case TypeKind::String: {
+                // Handle builtin string type's static members via __CxString
+                if (m_ctx->rt_string_type) {
+                    auto member = m_ctx->rt_string_type->data.struct_.find_static_member(field_name);
+                    if (!member) {
+                        error(node, errors::MEMBER_NOT_FOUND, field_name, "string");
+                        return nullptr;
+                    }
+                    data.resolved_decl = member->node;
+                    data.field->node = member->node;
+                    return member->resolved_type;
+                }
+                error(node, errors::MEMBER_NOT_FOUND, field_name, "string");
+                return nullptr;
+            }
             default:
                 error(node, errors::MEMBER_NOT_FOUND, field_name, format_type(underlying_type, true));
                 return nullptr;

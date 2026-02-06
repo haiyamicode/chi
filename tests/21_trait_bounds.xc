@@ -9,7 +9,7 @@ struct Point implements Show {
     y: int = 0;
     
     func show() string {
-        return stringf("({}, {})", this.x, this.y);
+        return string.format("({}, {})", this.x, this.y);
     }
 }
 
@@ -17,7 +17,7 @@ struct Number implements Show {
     value: int = 0;
     
     func show() string {
-        return stringf("Number({})", this.value);
+        return string.format("Number({})", this.value);
     }
 }
 
@@ -37,7 +37,7 @@ struct Container<T: Show> {
     name: string = "";
     
     func show_container() string {
-        return stringf("Container[{}]: {}", this.name, this.item.show());
+        return string.format("Container[{}]: {}", this.name, this.item.show());
     }
     
     func get_item() T {
@@ -51,7 +51,7 @@ struct Pair<T: Show, U: Show> {
     second: U = {};
     
     func show_both() string {
-        return stringf("Pair({}, {})", this.first.show(), this.second.show());
+        return string.format("Pair({}, {})", this.first.show(), this.second.show());
     }
 }
 

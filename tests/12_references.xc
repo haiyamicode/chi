@@ -5,7 +5,7 @@ struct Pos implements ops.Display {
   y: int = 0;
 
   mut func display() string {
-    return stringf("({}, {})", this.x, this.y);
+    return string.format("({}, {})", this.x, this.y);
   }
 
   mut func reset() {

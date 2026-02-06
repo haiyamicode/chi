@@ -46,7 +46,7 @@ struct Color implements ops.Display, Cloneable {
   }
 
   func display() string {
-    return stringf("rgb({},{},{})", this.r, this.g, this.b);
+    return string.format("rgb({},{},{})", this.r, this.g, this.b);
   }
 
   func brightness() float {

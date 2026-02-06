@@ -12,7 +12,7 @@ struct Foo implements ops.CopyFrom<Foo> {
   }
 
   mut func copy_from(b: &Foo) {
-    this.new(stringf("{}_copy", b.id));
+    this.new(string.format("{}_copy", b.id));
     this.p! = b.p!;
     printf("copied {}, p = {}\n", this.id, b.p!);
   }

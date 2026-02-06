@@ -4,7 +4,7 @@ func test_string_pass(str: string) {
 
 func test_string() {
   // ensure that strings are properly copied and not double-freed
-  var s = stringf("hello {}", "world");
+  var s = string.format("hello {}", "world");
   var t = s;
   println(t); 
   test_string_pass(s);

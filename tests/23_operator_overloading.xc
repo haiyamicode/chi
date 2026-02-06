@@ -25,7 +25,7 @@ struct Point implements ops.Display, ops.Add {
     }
 
     func display() string {
-        return stringf("({}, {})", this.x, this.y);
+        return string.format("({}, {})", this.x, this.y);
     }
 }
 

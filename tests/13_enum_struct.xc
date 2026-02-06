@@ -9,7 +9,7 @@ enum Node (type: uint64) {
     name: string = "";
 
     func greeting() string {
-      return stringf("hello, {}", this.name);
+      return string.format("hello, {}", this.name);
     }
 
     func is_callable() bool {
