@@ -921,6 +921,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             op1_scope = scope.set_is_lhs(true);
         }
         auto t1 = resolve(data.op1, op1_scope);
+        if (!t1) {
+            return nullptr;
+        }
 
         ChiType *t2;
         if (is_assignment_op(data.op_type)) {
@@ -943,6 +946,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Propagate type context for literal inference (e.g., `x == 0` where x is uint32)
             auto op2_scope = scope.set_value_type(t1);
             t2 = resolve(data.op2, op2_scope);
+        }
+
+        if (!t2) {
+            return nullptr;
         }
 
         // For assignment operators, just check assignment validity
@@ -1021,6 +1028,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             operand_scope = scope.set_value_type(nullptr);
         }
         auto t = resolve(data.op1, operand_scope);
+        if (!t) {
+            return nullptr;
+        }
         switch (auto tt = data.op_type) {
         case TokenType::SUB:
         case TokenType::ADD:
