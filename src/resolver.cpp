@@ -1462,6 +1462,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.fn_call_expr;
         auto fn_ref_scope = scope.set_is_lhs(false).set_is_fn_call(true);
         auto fn_type = resolve(data.fn_ref_expr, fn_ref_scope);
+        if (!fn_type) {
+            return nullptr;
+        }
         if (fn_type->kind != TypeKind::Fn && fn_type->kind != TypeKind::FnLambda) {
             error(data.fn_ref_expr, errors::CANNOT_CALL_NON_FUNCTION);
             return nullptr;
