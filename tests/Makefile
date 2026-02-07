@@ -82,3 +82,19 @@ all: test
 
 test: $(TESTS)
 	@echo "tests passed"
+
+# Stress test: run all tests N times to catch non-deterministic bugs
+# Usage: make stress N=1000
+N ?= 1000
+STRESS_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test 18_gc_escape.test,$(TESTS_LIST)))
+stress:
+	@echo "Stress testing ($(N) iterations)..."
+	@for i in $$(seq 1 $(N)); do \
+		for t in $(STRESS_TESTS); do \
+			src=$$t.xc; [ -f $$src ] || src=$$t.x; \
+			$(CHI) -o $(TMP).$$t -c $$src && $(TMP).$$t >$(TMP).$$t.out 2>&1 || { echo "FAIL $$t at iteration $$i (compile/run)"; exit 1; }; \
+			diff -qbu $$t.expect $(TMP).$$t.out >/dev/null || { echo "FAIL $$t at iteration $$i (output mismatch)"; diff -u $$t.expect $(TMP).$$t.out; exit 1; }; \
+		done; \
+		if [ $$((i % 100)) -eq 0 ]; then echo "  $$i/$(N) OK"; fi; \
+	done; \
+	echo "Stress test: $(N)/$(N) PASSED"

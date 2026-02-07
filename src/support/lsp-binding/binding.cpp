@@ -1,10 +1,28 @@
 #include <assert.h>
 #include <node/node_api.h>
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
 
 #define BOOST_JSON_STANDALONE
 #define BOOST_NO_EXCEPTIONS
 #include "../../analyzer.h"
 #include <boost/json/src.hpp>
+
+static void crash_handler(int sig) {
+    fprintf(stderr, "\n=== CRASH: signal %d ===\n", sig);
+    void *bt[64];
+    int n = backtrace(bt, 64);
+    backtrace_symbols_fd(bt, n, 2);
+    fprintf(stderr, "=== END CRASH ===\n");
+    _exit(1);
+}
+
+__attribute__((constructor)) static void install_crash_handler() {
+    signal(SIGSEGV, crash_handler);
+    signal(SIGBUS, crash_handler);
+    signal(SIGABRT, crash_handler);
+}
 
 static std::string get_symbol_kind(cx::ast::Node *node) {
     switch (node->type) {
@@ -60,14 +78,17 @@ static napi_value Method(napi_env env, napi_callback_info info) {
     size_t argc = 1;
     napi_value args[1];
     status = napi_get_cb_info(env, info, &argc, args, NULL, NULL);
-    assert(status == napi_ok);
+    if (status != napi_ok) return nullptr;
 
-    char buf[1021024];
+    // get input string length, then allocate on heap (avoid large stack buffers)
     size_t len;
-    status = napi_get_value_string_utf8(env, args[0], buf, 1021024, &len);
-    assert(status == napi_ok);
-    std::string_view input_text(buf, len);
-    auto input = boost::json::parse(input_text).as_object();
+    status = napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
+    if (status != napi_ok) return nullptr;
+    std::string input_buf(len, '\0');
+    status = napi_get_value_string_utf8(env, args[0], input_buf.data(), len + 1, &len);
+    if (status != napi_ok) return nullptr;
+
+    auto input = boost::json::parse(input_buf).as_object();
 
     // initialize analyzer
     cx::Analyzer analyzer;
@@ -81,22 +102,28 @@ static napi_value Method(napi_env env, napi_callback_info info) {
 
     std::string input_file = input["file"].as_string().c_str();
     auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
-    // auto src = cx::io::Buffer::from_file(input_file);
 
     // process source code
     analyzer.build_runtime();
     auto pkg = analyzer.get_context()->add_package(".");
     auto module = analyzer.process_source(pkg, &src, input_file);
 
-    // collect errors
-    auto &errors = module->errors;
+    // collect errors from user module and runtime module
     boost::json::array errors_json = boost::json::array();
-    for (auto &error : errors) {
-        boost::json::object error_json;
-        error_json["message"] = error.message;
-        error_json["offset"] = error.pos.offset;
-        error_json["range"] = error.range;
-        errors_json.push_back(error_json);
+    auto collect_errors = [&](cx::ast::Module *mod) {
+        if (!mod) return;
+        for (auto &error : mod->errors) {
+            boost::json::object error_json;
+            error_json["message"] = error.message;
+            error_json["offset"] = error.pos.offset;
+            error_json["range"] = error.range;
+            errors_json.push_back(error_json);
+        }
+    };
+    collect_errors(module);
+    auto rt_package = analyzer.get_context()->rt_package;
+    if (rt_package && rt_package->modules.len > 0) {
+        collect_errors(rt_package->modules[0].get());
     }
 
     // scan
@@ -136,11 +163,12 @@ static napi_value Method(napi_env env, napi_callback_info info) {
                 result_object["info"] = get_symbol_info(result.decl, resolver);
             }
         } else if (operation == "definition") {
-            if (result.decl) {
+            auto start_tok = result.decl
+                ? (result.decl->start_token ? result.decl->start_token : result.decl->token)
+                : nullptr;
+            if (result.decl && result.decl->module && start_tok) {
                 boost::json::object def_link = {};
                 def_link["targetUri"] = fmt::format("file://{}", result.decl->module->full_path());
-                auto start_tok =
-                    result.decl->start_token ? result.decl->start_token : result.decl->token;
                 auto start_pos = start_tok->pos;
                 auto end_pos =
                     result.decl->end_token ? result.decl->end_token->pos : start_pos.add_line(1);
@@ -174,7 +202,7 @@ static napi_value Method(napi_env env, napi_callback_info info) {
     }
     auto str = boost::json::serialize(result_json);
     status = napi_create_string_utf8(env, str.c_str(), str.size(), &result);
-    assert(status == napi_ok);
+    if (status != napi_ok) return nullptr;
     return result;
 }
 

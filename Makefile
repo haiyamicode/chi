@@ -37,6 +37,9 @@ test: test_compiler
 test_compiler: build
 	(cd tests; make test)
 
+stress: build
+	(cd tests; make stress N=$(or $(N),1000))
+
 analyzer_test: build
 	(cd analyzer_tests; make test)
 

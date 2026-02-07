@@ -3551,8 +3551,9 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     // Count required parameters (those without defaults, excluding variadic)
     size_t params_required = n_params - (fn->is_variadic ? 1 : 0);
     size_t max_args = params_required;
-    if (fn_decl) {
-        auto &fn_proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
+    if (fn_decl && fn_decl->type == ast::NodeType::FnDef) {
+        auto *fn_proto_node = fn_decl->data.fn_def.fn_proto;
+        auto &fn_proto = fn_proto_node->data.fn_proto;
         params_required = 0;
         for (size_t i = 0; i < fn_proto.params.len; i++) {
             auto param = fn_proto.params[i];
@@ -3576,7 +3577,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     }
 
     // Inject default values for missing arguments
-    if (fn_decl && n_args < max_args) {
+    if (fn_decl && fn_decl->type == ast::NodeType::FnDef && n_args < max_args) {
         auto &fn_proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
         for (size_t i = n_args; i < max_args; i++) {
             auto param = fn_proto.params[i];
