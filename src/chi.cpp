@@ -181,6 +181,14 @@ int main(int argc, char *argv[]) {
         auto pkg = analyzer.add_package(".");
         auto module = analyzer.format_file(pkg, input_file);
 
+        if (module && module->errors.len > 0) {
+            for (auto &error : module->errors) {
+                fmt::print(stderr, "{}:{}:{}: error: {}\n", module->full_path(),
+                           error.pos.line_number(), error.pos.col_number(), error.message);
+            }
+            return 1;
+        }
+
         if (module && module->root) {
             cx::AstPrinter printer(module->root, &module->comments);
             printer.print_ast();

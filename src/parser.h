@@ -23,6 +23,7 @@ struct ParseContext {
     Context *allocator;
     ScopeResolver *resolver;
     bool debug_mode = false;
+    bool format_mode = false;
     optional<ErrorHandler> error_handler = {};
     array<Token *> tokens;
 

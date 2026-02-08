@@ -466,7 +466,7 @@ Node *Parser::parse_identifier() {
     auto token = expect_identifier();
     auto decl = m_ctx->resolver->find_symbol(token->str);
     auto node = create_identifier_node(token, decl);
-    if (!decl && token->type != TokenType::KW_THIS_TYPE) {
+    if (!decl && token->type != TokenType::KW_THIS_TYPE && !m_ctx->format_mode) {
         error(token, errors::UNDECLARED, node->name);
     }
     if (token->type == TokenType::KW_THIS) {
@@ -1585,7 +1585,7 @@ void Parser::add_to_scope(Node *node) {
 
 void Parser::add_to_scope(Node *node, const string &name) {
     auto ok = m_ctx->resolver->declare_symbol(name, node);
-    if (!ok) {
+    if (!ok && !m_ctx->format_mode) {
         error(node->token, errors::REDECLARED, name);
     }
 }
@@ -2226,7 +2226,7 @@ Node *Parser::parse_export_decl() {
             }
             expect(TokenType::RBRACE);
         } else {
-            error(get(), errors::EXPORT_DECL_MUST_HAVE_SYMBOLS);
+            if (!m_ctx->format_mode) error(get(), errors::EXPORT_DECL_MUST_HAVE_SYMBOLS);
         }
     }
 
@@ -2256,7 +2256,7 @@ Node *Parser::parse_switch_expr() {
             break;
         }
     }
-    if (!has_else) {
+    if (!has_else && !m_ctx->format_mode) {
         error(kw, errors::SWITCH_EXPR_MUST_HAVE_ELSE);
     }
     expect(TokenType::RBRACE);

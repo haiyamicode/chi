@@ -53,9 +53,10 @@ ast::Module *Analyzer::format_file(ast::Package *package, const string &file_nam
     pc.resolver = &scope_resolver;
     pc.module = module;
     pc.allocator = &m_ctx;
+    pc.format_mode = true;
     pc.add_token_results(tokenization.tokens);
 
-    // Set up error handler to collect errors without crashing
+    // Collect syntax errors only (resolution errors are skipped via format_mode)
     pc.error_handler = [&](const Error &error) { module->errors.add(error); };
 
     Parser parser(&pc);
