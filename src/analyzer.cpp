@@ -132,10 +132,11 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
 }
 
 bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
+    if (!node) return false;
     switch (node->type) {
     case ast::NodeType::FnDef: {
         auto &fn = node->data.fn_def;
-        if (fn.body->type == ast::NodeType::Block) {
+        if (fn.body && fn.body->type == ast::NodeType::Block) {
             auto &block = fn.body->data.block;
             auto start = fn.body->start_token;
             auto end = fn.body->end_token;
