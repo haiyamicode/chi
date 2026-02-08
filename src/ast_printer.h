@@ -18,6 +18,16 @@ class AstPrinter {
     bool m_suppress_func_keyword = false;
     array<Comment> *m_comments = nullptr;
     size_t m_comment_idx = 0;
+    fmt::memory_buffer *m_buffer = nullptr;
+
+    // Shadows global fmt::print — routes output to buffer when set, stdout otherwise.
+    template <typename... Args> void emit(fmt::format_string<Args...> fmt, Args &&...args) {
+        if (m_buffer) {
+            fmt::format_to(std::back_inserter(*m_buffer), fmt, std::forward<Args>(args)...);
+        } else {
+            fmt::print(fmt, std::forward<Args>(args)...);
+        }
+    }
 
   public:
     AstPrinter(Node *root, array<Comment> *comments = nullptr) {
@@ -26,6 +36,9 @@ class AstPrinter {
     }
 
     void print_ast();
+
+    // Format the AST and return the result as a string.
+    string format_to_string();
 
     void print_node(Node *root);
 

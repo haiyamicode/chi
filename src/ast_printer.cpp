@@ -35,28 +35,39 @@ void cx::print_ast(Node *root) {
 
 void AstPrinter::print_ast() { print_node(m_root); }
 
+string AstPrinter::format_to_string() {
+    fmt::memory_buffer buf;
+    m_buffer = &buf;
+    print_ast();
+    m_buffer = nullptr;
+    return string(buf.data(), buf.size());
+}
+
 void AstPrinter::print_node(Node *node) {
-    if (!node) return;
+    if (!node)
+        return;
     // Flush any inline comments before this node's position.
     // Own-line comments are handled by callers before indentation.
     auto *_ft = first_token(node);
-    if (_ft) flush_comments_before(_ft->pos);
+    if (_ft)
+        flush_comments_before(_ft->pos);
     switch (node->type) {
     case NodeType::Root: {
         for (auto decl : m_root->data.root.top_level_decls) {
             auto *ft = first_token(decl);
-            if (ft) flush_comments_before(ft->pos);
+            if (ft)
+                flush_comments_before(ft->pos);
             print_node(decl);
             if (decl->type == NodeType::VarDecl) {
-                print(";");
+                emit(";");
             }
-            print("\n");
+            emit("\n");
         }
         // Flush any trailing comments at end of file
         if (m_comments) {
             while (m_comment_idx < m_comments->len) {
                 auto &comment = m_comments->at(m_comment_idx);
-                print("{}\n", comment.text);
+                emit("{}\n", comment.text);
                 m_comment_idx++;
             }
         }
@@ -68,25 +79,25 @@ void AstPrinter::print_node(Node *node) {
         // Value captures go between 'func' and params: func [x, y](...)
         if (data.value_captures.len > 0) {
             m_suppress_func_keyword = true;
-            print("func [");
+            emit("func [");
             for (size_t i = 0; i < data.value_captures.len; i++) {
-                print("{}", data.value_captures.at(i));
+                emit("{}", data.value_captures.at(i));
                 if (i < data.value_captures.len - 1) {
-                    print(", ");
+                    emit(", ");
                 }
             }
-            print("] ");
+            emit("] ");
         }
         print_node(data.fn_proto);
         m_suppress_func_keyword = false;
         if (data.body) {
-            print(" ");
+            emit(" ");
             print_node(data.body);
             if (data.fn_kind != FnKind::Lambda) {
-                print("\n");
+                emit("\n");
             }
         } else {
-            print(";");
+            emit(";");
         }
         break;
     }
@@ -94,49 +105,49 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.fn_proto;
         if (data.is_type_expr && !data.params.len && !data.return_type) {
             if (!m_suppress_func_keyword) {
-                print("func");
+                emit("func");
             }
             return;
         }
         if (m_suppress_func_keyword) {
             if (!node->name.empty()) {
-                print("{}", node->name);
+                emit("{}", node->name);
             }
         } else {
-            print("func {}", node->name);
+            emit("func {}", node->name);
         }
         // Print type parameters if present
         if (data.type_params.len > 0) {
-            print("<");
+            emit("<");
             print_node_list(&data.type_params);
-            print(">");
+            emit(">");
         }
-        print("(");
+        emit("(");
         print_node_list(&data.params);
-        print(")");
+        emit(")");
         if (data.return_type) {
-            print(" ");
+            emit(" ");
             print_node(data.return_type);
         }
         break;
     }
     case NodeType::Identifier: {
-        print("{}", node->name);
+        emit("{}", node->name);
         break;
     }
     case NodeType::Primitive: {
-        print("{}", node->name);
+        emit("{}", node->name);
         break;
     }
     case NodeType::TypeParam: {
         auto &data = node->data.type_param;
-        print("{}", node->name);
+        emit("{}", node->name);
         if (data.type_bound) {
-            print(": ");
+            emit(": ");
             print_node(data.type_bound);
         }
         if (data.default_type) {
-            print(" = ");
+            emit(" = ");
             print_node(data.default_type);
         }
         break;
@@ -144,15 +155,15 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::ParamDecl: {
         auto &data = node->data.param_decl;
         if (data.is_variadic) {
-            print("...");
+            emit("...");
         }
-        print(node->name);
+        emit(node->name);
         if (data.type) {
-            print(": ");
+            emit(": ");
             print_node(data.type);
         }
         if (data.default_value) {
-            print(" = ");
+            emit(" = ");
             print_node(data.default_value);
         }
         break;
@@ -161,35 +172,37 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.block;
         auto is_inline = !data.statements.len && !data.has_braces;
         if (data.is_arrow) {
-            print(" => ");
+            emit(" => ");
         }
         if (data.has_braces) {
             m_indent++;
-            print("{{\n");
+            emit("{{\n");
         }
 
         Node *prev_stmt = nullptr;
         for (auto stmt : data.statements) {
             // Arrow lambda bodies: print expression directly without 'return' keyword
-            if (data.is_arrow && stmt->type == NodeType::ReturnStmt && stmt->data.return_stmt.expr) {
+            if (data.is_arrow && stmt->type == NodeType::ReturnStmt &&
+                stmt->data.return_stmt.expr) {
                 print_node(stmt->data.return_stmt.expr);
             } else {
                 // Preserve blank lines from original source
                 if (prev_stmt && has_blank_line_between(prev_stmt, stmt)) {
-                    print("\n");
+                    emit("\n");
                 }
                 auto *ft = first_token(stmt);
-                if (ft) flush_comments_before(ft->pos);
+                if (ft)
+                    flush_comments_before(ft->pos);
                 print_indent(m_indent);
                 print_node(stmt);
                 if (stmt->type == NodeType::ForStmt || stmt->type == NodeType::WhileStmt) {
                     // These handlers print their own \n
                 } else if (stmt->type == NodeType::IfStmt || stmt->type == NodeType::Block) {
-                    print("\n");
+                    emit("\n");
                 } else {
-                    print(";");
+                    emit(";");
                     flush_trailing_comment(stmt);
-                    print("\n");
+                    emit("\n");
                 }
             }
             prev_stmt = stmt;
@@ -198,16 +211,17 @@ void AstPrinter::print_node(Node *node) {
         if (data.return_expr) {
             // Preserve blank line before return expression
             if (prev_stmt && has_blank_line_between(prev_stmt, data.return_expr)) {
-                print("\n");
+                emit("\n");
             }
             if (!is_inline) {
                 auto *ft = first_token(data.return_expr);
-                if (ft) flush_comments_before(ft->pos);
+                if (ft)
+                    flush_comments_before(ft->pos);
                 print_indent(m_indent);
             }
             print_node(data.return_expr);
             if (!is_inline) {
-                print("\n");
+                emit("\n");
             }
         }
 
@@ -218,7 +232,7 @@ void AstPrinter::print_node(Node *node) {
             }
             m_indent--;
             print_indent(m_indent);
-            print("}}");
+            emit("}}");
         }
         break;
     }
@@ -227,50 +241,50 @@ void AstPrinter::print_node(Node *node) {
         if (!data.is_field) {
             switch (data.kind) {
             case ast::VarKind::Mutable:
-                print("var");
+                emit("var");
                 break;
             case ast::VarKind::Immutable:
-                print("let");
+                emit("let");
                 break;
             case ast::VarKind::Constant:
-                print("const");
+                emit("const");
                 break;
             }
-            print(" ");
+            emit(" ");
         }
         if (data.is_embed) {
-            print("...");
+            emit("...");
         }
-        print(node->name);
+        emit(node->name);
         if (data.type) {
-            print(": ");
+            emit(": ");
             print_node(data.type);
         }
         if (data.expr) {
-            print(" = ");
+            emit(" = ");
             print_node(data.expr);
         }
         break;
     }
     case NodeType::StructDecl: {
         auto &data = node->data.struct_decl;
-        print("{} ", node->token->str);
+        emit("{} ", node->token->str);
         if (!node->name.empty()) {
-            print("{}", node->name);
+            emit("{}", node->name);
         }
         if (data.type_params.len) {
-            print("<");
+            emit("<");
             print_node_list(&data.type_params);
-            print(">");
+            emit(">");
         }
         if (data.implements.len) {
-            print(" implements ");
+            emit(" implements ");
             print_node_list(&data.implements);
         }
-        print(" {{");
+        emit(" {{");
 
         if (data.members.len) {
-            print("\n");
+            emit("\n");
             m_indent++;
             Node *prev_member = nullptr;
             NodeType prev_type = NodeType::Error;
@@ -279,111 +293,116 @@ void AstPrinter::print_node(Node *node) {
                 // Blank line: type change, between methods, or user's blank lines
                 if (prev_member) {
                     bool want_blank = false;
-                    if (prev_type != member->type) want_blank = true;
-                    if (prev_type == NodeType::FnDef) want_blank = true;
-                    if (has_blank_line_between(prev_member, member)) want_blank = true;
-                    if (want_blank) print("\n");
+                    if (prev_type != member->type)
+                        want_blank = true;
+                    if (prev_type == NodeType::FnDef)
+                        want_blank = true;
+                    if (has_blank_line_between(prev_member, member))
+                        want_blank = true;
+                    if (want_blank)
+                        emit("\n");
                 }
                 prev_type = member->type;
                 auto *ft = first_token(member);
-                if (ft) flush_comments_before(ft->pos);
+                if (ft)
+                    flush_comments_before(ft->pos);
                 print_indent(m_indent);
                 print_node(member);
                 if (member->type == NodeType::VarDecl) {
-                    print(";");
+                    emit(";");
                     flush_trailing_comment(member);
-                    print("\n");
+                    emit("\n");
                 } else if (member->type == NodeType::FnDef) {
                     // FnDef handler already prints \n after body
                 } else if (member->type == NodeType::EnumVariant) {
                     if (i != data.members.len - 1) {
-                        print(",");
+                        emit(",");
                     }
                     flush_trailing_comment(member);
-                    print("\n");
+                    emit("\n");
                 }
                 prev_member = member;
                 i++;
             }
             m_indent--;
-        } else if (node->end_token && m_comments && m_comment_idx < m_comments->len
-                   && m_comments->at(m_comment_idx).pos < node->end_token->pos) {
+        } else if (node->end_token && m_comments && m_comment_idx < m_comments->len &&
+                   m_comments->at(m_comment_idx).pos < node->end_token->pos) {
             // Empty struct with inner comments
-            print("\n");
+            emit("\n");
             m_indent++;
             flush_comments_before(node->end_token->pos);
             m_indent--;
             print_indent(m_indent);
         }
-        print("}}");
-        print("\n");
+        emit("}}");
+        emit("\n");
         break;
     }
     case NodeType::DotExpr: {
         auto &data = node->data.dot_expr;
         print_node(data.expr);
-        print(".{}", data.field->str);
+        emit(".{}", data.field->str);
         break;
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
         if (data.type) {
             if (data.is_new) {
-                print("new ");
+                emit("new ");
             }
             print_node(data.type);
         }
-        print("{{");
+        emit("{{");
         // Print positional items first, then named field inits
         print_node_list(&data.items);
         if (data.items.len && data.field_inits.len) {
-            print(", ");
+            emit(", ");
         }
         print_node_list(&data.field_inits);
-        print("}}");
+        emit("}}");
         break;
     }
     case NodeType::FieldInitExpr: {
         auto &data = node->data.field_init_expr;
-        print(".{} = ", data.field->str);
+        emit(".{} = ", data.field->str);
         print_node(data.value);
         break;
     }
     case NodeType::BinOpExpr: {
         auto &data = node->data.bin_op_expr;
         print_node(data.op1);
-        print(" {} ", get_token_symbol(data.op_type));
+        emit(" {} ", get_token_symbol(data.op_type));
         print_node(data.op2);
         break;
     }
     case NodeType::LiteralExpr: {
-        print("{}", node->token->to_string());
+        emit("{}", node->token->to_string());
         break;
     }
     case NodeType::ReturnStmt: {
         auto &data = node->data.return_stmt;
-        print("return");
+        emit("return");
         if (data.expr) {
-            print(" ");
+            emit(" ");
             print_node(data.expr);
         }
         break;
     }
     case NodeType::ParenExpr: {
         auto &child = node->data.child_expr;
-        print("(");
+        emit("(");
         print_node(child);
-        print(")");
+        emit(")");
         break;
     }
     case NodeType::IfStmt: {
         auto &data = node->data.if_stmt;
-        print("if ");
+        emit("if ");
         print_node(data.condition);
-        print(" ");
+        emit(" ");
         print_node(data.then_block);
         if (data.else_node) {
-            print(" else ");
+            emit(" else ");
             print_node(data.else_node);
         }
         // No \n here — Block handler owns it, preventing double \n in else-if chains
@@ -394,64 +413,64 @@ void AstPrinter::print_node(Node *node) {
         print_node(data.fn_ref_expr);
         // Print type parameters if present
         if (data.type_args.len > 0) {
-            print("<");
+            emit("<");
             print_node_list(&data.type_args);
-            print(">");
+            emit(">");
         }
-        print("(");
+        emit("(");
         print_node_list(&data.args);
-        print(")");
+        emit(")");
         break;
     }
     case NodeType::SubtypeExpr: {
         auto &data = node->data.subtype_expr;
         print_node(data.type);
-        print("<");
+        emit("<");
         print_node_list(&data.args);
-        print(">");
+        emit(">");
         break;
     }
     case NodeType::IndexExpr: {
         auto &data = node->data.index_expr;
         print_node(data.expr);
-        print("[");
+        emit("[");
         print_node(data.subscript);
-        print("]");
+        emit("]");
         break;
     }
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
-        print("{}", get_sigil_symbol(data.sigil));
+        emit("{}", get_sigil_symbol(data.sigil));
         if (data.sigil == SigilKind::MutRef) {
             if (data.has_wrapping) {
-                print("<");
+                emit("<");
             } else {
-                print(" ");
+                emit(" ");
             }
         }
         print_node(data.type);
         if (data.has_wrapping && data.sigil == SigilKind::MutRef) {
-            print(">");
+            emit(">");
         }
         break;
     }
     case NodeType::TypedefDecl: {
         auto &data = node->data.typedef_decl;
-        print("typedef ");
-        print(data.identifier->str);
-        print(" = ");
+        emit("typedef ");
+        emit(data.identifier->str);
+        emit(" = ");
         print_node(data.type);
         break;
     }
     case NodeType::EnumVariant: {
         auto &data = node->data.enum_variant;
-        print("{}", node->name);
+        emit("{}", node->name);
         if (data.value) {
-            print(" = ");
+            emit(" = ");
             print_node(data.value);
         }
         if (data.struct_body) {
-            print(" ");
+            emit(" ");
             print_struct_members(data.struct_body->data.struct_decl);
         }
         break;
@@ -460,107 +479,107 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.unary_op_expr;
         if (!data.is_suffix) {
             if (data.op_type == TokenType::MUTREF) {
-                print("&mut ");
+                emit("&mut ");
             } else {
-                print("{}", get_token_symbol(data.op_type));
+                emit("{}", get_token_symbol(data.op_type));
             }
             print_node(data.op1);
         } else {
             print_node(data.op1);
-            print("{}", get_token_symbol(data.op_type));
+            emit("{}", get_token_symbol(data.op_type));
         }
         break;
     }
     case NodeType::TryExpr: {
         auto &data = node->data.try_expr;
-        print("try ");
+        emit("try ");
         print_node(data.expr);
         break;
     }
     case NodeType::AwaitExpr: {
         auto &data = node->data.await_expr;
-        print("await ");
+        emit("await ");
         print_node(data.expr);
         break;
     }
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
         print_node(data.expr);
-        print(" as ");
+        emit(" as ");
         print_node(data.dest_type);
         break;
     }
     case NodeType::BindIdentifier: {
-        print("{}", node->token->to_string());
+        emit("{}", node->token->to_string());
         break;
     }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
-        print("for ");
+        emit("for ");
         if (data.kind == ForLoopKind::Ternary) {
             if (data.init) {
                 print_node(data.init);
             }
-            print(";");
+            emit(";");
             if (data.condition) {
-                print(" ");
+                emit(" ");
                 print_node(data.condition);
             }
-            print(";");
+            emit(";");
             if (data.post) {
-                print(" ");
+                emit(" ");
                 print_node(data.post);
             }
-            print(" ");
+            emit(" ");
         }
         if (data.kind == ForLoopKind::Range) {
             if (data.bind_sigil != SigilKind::None) {
-                print("{}", get_sigil_symbol(data.bind_sigil));
-                print(" ");
+                emit("{}", get_sigil_symbol(data.bind_sigil));
+                emit(" ");
             }
             if (data.bind) {
                 print_node(data.bind);
-                print(" ");
+                emit(" ");
             }
-            print("in ");
+            emit("in ");
             print_node(data.expr);
-            print(" ");
+            emit(" ");
         }
         print_node(data.body);
-        print("\n");
+        emit("\n");
         break;
     }
     case NodeType::WhileStmt: {
         auto &data = node->data.while_stmt;
-        print("while");
+        emit("while");
         if (data.condition) {
-            print(" ");
+            emit(" ");
             print_node(data.condition);
         }
-        print(" ");
+        emit(" ");
         print_node(data.body);
-        print("\n");
+        emit("\n");
         break;
     }
     case NodeType::BranchStmt: {
-        print("{}", node->token->to_string());
+        emit("{}", node->token->to_string());
         break;
     }
     case NodeType::ExternDecl: {
         auto &data = node->data.extern_decl;
-        print("extern {} ", data.type->to_string());
-        print("{{\n");
+        emit("extern {} ", data.type->to_string());
+        emit("{{\n");
         for (auto member : data.members) {
             print_indent(m_indent + 1);
             print_node(member);
-            print("\n");
+            emit("\n");
         }
-        print("}}\n");
+        emit("}}\n");
         break;
     }
     case NodeType::Error: {
         if (node->token) {
-            print("{}", node->token->to_string());
+            emit("{}", node->token->to_string());
         }
         break;
     }
@@ -569,71 +588,73 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ImportDecl: {
         auto &data = node->data.import_decl;
-        print("import ");
-        print(data.path->to_string());
+        emit("import ");
+        emit(data.path->to_string());
         if (data.alias) {
-            print(" as {}", data.alias->to_string());
+            emit(" as {}", data.alias->to_string());
         }
         if (data.symbols.len) {
-            print(" {{");
+            emit(" {{");
             print_node_list(&data.symbols);
-            print("}}");
+            emit("}}");
         }
-        print(";\n");
+        emit(";\n");
         break;
     }
     case NodeType::ExportDecl: {
         auto &data = node->data.import_decl;
-        print("export ");
-        print(data.path->to_string());
+        emit("export ");
+        emit(data.path->to_string());
         if (data.alias) {
-            print(" as {}", data.alias->to_string());
+            emit(" as {}", data.alias->to_string());
         }
         if (data.match_all) {
-            print(" *");
+            emit(" *");
         } else {
             if (data.symbols.len) {
-                print(" {{");
+                emit(" {{");
                 print_node_list(&data.symbols);
-                print("}}");
+                emit("}}");
             }
         }
-        print(";\n");
+        emit(";\n");
         break;
     }
     case NodeType::ImportSymbol: {
         auto &data = node->data.import_symbol;
-        print("{}", data.name->to_string());
+        emit("{}", data.name->to_string());
         if (data.alias) {
-            print(" as {}", data.alias->to_string());
+            emit(" as {}", data.alias->to_string());
         }
         break;
     }
     case NodeType::PrefixExpr: {
         auto &data = node->data.prefix_expr;
-        print("{} ", data.prefix->str);
+        emit("{} ", data.prefix->str);
         print_node(data.expr);
         break;
     }
     case NodeType::SwitchExpr: {
         auto &data = node->data.switch_expr;
-        print("switch ");
+        emit("switch ");
         print_node(data.expr);
-        print(" {{\n");
+        emit(" {{\n");
         m_indent++;
         for (int i = 0; i < data.cases.len; i++) {
             auto case_node = data.cases.at(i);
             auto *ft = first_token(case_node);
-            if (ft) flush_comments_before(ft->pos);
+            if (ft)
+                flush_comments_before(ft->pos);
             print_indent(m_indent);
             print_node(case_node);
             if (i < data.cases.len - 1) {
-                print(",");
+                emit(",");
             }
             // Flush trailing comment — use body if present (arrow block end)
-            auto *trail_node = case_node->data.case_expr.body ? case_node->data.case_expr.body : case_node;
+            auto *trail_node =
+                case_node->data.case_expr.body ? case_node->data.case_expr.body : case_node;
             flush_trailing_comment(trail_node);
-            print("\n");
+            emit("\n");
         }
         // Flush trailing comments before closing brace
         if (node->end_token) {
@@ -641,20 +662,20 @@ void AstPrinter::print_node(Node *node) {
         }
         m_indent--;
         print_indent(m_indent);
-        print("}}");
+        emit("}}");
         break;
     }
 
     case NodeType::CaseExpr: {
         auto &data = node->data.case_expr;
         if (data.is_else) {
-            print("else");
+            emit("else");
         } else {
             for (int i = 0; i < data.clauses.len; i++) {
                 auto clause = data.clauses.at(i);
                 print_node(clause);
                 if (i < data.clauses.len - 1) {
-                    print(", ");
+                    emit(", ");
                 }
             }
         }
@@ -665,53 +686,54 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::EnumDecl: {
         auto &data = node->data.enum_decl;
         print_declspec(data.decl_spec);
-        print("enum ");
+        emit("enum ");
         if (!node->name.empty()) {
-            print("{}", node->name);
+            emit("{}", node->name);
         }
         if (data.discriminator_field || data.discriminator_type) {
-            print(" (");
+            emit(" (");
             if (data.discriminator_field) {
-                print("{}: ", data.discriminator_field->get_name());
+                emit("{}: ", data.discriminator_field->get_name());
             }
             if (data.discriminator_type) {
                 print_node(data.discriminator_type);
             }
-            print(")");
+            emit(")");
         }
-        print(" {{\n");
+        emit(" {{\n");
         m_indent++;
         for (int i = 0; i < data.variants.len; i++) {
             auto variant = data.variants.at(i);
             auto *ft = first_token(variant);
-            if (ft) flush_comments_before(ft->pos);
+            if (ft)
+                flush_comments_before(ft->pos);
             print_indent(m_indent);
             print_node(variant);
             // Variants with struct bodies use ';' separator
             if (variant->data.enum_variant.struct_body) {
-                print(";");
+                emit(";");
             } else if (i < data.variants.len - 1) {
-                print(",");
+                emit(",");
             }
             flush_trailing_comment(variant);
-            print("\n");
+            emit("\n");
         }
         // Flush inner comments in empty enum
-        if (data.variants.len == 0 && !data.base_struct
-            && node->end_token && m_comments && m_comment_idx < m_comments->len
-            && m_comments->at(m_comment_idx).pos < node->end_token->pos) {
+        if (data.variants.len == 0 && !data.base_struct && node->end_token && m_comments &&
+            m_comment_idx < m_comments->len &&
+            m_comments->at(m_comment_idx).pos < node->end_token->pos) {
             flush_comments_before(node->end_token->pos);
         }
         // Print base struct members if present
         if (data.base_struct) {
-            print("\n");
+            emit("\n");
             print_indent(m_indent);
-            print("struct ");
+            emit("struct ");
             print_struct_members(data.base_struct->data.struct_decl);
-            print("\n");
+            emit("\n");
         }
         m_indent--;
-        print("}}\n");
+        emit("}}\n");
         break;
     }
     default:
@@ -721,7 +743,7 @@ void AstPrinter::print_node(Node *node) {
 
 void AstPrinter::print_indent(int level) {
     for (int i = 0; i < level; i++) {
-        print("    ");
+        emit("    ");
     }
 }
 
@@ -729,35 +751,40 @@ void AstPrinter::print_node_list(array<Node *> *list) {
     for (int i = 0; i < list->len; i++) {
         print_node(list->at(i));
         if (i < list->len - 1) {
-            print(", ");
+            emit(", ");
         }
     }
 }
 
 void AstPrinter::print_struct_members(StructDecl &data) {
-    print("{{");
+    emit("{{");
     if (data.members.len) {
-        print("\n");
+        emit("\n");
         m_indent++;
         Node *prev_member = nullptr;
         NodeType prev_type = NodeType::Error;
         for (auto member : data.members) {
             if (prev_member) {
                 bool want_blank = false;
-                if (prev_type != member->type) want_blank = true;
-                if (prev_type == NodeType::FnDef) want_blank = true;
-                if (has_blank_line_between(prev_member, member)) want_blank = true;
-                if (want_blank) print("\n");
+                if (prev_type != member->type)
+                    want_blank = true;
+                if (prev_type == NodeType::FnDef)
+                    want_blank = true;
+                if (has_blank_line_between(prev_member, member))
+                    want_blank = true;
+                if (want_blank)
+                    emit("\n");
             }
             prev_type = member->type;
             auto *ft = first_token(member);
-            if (ft) flush_comments_before(ft->pos);
+            if (ft)
+                flush_comments_before(ft->pos);
             print_indent(m_indent);
             print_node(member);
             if (member->type == NodeType::VarDecl) {
-                print(";");
+                emit(";");
                 flush_trailing_comment(member);
-                print("\n");
+                emit("\n");
             } else if (member->type == NodeType::FnDef) {
                 // FnDef handler already prints \n after body
             }
@@ -766,30 +793,30 @@ void AstPrinter::print_struct_members(StructDecl &data) {
         m_indent--;
         print_indent(m_indent);
     }
-    print("}}");
+    emit("}}");
 }
 
 void AstPrinter::print_declspec(DeclSpec *declspec) {
     for (auto attr : declspec->attributes) {
-        print("@[");
+        emit("@[");
         print_node(attr->data.decl_attribute.term);
-        print("]\n");
+        emit("]\n");
         print_indent(m_indent);
     }
     if (declspec->has_flag(DECL_PRIVATE)) {
-        print("private ");
+        emit("private ");
     }
     if (declspec->has_flag(DECL_PROTECTED)) {
-        print("protected ");
+        emit("protected ");
     }
     if (declspec->has_flag(DECL_STATIC)) {
-        print("static ");
+        emit("static ");
     }
     if (declspec->has_flag(DECL_MUTABLE)) {
-        print("mut ");
+        emit("mut ");
     }
     if (declspec->has_flag(DECL_ASYNC)) {
-        print("async ");
+        emit("async ");
     }
 }
 
@@ -837,41 +864,46 @@ Token *AstPrinter::last_token(Node *node) {
 }
 
 void AstPrinter::flush_comments_before(Pos before_pos) {
-    if (!m_comments) return;
+    if (!m_comments)
+        return;
     long last_comment_line = -1;
     while (m_comment_idx < m_comments->len) {
         auto &comment = m_comments->at(m_comment_idx);
-        if (!(comment.pos < before_pos)) break;
+        if (!(comment.pos < before_pos))
+            break;
 
         if (comment.pos.line == before_pos.line) {
             // Inline comment (same line as the next token) — print inline
-            print("{} ", comment.text);
+            emit("{} ", comment.text);
         } else {
             // Own-line comment — print on its own line with indent
             if (last_comment_line >= 0 && comment.pos.line - last_comment_line > 1) {
-                print("\n");
+                emit("\n");
             }
             print_indent(m_indent);
-            print("{}\n", comment.text);
+            emit("{}\n", comment.text);
             last_comment_line = comment.pos.line;
         }
         m_comment_idx++;
     }
     // Preserve blank line between last own-line comment and the node
     if (last_comment_line >= 0 && before_pos.line - last_comment_line > 1) {
-        print("\n");
+        emit("\n");
     }
 }
 
 void AstPrinter::flush_trailing_comment(Node *node) {
-    if (!m_comments || !node) return;
+    if (!m_comments || !node)
+        return;
     auto *lt = last_token(node);
-    if (!lt) return;
+    if (!lt)
+        return;
     long on_line = lt->pos.line;
     while (m_comment_idx < m_comments->len) {
         auto &comment = m_comments->at(m_comment_idx);
-        if (comment.pos.line != on_line) break;
-        print(" {}", comment.text);
+        if (comment.pos.line != on_line)
+            break;
+        emit(" {}", comment.text);
         m_comment_idx++;
     }
 }

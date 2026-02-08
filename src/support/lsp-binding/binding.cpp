@@ -7,6 +7,7 @@
 #define BOOST_JSON_STANDALONE
 #define BOOST_NO_EXCEPTIONS
 #include "../../analyzer.h"
+#include "../../ast_printer.h"
 #include <boost/json/src.hpp>
 
 static void crash_handler(int sig) {
@@ -102,6 +103,43 @@ static napi_value Method(napi_env env, napi_callback_info info) {
 
     std::string input_file = input["file"].as_string().c_str();
     auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+
+    // handle format operation early (lightweight path, no runtime needed)
+    if (input.contains("scan")) {
+        auto scan_input = input["scan"].as_object();
+        auto operation = scan_input["operation"].as_string();
+        if (operation == "format") {
+            auto pkg = analyzer.get_context()->add_package(".");
+            auto module = analyzer.format_source(pkg, &src, input_file);
+
+            boost::json::array errors_json;
+            if (module) {
+                for (auto &error : module->errors) {
+                    boost::json::object error_json;
+                    error_json["message"] = error.message;
+                    error_json["offset"] = error.pos.offset;
+                    error_json["range"] = error.range;
+                    errors_json.push_back(error_json);
+                }
+            }
+
+            boost::json::object result_object;
+            if (module && module->errors.len == 0 && module->root) {
+                cx::AstPrinter printer(module->root, &module->comments);
+                result_object["formatted"] = printer.format_to_string();
+            }
+
+            boost::json::object result_json = {
+                {"errors", errors_json},
+                {"scanResult", result_object},
+            };
+            auto str = boost::json::serialize(result_json);
+            napi_value result;
+            status = napi_create_string_utf8(env, str.c_str(), str.size(), &result);
+            if (status != napi_ok) return nullptr;
+            return result;
+        }
+    }
 
     // process source code
     analyzer.build_runtime();
