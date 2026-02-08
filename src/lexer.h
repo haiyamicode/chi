@@ -114,6 +114,11 @@ struct Pos {
     Pos add_line(long delta) const { return {line + delta, 0, -1}; }
 };
 
+struct Comment {
+    string text;
+    Pos pos;
+};
+
 struct Token {
     union Value {
         bool b;    // bool value
@@ -187,6 +192,7 @@ using ErrorHandler = std::function<void(Error)>;
 
 struct Tokenization {
     array<box<Token>> tokens;
+    array<Comment> comments;
     optional<string> error;
     Pos error_pos;
 };

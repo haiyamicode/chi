@@ -182,7 +182,7 @@ int main(int argc, char *argv[]) {
         auto module = analyzer.format_file(pkg, input_file);
 
         if (module && module->root) {
-            cx::AstPrinter printer(module->root);
+            cx::AstPrinter printer(module->root, &module->comments);
             printer.print_ast();
         }
         return 0;
@@ -203,7 +203,7 @@ int main(int argc, char *argv[]) {
         auto module = analyzer.process_file(pkg, input_file);
 
         if (module && module->root) {
-            cx::AstPrinter printer(module->root);
+            cx::AstPrinter printer(module->root, &module->comments);
             printer.print_ast();
         }
         return 0;

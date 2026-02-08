@@ -1,6 +1,3 @@
-// Test comprehensive numeric type support including int and float arithmetic
-// and type conversions
-
 func test_basic_types() {
     var i32: int32 = 100;
     var i64: int64 = 1000000;
@@ -8,7 +5,6 @@ func test_basic_types() {
     var ui64: uint64 = 3000000;
     var f32: float = 3.14;
     var f64: float64 = 3.141592653589793;
-    
     printf("Basic types:\n");
     printf("int32: {}\n", i32);
     printf("int64: {}\n", i64);
@@ -23,13 +19,11 @@ func test_arithmetic() {
     var b: int32 = 50;
     var c: float = 3.5;
     var d: float = 1.5;
-    
     printf("\nArithmetic operations:\n");
     printf("int32: {} + {} = {}\n", a, b, a + b);
     printf("int32: {} - {} = {}\n", a, b, a - b);
     printf("int32: {} * {} = {}\n", a, b, a * b);
     printf("int32: {} / {} = {}\n", a, b, a / b);
-    
     printf("float: {} + {} = {}\n", c, d, c + d);
     printf("float: {} - {} = {}\n", c, d, c - d);
     printf("float: {} * {} = {}\n", c, d, c * d);
@@ -39,7 +33,6 @@ func test_arithmetic() {
 func test_type_conversions() {
     var i: int32 = 42;
     var f: float = 3.14;
-    
     printf("\nType conversions:\n");
     printf("int32 to float: {} -> {}\n", i, i as float);
     printf("float to int32: {} -> {}\n", f, f as int32);
@@ -50,7 +43,6 @@ func test_type_conversions() {
 func test_mixed_operations() {
     var i: int32 = 100;
     var f: float = 2.5;
-    
     printf("\nMixed operations (implicit conversions):\n");
     printf("int32 + float: {} + {} = {}\n", i, f, i + f);
     printf("float - int32: {} - {} = {}\n", f, i, f - i);
@@ -61,7 +53,6 @@ func test_mixed_operations() {
 func test_unary_operations() {
     var i: int32 = 42;
     var f: float = 3.14;
-    
     printf("\nUnary operations:\n");
     printf("-int32: {}\n", -i);
     printf("-float: {}\n", -f);
@@ -74,7 +65,6 @@ func test_edge_cases() {
     var min_i32: int32 = -2147483648;
     var small_float: float = 0.0001;
     var large_float: float = 1000000.0;
-    
     printf("\nEdge cases:\n");
     printf("max int32: {}\n", max_i32);
     printf("min int32: {}\n", min_i32);
@@ -83,7 +73,6 @@ func test_edge_cases() {
 }
 
 func test_implicit_conversions() {
-    // Test implicit conversions from smaller to larger int types
     var b: bool = true;
     var c: char = 'A';
     var i8: int8 = 127;
@@ -92,42 +81,27 @@ func test_implicit_conversions() {
     var i64: int64 = 0;
     var f32: float = 0.0;
     var f64: float64 = 0.0;
-    
     printf("\nImplicit integer conversions:\n");
-    
-    // bool/char/smaller ints to larger ints
     i32 = b;
     printf("bool to int32: {} -> {}\n", true, i32);
-    
     i32 = c;
     printf("char to int32: '{}' -> {}\n", c, i32);
-    
     i32 = i8;
     printf("int8 to int32: {} -> {}\n", i8, i32);
-    
     i64 = i16;
     printf("int16 to int64: {} -> {}\n", i16, i64);
-    
-    // int to float conversions
     f32 = i32;
     printf("int32 to float: {} -> {}\n", i32, f32);
-    
     f64 = i64;
     printf("int64 to float64: {} -> {}\n", i64, f64);
-    
-    // float32 to float64
     f32 = 3.14;
     f64 = f32;
     printf("float to float64: {} -> {}\n", f32, f64);
-    
-    // Test operations with mixed types
-    var result_i32: int32 = i8 + i16;  // Should use int32
+    var result_i32: int32 = i8 + i16;
     printf("int8 + int16 = int32: {} + {} = {}\n", i8, i16, result_i32);
-    
-    var result_f32: float = i32 + f32;  // Should use float
+    var result_f32: float = i32 + f32;
     printf("int32 + float = float: {} + {} = {}\n", i32, f32, result_f32);
-    
-    var result_f64: float64 = f32 + f64;  // Should use float64
+    var result_f64: float64 = f32 + f64;
     printf("float + float64 = float64: {} + {} = {}\n", f32, f64, result_f64);
 }
 
@@ -141,3 +115,4 @@ func main() {
     test_implicit_conversions();
     printf("All numeric type tests completed!\n");
 }
+

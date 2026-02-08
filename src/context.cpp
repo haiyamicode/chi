@@ -150,6 +150,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     Tokenization tokenization;
     Lexer lexer(src, &tokenization);
     lexer.tokenize();
+    module->comments = std::move(tokenization.comments);
     if (tokenization.error) {
         if (exitOnError) {
             print("{}:{}:{}: error: {}\n", module->path, tokenization.error_pos.line_number(),

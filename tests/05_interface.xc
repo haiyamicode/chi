@@ -1,6 +1,5 @@
 interface Animal {
-    func make_sound();
-}
+    func make_sound();}
 
 struct AnimalBase implements Animal {
     id: int;
@@ -12,7 +11,7 @@ struct AnimalBase implements Animal {
     func make_sound() {
         printf("{}: <silence>\n", this.id);
     }
-};
+}
 
 struct Ant {
     ...base: AnimalBase;
@@ -28,7 +27,7 @@ struct Sheep {
     func make_sound() {
         printf("{}: baaaaahh\n", this.id);
     }
-};
+}
 
 struct Cat implements Animal {
     id: int;
@@ -40,7 +39,7 @@ struct Cat implements Animal {
     func make_sound() {
         printf("{}: meeoooww\n", this.id);
     }
-};
+}
 
 func main() {
     var sheep: Sheep = {1};
@@ -53,3 +52,4 @@ func main() {
     animal = &ant;
     animal.make_sound();
 }
+

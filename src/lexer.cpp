@@ -146,24 +146,36 @@ l0:
     } else if (c == '\'') {
         read_rune();
     } else if (c == '#') {
+        auto comment_pos = pos();
+        string comment_text = "#";
         c = read();
-        while (c != '\n') {
-            c = read(); // ignore
+        while (c && c != '\n') {
+            comment_text.push_back(c);
+            c = read();
         }
+        m_result->comments.add({std::move(comment_text), comment_pos});
         goto l0;
     } else if (c == '/') {
         if (read_expect('/')) {
+            auto comment_pos = pos();
+            string comment_text = "//";
             c = read();
             while (c && c != '\n') {
-                c = read(); // ignore
+                comment_text.push_back(c);
+                c = read();
             }
+            m_result->comments.add({std::move(comment_text), comment_pos});
             goto l0;
         } else if (read_expect('*')) {
+            auto comment_pos = pos();
+            string comment_text = "/*";
             c = read();
             while (1) {
                 if (c == '*') {
+                    comment_text.push_back(c);
                     c = read();
                     if (c == '/') {
+                        comment_text.push_back(c);
                         break;
                     }
                     continue;
@@ -172,9 +184,10 @@ l0:
                     error("eof in comment", pos());
                     return;
                 }
-
-                c = read(); // ignore
+                comment_text.push_back(c);
+                c = read();
             }
+            m_result->comments.add({std::move(comment_text), comment_pos});
             goto l0;
         }
 
@@ -856,8 +869,14 @@ string Token::to_string() const {
         return fmt::format("\"{}\"", get_strlit_repr(str));
     case TokenType::INT:
         return fmt::format("{}", val.i);
-    case TokenType::FLOAT:
-        return fmt::format("{}", val.d);
+    case TokenType::FLOAT: {
+        auto s = fmt::format("{}", val.d);
+        // Ensure float literals keep a decimal point (3.0 not 3)
+        if (s.find('.') == string::npos && s.find('e') == string::npos) {
+            s += ".0";
+        }
+        return s;
+    }
     case TokenType::BOOL:
         return val.b ? "true" : "false";
     case TokenType::NULLP:

@@ -36,21 +36,49 @@ void cx::print_ast(Node *root) {
 void AstPrinter::print_ast() { print_node(m_root); }
 
 void AstPrinter::print_node(Node *node) {
+    if (!node) return;
+    // Flush any inline comments before this node's position.
+    // Own-line comments are handled by callers before indentation.
+    auto *_ft = first_token(node);
+    if (_ft) flush_comments_before(_ft->pos);
     switch (node->type) {
     case NodeType::Root: {
         for (auto decl : m_root->data.root.top_level_decls) {
+            auto *ft = first_token(decl);
+            if (ft) flush_comments_before(ft->pos);
             print_node(decl);
             if (decl->type == NodeType::VarDecl) {
                 print(";");
             }
             print("\n");
         }
+        // Flush any trailing comments at end of file
+        if (m_comments) {
+            while (m_comment_idx < m_comments->len) {
+                auto &comment = m_comments->at(m_comment_idx);
+                print("{}\n", comment.text);
+                m_comment_idx++;
+            }
+        }
         break;
     }
     case NodeType::FnDef: {
         auto &data = node->data.fn_def;
         print_declspec(data.decl_spec);
+        // Value captures go between 'func' and params: func [x, y](...)
+        if (data.value_captures.len > 0) {
+            m_suppress_func_keyword = true;
+            print("func [");
+            for (size_t i = 0; i < data.value_captures.len; i++) {
+                print("{}", data.value_captures.at(i));
+                if (i < data.value_captures.len - 1) {
+                    print(", ");
+                }
+            }
+            print("] ");
+        }
         print_node(data.fn_proto);
+        m_suppress_func_keyword = false;
         if (data.body) {
             print(" ");
             print_node(data.body);
@@ -65,10 +93,18 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
         if (data.is_type_expr && !data.params.len && !data.return_type) {
-            print("func");
+            if (!m_suppress_func_keyword) {
+                print("func");
+            }
             return;
         }
-        print("func {}", node->name);
+        if (m_suppress_func_keyword) {
+            if (!node->name.empty()) {
+                print("{}", node->name);
+            }
+        } else {
+            print("func {}", node->name);
+        }
         // Print type parameters if present
         if (data.type_params.len > 0) {
             print("<");
@@ -88,12 +124,20 @@ void AstPrinter::print_node(Node *node) {
         print("{}", node->name);
         break;
     }
+    case NodeType::Primitive: {
+        print("{}", node->name);
+        break;
+    }
     case NodeType::TypeParam: {
         auto &data = node->data.type_param;
         print("{}", node->name);
         if (data.type_bound) {
             print(": ");
             print_node(data.type_bound);
+        }
+        if (data.default_type) {
+            print(" = ");
+            print_node(data.default_type);
         }
         break;
     }
@@ -103,8 +147,14 @@ void AstPrinter::print_node(Node *node) {
             print("...");
         }
         print(node->name);
-        print(": ");
-        print_node(data.type);
+        if (data.type) {
+            print(": ");
+            print_node(data.type);
+        }
+        if (data.default_value) {
+            print(" = ");
+            print_node(data.default_value);
+        }
         break;
     }
     case NodeType::Block: {
@@ -118,17 +168,41 @@ void AstPrinter::print_node(Node *node) {
             print("{{\n");
         }
 
+        Node *prev_stmt = nullptr;
         for (auto stmt : data.statements) {
-            print_indent(m_indent);
-            print_node(stmt);
-            if (stmt->type != NodeType::IfStmt && stmt->type != NodeType::ForStmt &&
-                stmt->type != NodeType::WhileStmt) {
-                print(";\n");
+            // Arrow lambda bodies: print expression directly without 'return' keyword
+            if (data.is_arrow && stmt->type == NodeType::ReturnStmt && stmt->data.return_stmt.expr) {
+                print_node(stmt->data.return_stmt.expr);
+            } else {
+                // Preserve blank lines from original source
+                if (prev_stmt && has_blank_line_between(prev_stmt, stmt)) {
+                    print("\n");
+                }
+                auto *ft = first_token(stmt);
+                if (ft) flush_comments_before(ft->pos);
+                print_indent(m_indent);
+                print_node(stmt);
+                if (stmt->type == NodeType::ForStmt || stmt->type == NodeType::WhileStmt) {
+                    // These handlers print their own \n
+                } else if (stmt->type == NodeType::IfStmt || stmt->type == NodeType::Block) {
+                    print("\n");
+                } else {
+                    print(";");
+                    flush_trailing_comment(stmt);
+                    print("\n");
+                }
             }
+            prev_stmt = stmt;
         }
 
         if (data.return_expr) {
+            // Preserve blank line before return expression
+            if (prev_stmt && has_blank_line_between(prev_stmt, data.return_expr)) {
+                print("\n");
+            }
             if (!is_inline) {
+                auto *ft = first_token(data.return_expr);
+                if (ft) flush_comments_before(ft->pos);
                 print_indent(m_indent);
             }
             print_node(data.return_expr);
@@ -138,6 +212,10 @@ void AstPrinter::print_node(Node *node) {
         }
 
         if (data.has_braces) {
+            // Flush any remaining comments inside the block before the closing brace
+            if (node->end_token) {
+                flush_comments_before(node->end_token->pos);
+            }
             m_indent--;
             print_indent(m_indent);
             print("}}");
@@ -186,37 +264,56 @@ void AstPrinter::print_node(Node *node) {
             print(">");
         }
         if (data.implements.len) {
-            print(": ");
+            print(" implements ");
             print_node_list(&data.implements);
         }
         print(" {{");
 
-        NodeType member_type = NodeType::Error;
         if (data.members.len) {
             print("\n");
             m_indent++;
+            Node *prev_member = nullptr;
+            NodeType prev_type = NodeType::Error;
             size_t i = 0;
             for (auto member : data.members) {
-                if (member_type != NodeType::Error && member_type != member->type) {
-                    print("\n");
+                // Blank line: type change, between methods, or user's blank lines
+                if (prev_member) {
+                    bool want_blank = false;
+                    if (prev_type != member->type) want_blank = true;
+                    if (prev_type == NodeType::FnDef) want_blank = true;
+                    if (has_blank_line_between(prev_member, member)) want_blank = true;
+                    if (want_blank) print("\n");
                 }
-                member_type = member->type;
+                prev_type = member->type;
+                auto *ft = first_token(member);
+                if (ft) flush_comments_before(ft->pos);
                 print_indent(m_indent);
                 print_node(member);
                 if (member->type == NodeType::VarDecl) {
-                    print(";\n");
-                } else if (member->type == NodeType::FnDef) {
+                    print(";");
+                    flush_trailing_comment(member);
                     print("\n");
+                } else if (member->type == NodeType::FnDef) {
+                    // FnDef handler already prints \n after body
                 } else if (member->type == NodeType::EnumVariant) {
                     if (i != data.members.len - 1) {
-                        print(",\n");
-                    } else {
-                        print("\n");
+                        print(",");
                     }
+                    flush_trailing_comment(member);
+                    print("\n");
                 }
+                prev_member = member;
                 i++;
             }
             m_indent--;
+        } else if (node->end_token && m_comments && m_comment_idx < m_comments->len
+                   && m_comments->at(m_comment_idx).pos < node->end_token->pos) {
+            // Empty struct with inner comments
+            print("\n");
+            m_indent++;
+            flush_comments_before(node->end_token->pos);
+            m_indent--;
+            print_indent(m_indent);
         }
         print("}}");
         print("\n");
@@ -237,8 +334,19 @@ void AstPrinter::print_node(Node *node) {
             print_node(data.type);
         }
         print("{{");
+        // Print positional items first, then named field inits
         print_node_list(&data.items);
+        if (data.items.len && data.field_inits.len) {
+            print(", ");
+        }
+        print_node_list(&data.field_inits);
         print("}}");
+        break;
+    }
+    case NodeType::FieldInitExpr: {
+        auto &data = node->data.field_init_expr;
+        print(".{} = ", data.field->str);
+        print_node(data.value);
         break;
     }
     case NodeType::BinOpExpr: {
@@ -278,7 +386,7 @@ void AstPrinter::print_node(Node *node) {
             print(" else ");
             print_node(data.else_node);
         }
-        print("\n");
+        // No \n here — Block handler owns it, preventing double \n in else-if chains
         break;
     }
     case NodeType::FnCallExpr: {
@@ -314,8 +422,12 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         print("{}", get_sigil_symbol(data.sigil));
-        if (data.has_wrapping && data.sigil == SigilKind::MutRef) {
-            print("<");
+        if (data.sigil == SigilKind::MutRef) {
+            if (data.has_wrapping) {
+                print("<");
+            } else {
+                print(" ");
+            }
         }
         print_node(data.type);
         if (data.has_wrapping && data.sigil == SigilKind::MutRef) {
@@ -338,12 +450,20 @@ void AstPrinter::print_node(Node *node) {
             print(" = ");
             print_node(data.value);
         }
+        if (data.struct_body) {
+            print(" ");
+            print_struct_members(data.struct_body->data.struct_decl);
+        }
         break;
     }
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
         if (!data.is_suffix) {
-            print("{}", get_token_symbol(data.op_type));
+            if (data.op_type == TokenType::MUTREF) {
+                print("&mut ");
+            } else {
+                print("{}", get_token_symbol(data.op_type));
+            }
             print_node(data.op1);
         } else {
             print_node(data.op1);
@@ -376,10 +496,6 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
-        if (node->index > 0) {
-            print("\n");
-            print_indent(m_indent);
-        }
         print("for ");
         if (data.kind == ForLoopKind::Ternary) {
             if (data.init) {
@@ -412,17 +528,10 @@ void AstPrinter::print_node(Node *node) {
         }
         print_node(data.body);
         print("\n");
-        if (!node->is_last_stmt()) {
-            print("\n");
-        }
         break;
     }
     case NodeType::WhileStmt: {
         auto &data = node->data.while_stmt;
-        if (node->index > 0) {
-            print("\n");
-            print_indent(m_indent);
-        }
         print("while");
         if (data.condition) {
             print(" ");
@@ -431,9 +540,6 @@ void AstPrinter::print_node(Node *node) {
         print(" ");
         print_node(data.body);
         print("\n");
-        if (!node->is_last_stmt()) {
-            print("\n");
-        }
         break;
     }
     case NodeType::BranchStmt: {
@@ -453,7 +559,12 @@ void AstPrinter::print_node(Node *node) {
         break;
     }
     case NodeType::Error: {
-        print("{}", node->token->to_string());
+        if (node->token) {
+            print("{}", node->token->to_string());
+        }
+        break;
+    }
+    case NodeType::EmptyStmt: {
         break;
     }
     case NodeType::ImportDecl: {
@@ -512,12 +623,21 @@ void AstPrinter::print_node(Node *node) {
         m_indent++;
         for (int i = 0; i < data.cases.len; i++) {
             auto case_node = data.cases.at(i);
+            auto *ft = first_token(case_node);
+            if (ft) flush_comments_before(ft->pos);
             print_indent(m_indent);
             print_node(case_node);
             if (i < data.cases.len - 1) {
                 print(",");
             }
+            // Flush trailing comment — use body if present (arrow block end)
+            auto *trail_node = case_node->data.case_expr.body ? case_node->data.case_expr.body : case_node;
+            flush_trailing_comment(trail_node);
             print("\n");
+        }
+        // Flush trailing comments before closing brace
+        if (node->end_token) {
+            flush_comments_before(node->end_token->pos);
         }
         m_indent--;
         print_indent(m_indent);
@@ -549,14 +669,45 @@ void AstPrinter::print_node(Node *node) {
         if (!node->name.empty()) {
             print("{}", node->name);
         }
+        if (data.discriminator_field || data.discriminator_type) {
+            print(" (");
+            if (data.discriminator_field) {
+                print("{}: ", data.discriminator_field->get_name());
+            }
+            if (data.discriminator_type) {
+                print_node(data.discriminator_type);
+            }
+            print(")");
+        }
         print(" {{\n");
         m_indent++;
         for (int i = 0; i < data.variants.len; i++) {
+            auto variant = data.variants.at(i);
+            auto *ft = first_token(variant);
+            if (ft) flush_comments_before(ft->pos);
             print_indent(m_indent);
-            print_node(data.variants.at(i));
-            if (i < data.variants.len - 1) {
+            print_node(variant);
+            // Variants with struct bodies use ';' separator
+            if (variant->data.enum_variant.struct_body) {
+                print(";");
+            } else if (i < data.variants.len - 1) {
                 print(",");
             }
+            flush_trailing_comment(variant);
+            print("\n");
+        }
+        // Flush inner comments in empty enum
+        if (data.variants.len == 0 && !data.base_struct
+            && node->end_token && m_comments && m_comment_idx < m_comments->len
+            && m_comments->at(m_comment_idx).pos < node->end_token->pos) {
+            flush_comments_before(node->end_token->pos);
+        }
+        // Print base struct members if present
+        if (data.base_struct) {
+            print("\n");
+            print_indent(m_indent);
+            print("struct ");
+            print_struct_members(data.base_struct->data.struct_decl);
             print("\n");
         }
         m_indent--;
@@ -564,14 +715,13 @@ void AstPrinter::print_node(Node *node) {
         break;
     }
     default:
-        print("\n");
-        panic("unhandled node {}", PRINT_ENUM(node->type));
+        break;
     }
 }
 
 void AstPrinter::print_indent(int level) {
     for (int i = 0; i < level; i++) {
-        print("  ");
+        print("    ");
     }
 }
 
@@ -584,6 +734,41 @@ void AstPrinter::print_node_list(array<Node *> *list) {
     }
 }
 
+void AstPrinter::print_struct_members(StructDecl &data) {
+    print("{{");
+    if (data.members.len) {
+        print("\n");
+        m_indent++;
+        Node *prev_member = nullptr;
+        NodeType prev_type = NodeType::Error;
+        for (auto member : data.members) {
+            if (prev_member) {
+                bool want_blank = false;
+                if (prev_type != member->type) want_blank = true;
+                if (prev_type == NodeType::FnDef) want_blank = true;
+                if (has_blank_line_between(prev_member, member)) want_blank = true;
+                if (want_blank) print("\n");
+            }
+            prev_type = member->type;
+            auto *ft = first_token(member);
+            if (ft) flush_comments_before(ft->pos);
+            print_indent(m_indent);
+            print_node(member);
+            if (member->type == NodeType::VarDecl) {
+                print(";");
+                flush_trailing_comment(member);
+                print("\n");
+            } else if (member->type == NodeType::FnDef) {
+                // FnDef handler already prints \n after body
+            }
+            prev_member = member;
+        }
+        m_indent--;
+        print_indent(m_indent);
+    }
+    print("}}");
+}
+
 void AstPrinter::print_declspec(DeclSpec *declspec) {
     for (auto attr : declspec->attributes) {
         print("@[");
@@ -593,5 +778,100 @@ void AstPrinter::print_declspec(DeclSpec *declspec) {
     }
     if (declspec->has_flag(DECL_PRIVATE)) {
         print("private ");
+    }
+    if (declspec->has_flag(DECL_PROTECTED)) {
+        print("protected ");
+    }
+    if (declspec->has_flag(DECL_STATIC)) {
+        print("static ");
+    }
+    if (declspec->has_flag(DECL_MUTABLE)) {
+        print("mut ");
+    }
+    if (declspec->has_flag(DECL_ASYNC)) {
+        print("async ");
+    }
+}
+
+bool AstPrinter::has_blank_line_between(Node *prev, Node *next) {
+    long prev_end = -1;
+    if (prev->end_token)
+        prev_end = prev->end_token->pos.line;
+    else if (prev->token)
+        prev_end = prev->token->pos.line;
+    else if (prev->start_token)
+        prev_end = prev->start_token->pos.line;
+
+    // Use first comment's position if there are comments before the next node
+    long next_start = -1;
+    if (m_comments && m_comment_idx < m_comments->len) {
+        auto &comment = m_comments->at(m_comment_idx);
+        auto *ft = first_token(next);
+        long node_line = ft ? ft->pos.line : -1;
+        if (node_line >= 0 && comment.pos.line < node_line) {
+            next_start = comment.pos.line;
+        }
+    }
+    if (next_start < 0) {
+        if (next->start_token)
+            next_start = next->start_token->pos.line;
+        else if (next->token)
+            next_start = next->token->pos.line;
+    }
+
+    if (prev_end < 0 || next_start < 0)
+        return false;
+    return next_start - prev_end > 1;
+}
+
+Token *AstPrinter::first_token(Node *node) {
+    if (node->start_token)
+        return node->start_token;
+    return node->token;
+}
+
+Token *AstPrinter::last_token(Node *node) {
+    if (node->end_token)
+        return node->end_token;
+    return node->token;
+}
+
+void AstPrinter::flush_comments_before(Pos before_pos) {
+    if (!m_comments) return;
+    long last_comment_line = -1;
+    while (m_comment_idx < m_comments->len) {
+        auto &comment = m_comments->at(m_comment_idx);
+        if (!(comment.pos < before_pos)) break;
+
+        if (comment.pos.line == before_pos.line) {
+            // Inline comment (same line as the next token) — print inline
+            print("{} ", comment.text);
+        } else {
+            // Own-line comment — print on its own line with indent
+            if (last_comment_line >= 0 && comment.pos.line - last_comment_line > 1) {
+                print("\n");
+            }
+            print_indent(m_indent);
+            print("{}\n", comment.text);
+            last_comment_line = comment.pos.line;
+        }
+        m_comment_idx++;
+    }
+    // Preserve blank line between last own-line comment and the node
+    if (last_comment_line >= 0 && before_pos.line - last_comment_line > 1) {
+        print("\n");
+    }
+}
+
+void AstPrinter::flush_trailing_comment(Node *node) {
+    if (!m_comments || !node) return;
+    auto *lt = last_token(node);
+    if (!lt) return;
+    long on_line = lt->pos.line;
+    while (m_comment_idx < m_comments->len) {
+        auto &comment = m_comments->at(m_comment_idx);
+        if (comment.pos.line != on_line) break;
+        print(" {}", comment.text);
+        m_comment_idx++;
     }
 }

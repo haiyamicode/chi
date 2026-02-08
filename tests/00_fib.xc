@@ -1,7 +1,7 @@
 func main() {
-	let n: int = 10;
-	let value = fib(n);
-	printf("fib: {}\n", value);
+    let n: int = 10;
+    let value = fib(n);
+    printf("fib: {}\n", value);
 }
 
 func fib(n: int) int {
@@ -10,3 +10,4 @@ func fib(n: int) int {
     }
     return fib(n - 2) + fib(n - 1);
 }
+

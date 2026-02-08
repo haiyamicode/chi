@@ -4,7 +4,7 @@ struct Bar {
     mut func new(id: int) {
         this.id = id;
     }
-    
+
     func delete() {
         printf("delete bar {}\n", this.id);
     }
@@ -45,3 +45,4 @@ func test_foo() {
 func main() {
     test_foo();
 }
+

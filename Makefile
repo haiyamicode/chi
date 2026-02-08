@@ -43,6 +43,14 @@ stress: build
 analyzer_test: build
 	(cd analyzer_tests; make test)
 
+formatter_test: build
+	(cd tests; make formatter_test)
+
+test_all: build
+	(cd tests; make test)
+	(cd tests; make formatter_test)
+	(cd analyzer_tests; make test)
+
 clean:
 	rm -rf $(BUILD_DIR)/* && mkdir -p $(BUILD_DIR)
 
@@ -54,7 +62,6 @@ run_example: compile_example
 
 debug_example: compile_example
 	lldb -o run ./local/test
-
 
 compile_example_package: build install
 	$(CHI) -p $(INPUT_PACKAGE) -o local/test_package_exe -w local/build

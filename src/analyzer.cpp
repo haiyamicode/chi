@@ -36,6 +36,8 @@ ast::Module *Analyzer::format_file(ast::Package *package, const string &file_nam
     Lexer lexer(&src, &tokenization);
     lexer.tokenize();
 
+    module->comments = std::move(tokenization.comments);
+
     if (tokenization.error) {
         module->errors.add({*tokenization.error, tokenization.error_pos});
         return module;

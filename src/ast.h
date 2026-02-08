@@ -57,6 +57,7 @@ struct Module {
     optional<string> source = {};
     array<Module *> imports = {};
     array<Token *> tokens = {};
+    array<Comment> comments = {};
     bool broken = false;
 
     Module() = default;

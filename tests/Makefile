@@ -83,6 +83,24 @@ all: test
 test: $(TESTS)
 	@echo "tests passed"
 
+# Formatter idempotency test: verify format(file) == file for all test sources
+# Excludes 15_package (uses -p flag, no single source file)
+FORMAT_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test,$(TESTS_LIST)))
+formatter_test:
+	@echo "Formatter idempotency test..."
+	@fail=0; \
+	for t in $(FORMAT_TESTS); do \
+		src=$$t.xc; [ -f $$src ] || src=$$t.x; \
+		$(CHI) -f -c $$src > $(TMP).$$t.fmt 2>/dev/null; \
+		if ! diff -q $$src $(TMP).$$t.fmt >/dev/null 2>&1; then \
+			echo "FAIL $$t (formatter output differs from source)"; \
+			diff -u $$src $(TMP).$$t.fmt | head -20; \
+			fail=1; \
+		fi; \
+		rm -f $(TMP).$$t.fmt; \
+	done; \
+	if [ $$fail -eq 0 ]; then echo "formatter tests passed"; else exit 1; fi
+
 # Stress test: run all tests N times to catch non-deterministic bugs
 # Usage: make stress N=1000
 N ?= 1000
