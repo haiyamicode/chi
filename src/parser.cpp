@@ -2241,7 +2241,7 @@ Node *Parser::parse_switch_expr() {
 
     node->data.switch_expr.expr = parse_expr();
     expect(TokenType::LBRACE);
-    while (!next_is(TokenType::RBRACE)) {
+    while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END)) {
         auto case_expr = parse_case_expr();
         node->data.switch_expr.cases.add(case_expr);
         if (!at_comma(TokenType::RBRACE)) {
@@ -2278,7 +2278,7 @@ Node *Parser::parse_case_expr() {
         node->data.case_expr.clauses = {expr};
         if (next_is(TokenType::COMMA)) {
             consume();
-            while (!next_is(TokenType::ARROW)) {
+            while (!next_is(TokenType::ARROW) && !next_is(TokenType::END)) {
                 auto expr = parse_expr();
                 node->data.case_expr.clauses.add(expr);
                 if (!at_comma(TokenType::ARROW)) {

@@ -431,6 +431,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
 }
 
 ChiType *Resolver::to_value_type(ChiType *type) {
+    if (!type) return nullptr;
     if (type->kind == TypeKind::TypeSymbol) {
         return type->data.type_symbol.giving_type;
     }
@@ -439,6 +440,7 @@ ChiType *Resolver::to_value_type(ChiType *type) {
 
 ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     auto value_type = to_value_type(resolve(node, scope));
+    if (!value_type) return nullptr;
     if (ChiTypeStruct::is_generic(value_type)) {
         // Check if all type params have defaults — if so, instantiate with defaults
         auto &struct_ = value_type->data.struct_;
@@ -539,7 +541,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto lambda_fn_type =
                 proto->kind == TypeKind::FnLambda ? proto->data.fn_lambda.fn : proto;
             auto local_fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
-            resolve(data.body, local_fn_scope);
+            if (data.body)
+                resolve(data.body, local_fn_scope);
 
             // After body resolution, sync the FnLambda's is_placeholder with the inner Fn type
             // This is needed when return type was inferred from the body (placeholder -> concrete)
@@ -1730,9 +1733,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
 
                 auto impl_trait = resolve_value(implement, scope);
+                if (!impl_trait) continue;
                 auto trait_struct = resolve_struct_type(impl_trait);
-                if (!ChiTypeStruct::is_interface(trait_struct)) {
+                if (!trait_struct || !ChiTypeStruct::is_interface(trait_struct)) {
                     error(implement, errors::NON_INTERFACE_IMPL_TYPE, format_type(impl_trait));
+                    if (!trait_struct) continue;
                 }
 
                 resolve_vtable(impl_trait, struct_type, implement);
@@ -2247,6 +2252,7 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
 }
 
 ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags) {
+    if (!node) return nullptr;
     auto cached = node_get_type(node);
     if (cached) {
         return cached;
@@ -3416,6 +3422,7 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
 }
 
 ChiType *Resolver::eval_struct_type(ChiType *type) {
+    if (!type) return nullptr;
     auto sty = type;
     if (sty->kind == TypeKind::This) {
         sty = sty->get_elem();

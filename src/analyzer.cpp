@@ -141,7 +141,7 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
             auto start = fn.body->start_token;
             auto end = fn.body->end_token;
 
-            if (cursor_pos.is_in_range(start->pos, end->pos)) {
+            if (start && end && cursor_pos.is_in_range(start->pos, end->pos)) {
                 result->fn = node;
                 result->block = fn.body;
                 result->scope = block.scope;
