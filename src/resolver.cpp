@@ -2420,7 +2420,7 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         if (fn.is_extern) {
             ss << "extern ";
         }
-        if (fn.container_ref) {
+        if (fn.container_ref && !for_display) {
             ss << "(";
             ss << format_type(fn.container_ref, for_display);
             ss << ") ";

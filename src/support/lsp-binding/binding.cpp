@@ -40,10 +40,44 @@ static std::string get_symbol_kind(cx::ast::Node *node) {
     }
 }
 
-static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) {
+static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolver) {
     auto type = decl->resolved_type;
+    if (!type || type->kind != cx::TypeKind::Fn) {
+        return type ? resolver.format_type(type, true) : "unknown";
+    }
+    auto &fn = type->data.fn;
+    auto *proto = decl->data.fn_def.fn_proto;
+    auto &proto_params = proto->data.fn_proto.params;
+
+    std::stringstream ss;
+    ss << "func(";
+    for (int i = 0; i < fn.params.len; i++) {
+        if (fn.is_variadic && i == fn.params.len - 1) {
+            ss << "...";
+        }
+        if (i < proto_params.len && !proto_params[i]->name.empty()) {
+            ss << proto_params[i]->name << ": ";
+        }
+        ss << resolver.format_type(fn.params[i], true);
+        if (i < fn.params.len - 1) {
+            ss << ", ";
+        }
+    }
+    ss << ")";
+    if (fn.return_type && fn.return_type->kind != cx::TypeKind::Void) {
+        ss << " " << resolver.format_type(fn.return_type, true);
+    }
+    return ss.str();
+}
+
+static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) {
     auto kind = get_symbol_kind(decl);
-    return fmt::format("({}) {}: {}", kind, decl->name.size() ? decl->name : "<anonymous>",
+    auto name = decl->name.size() ? decl->name : "<anonymous>";
+    if (decl->type == cx::ast::NodeType::FnDef) {
+        return fmt::format("({}) {}: {}", kind, name, format_fn_signature(decl, resolver));
+    }
+    auto type = decl->resolved_type;
+    return fmt::format("({}) {}: {}", kind, name,
                        type ? resolver.format_type(type, true) : "unknown");
 }
 
