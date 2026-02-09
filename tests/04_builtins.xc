@@ -35,7 +35,7 @@ func test_map() {
     printf("m[\"d\"] = {}\n", m["d"]);
     printf("m[\"ef\"] = {}\n", m["ef"]);
     var it1 = m.find("abc");
-    printf("m.find(\"abc\")!! = {}\n", it1!!);
+    printf("m.find(\"abc\")! = {}\n", it1!);
     var it2 = m.find("invalid");
     printf("m.find(\"invalid\") = {}\n", it2);
     println("");
@@ -44,11 +44,11 @@ func test_map() {
 func test_shared() {
     println("testing shared:");
     var r1: Shared<int> = {42};
-    printf("r1.as_ref()={}, ref_count={}\n", r1.as_ref()!, r1.ref_count());
+    printf("r1.as_ref()={}, ref_count={}\n", r1.as_ref(), r1.ref_count());
     var r2: Shared<int> = r1;
     printf("after copy: ref_count={}\n", r1.ref_count());
     r1.set(100);
-    printf("after r1.set(100): r2.as_ref()={}\n", r2.as_ref()!);
+    printf("after r1.set(100): r2.as_ref()={}\n", r2.as_ref());
 }
 
 struct NestedState {
@@ -120,12 +120,12 @@ func test_box_helper() {
 func test_box() {
     println("testing box:");
     var b1 = Box<int>{42};
-    printf("b1.as_ref()={}\n", b1.as_ref()!);
+    printf("b1.as_ref()={}\n", b1.as_ref());
     b1.set(99);
-    printf("after set: b1.as_ref()={}\n", b1.as_ref()!);
+    printf("after set: b1.as_ref()={}\n", b1.as_ref());
     var b2 = b1;
     b2.set(7);
-    printf("after copy+set: b1={}, b2={}\n", b1.as_ref()!, b2.as_ref()!);
+    printf("after copy+set: b1={}, b2={}\n", b1.as_ref(), b2.as_ref());
     test_box_helper();
     println("after helper returned");
     println("");

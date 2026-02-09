@@ -80,7 +80,7 @@ private struct SharedData<T> {
     }
 }
 
-struct Shared<T> implements ops.CopyFrom<Shared<T>> {
+struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
     private data: *SharedData<T> = null;
 
     func new(value: T) {
@@ -128,9 +128,13 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
     func ref_count() uint32 {
         return this.data.ref_count;
     }
+
+    func display() string {
+        return string.display(this.as_ref());
+    }
 }
 
-struct Box<T> implements ops.CopyFrom<Box<T>> {
+struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
     private _ptr: *T = null;
 
     func new(value: T) {
@@ -153,13 +157,17 @@ struct Box<T> implements ops.CopyFrom<Box<T>> {
     }
 
     func as_ref() &T {
-        return &this._ptr!;
+        return this._ptr as &T;
     }
 
     func set(value: T) {
         delete this._ptr;
         this._ptr = cx_malloc(sizeof T, null) as *T;
         this._ptr! = value;
+    }
+
+    func display() string {
+        return string.display(this._ptr!);
     }
 }
 
@@ -473,6 +481,10 @@ struct __CxString implements ops.Add {
         var result: string = "";
         cx_string_format(&fmt, &values, &result);
         return result;
+    }
+
+    static func display(value: any) string {
+        return string.format("{}", value);
     }
 
     func is_empty() bool {

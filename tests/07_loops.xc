@@ -18,7 +18,7 @@ func for_in() {
     println("print from 1 to 3");
 
     for & item in list {
-        printf("{}\n", item!);
+        printf("{}\n", item);
     }
 
     println("");

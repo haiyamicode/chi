@@ -468,9 +468,16 @@ struct Scope {
     map<string, ast::Node *> symbols = {};
 };
 
+struct TypeInfo;
+
+struct ChiTypePointerInfoData {
+    TypeInfo *elem;
+};
+
 union TypeInfoData {
     ChiTypeInt int_;
     ChiTypeFloat float_;
+    ChiTypePointerInfoData pointer;
 };
 
 #pragma pack(push, 1)

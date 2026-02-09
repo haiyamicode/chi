@@ -213,8 +213,24 @@ static std::string get_value_display(const CxAny &v) {
         return fstringf(v);
     case TypeKind::Pointer:
     case TypeKind::Reference:
-    case TypeKind::MutRef:
+    case TypeKind::MutRef: {
+        auto ptr = *(void **)&v.data;
+        auto elem_ti = v.type->data.pointer.elem;
+        if (elem_ti && ptr) {
+            CxAny inner;
+            inner.type = elem_ti;
+            inner.inlined = true;
+            auto elem_size = elem_ti->size;
+            if (elem_size <= (int32_t)sizeof(inner.data)) {
+                memcpy(inner.data, ptr, elem_size);
+            } else {
+                inner.inlined = false;
+                memcpy(inner.data, &ptr, sizeof(ptr));
+            }
+            return get_value_display(inner);
+        }
         return fmt::format("{:#x}", *(intptr_t *)&v.data);
+    }
     case TypeKind::Optional: {
         auto data_p = get_any_data(&v);
         auto has_value = *(bool *)data_p;

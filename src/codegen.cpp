@@ -839,15 +839,29 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     auto ti_meta_table_type_l =
         llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), meta_table_size);
 
+    auto typesize = llvm_type_size(type_l);
+
+    // For reference/pointer types, store elem TypeInfo* in the data field.
+    // For other types, serialize the data as raw bytes.
+    llvm::Constant *typedata_l;
+    llvm::Type *tidata_actual_l;
+    if ((type->kind == TypeKind::Reference || type->kind == TypeKind::MutRef ||
+         type->kind == TypeKind::Pointer) &&
+        type->get_elem()) {
+        auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
+        tidata_actual_l = ptr_type_l;
+        typedata_l = (llvm::Constant *)compile_type_info(type->get_elem());
+    } else {
+        tidata_actual_l = tidata_type_l;
+        auto typedata = (uint8_t *)&type->data;
+        typedata_l = llvm::ConstantDataArray::get(
+            llvm_ctx, llvm::ArrayRef<uint8_t>(typedata, sizeof(TypeInfoData)));
+    }
+
     auto ti_type_l = llvm::StructType::create(
-        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_type_l,
+        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
          llvm::Type::getInt32Ty(llvm_ctx), ti_meta_table_type_l},
         "TypeInfo", true);
-
-    auto typesize = llvm_type_size(type_l);
-    auto typedata = (uint8_t *)&type->data;
-    llvm::Constant *typedata_arr_l = llvm::ConstantDataArray::get(
-        llvm_ctx, llvm::ArrayRef<uint8_t>(typedata, sizeof(TypeInfoData)));
 
     auto info_l = llvm::ConstantStruct::get(
         ti_type_l,
@@ -857,7 +871,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
             /* typesize */
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), (int32_t)typesize),
             /* data */
-            typedata_arr_l,
+            typedata_l,
             /* vtable_len */
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), meta_table_len),
             /* vtable */
