@@ -122,6 +122,12 @@ void AstPrinter::print_node(Node *node) {
         }
         emit("(");
         print_node_list(&data.params);
+        if (data.is_vararg) {
+            if (data.params.len > 0) {
+                emit(", ");
+            }
+            emit("...");
+        }
         emit(")");
         if (data.return_type) {
             emit(" ");
@@ -236,7 +242,11 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
-        if (!data.is_field) {
+        if (data.is_field) {
+            if (data.decl_spec) {
+                print_declspec(data.decl_spec);
+            }
+        } else {
             switch (data.kind) {
             case ast::VarKind::Mutable:
                 emit("var");
@@ -266,6 +276,9 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::StructDecl: {
         auto &data = node->data.struct_decl;
+        if (data.decl_spec) {
+            print_declspec(data.decl_spec);
+        }
         emit("{} ", node->token->str);
         if (!node->name.empty()) {
             emit("{}", node->name);
@@ -567,11 +580,16 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.extern_decl;
         emit("extern {} ", data.type->to_string());
         emit("{{\n");
+        m_indent++;
         for (auto member : data.members) {
-            print_indent(m_indent + 1);
+            auto *ft = first_token(member);
+            if (ft)
+                flush_comments_before(ft->pos);
+            print_indent(m_indent);
             print_node(member);
             emit("\n");
         }
+        m_indent--;
         emit("}}\n");
         break;
     }

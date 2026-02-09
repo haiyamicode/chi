@@ -3165,9 +3165,16 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto sret_type = fn_type->data.fn.should_use_sret() ? compile_type(return_type) : nullptr;
     auto result = create_fn_call_invoke(callee, args, sret_type, invoke, sret_dest);
 
-    // Destroy temporaries after the call completes
-    for (auto &[temp_ptr, temp_node] : arg_temporaries) {
-        compile_destruction(fn, temp_ptr, temp_node);
+    // Destroy temporaries after the call completes.
+    // When using invoke, the invoke terminates the current block, so we must
+    // switch to the normal continuation block before emitting destruction code.
+    if (!arg_temporaries.empty()) {
+        if (invoke) {
+            fn->use_label(invoke->normal);
+        }
+        for (auto &[temp_ptr, temp_node] : arg_temporaries) {
+            compile_destruction(fn, temp_ptr, temp_node);
+        }
     }
 
     return result;

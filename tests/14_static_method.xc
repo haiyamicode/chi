@@ -4,9 +4,9 @@ interface Cloneable {
     func clone() This;}
 
 struct Color implements ops.Display, Cloneable {
-    r: int = 0;
-    g: int = 0;
-    b: int = 0;
+    private r: int = 0;
+    private g: int = 0;
+    protected b: int = 0;
 
     func new(r: int, g: int, b: int) {
         this.r = r;
