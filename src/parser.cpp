@@ -582,8 +582,56 @@ Node *Parser::parse_type_expr(bool type_only) {
     return node;
 }
 
+// Lookahead to check if current '(' starts an arrow lambda: (params) [ret_type] =>
+// Params are: iden [: type], with optional leading '...' for variadics
+bool Parser::is_arrow_lambda_ahead() {
+    int pos = 1; // after '('
+
+    // Parse parameter list
+    for (;;) {
+        auto tok = lookahead(pos);
+        if (tok->type == TokenType::END) return false;
+        if (tok->type == TokenType::RPAREN) { pos++; break; }
+
+        // Optional variadic
+        if (tok->type == TokenType::ELLIPSIS) {
+            pos++;
+            tok = lookahead(pos);
+        }
+
+        // Each param must be an identifier
+        if (tok->type != TokenType::IDEN) return false;
+        pos++;
+
+        // Optional ': type'
+        tok = lookahead(pos);
+        if (tok->type == TokenType::COLON) {
+            pos++;
+            if (!try_parse_type_expr_lookahead(pos)) return false;
+            tok = lookahead(pos);
+        }
+
+        if (tok->type == TokenType::COMMA) { pos++; }
+        else if (tok->type == TokenType::RPAREN) { pos++; break; }
+        else return false;
+    }
+
+    // Check for '=>' directly or after a return type
+    if (lookahead(pos)->type == TokenType::ARROW) return true;
+    int type_pos = pos;
+    if (try_parse_type_expr_lookahead(type_pos)) {
+        if (lookahead(type_pos)->type == TokenType::ARROW) return true;
+    }
+    return false;
+}
+
 Node *Parser::parse_fn_lambda() {
-    auto token = expect(TokenType::KW_FUNC);
+    Token *token;
+    if (next_is(TokenType::KW_FUNC)) {
+        token = expect(TokenType::KW_FUNC);
+    } else {
+        token = get();
+    }
     auto fn = create_node(NodeType::FnDef, token);
 
     // Parse optional by-value capture list: func [x, y] (params) { ... }
@@ -1268,6 +1316,9 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
         return create_node(NodeType::LiteralExpr, token);
     }
     case TokenType::LPAREN: {
+        if (is_arrow_lambda_ahead()) {
+            return parse_fn_lambda();
+        }
         consume();
         auto node = create_node(NodeType::ParenExpr, token);
         node->data.child_expr = parse_child_expr(lhs, parent);

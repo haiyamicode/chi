@@ -249,7 +249,7 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
     }
 
     func assert_kind(kind: JsonKind) {
-        if (this.kind != kind) {
+        if this.kind != kind {
             panic(string.format("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
         }
     }
@@ -365,7 +365,7 @@ struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, o
 
     func new(...values: T) {
         cx_array_new(this);
-        if (values.length > 0) {
+        if values.length > 0 {
             cx_array_reserve(this, sizeof T, values.length);
             for value in values {
                 this.add(value);
@@ -383,7 +383,7 @@ struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, o
     }
 
     func clear() {
-        if (this.data) {
+        if this.data {
             cx_free(this.data as *void);
         }
         cx_array_new(this);

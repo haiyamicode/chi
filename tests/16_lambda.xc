@@ -131,7 +131,7 @@ func test_recursive_lambda_capture() {
     println("testing lambda capture edge cases:");
     var base_value: int = 1;
     var conditional_capture = func (n: int) int {
-        if (n > 0) {
+        if n > 0 {
             return n + base_value;
         }
         return base_value;
@@ -141,7 +141,7 @@ func test_recursive_lambda_capture() {
     var outer_multiplier: int = 2;
     var create_conditional = func () int {
         var inner_conditional = func (flag: bool) int {
-            if (flag) {
+            if flag {
                 return outer_multiplier * 10;
             }
             return outer_multiplier;

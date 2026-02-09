@@ -147,6 +147,8 @@ class Parser {
 
     Node *parse_type_expr(bool type_only = false);
 
+    bool is_arrow_lambda_ahead();
+
     Node *parse_fn_lambda();
 
     Node *parse_fn_decl(uint32_t flags, DeclSpec *decl_spec = nullptr);

@@ -93,16 +93,16 @@ func main() {
     });
     printf("apply_int(3, n: int => n + 10) = {}\n", mixed);
     printf("\nTest 9: Arrow syntax\n");
-    var arrow1 = apply_int(4, func (n)  => n * 3);
+    var arrow1 = apply_int(4, (n) => n * 3);
     printf("apply_int(4, func (n) => n * 3) = {}\n", arrow1);
     printf("\nTest 10: Arrow multiple params\n");
-    var arrow2 = combine(5, 7, func (x, y)  => x * y);
+    var arrow2 = combine(5, 7, (x, y) => x * y);
     printf("combine(5, 7, func (x, y) => x * y) = {}\n", arrow2);
     printf("\nTest 11: Arrow explicit params\n");
-    var arrow3 = apply_int(8, func (n: int)  => n + 100);
+    var arrow3 = apply_int(8, (n: int) => n + 100);
     printf("apply_int(8, func (n: int) => n + 100) = {}\n", arrow3);
     printf("\nTest 12: Arrow bool return\n");
-    var arrow4 = filter_positive(10, func (n)  => n > 5);
+    var arrow4 = filter_positive(10, (n) => n > 5);
     printf("filter_positive(10, func (n) => n > 5) = {}\n", arrow4);
     printf("\nTest 13: Return type inference\n");
     var wrapper: Wrapper<int> = make_wrapper(func () {
@@ -127,7 +127,7 @@ func main() {
     printf("make_wrapper inferred T=Point: Point({}, {})\n", point_wrapper.value.x, point_wrapper.value.y);
     printf("\nTest 17: Array.filter\n");
     var nums: Array<int> = {1, 2, 3, 4, 5, 6};
-    var evens = nums.filter(func (n)  => n % 2 == 0);
+    var evens = nums.filter((n) => n % 2 == 0);
     printf("filter evens from [1,2,3,4,5,6]: ");
 
     for n in evens {
@@ -136,7 +136,9 @@ func main() {
 
     printf("\n");
     printf("\nTest 18: Array.map\n");
-    var doubled_arr = nums.map<int>(func (n)  => n * 2);
+    var doubled_arr = nums.map<int>(func (n) {
+        return n * 2;
+    });
     printf("map *2 on [1,2,3,4,5,6]: ");
 
     for n in doubled_arr {

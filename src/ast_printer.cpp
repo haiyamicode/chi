@@ -89,7 +89,9 @@ void AstPrinter::print_node(Node *node) {
         print_node(data.fn_proto);
         m_suppress_func_keyword = false;
         if (data.body) {
-            emit(" ");
+            if (!data.body->data.block.is_arrow) {
+                emit(" ");
+            }
             print_node(data.body);
             if (data.fn_kind != FnKind::Lambda) {
                 emit("\n");
