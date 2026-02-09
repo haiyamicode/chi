@@ -113,6 +113,16 @@ void Analyzer::build_runtime() {
     resolver.context_init_builtins(module);
 }
 
+ast::Module *Analyzer::build_runtime_from_source(io::Buffer *src) {
+    auto resolver = m_ctx.create_resolver();
+    resolver.context_init_primitives();
+
+    auto rt_file_path = m_ctx.init_rt_stdlib();
+    auto module = process_source(m_ctx.rt_package, src, rt_file_path);
+    resolver.context_init_builtins(module);
+    return module;
+}
+
 ast::Module *Analyzer::analyze_package_file(ast::Package *package, const string &file_name) {
     build_runtime();
     return process_file(package, file_name);
@@ -262,6 +272,99 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
     }
 }
 
+// Find the innermost FnCallExpr whose argument list contains the cursor.
+// Sets result->fn_call and result->active_param.
+static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
+    if (!node) return false;
+
+    if (node->type == ast::NodeType::FnCallExpr) {
+        auto &call = node->data.fn_call_expr;
+        auto fn_ref = call.fn_ref_expr;
+        auto fn_ref_end = fn_ref ? (fn_ref->end_token ? fn_ref->end_token : fn_ref->token) : nullptr;
+        if (fn_ref_end && node->end_token) {
+            auto open_offset = fn_ref_end->pos.offset +
+                               (long)fn_ref_end->to_string().size();
+            auto close_offset = node->end_token->pos.offset;
+
+            if (cursor_pos.offset > open_offset && cursor_pos.offset <= close_offset) {
+                // Check children first for nested calls
+                for (auto arg : call.args) {
+                    if (find_fn_call(arg, cursor_pos, result)) return true;
+                }
+                // This is the innermost call
+                result->fn_call = node;
+                result->active_param = 0;
+                for (int i = 0; i < call.args.len; i++) {
+                    auto arg = call.args[i];
+                    auto arg_start = arg->start_token ? arg->start_token : arg->token;
+                    if (arg_start && cursor_pos.offset >= arg_start->pos.offset) {
+                        result->active_param = i;
+                    }
+                }
+                // Past all args (trailing comma) → next param
+                if (call.args.len > 0) {
+                    auto last = call.args[call.args.len - 1];
+                    auto last_end = last->end_token ? last->end_token : last->token;
+                    if (last_end &&
+                        cursor_pos.offset > last_end->pos.offset +
+                                                (long)last_end->to_string().size()) {
+                        result->active_param = call.args.len;
+                    }
+                }
+                return true;
+            }
+        }
+    }
+
+    // Recurse into children
+    switch (node->type) {
+    case ast::NodeType::VarDecl:
+        return find_fn_call(node->data.var_decl.expr, cursor_pos, result);
+    case ast::NodeType::BinOpExpr:
+        return find_fn_call(node->data.bin_op_expr.op1, cursor_pos, result) ||
+               find_fn_call(node->data.bin_op_expr.op2, cursor_pos, result);
+    case ast::NodeType::UnaryOpExpr:
+        return find_fn_call(node->data.unary_op_expr.op1, cursor_pos, result);
+    case ast::NodeType::ReturnStmt:
+        return find_fn_call(node->data.return_stmt.expr, cursor_pos, result);
+    case ast::NodeType::FnCallExpr: {
+        auto &call = node->data.fn_call_expr;
+        if (find_fn_call(call.fn_ref_expr, cursor_pos, result)) return true;
+        for (auto arg : call.args) {
+            if (find_fn_call(arg, cursor_pos, result)) return true;
+        }
+        return false;
+    }
+    case ast::NodeType::IndexExpr:
+        return find_fn_call(node->data.index_expr.expr, cursor_pos, result) ||
+               find_fn_call(node->data.index_expr.subscript, cursor_pos, result);
+    case ast::NodeType::CastExpr:
+        return find_fn_call(node->data.cast_expr.expr, cursor_pos, result);
+    case ast::NodeType::DotExpr:
+        return find_fn_call(node->data.dot_expr.expr, cursor_pos, result);
+    case ast::NodeType::PrefixExpr:
+        return find_fn_call(node->data.prefix_expr.expr, cursor_pos, result);
+    case ast::NodeType::IfStmt:
+        return find_fn_call(node->data.if_stmt.condition, cursor_pos, result) ||
+               find_fn_call(node->data.if_stmt.then_block, cursor_pos, result) ||
+               find_fn_call(node->data.if_stmt.else_node, cursor_pos, result);
+    case ast::NodeType::ConstructExpr:
+        for (auto item : node->data.construct_expr.field_inits) {
+            if (find_fn_call(item, cursor_pos, result)) return true;
+        }
+        return false;
+    case ast::NodeType::FieldInitExpr:
+        return find_fn_call(node->data.field_init_expr.value, cursor_pos, result);
+    case ast::NodeType::Block:
+        for (auto stmt : node->data.block.statements) {
+            if (find_fn_call(stmt, cursor_pos, result)) return true;
+        }
+        return false;
+    default:
+        return false;
+    }
+}
+
 bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
     if (!node) return false;
     switch (node->type) {
@@ -292,6 +395,7 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                                 result->is_dot = true;
                                 return true;
                             }
+                            find_fn_call(stmt, cursor_pos, result);
                             result->stmt = stmt;
                             return true;
                         }

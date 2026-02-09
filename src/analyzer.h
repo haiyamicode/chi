@@ -18,6 +18,8 @@ struct ScanResult {
     bool is_dot = false;
     Token *token = nullptr;
     ast::Node *decl = nullptr;
+    ast::Node *fn_call = nullptr;
+    int active_param = 0;
 };
 
 class Analyzer {
@@ -38,6 +40,7 @@ class Analyzer {
     ast::Module *format_source(ast::Package *package, io::Buffer *src, const string &file_name);
 
     void build_runtime();
+    ast::Module *build_runtime_from_source(io::Buffer *src);
     ast::Module *analyze_package_file(ast::Package *package, const string &file_name);
     ast::Module *analyze_file(const string &entry_file_name);
 

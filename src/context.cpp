@@ -121,11 +121,12 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     auto module = module_from_path(package, path);
     bool exitOnError = flags & FLAG_EXIT_ON_ERROR;
 
+    auto saved_error_handler = resolve_ctx.error_handler;
+
     optional<ErrorHandler> error_handler = std::nullopt;
     if (!exitOnError) {
         error_handler = [module](Error error) {
             if (module->errors.len > MAX_ERRORS) {
-                module->broken = true;
                 return;
             }
             module->errors.add(error);
@@ -197,5 +198,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     }
 
     resolver.resolve(module);
+
+    resolve_ctx.error_handler = saved_error_handler;
     return module;
 }

@@ -1296,6 +1296,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(node, errors::MEMBER_NOT_FOUND, field_name, format_type(expr_type, true));
             return nullptr;
         }
+        if (field_name == "new" || field_name == "delete") {
+            if (!scope.parent_struct) {
+                error(node, "'{}' cannot be called via dot syntax", field_name);
+                return nullptr;
+            }
+        }
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
         auto member = get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs);
         if (!member) {
@@ -4758,7 +4764,8 @@ bool ScopeResolver::declare_symbol(const string &name, ast::Node *node) {
         return false;
     }
     if (auto builtin = m_resolver->get_builtin(name)) {
-        if (builtin->type == NodeType::Primitive) {
+        if (builtin->type == NodeType::Primitive || builtin->type == NodeType::StructDecl ||
+            builtin->type == NodeType::EnumDecl) {
             return false;
         }
     }

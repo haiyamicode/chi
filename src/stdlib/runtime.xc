@@ -1,6 +1,6 @@
 import "std/ops" as ops;
 
-struct HashBytes {
+private struct HashBytes {
     data: *void = null;
     length: uint32 = 0;
 }
@@ -462,7 +462,7 @@ struct CString implements ops.CopyFrom<CString> {
 
     mut func delete() {
         if this.data != null {
-            cx_free(this.data as *void);
+            delete this.data;
             this.data = null;
         }
     }
@@ -642,7 +642,7 @@ func promise<T>(executor: func (resolve: func (value: T))) Promise<T> {
     return p;
 }
 
-func delay(ms: uint64) Promise<Unit> {
+func sleep(ms: uint64) Promise<Unit> {
     return promise(func (resolve) {
         timeout(ms, func [resolve] () {
             resolve({});

@@ -127,19 +127,19 @@ func test_timeout() {
     println("");
 }
 
-func test_delay() {
-    println("=== Test 9: delay() function ===");
-    delay(10).then(func (u: Unit) {
-        println("delay resolved");
+func test_sleep() {
+    println("=== Test 9: sleep() function ===");
+    sleep(10).then(func (u: Unit) {
+        println("sleep resolved");
     });
-    println("delay scheduled");
+    println("sleep scheduled");
     println("");
 }
 
-func test_delay_value_capture() {
-    println("=== Test 10: By-value capture with delay ===");
+func test_sleep_value_capture() {
+    println("=== Test 10: By-value capture with sleep ===");
     var counter = 42;
-    delay(10).then(func [counter] (u: Unit) {
+    sleep(10).then(func [counter] (u: Unit) {
         printf("captured counter: {}\n", counter);
     });
     counter = 999;
@@ -166,8 +166,8 @@ func main() {
     test_multiple_callbacks();
     test_locals_across_await();
     test_timeout();
-    test_delay();
-    test_delay_value_capture();
+    test_sleep();
+    test_sleep_value_capture();
     test_promise_helper();
     println("All async/await tests passed!");
 }

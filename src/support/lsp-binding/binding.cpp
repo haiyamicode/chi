@@ -81,6 +81,71 @@ static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) 
                        type ? resolver.format_type(type, true) : "unknown");
 }
 
+static cx::ast::Node *get_fn_decl_from_call(cx::ast::Node *call_node) {
+    auto fn_ref = call_node->data.fn_call_expr.fn_ref_expr;
+    if (!fn_ref) return nullptr;
+    if (fn_ref->type == cx::ast::NodeType::Identifier && fn_ref->data.identifier.decl) {
+        return fn_ref->data.identifier.decl;
+    }
+    if (fn_ref->type == cx::ast::NodeType::DotExpr && fn_ref->data.dot_expr.resolved_decl) {
+        return fn_ref->data.dot_expr.resolved_decl;
+    }
+    return nullptr;
+}
+
+static boost::json::object build_signature_help(cx::ScanResult &result, cx::Resolver &resolver) {
+    boost::json::object sig_help;
+    auto call_node = result.fn_call;
+    if (!call_node) return sig_help;
+
+    auto fn_decl = get_fn_decl_from_call(call_node);
+    if (!fn_decl || fn_decl->type != cx::ast::NodeType::FnDef) return sig_help;
+
+    auto type = fn_decl->resolved_type;
+    if (!type || type->kind != cx::TypeKind::Fn) return sig_help;
+
+    auto &fn = type->data.fn;
+    auto *proto = fn_decl->data.fn_def.fn_proto;
+    auto &proto_params = proto->data.fn_proto.params;
+
+    // Build the full signature label and track parameter label offsets
+    std::string label = fn_decl->name + "(";
+    boost::json::array params_json;
+
+    for (int i = 0; i < fn.params.len; i++) {
+        auto param_start = label.size();
+        if (fn.is_variadic && i == fn.params.len - 1) {
+            label += "...";
+        }
+        if (i < proto_params.len && !proto_params[i]->name.empty()) {
+            label += proto_params[i]->name + ": ";
+        }
+        label += resolver.format_type(fn.params[i], true);
+        auto param_end = label.size();
+
+        boost::json::object param;
+        param["label"] = boost::json::array{(int64_t)param_start, (int64_t)param_end};
+        params_json.push_back(param);
+
+        if (i < fn.params.len - 1) {
+            label += ", ";
+        }
+    }
+    label += ")";
+    if (fn.return_type && fn.return_type->kind != cx::TypeKind::Void) {
+        label += " " + resolver.format_type(fn.return_type, true);
+    }
+
+    boost::json::object sig;
+    sig["label"] = label;
+    sig["parameters"] = params_json;
+
+    sig_help["signatures"] = boost::json::array{sig};
+    sig_help["activeSignature"] = 0;
+    sig_help["activeParameter"] = result.active_param;
+    return sig_help;
+}
+
 static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &resolver) {
     boost::json::array completions = {};
     assert(result.is_dot && result.dot_expr);
@@ -93,16 +158,23 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
         return completions;
     }
 
+    bool is_static = expr_type->kind == cx::TypeKind::TypeSymbol;
+
     auto struct_ = resolver.resolve_struct_type(expr_type);
     if (!struct_) {
         return completions;
     }
 
-    for (auto member : struct_->members) {
+    auto &members = is_static ? struct_->static_members : struct_->members;
+    for (auto member : members) {
+        auto name = member->get_name();
+        if (!is_static && (name == "new" || name == "delete")) continue;
         boost::json::object completion;
         completion["label"] = member->get_name();
         completion["kind"] = member->is_method() ? "Method" : "Field";
-        completion["detail"] = resolver.format_type(member->resolved_type, true);
+        if (member->resolved_type) {
+            completion["detail"] = resolver.format_type(member->resolved_type, true);
+        }
         completions.push_back(completion);
     }
     return completions;
@@ -176,9 +248,17 @@ static napi_value Method(napi_env env, napi_callback_info info) {
     }
 
     // process source code
-    analyzer.build_runtime();
-    auto pkg = analyzer.get_context()->add_package(".");
-    auto module = analyzer.process_source(pkg, &src, input_file);
+    auto rt_path = analyzer.get_context()->get_stdlib_path("runtime.xc");
+    bool is_runtime_file = (input_file == rt_path);
+    cx::ast::Module *module;
+    if (is_runtime_file) {
+        // Process the editor content as the runtime to avoid double-processing
+        module = analyzer.build_runtime_from_source(&src);
+    } else {
+        analyzer.build_runtime();
+        auto pkg = analyzer.get_context()->add_package(".");
+        module = analyzer.process_source(pkg, &src, input_file);
+    }
 
     // collect errors from user module and runtime module
     boost::json::array errors_json = boost::json::array();
@@ -193,10 +273,6 @@ static napi_value Method(napi_env env, napi_callback_info info) {
         }
     };
     collect_errors(module);
-    auto rt_package = analyzer.get_context()->rt_package;
-    if (rt_package && rt_package->modules.len > 0) {
-        collect_errors(rt_package->modules[0].get());
-    }
 
     // scan
     std::optional<boost::json::object> scan_result = std::nullopt;
@@ -230,6 +306,10 @@ static napi_value Method(napi_env env, napi_callback_info info) {
                 }
             }
             result_object["completions"] = completions;
+        } else if (operation == "signatureHelp") {
+            if (result.fn_call) {
+                result_object["signatureHelp"] = build_signature_help(result, resolver);
+            }
         } else if (operation == "info") {
             if (result.decl) {
                 result_object["info"] = get_symbol_info(result.decl, resolver);

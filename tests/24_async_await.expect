@@ -45,10 +45,10 @@ Final: 30
 === Test 8: timeout() function ===
 timeout scheduled
 
-=== Test 9: delay() function ===
-delay scheduled
+=== Test 9: sleep() function ===
+sleep scheduled
 
-=== Test 10: By-value capture with delay ===
+=== Test 10: By-value capture with sleep ===
 original counter after mutate: 999
 
 === Test 11: promise<T>() helper ===
@@ -57,5 +57,5 @@ promise resolved with: 123
 
 All async/await tests passed!
 timeout callback executed
-delay resolved
+sleep resolved
 captured counter: 42

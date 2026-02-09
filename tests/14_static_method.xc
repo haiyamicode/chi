@@ -24,7 +24,7 @@ struct Color implements ops.Display, Cloneable {
     }
 
     static func gray(f: float) This {
-        return Color.white().multiply(f);
+        return This.white().multiply(f);
     }
 
     static func red() This {

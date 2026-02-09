@@ -1251,6 +1251,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
         node->name = "this";
         return node;
     }
+    case TokenType::KW_THIS_TYPE:
     case TokenType::KW_NEW:
     case TokenType::KW_DELETE:
     case TokenType::IDEN: {
@@ -1311,7 +1312,7 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
         }
         consume();
     }
-    expect(TokenType::RPAREN);
+    node->end_token = expect(TokenType::RPAREN);
     return node;
 }
 
@@ -1411,7 +1412,7 @@ Node *Parser::parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *pare
         }
         consume();
     }
-    expect(TokenType::RPAREN);
+    node->end_token = expect(TokenType::RPAREN);
     return node;
 }
 
