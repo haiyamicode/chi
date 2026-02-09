@@ -96,11 +96,10 @@ void AstPrinter::print_node(Node *node) {
             if (!data.body->data.block.is_arrow) {
                 emit(" ");
             }
-            auto prev_fn_has_ret = m_fn_has_return_type;
-            m_fn_has_return_type = data.fn_proto &&
-                                   data.fn_proto->data.fn_proto.return_type != nullptr;
+            auto prev_fn_ret = m_fn_return_type;
+            m_fn_return_type = data.fn_proto ? data.fn_proto->data.fn_proto.return_type : nullptr;
             print_node(data.body);
-            m_fn_has_return_type = prev_fn_has_ret;
+            m_fn_return_type = prev_fn_ret;
             if (data.fn_kind != FnKind::Lambda) {
                 emit("\n");
             }
@@ -275,9 +274,35 @@ void AstPrinter::print_node(Node *node) {
         }
         emit(node->name);
         // Collapse `var x = Type{...}` to `var x: Type = {...}`
+        // Collapse `var x = Array<T>{...}` to `var x = [...]`
         auto *expr = data.expr;
         if (!data.type && expr && expr->type == NodeType::ConstructExpr &&
-            expr->data.construct_expr.type && !expr->data.construct_expr.is_new) {
+            expr->data.construct_expr.type && !expr->data.construct_expr.is_new &&
+            !expr->data.construct_expr.field_inits.len) {
+            auto *ctype = expr->data.construct_expr.type;
+            // Check if type is Array<T> (SubtypeExpr with base name "Array")
+            bool is_array = false;
+            if (ctype->type == NodeType::SubtypeExpr && ctype->data.subtype_expr.type &&
+                ctype->data.subtype_expr.type->name == "Array") {
+                is_array = true;
+            } else if (ctype->type == NodeType::Identifier && ctype->name == "Array") {
+                is_array = true;
+            }
+            if (is_array) {
+                emit(": ");
+                print_node(ctype);
+                emit(" = [");
+                print_node_list(&expr->data.construct_expr.items);
+                emit("]");
+            } else {
+                emit(": ");
+                print_node(ctype);
+                emit(" = {{");
+                print_node_list(&expr->data.construct_expr.items);
+                emit("}}");
+            }
+        } else if (!data.type && expr && expr->type == NodeType::ConstructExpr &&
+                   expr->data.construct_expr.type && !expr->data.construct_expr.is_new) {
             emit(": ");
             print_node(expr->data.construct_expr.type);
             emit(" = {{");
@@ -288,19 +313,43 @@ void AstPrinter::print_node(Node *node) {
             print_node_list(&expr->data.construct_expr.field_inits);
             emit("}}");
         } else {
-            if (data.type) {
-                emit(": ");
-                print_node(data.type);
-            }
-            if (expr) {
-                emit(" = ");
-                // Strip redundant type from construct when var already has type annotation
-                if (data.type && expr->type == NodeType::ConstructExpr &&
-                    expr->data.construct_expr.type && !expr->data.construct_expr.is_new) {
-                    m_suppress_construct_type = true;
+            // Collapse `var x: Array<T> = {...}` to `var x = [...]`
+            bool collapsed_to_array = false;
+            if (data.type && expr && expr->type == NodeType::ConstructExpr &&
+                !expr->data.construct_expr.is_new && !expr->data.construct_expr.field_inits.len) {
+                auto *vtype = data.type;
+                bool is_array = false;
+                if (vtype->type == NodeType::SubtypeExpr && vtype->data.subtype_expr.type &&
+                    vtype->data.subtype_expr.type->name == "Array") {
+                    is_array = true;
+                } else if (vtype->type == NodeType::Identifier && vtype->name == "Array") {
+                    is_array = true;
                 }
-                print_node(expr);
-                m_suppress_construct_type = false;
+                if (is_array) {
+                    emit(": ");
+                    print_node(vtype);
+                    emit(" = [");
+                    print_node_list(&expr->data.construct_expr.items);
+                    emit("]");
+                    collapsed_to_array = true;
+                }
+            }
+            if (!collapsed_to_array) {
+                if (data.type) {
+                    emit(": ");
+                    print_node(data.type);
+                }
+                if (expr) {
+                    emit(" = ");
+                    // Strip redundant type from construct only when it matches the annotation
+                    if (data.type && expr->type == NodeType::ConstructExpr &&
+                        expr->data.construct_expr.type && !expr->data.construct_expr.is_new &&
+                        types_match(data.type, expr->data.construct_expr.type)) {
+                        m_suppress_construct_type = true;
+                    }
+                    print_node(expr);
+                    m_suppress_construct_type = false;
+                }
             }
         }
         break;
@@ -392,7 +441,16 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
-        if (data.type && !m_suppress_construct_type) {
+        if (data.is_array_literal) {
+            emit("[");
+            print_node_list(&data.items);
+            emit("]");
+            break;
+        }
+        // Consume and reset flag so it only affects THIS construct, not nested ones
+        bool suppress = m_suppress_construct_type;
+        m_suppress_construct_type = false;
+        if (data.type && !suppress) {
             if (data.is_new) {
                 emit("new ");
             }
@@ -430,9 +488,10 @@ void AstPrinter::print_node(Node *node) {
         emit("return");
         if (data.expr) {
             emit(" ");
-            // Strip redundant type from construct when function has explicit return type
-            if (m_fn_has_return_type && data.expr->type == NodeType::ConstructExpr &&
-                data.expr->data.construct_expr.type && !data.expr->data.construct_expr.is_new) {
+            // Strip redundant type from construct only when it matches the function return type
+            if (m_fn_return_type && data.expr->type == NodeType::ConstructExpr &&
+                data.expr->data.construct_expr.type && !data.expr->data.construct_expr.is_new &&
+                types_match(m_fn_return_type, data.expr->data.construct_expr.type)) {
                 m_suppress_construct_type = true;
             }
             print_node(data.expr);
@@ -952,6 +1011,38 @@ void AstPrinter::flush_comments_before(Pos before_pos) {
     // Preserve blank line between last own-line comment and the node
     if (last_comment_line >= 0 && before_pos.line - last_comment_line > 1) {
         emit("\n");
+    }
+}
+
+bool AstPrinter::types_match(Node *a, Node *b) {
+    if (!a || !b)
+        return false;
+    if (a->type != b->type)
+        return false;
+    switch (a->type) {
+    case NodeType::Identifier:
+        return a->name == b->name;
+    case NodeType::Primitive:
+        return a->name == b->name;
+    case NodeType::SubtypeExpr: {
+        if (!types_match(a->data.subtype_expr.type, b->data.subtype_expr.type))
+            return false;
+        if (a->data.subtype_expr.args.len != b->data.subtype_expr.args.len)
+            return false;
+        for (int i = 0; i < a->data.subtype_expr.args.len; i++) {
+            if (!types_match(a->data.subtype_expr.args.at(i), b->data.subtype_expr.args.at(i)))
+                return false;
+        }
+        return true;
+    }
+    case NodeType::TypeSigil:
+        return a->data.sigil_type.sigil == b->data.sigil_type.sigil &&
+               types_match(a->data.sigil_type.type, b->data.sigil_type.type);
+    case NodeType::DotExpr:
+        return a->data.dot_expr.field->str == b->data.dot_expr.field->str &&
+               types_match(a->data.dot_expr.expr, b->data.dot_expr.expr);
+    default:
+        return false;
     }
 }
 

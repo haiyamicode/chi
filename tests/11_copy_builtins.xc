@@ -10,7 +10,7 @@ func test_string() {
 }
 
 func test_array() {
-    var a: Array<int> = {};
+    var a: Array<int> = [];
     a.add(1);
     a.add(2);
     var b = a;

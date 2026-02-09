@@ -1339,6 +1339,27 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     case TokenType::LBRACE: {
         return parse_construct_expr();
     }
+    case TokenType::LBRACK: {
+        // Array literal: [expr, expr, ...]
+        consume();
+        auto node = create_node(NodeType::ConstructExpr, token);
+        node->data.construct_expr.is_array_literal = true;
+        for (;;) {
+            auto tok = get();
+            if (tok->type == TokenType::END) {
+                error(tok, errors::UNEXPECTED_EOF);
+                return node;
+            }
+            if (tok->type == TokenType::RBRACK) {
+                break;
+            }
+            node->data.construct_expr.items.add(parse_expr());
+            if (!at_comma(TokenType::RBRACK)) break;
+            consume();
+        }
+        expect(TokenType::RBRACK);
+        return node;
+    }
     default:
         unexpected(token);
     }

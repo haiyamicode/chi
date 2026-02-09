@@ -52,7 +52,7 @@ func test_structs() {
 func test_arrays() {
     println("\n=== Arrays Test ===");
 
-    var arr: Array<int> = {};
+    var arr: Array<int> = [];
     arr.add(10);
     arr.add(20);
     arr.add(30);

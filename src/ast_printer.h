@@ -17,7 +17,7 @@ class AstPrinter {
     int m_indent = 0;
     bool m_suppress_func_keyword = false;
     bool m_suppress_construct_type = false;
-    bool m_fn_has_return_type = false;
+    Node *m_fn_return_type = nullptr;
     array<Comment> *m_comments = nullptr;
     size_t m_comment_idx = 0;
     fmt::memory_buffer *m_buffer = nullptr;
@@ -68,6 +68,9 @@ class AstPrinter {
 
     // Emit trailing comments on the same line as the given node's last token.
     void flush_trailing_comment(Node *node);
+
+    // Structural comparison of two type nodes (for safe construct collapsing).
+    bool types_match(Node *a, Node *b);
 };
 
 void print_ast(Node *root);

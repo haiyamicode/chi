@@ -279,6 +279,7 @@ struct FieldInitExpr {
 // composite literal
 struct ConstructExpr {
     bool is_new = false;
+    bool is_array_literal = false;
     array<Node *> items = {};
     array<Node *> field_inits = {};
     Node *type = nullptr;

@@ -35,7 +35,7 @@ func main() {
     });
 
     // typed construct expr collapsing
-    var nums: Array<int> = {1, 2, 3};
+    var nums: Array<int> = [1, 2, 3];
 
     // redundant construct type in return
     var f = make_point(1, 2);

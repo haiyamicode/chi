@@ -14,14 +14,14 @@ func test_optional() {
 
 func test_array() {
     println("testing array:");
-    var a: Array<int> = {};
+    var a: Array<int> = [];
     a.add(1);
     a.add(2);
     printf("a=[{}, {}]\n", a[0], a[1]);
     a[0] = 2;
     a[1] = 1;
     printf("a=[{}, {}]\n", a[0], a[1]);
-    var b: Array<int> = {10, 20, 30};
+    var b = [10, 20, 30];
     printf("b=[{}, {}, {}]\n", b[0], b[1], b[2]);
     println("");
 }

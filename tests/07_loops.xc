@@ -11,7 +11,7 @@ func for_classic() {
 
 func for_in() {
     println("for_in:");
-    var list: Array<int> = {};
+    var list: Array<int> = [];
     list.add(1);
     list.add(2);
     list.add(3);

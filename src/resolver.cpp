@@ -1415,14 +1415,26 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.is_new ? get_pointer_type(value_type, TypeKind::Reference) : value_type;
         } else {
             if (!scope.value_type) {
-                error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
-                return nullptr;
+                // Array literals: infer Array<T> from first element type
+                if (data.is_array_literal && data.items.len > 0) {
+                    auto elem_type = resolve(data.items[0], scope);
+                    if (!elem_type)
+                        return nullptr;
+                    array<ChiType *> args;
+                    args.add(elem_type);
+                    result_type = get_subtype(m_ctx->rt_array_type, &args);
+                    value_type = result_type;
+                } else {
+                    error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
+                    return nullptr;
+                }
+            } else {
+                result_type = scope.value_type;
+                if (data.is_new != result_type->is_raw_pointer()) {
+                    error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
+                }
+                value_type = data.is_new ? result_type->get_elem() : result_type;
             }
-            result_type = scope.value_type;
-            if (data.is_new != result_type->is_raw_pointer()) {
-                error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
-            }
-            value_type = data.is_new ? result_type->get_elem() : result_type;
         }
         auto struct_type = resolve_struct_type(value_type);
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
