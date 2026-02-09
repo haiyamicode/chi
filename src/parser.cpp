@@ -659,27 +659,32 @@ Node *Parser::parse_fn_lambda() {
     if (next_is(TokenType::ARROW)) {
         auto arrow = read(); // consume =>
 
-        // Create scope and add params
-        auto scope = m_ctx->resolver->push_scope(fn);
-        auto &fn_proto = proto->data.fn_proto;
-        for (auto param : fn_proto.params) {
-            add_to_scope(param);
-            param->parent_fn = fn;
+        // => { block } collapses to a regular block body
+        if (next_is(TokenType::LBRACE)) {
+            parse_fn_block(fn);
+        } else {
+            // Create scope and add params
+            auto scope = m_ctx->resolver->push_scope(fn);
+            auto &fn_proto = proto->data.fn_proto;
+            for (auto param : fn_proto.params) {
+                add_to_scope(param);
+                param->parent_fn = fn;
+            }
+
+            // Parse expression and wrap in return statement
+            auto expr = parse_expr();
+            auto ret = create_node(NodeType::ReturnStmt, arrow);
+            ret->data.return_stmt.expr = expr;
+
+            // Create block containing the return statement
+            auto block = create_node(NodeType::Block, arrow);
+            block->data.block.scope = scope;
+            block->data.block.statements.add(ret);
+            block->data.block.is_arrow = true;
+            fn->data.fn_def.body = block;
+
+            m_ctx->resolver->pop_scope();
         }
-
-        // Parse expression and wrap in return statement
-        auto expr = parse_expr();
-        auto ret = create_node(NodeType::ReturnStmt, arrow);
-        ret->data.return_stmt.expr = expr;
-
-        // Create block containing the return statement
-        auto block = create_node(NodeType::Block, arrow);
-        block->data.block.scope = scope;
-        block->data.block.statements.add(ret);
-        block->data.block.is_arrow = true;
-        fn->data.fn_def.body = block;
-
-        m_ctx->resolver->pop_scope();
     } else {
         parse_fn_block(fn);
     }

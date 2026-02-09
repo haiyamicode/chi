@@ -101,6 +101,19 @@ formatter_test:
 	done; \
 	if [ $$fail -eq 0 ]; then echo "formatter tests passed"; else exit 1; fi
 
+# Formatter collapse test: verify formatting collapses redundant syntax
+formatter_collapse_test:
+	@echo "Formatter collapse test..."
+	@$(CHI) -f -c formatter_collapse.xc > $(TMP).formatter_collapse.fmt 2>/dev/null; \
+	if ! diff -q formatter_collapse.expected $(TMP).formatter_collapse.fmt >/dev/null 2>&1; then \
+		echo "FAIL formatter_collapse (output differs from expected)"; \
+		diff -u formatter_collapse.expected $(TMP).formatter_collapse.fmt; \
+		rm -f $(TMP).formatter_collapse.fmt; \
+		exit 1; \
+	fi; \
+	rm -f $(TMP).formatter_collapse.fmt; \
+	echo "formatter collapse test passed"
+
 # Stress test: run all tests N times to catch non-deterministic bugs
 # Usage: make stress N=1000
 N ?= 1000

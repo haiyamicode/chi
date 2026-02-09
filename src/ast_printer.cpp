@@ -86,6 +86,10 @@ void AstPrinter::print_node(Node *node) {
             }
             emit("] ");
         }
+        // Arrow lambdas: omit 'func' keyword — (n) => n * 2
+        if (data.fn_kind == FnKind::Lambda && data.body && data.body->data.block.is_arrow) {
+            m_suppress_func_keyword = true;
+        }
         print_node(data.fn_proto);
         m_suppress_func_keyword = false;
         if (data.body) {
@@ -415,7 +419,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::IfStmt: {
         auto &data = node->data.if_stmt;
         emit("if ");
-        print_node(data.condition);
+        auto *cond = data.condition;
+        if (cond && cond->type == NodeType::ParenExpr) cond = cond->data.child_expr;
+        print_node(cond);
         emit(" ");
         print_node(data.then_block);
         if (data.else_node) {
@@ -571,7 +577,9 @@ void AstPrinter::print_node(Node *node) {
         emit("while");
         if (data.condition) {
             emit(" ");
-            print_node(data.condition);
+            auto *cond = data.condition;
+            if (cond->type == NodeType::ParenExpr) cond = cond->data.child_expr;
+            print_node(cond);
         }
         emit(" ");
         print_node(data.body);
@@ -659,7 +667,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::SwitchExpr: {
         auto &data = node->data.switch_expr;
         emit("switch ");
-        print_node(data.expr);
+        auto *expr = data.expr;
+        if (expr && expr->type == NodeType::ParenExpr) expr = expr->data.child_expr;
+        print_node(expr);
         emit(" {{\n");
         m_indent++;
         for (int i = 0; i < data.cases.len; i++) {
