@@ -1,7 +1,8 @@
 import "std/ops" as ops;
 
 interface Cloneable {
-    func clone() This;}
+    func clone() This;
+}
 
 struct Color implements ops.Display, Cloneable {
     private r: int = 0;

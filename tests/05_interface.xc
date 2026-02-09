@@ -1,5 +1,6 @@
 interface Animal {
-    func make_sound();}
+    func make_sound();
+}
 
 struct AnimalBase implements Animal {
     id: int;

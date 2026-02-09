@@ -1,5 +1,6 @@
 interface Show {
-    func show() string;}
+    func show() string;
+}
 
 struct Point implements Show {
     x: int = 0;

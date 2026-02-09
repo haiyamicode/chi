@@ -324,7 +324,11 @@ void AstPrinter::print_node(Node *node) {
                     flush_trailing_comment(member);
                     emit("\n");
                 } else if (member->type == NodeType::FnDef) {
-                    // FnDef handler already prints \n after body
+                    // FnDef with body prints \n itself; bodyless (interface) needs \n
+                    if (!member->data.fn_def.body) {
+                        flush_trailing_comment(member);
+                        emit("\n");
+                    }
                 } else if (member->type == NodeType::EnumVariant) {
                     if (i != data.members.len - 1) {
                         emit(",");
