@@ -160,6 +160,20 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
 
     bool is_static = expr_type->kind == cx::TypeKind::TypeSymbol;
 
+    // Handle enum type completions (e.g. JsonKind.)
+    if (is_static) {
+        auto underlying = expr_type->data.type_symbol.underlying_type;
+        if (underlying && underlying->kind == cx::TypeKind::Enum) {
+            for (auto variant : underlying->data.enum_.variants) {
+                boost::json::object completion;
+                completion["label"] = variant->name;
+                completion["kind"] = "Enum";
+                completions.push_back(completion);
+            }
+            return completions;
+        }
+    }
+
     auto struct_ = resolver.resolve_struct_type(expr_type);
     if (!struct_) {
         return completions;

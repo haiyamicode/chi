@@ -100,6 +100,7 @@ ChiStructMember *ChiTypeStruct::get_destructor(ChiType *type) {
 ChiEnumVariant *ChiTypeEnum::add_variant(Context *allocator, const string &name, ast::Node *node,
                                          ChiType *resolved_type) {
     auto member = allocator->create_enum_member();
+    member->name = name;
     member->node = node;
     member->resolved_type = resolved_type;
     member->enum_ = this;
