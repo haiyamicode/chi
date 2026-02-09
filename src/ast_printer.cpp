@@ -18,8 +18,6 @@ string get_sigil_symbol(SigilKind sigil) {
         return "?";
     case SigilKind::Reference:
         return "&";
-    case SigilKind::Box:
-        return "^";
     case SigilKind::MutRef:
         return "&mut";
     default:

@@ -29,3 +29,8 @@ s1.is_empty()=false
 s1.add(" World")=Hello World
 empty.is_empty()=true
 
+testing box:
+b1.as_ref()=42
+after set: b1.as_ref()=99
+after copy+set: b1=99, b2=7
+

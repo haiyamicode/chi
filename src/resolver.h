@@ -59,7 +59,6 @@ struct SystemTypes {
     ChiType *bool_ = nullptr;
     ChiType *array = nullptr;
     ChiType *optional = nullptr;
-    ChiType *box = nullptr;
     ChiType *result = nullptr;
     ChiType *error = nullptr;
     ChiType *promise = nullptr;

@@ -92,6 +92,18 @@ func test_string() {
     println("");
 }
 
+func test_box() {
+    println("testing box:");
+    var b1 = Box<int>{42};
+    printf("b1.as_ref()={}\n", b1.as_ref()!);
+    b1.set(99);
+    printf("after set: b1.as_ref()={}\n", b1.as_ref()!);
+    var b2 = b1;
+    b2.set(7);
+    printf("after copy+set: b1={}, b2={}\n", b1.as_ref()!, b2.as_ref()!);
+    println("");
+}
+
 func main() {
     test_optional();
     test_array();
@@ -99,5 +111,6 @@ func main() {
     test_shared();
     test_nested_shared();
     test_string();
+    test_box();
 }
 

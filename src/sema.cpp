@@ -209,8 +209,6 @@ ChiType *ChiType::get_elem() {
     case TypeKind::Optional:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::Box:
-        return data.pointer.elem;
     case TypeKind::Array:
         return data.array.elem;
     case TypeKind::Result:

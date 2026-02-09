@@ -59,7 +59,6 @@ void Resolver::context_init_primitives() {
     system_types.str_lit = create_pointer_type(system_types.char_, TypeKind::Pointer);
     system_types.array = create_type(TypeKind::Array);
     system_types.optional = create_type(TypeKind::Optional);
-    system_types.box = create_type(TypeKind::Box);
     system_types.result = create_type(TypeKind::Result);
     system_types.error = create_type(TypeKind::Error);
     // Promise is now defined as a Chi-native struct in runtime.xc
@@ -98,7 +97,6 @@ void Resolver::context_init_primitives() {
     add_primitive("uint64", create_int_type(64, true));
 
     // non-primitive builtins
-    add_primitive("Box", system_types.box);
     add_primitive("Result", system_types.result);
     add_primitive("Error", system_types.error);
     // Promise is now defined as a Chi-native struct in runtime.xc
@@ -1057,8 +1055,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     return t->get_elem();
                 } else if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
-                } else if (t->kind == TypeKind::Box) {
-                    return t->get_elem();
                 }
                 goto invalid;
             } else {
@@ -1792,8 +1788,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::SubtypeExpr: {
         auto &data = node->data.subtype_expr;
         auto type = to_value_type(resolve(data.type, scope));
-        if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional ||
-            type->kind == TypeKind::Box) {
+        if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional) {
             if (data.args.len != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
                       format_type(get_system_type(type->kind)), 1, data.args.len);
@@ -2365,8 +2360,6 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "&mut<" + format_type(type->get_elem(), for_display) + ">";
     case TypeKind::Optional:
         return "?" + format_type(type->get_elem(), for_display);
-    case TypeKind::Box:
-        return "^" + format_type(type->get_elem(), for_display);
     case TypeKind::Array:
         return fmt::format("Array<{}>", format_type(type->get_elem(), for_display));
     case TypeKind::Result:
@@ -2881,7 +2874,6 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::Optional:
-    case TypeKind::Box:
     case TypeKind::Array: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
         return get_wrapped_type(elem_type, type->kind);
@@ -3148,7 +3140,6 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::Optional:
-    case TypeKind::Box:
     case TypeKind::Array: {
         // Must have same wrapper kind and unify element types
         if (param_type->kind != arg_type->kind) {
@@ -4318,8 +4309,7 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
         }
         // Structural comparison for pointer-like types
         if (a->kind == TypeKind::Pointer || a->kind == TypeKind::Reference ||
-            a->kind == TypeKind::MutRef || a->kind == TypeKind::Optional ||
-            a->kind == TypeKind::Box) {
+            a->kind == TypeKind::MutRef || a->kind == TypeKind::Optional) {
             return is_same_type(a->get_elem(), b->get_elem());
         }
     }
@@ -4535,6 +4525,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         return data.final_type;
     }
 
+    if (!data.generic) return subtype;
     auto &base = data.generic->data.struct_;
     auto sty = create_type(TypeKind::Struct);
     sty->name = format_type(subtype);
@@ -4547,6 +4538,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     auto base_symbol = resolve_intrinsic_symbol(base.node);
 
     for (auto member : base.members) {
+        if (!member->resolved_type) continue;
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
         if (member->is_method()) {
@@ -4663,8 +4655,6 @@ ChiType *Resolver::get_system_type(TypeKind kind) {
         return types->array;
     case TypeKind::Optional:
         return types->optional;
-    case TypeKind::Box:
-        return types->box;
     case TypeKind::Bool:
         return types->bool_;
     case TypeKind::Void:
@@ -4681,7 +4671,6 @@ ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::Optional:
-    case TypeKind::Box:
         return get_pointer_type(elem, kind);
     case TypeKind::Array:
         return get_array_type(elem);
@@ -4703,8 +4692,6 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
         return TypeKind::MutRef;
     case ast::SigilKind::Optional:
         return TypeKind::Optional;
-    case ast::SigilKind::Box:
-        return TypeKind::Box;
     default:
         unreachable();
         return {};
@@ -4725,6 +4712,8 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
         return find_root_decl(node->data.child_expr);
     case NodeType::IndexExpr:
         return find_root_decl(node->data.index_expr.expr);
+    case NodeType::UnaryOpExpr:
+        return find_root_decl(node->data.unary_op_expr.op1);
     case NodeType::FnCallExpr:
         // Function call results are temporaries, return nullptr to indicate no root decl
         return nullptr;

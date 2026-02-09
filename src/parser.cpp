@@ -483,8 +483,6 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
         return SigilKind::Pointer;
     case TokenType::AND:
         return SigilKind::Reference;
-    case TokenType::XOR:
-        return SigilKind::Box;
     case TokenType::QUES:
         return SigilKind::Optional;
     default:

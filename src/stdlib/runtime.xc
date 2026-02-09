@@ -133,6 +133,37 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>> {
   }
 }
 
+struct Box<T> implements ops.CopyFrom<Box<T>> {
+    private _ptr: *T = null;
+
+    func new(value: T) {
+        this._ptr = cx_malloc(sizeof T, null) as *T;
+        this._ptr! = value;
+    }
+
+    func delete() {
+        if this._ptr {
+            cx_free(this._ptr as *void);
+        }
+    }
+
+    func copy_from(from: &Box<T>) {
+        if this._ptr {
+            cx_free(this._ptr as *void);
+        }
+        this._ptr = cx_malloc(sizeof T, null) as *T;
+        this._ptr! = from._ptr!;
+    }
+
+    func as_ref() &T {
+        return &this._ptr!;
+    }
+
+    func set(value: T) {
+        this._ptr! = value;
+    }
+}
+
 // Internal lambda struct for compiler-generated closures.
 // Captures are type-erased (CxCapture payload pointer) so lambdas can be converted across
 // capture types with the same call signature.

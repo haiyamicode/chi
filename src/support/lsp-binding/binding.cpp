@@ -67,7 +67,7 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
     for (auto member : struct_->members) {
         boost::json::object completion;
         completion["label"] = member->get_name();
-        completion["kind"] = "Field";
+        completion["kind"] = member->is_method() ? "Method" : "Field";
         completion["detail"] = resolver.format_type(member->resolved_type, true);
         completions.push_back(completion);
     }

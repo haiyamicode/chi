@@ -22,7 +22,7 @@ struct ChiTypeStruct;
 struct ChiTypeEnum;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer,
-          Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional, Box,
+          Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           Result, Error, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
           Undefined)
 
@@ -298,7 +298,6 @@ struct ChiType {
         case TypeKind::Optional:
         case TypeKind::Reference:
         case TypeKind::MutRef:
-        case TypeKind::Box:
         case TypeKind::This:
             new (&data.pointer) ChiTypePointer();
             break;
@@ -332,7 +331,6 @@ struct ChiType {
         case TypeKind::Optional:
         case TypeKind::Reference:
         case TypeKind::MutRef:
-        case TypeKind::Box:
         case TypeKind::This:
             data.pointer.~ChiTypePointer();
             break;
@@ -373,7 +371,6 @@ struct ChiType {
         case TypeKind::Optional:
         case TypeKind::Reference:
         case TypeKind::MutRef:
-        case TypeKind::Box:
         case TypeKind::This:
             b->data.pointer = data.pointer;
             break;
