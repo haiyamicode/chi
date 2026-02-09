@@ -37,8 +37,8 @@ func main() {
     printf("p1: {}\n", p1);
     printf("p2: {}\n", p2);
     printf("p3 = p1 + p2: {}\n", p3);
-    let i1 = MyInt{.value = 5};
-    let i2 = MyInt{.value = 7};
+    let i1: MyInt = {.value = 5};
+    let i2: MyInt = {.value = 7};
     var result = add<MyInt>(i1, i2);
     printf("MyInt: {} + {} = {}\n", i1.value, i2.value, result.value);
     var result2 = add<int>(10, 15);

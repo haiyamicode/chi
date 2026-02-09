@@ -21,7 +21,7 @@ func test_array() {
     a[0] = 2;
     a[1] = 1;
     printf("a=[{}, {}]\n", a[0], a[1]);
-    var b = Array<int>{10, 20, 30};
+    var b: Array<int> = {10, 20, 30};
     printf("b=[{}, {}, {}]\n", b[0], b[1], b[2]);
     println("");
 }
@@ -107,7 +107,7 @@ struct Traced {
 
 func test_box_helper() {
     println("creating box:");
-    var b1 = Box<Traced>{{1}};
+    var b1: Box<Traced> = {{1}};
     printf("b1.id={}\n", b1.as_ref().id);
     println("copying box:");
     var b2 = b1;
@@ -119,7 +119,7 @@ func test_box_helper() {
 
 func test_box() {
     println("testing box:");
-    var b1 = Box<int>{42};
+    var b1: Box<int> = {42};
     printf("b1.as_ref()={}\n", b1.as_ref());
     b1.set(99);
     printf("after set: b1.as_ref()={}\n", b1.as_ref());

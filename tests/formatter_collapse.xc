@@ -33,4 +33,24 @@ func main() {
     var e = combine(1, 2, func (x, y) => {
         return x + y;
     });
+
+    // typed construct expr collapsing
+    var nums = Array<int>{1, 2, 3};
+
+    // redundant construct type in return
+    var f = make_point(1, 2);
+}
+
+struct Point2 {
+    x: int;
+    y: int;
+
+    func new(x: int, y: int) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+func make_point(x: int, y: int) Point2 {
+    return Point2{x, y};
 }
