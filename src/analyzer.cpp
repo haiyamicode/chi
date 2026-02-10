@@ -168,6 +168,18 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
                 }
             }
 
+            // resolve from DotExpr first (e.g. math.sqrtf -> sqrtf's FnDef)
+            // This must come before scope lookup to avoid resolving to a
+            // same-named symbol in an outer scope (e.g. stdio.printf vs builtin printf)
+            if (!result.decl && result.dot_expr) {
+                auto &dot = result.dot_expr->data.dot_expr;
+                if (dot.resolved_decl) {
+                    result.decl = dot.resolved_decl;
+                } else if (dot.resolved_struct_member && dot.resolved_struct_member->node) {
+                    result.decl = dot.resolved_struct_member->node;
+                }
+            }
+
             // resort to symbol lookup
             if (!result.decl) {
                 auto name = result.token->str;

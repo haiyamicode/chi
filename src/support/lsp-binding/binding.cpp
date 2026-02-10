@@ -74,6 +74,9 @@ __attribute__((constructor)) static void install_crash_handler() {
 }
 
 static std::string get_symbol_kind(cx::ast::Node *node) {
+    if (node->type == cx::ast::NodeType::ImportSymbol && node->data.import_symbol.resolved_decl) {
+        node = node->data.import_symbol.resolved_decl;
+    }
     switch (node->type) {
     case cx::ast::NodeType::FnDef:
         return node->data.fn_def.fn_kind == cx::ast::FnKind::Method ? "method" : "function";
@@ -119,6 +122,10 @@ static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolv
 }
 
 static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) {
+    // Unwrap ImportSymbol to the actual declaration
+    if (decl->type == cx::ast::NodeType::ImportSymbol && decl->data.import_symbol.resolved_decl) {
+        decl = decl->data.import_symbol.resolved_decl;
+    }
     auto kind = get_symbol_kind(decl);
     auto name = decl->name.size() ? decl->name : "<anonymous>";
     if (decl->type == cx::ast::NodeType::FnDef) {
