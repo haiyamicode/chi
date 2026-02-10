@@ -2186,7 +2186,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 for (auto symbol : data.symbols) {
                     auto item_type = resolve(symbol, scope);
                     auto &item_data = symbol->data.import_symbol;
-                    assert(item_data.resolved_decl);
+                    // Skip if symbol wasn't resolved (error already reported)
+                    if (!item_data.resolved_decl) {
+                        continue;
+                    }
                     auto name = item_data.output_name();
                     type->data.module.scope->put(name, item_data.resolved_decl);
                 }
