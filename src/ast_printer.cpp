@@ -126,18 +126,48 @@ void AstPrinter::print_node(Node *node) {
         // Print type parameters if present
         if (data.type_params.len > 0) {
             emit("<");
-            print_node_list(&data.type_params);
+            emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
-        emit("(");
-        print_node_list(&data.params);
+        // For params, handle varargs specially
         if (data.is_vararg) {
-            if (data.params.len > 0) {
-                emit(", ");
+            // Calculate total length including varargs
+            int base_len = m_current_column + 1; // "("
+            for (int i = 0; i < data.params.len; i++) {
+                auto param_str = format_node_to_string(data.params.at(i));
+                base_len += param_str.size();
+                if (i < data.params.len - 1 || data.params.len > 0) {
+                    base_len += 2; // ", "
+                }
             }
-            emit("...");
+            base_len += 3; // "..."
+            base_len += 1; // ")"
+            bool should_wrap = base_len >= m_max_line_length;
+
+            emit("(");
+            if (should_wrap) {
+                emit("\n");
+                m_indent++;
+                for (int i = 0; i < data.params.len; i++) {
+                    print_indent(m_indent);
+                    print_node(data.params.at(i));
+                    emit(",\n");
+                }
+                print_indent(m_indent);
+                emit("...\n");
+                m_indent--;
+                print_indent(m_indent);
+            } else {
+                print_node_list(&data.params);
+                if (data.params.len > 0) {
+                    emit(", ");
+                }
+                emit("...");
+            }
+            emit(")");
+        } else {
+            bool wrapped = emit_wrapped_list(&data.params, "(", ")", ", ");
         }
-        emit(")");
         if (data.return_type) {
             emit(" ");
             print_node(data.return_type);
@@ -302,9 +332,8 @@ void AstPrinter::print_node(Node *node) {
                     emit(": ");
                     print_node(etype);
                 }
-                emit(" = [");
-                print_node_list(&cdata.items);
-                emit("]");
+                emit(" = ");
+                emit_wrapped_list(&cdata.items, "[", "]", ", ");
             } else {
                 // Non-array: collapse to var x = Type{items}
                 bool keep_annotation = vtype && ctype && !types_match(vtype, ctype);
@@ -314,13 +343,18 @@ void AstPrinter::print_node(Node *node) {
                 }
                 emit(" = ");
                 if (etype) print_node(etype);
-                emit("{{");
-                print_node_list(&cdata.items);
-                if (cdata.items.len && cdata.field_inits.len) {
-                    emit(", ");
+                // Use wrapping for long construct expressions
+                if (cdata.items.len && !cdata.field_inits.len) {
+                    emit_wrapped_list(&cdata.items, "{", "}", ", ");
+                } else {
+                    emit("{{");
+                    print_node_list(&cdata.items);
+                    if (cdata.items.len && cdata.field_inits.len) {
+                        emit(", ");
+                    }
+                    print_node_list(&cdata.field_inits);
+                    emit("}}");
                 }
-                print_node_list(&cdata.field_inits);
-                emit("}}");
             }
         } else {
             // Non-construct expression or array literal — print normally
@@ -346,12 +380,13 @@ void AstPrinter::print_node(Node *node) {
         }
         if (data.type_params.len) {
             emit("<");
-            print_node_list(&data.type_params);
+            emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
         if (data.implements.len) {
             emit(" implements ");
-            print_node_list(&data.implements);
+            // Don't wrap implements clause - it uses empty open/close
+            bool wrapped = emit_wrapped_list(&data.implements, "", "", ", ");
         }
         emit(" {{");
 
@@ -423,9 +458,7 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
         if (data.is_array_literal) {
-            emit("[");
-            print_node_list(&data.items);
-            emit("]");
+            emit_wrapped_list(&data.items, "[", "]", ", ");
             break;
         }
         // Consume and reset flag so it only affects THIS construct, not nested ones
@@ -437,14 +470,24 @@ void AstPrinter::print_node(Node *node) {
             }
             print_node(data.type);
         }
-        emit("{{");
-        // Print positional items first, then named field inits
-        print_node_list(&data.items);
-        if (data.items.len && data.field_inits.len) {
-            emit(", ");
+        // For construct expressions, always try wrapping
+        if (data.items.len || data.field_inits.len) {
+            // If only items (no field_inits), use emit_wrapped_list
+            if (data.items.len && !data.field_inits.len) {
+                emit_wrapped_list(&data.items, "{", "}", ", ");
+            } else {
+                // Complex case with field_inits - fall back to simple printing for now
+                emit("{{");
+                print_node_list(&data.items);
+                if (data.items.len && data.field_inits.len) {
+                    emit(", ");
+                }
+                print_node_list(&data.field_inits);
+                emit("}}");
+            }
+        } else {
+            emit("{{}}");
         }
-        print_node_list(&data.field_inits);
-        emit("}}");
         break;
     }
     case NodeType::FieldInitExpr: {
@@ -508,19 +551,17 @@ void AstPrinter::print_node(Node *node) {
         // Print type parameters if present
         if (data.type_args.len > 0) {
             emit("<");
-            print_node_list(&data.type_args);
+            emit_wrapped_list(&data.type_args, "", "", ", ");
             emit(">");
         }
-        emit("(");
-        print_node_list(&data.args);
-        emit(")");
+        emit_wrapped_list(&data.args, "(", ")", ", ");
         break;
     }
     case NodeType::SubtypeExpr: {
         auto &data = node->data.subtype_expr;
         print_node(data.type);
         emit("<");
-        print_node_list(&data.args);
+        emit_wrapped_list(&data.args, "", "", ", ");
         emit(">");
         break;
     }
@@ -957,7 +998,7 @@ bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const
     total_length += strlen(close);
 
     // If it fits on one line, emit inline
-    if (total_length <= m_max_line_length) {
+    if (total_length < m_max_line_length) {
         emit("{}", open);
         for (int i = 0; i < items->len; i++) {
             print_node(items->at(i));

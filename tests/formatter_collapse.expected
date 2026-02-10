@@ -68,3 +68,41 @@ func make_point(x: int, y: int) Point2 {
     return {x, y};
 }
 
+// Function parameter wrapping tests
+func short_params(a: int, b: int, c: int) int {
+    return a + b + c;
+}
+
+func function_name(
+    parameter_name_one_long: int,
+    parameter_name_two_long: int,
+    parameter_name_three_long: int,
+    parameter_name_four_long: int
+) int {
+    return 0;
+}
+
+// Function call wrapping tests
+func test_wrapping() {
+    short_params(1, 2, 3);
+    function_name(
+        argument_one_with_long_name,
+        argument_two_with_long_name,
+        argument_three_with_long_name,
+        argument_four_with_long_name,
+        argument_five
+    );
+}
+
+// Array literal wrapping tests
+func test_arrays() {
+    var short_arr = [1, 2, 3, 4];
+    var long_arr = [
+        element_one_with_long_name,
+        element_two_with_long_name,
+        element_three_with_long_name,
+        element_four_with_long_name,
+        element_five
+    ];
+}
+
