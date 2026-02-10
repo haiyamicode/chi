@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
 #include <clang-c/Index.h>
 #endif
 
@@ -91,14 +91,14 @@ public:
     // This avoids creating temporary files on disk
     bool import_header_by_name(const std::string& header_name, const CImportConfig& config);
 
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
     // Extract symbols from an already-parsed translation unit
     // Used for lazy/incremental symbol extraction
     void extract_symbols_from_tu(CXTranslationUnit tu, const std::vector<std::string>& symbol_patterns);
 #endif
 
 private:
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
     CXIndex index_;
     CXTranslationUnit tu_;
 #endif
@@ -111,7 +111,7 @@ private:
     std::set<std::string> symbol_filter_;
     std::string error_;
 
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
     // Helper to convert CXString to std::string
     static std::string to_string(CXString cx_str);
 

@@ -27,6 +27,7 @@ set(LIBS ${PKG_LIBS} ${LLVM_LIBS} pthread dl)
 # Add libclang if available
 if(LIBCLANG_LIBRARY)
     list(APPEND LIBS ${LIBCLANG_LIBRARY})
+    add_definitions(-DHAVE_LIBCLANG)
 endif()
 
 # Runtime library

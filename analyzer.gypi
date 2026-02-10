@@ -8,7 +8,17 @@
         "src/context.cpp",
         "src/ast_printer.cpp",
         "src/ast.cpp",
+        "src/c_importer.cpp",
+        "src/package_config.cpp",
     ],
-    "include_dirs": ["src/include", "src"],
-    "defines": ["FMT_HEADER_ONLY"],
+    "include_dirs": [
+        "src/include",
+        "src",
+        "<!(echo ${LLVM_DIR:-NOT_SET}/include)",
+    ],
+    "defines": ["FMT_HEADER_ONLY", "HAVE_LIBCLANG"],
+    "libraries": ["-lclang"],
+    "library_dirs": [
+        "<!(echo ${LLVM_DIR:-NOT_SET}/lib)",
+    ],
 }

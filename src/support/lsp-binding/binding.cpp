@@ -8,7 +8,66 @@
 #define BOOST_NO_EXCEPTIONS
 #include "../../analyzer.h"
 #include "../../ast_printer.h"
+#include "../../package_config.h"
 #include <boost/json/src.hpp>
+#include <filesystem>
+#include <fstream>
+
+namespace fs = std::filesystem;
+
+// Find and load package.jsonc starting from the given file path
+static void load_package_config(cx::ast::Package* package, const std::string& file_path) {
+    if (!package) return;
+
+    // Find package.jsonc by walking up directories
+    fs::path current = fs::path(file_path).parent_path();
+    fs::path package_json_path;
+
+    while (!current.empty()) {
+        auto candidate = current / "package.jsonc";
+        if (fs::exists(candidate)) {
+            package_json_path = candidate;
+            break;
+        }
+        auto parent = current.parent_path();
+        if (parent == current) break; // Reached root
+        current = parent;
+    }
+
+    if (package_json_path.empty()) {
+        return; // No package.jsonc found
+    }
+
+    // Load and parse package.jsonc
+    std::ifstream config_file(package_json_path);
+    if (!config_file.is_open()) {
+        return;
+    }
+
+    std::string config_content((std::istreambuf_iterator<char>(config_file)),
+                               std::istreambuf_iterator<char>());
+    config_file.close();
+
+    // Parse JSON (boost::json will ignore comments in JSONC)
+    boost::json::value config_json;
+    try {
+        config_json = boost::json::parse(config_content);
+    } catch (...) {
+        return; // Ignore parse errors
+    }
+
+    // Parse configuration using Boost.JSON
+    cx::PackageConfig config;
+    try {
+        config = boost::json::value_to<cx::PackageConfig>(config_json);
+    } catch (...) {
+        return; // Ignore conversion errors
+    }
+
+    // Store config in a heap-allocated object
+    auto* config_ptr = new cx::PackageConfig(std::move(config));
+    package->config = config_ptr;
+}
 
 static void crash_handler(int sig) {
     fprintf(stderr, "\n=== CRASH: signal %d ===\n", sig);
@@ -230,6 +289,7 @@ static napi_value Method(napi_env env, napi_callback_info info) {
         auto operation = scan_input["operation"].as_string();
         if (operation == "format") {
             auto pkg = analyzer.get_context()->add_package(".");
+            load_package_config(pkg, input_file);
             auto module = analyzer.format_source(pkg, &src, input_file);
 
             boost::json::array errors_json;
@@ -271,6 +331,7 @@ static napi_value Method(napi_env env, napi_callback_info info) {
     } else {
         analyzer.build_runtime();
         auto pkg = analyzer.get_context()->add_package(".");
+        load_package_config(pkg, input_file);
         module = analyzer.process_source(pkg, &src, input_file);
     }
 

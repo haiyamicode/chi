@@ -8,17 +8,17 @@
 namespace cx {
 
 CImporter::CImporter()
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
     : index_(nullptr), tu_(nullptr)
 #endif
 {
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
     index_ = clang_createIndex(0, 0);
 #endif
 }
 
 CImporter::~CImporter() {
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
     if (tu_) {
         clang_disposeTranslationUnit(tu_);
     }
@@ -29,7 +29,7 @@ CImporter::~CImporter() {
 }
 
 bool CImporter::import_header(const std::string& header_path, const CImportConfig& config) {
-#ifndef __clang__
+#ifndef HAVE_LIBCLANG
     error_ = "C interop not available - libclang not found";
     return false;
 #else
@@ -83,7 +83,7 @@ bool CImporter::import_header(const std::string& header_path, const CImportConfi
 }
 
 bool CImporter::import_header_by_name(const std::string& header_name, const CImportConfig& config) {
-#ifndef __clang__
+#ifndef HAVE_LIBCLANG
     error_ = "C interop not available - libclang not found";
     return false;
 #else
@@ -151,7 +151,7 @@ bool CImporter::import_header_by_name(const std::string& header_name, const CImp
 #endif
 }
 
-#ifdef __clang__
+#ifdef HAVE_LIBCLANG
 void CImporter::extract_symbols_from_tu(CXTranslationUnit tu, const std::vector<std::string>& symbol_patterns) {
     // Clear previous extractions
     functions_.clear();
@@ -859,7 +859,7 @@ ast::Module* import_c_header_as_module(
     const std::vector<std::string>& include_directories,
     bool* out_newly_created
 ) {
-#ifndef __clang__
+#ifndef HAVE_LIBCLANG
     if (out_newly_created) *out_newly_created = false;
     return nullptr;
 #else
