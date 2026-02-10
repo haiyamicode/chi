@@ -402,7 +402,7 @@ void AstPrinter::print_node(Node *node) {
                     bool want_blank = false;
                     if (prev_type != member->type)
                         want_blank = true;
-                    if (prev_type == NodeType::FnDef)
+                    if (prev_type == NodeType::FnDef && prev_member->data.fn_def.body)
                         want_blank = true;
                     if (has_blank_line_between(prev_member, member))
                         want_blank = true;
@@ -918,7 +918,7 @@ void AstPrinter::print_struct_members(StructDecl &data) {
                 bool want_blank = false;
                 if (prev_type != member->type)
                     want_blank = true;
-                if (prev_type == NodeType::FnDef)
+                if (prev_type == NodeType::FnDef && prev_member->data.fn_def.body)
                     want_blank = true;
                 if (has_blank_line_between(prev_member, member))
                     want_blank = true;

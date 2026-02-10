@@ -22,7 +22,7 @@ class AstPrinter {
     size_t m_comment_idx = 0;
     fmt::memory_buffer *m_buffer = nullptr;
     int m_current_column = 0;
-    int m_max_line_length = 120;
+    int m_max_line_length = 100;
 
     // Shadows global fmt::print — routes output to buffer when set, stdout otherwise.
     template <typename... Args> void emit(fmt::format_string<Args...> fmt, Args &&...args) {

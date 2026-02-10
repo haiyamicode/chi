@@ -62,12 +62,20 @@ func main() {
         println("Local object escapes via pointer assignment");
     }
     println("Scope ended - escaped object should still be alive");
-    printf("CRITICAL TEST: Accessing escaped pointer after scope: GCBox({}).id = {}\n", escaped_ptr!.id, escaped_ptr!.id);
+    printf(
+        "CRITICAL TEST: Accessing escaped pointer after scope: GCBox({}).id = {}\n",
+        escaped_ptr!.id,
+        escaped_ptr!.id
+    );
 
     // Test 3: Escaping via return value
     println("\nTest 3: Object escaping via return value");
     var returned_ptr = get_escaped_ptr();
-    printf("CRITICAL TEST: Function returned pointer to GCBox({}), accessing id: {}\n", returned_ptr!.id, returned_ptr!.id);
+    printf(
+        "CRITICAL TEST: Function returned pointer to GCBox({}), accessing id: {}\n",
+        returned_ptr!.id,
+        returned_ptr!.id
+    );
 
     // Test 4: Non-escaping function call
     println("\nTest 4: Non-escaping function call");
@@ -93,7 +101,11 @@ func main() {
     }
     println("Both objects should still be accessible:");
     printf("CRITICAL TEST: After scope ended - ptr1->id={}, ptr2->id={}\n", ptr1!.id, ptr2!.id);
-    printf("CRITICAL TEST: Accessing values - GCBox({}) and GCBox({}) both accessible!\n", ptr1!.id, ptr2!.id);
+    printf(
+        "CRITICAL TEST: Accessing values - GCBox({}) and GCBox({}) both accessible!\n",
+        ptr1!.id,
+        ptr2!.id
+    );
 
     // Clean up explicitly
     println("\n=== Cleanup Phase ===");

@@ -3,7 +3,13 @@
 import {Foo, Bar, Baz} from "./short";
 
 // Long import - should wrap (>120 chars)
-import {VeryLongIdentifierName1, VeryLongIdentifierName2, VeryLongIdentifierName3, VeryLongIdentifierName4, VeryLongIdentifierName5} from "./long";
+import {
+    VeryLongIdentifierName1,
+    VeryLongIdentifierName2,
+    VeryLongIdentifierName3,
+    VeryLongIdentifierName4,
+    VeryLongIdentifierName5
+} from "./long";
 
 func apply(x: int, f: func (n: int) int) int {
     return f(x);
@@ -16,33 +22,33 @@ func combine(a: int, b: int, f: func (x: int, y: int) int) int {
 func main() {
     // if/while/switch paren collapsing
     var x = 5;
-    if (x > 0) {
+    if x > 0 {
         println("positive");
     }
-    if (x > 0) {
+    if x > 0 {
         println("big");
     } else {
         println("small");
     }
-    while (x > 0) {
+    while x > 0 {
         x = x - 1;
     }
 
     // arrow lambda func collapsing
-    var a = apply(5, func (n) => n * 2);
-    var b = combine(1, 2, func (x, y) => x + y);
-    var c = apply(3, func (n: int) => n + 1);
+    var a = apply(5, (n) => n * 2);
+    var b = combine(1, 2, (x, y) => x + y);
+    var c = apply(3, (n: int) => n + 1);
 
     // arrow block collapses to func block
-    var d = apply(5, (n) => {
+    var d = apply(5, func (n) {
         return n * 2;
     });
-    var e = combine(1, 2, func (x, y) => {
+    var e = combine(1, 2, func (x, y) {
         return x + y;
     });
 
     // typed construct expr collapsing
-    var nums = Array<int>{1, 2, 3};
+    var nums: Array<int> = [1, 2, 3];
 
     // redundant construct type in return
     var f = make_point(1, 2);
@@ -59,7 +65,7 @@ struct Point2 {
 }
 
 func make_point(x: int, y: int) Point2 {
-    return Point2{x, y};
+    return {x, y};
 }
 
 // Function parameter wrapping tests
@@ -67,18 +73,36 @@ func short_params(a: int, b: int, c: int) int {
     return a + b + c;
 }
 
-func function_name(parameter_name_one_long: int, parameter_name_two_long: int, parameter_name_three_long: int, parameter_name_four_long: int) int {
+func function_name(
+    parameter_name_one_long: int,
+    parameter_name_two_long: int,
+    parameter_name_three_long: int,
+    parameter_name_four_long: int
+) int {
     return 0;
 }
 
 // Function call wrapping tests
 func test_wrapping() {
     short_params(1, 2, 3);
-    function_name(argument_one_with_long_name, argument_two_with_long_name, argument_three_with_long_name, argument_four_with_long_name, argument_five);
+    function_name(
+        argument_one_with_long_name,
+        argument_two_with_long_name,
+        argument_three_with_long_name,
+        argument_four_with_long_name,
+        argument_five
+    );
 }
 
 // Array literal wrapping tests
 func test_arrays() {
     var short_arr = [1, 2, 3, 4];
-    var long_arr = [element_one_with_long_name, element_two_with_long_name, element_three_with_long_name, element_four_with_long_name, element_five];
+    var long_arr = [
+        element_one_with_long_name,
+        element_two_with_long_name,
+        element_three_with_long_name,
+        element_four_with_long_name,
+        element_five
+    ];
 }
+
