@@ -31,10 +31,10 @@ func main() {
     format_number(42, 5, '0');
     printf("add_offset(5) = {}\n", add_offset(5));
     printf("add_offset(5, 100) = {}\n", add_offset(5, 100));
-    var g1: Greeter = {};
+    var g1 = Greeter{};
     g1.say("World");
     g1.say("World", "?");
-    var g2: Greeter = {"Hello"};
+    var g2 = Greeter{"Hello"};
     g2.say("Chi");
 }
 

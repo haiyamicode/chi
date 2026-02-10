@@ -27,17 +27,17 @@ struct Foo {
 }
 
 func f2() {
-    var foo3: Foo = {3};
+    var foo3 = Foo{3};
     panic("exit");
 }
 
 func f() {
-    var foo2: Foo = {2};
+    var foo2 = Foo{2};
     f2();
 }
 
 func test_foo() {
-    var foo1: Foo = {1};
+    var foo1 = Foo{1};
     try f();
     println("finished");
 }

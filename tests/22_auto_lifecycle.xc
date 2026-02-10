@@ -23,7 +23,7 @@ struct Outer1 {
 }
 
 func test_auto_destroy_helper() {
-    var o: Outer1 = {1};
+    var o = Outer1{1};
     println("Before function exit");
 }
 
@@ -47,7 +47,7 @@ struct WithDefaults {
 
 func test_new_initializes_defaults() {
     println("=== Test 2: __new initializes defaults before user's new() ===");
-    var w: WithDefaults = {30};
+    var w = WithDefaults{30};
     printf("Final: a={}, b={}, c={}\n", w.a, w.b, w.c);
     println("");
 }
@@ -83,7 +83,7 @@ struct OrderedContainer {
 }
 
 func test_destruction_order_helper() {
-    var o: OrderedContainer = {};
+    var o = OrderedContainer{};
     println("Before function exit");
 }
 
@@ -118,7 +118,7 @@ struct HoldsShared {
 }
 
 func test_shared_helper() {
-    var h: HoldsShared = {42};
+    var h = HoldsShared{42};
     println("Before function exit");
 }
 
@@ -143,7 +143,7 @@ struct Level2 {
 
     func new(id: int) {
         this.id = id;
-        this.child = {.id = id * 10};
+        this.child = {id: id * 10};
     }
 
     func delete() {
@@ -166,7 +166,7 @@ struct Level1 {
 }
 
 func test_nested_helper() {
-    var l: Level1 = {1};
+    var l = Level1{1};
     println("Before function exit");
 }
 
@@ -205,12 +205,12 @@ struct HoldsNullOptional {
 }
 
 func test_optional_with_value_helper() {
-    var h: HoldsOptionalShared = {99};
+    var h = HoldsOptionalShared{99};
     println("Before function exit (with value)");
 }
 
 func test_optional_null_helper() {
-    var h: HoldsNullOptional = {};
+    var h = HoldsNullOptional{};
     println("Before function exit (null)");
 }
 
@@ -246,7 +246,7 @@ struct HoldsOptionalDirect {
 }
 
 func test_optional_direct_helper() {
-    var h: HoldsOptionalDirect = {77};
+    var h = HoldsOptionalDirect{77};
     println("Before function exit");
 }
 
@@ -268,7 +268,7 @@ struct BothLifecycles {
 }
 
 func test_both_helper() {
-    var b: BothLifecycles = {88};
+    var b = BothLifecycles{88};
     println("Before function exit");
 }
 
@@ -293,9 +293,9 @@ struct TrackedVar {
 }
 
 func test_multiple_vars_helper() {
-    var a: TrackedVar = {"first"};
-    var b: TrackedVar = {"second"};
-    var c: TrackedVar = {"third"};
+    var a = TrackedVar{"first"};
+    var b = TrackedVar{"second"};
+    var c = TrackedVar{"third"};
     println("Before function exit - destroys in declaration order");
 }
 

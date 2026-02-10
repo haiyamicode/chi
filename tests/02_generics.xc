@@ -26,7 +26,7 @@ struct Wrapper<T> {
     data: Shared<Inner<T>>;
 
     func init(value: T) {
-        var inner: Inner<T> = {value};
+        var inner = Inner<T>{value};
         this.data = {inner};
     }
 
@@ -86,12 +86,12 @@ struct Arr<T> {
 }
 
 func main() {
-    var box_stack: GenericBox<int> = {};
+    var box_stack = GenericBox<int>{};
     printf("box_stack.value={}\n", box_stack.value);
     var box_heap: *GenericBox<int> = new GenericBox<int>{};
     printf("box_heap.value={}\n", box_heap.value);
     delete box_heap;
-    var a: Arr<int> = {};
+    var a = Arr<int>{};
     a.add(1);
     a.add(2);
     printf("a.size={}\n", a.size);
@@ -99,17 +99,17 @@ func main() {
     a.add(3);
     printf("a.size={}\n", a.size);
     printf("a=[{},{},{}]\n", a.get(0), a.get(1), a.get(2));
-    var c: Container<int> = {};
+    var c = Container<int>{};
     printf("c.value={}\n", c.value);
     c.value! = 42;
     printf("c.value={}\n", c.value!);
-    var cs: Container<string> = {};
+    var cs = Container<string>{};
     cs.value! = "hello";
     printf("cs.value={}\n", cs.value!);
-    var w: Wrapper<int> = {};
+    var w = Wrapper<int>{};
     w.init(123);
     printf("w.get_inner().value={}\n", w.get_inner().value);
-    var rh: RefHolder<int> = {999};
+    var rh = RefHolder<int>{999};
     printf("rh.get()={}\n", rh.get());
 }
 

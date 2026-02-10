@@ -1599,6 +1599,15 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
     }
     pos++;
 
+    // Handle dot-qualified types (e.g., mod.Greeting, a.b.c)
+    while (lookahead(pos)->type == TokenType::DOT) {
+        pos++;
+        if (lookahead(pos)->type != TokenType::IDEN) {
+            return false;
+        }
+        pos++;
+    }
+
     // Handle generic types (e.g., Container<T>)
     token = lookahead(pos);
     if (token->type == TokenType::LT) {
@@ -2057,12 +2066,12 @@ Node *Parser::parse_construct_expr() {
             break;
         }
 
-        if (token->type == TokenType::DOT) {
-            // field initializer
+        if (token->type == TokenType::IDEN && lookahead(1)->type == TokenType::COLON) {
+            // field initializer: field: value
             field_started = true;
             consume();
-            auto field = expect_identifier();
-            expect(TokenType::ASS);
+            auto field = token;
+            expect(TokenType::COLON);
             auto value = parse_expr();
             auto field_init = create_node(NodeType::FieldInitExpr, field);
             field_init->data.field_init_expr.token = token;

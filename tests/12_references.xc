@@ -26,7 +26,7 @@ struct OptionalHolder {
 
 func test_optional_ref() {
     println("testing optional ref:");
-    var holder: OptionalHolder = {};
+    var holder = OptionalHolder{};
     var ref = &mut holder;
     ref.value = 42;
     printf("ref.value={}\n", ref.value!);
@@ -34,7 +34,7 @@ func test_optional_ref() {
 }
 
 func main() {
-    let p: Pos = {.x = 1, .y = 2};
+    let p = Pos{x: 1, y: 2};
     printf("p: {}\n", p);
     var pp = &mut p;
     pp.reset();

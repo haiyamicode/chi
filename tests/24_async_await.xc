@@ -2,7 +2,7 @@ import "std/ops" as ops;
 
 func test_manual_promise() {
     println("=== Test 1: Manual Promise with callbacks ===");
-    var p: Promise<int> = {};
+    var p = Promise<int>{};
     p.then(func (val: int) {
         printf("Callback A: {}\n", val);
     });
@@ -74,7 +74,7 @@ async func delayed_compute(x: int) Promise<int> {
 
 func test_promise_state() {
     println("=== Test 5: Promise state checking ===");
-    var p: Promise<int> = {};
+    var p = Promise<int>{};
     printf("Before resolve - is_resolved: {}\n", p.is_resolved());
     p.resolve(42);
     printf("After resolve - is_resolved: {}\n", p.is_resolved());
@@ -84,7 +84,7 @@ func test_promise_state() {
 
 func test_multiple_callbacks() {
     println("=== Test 6: Multiple callbacks on same promise ===");
-    var p: Promise<int> = {};
+    var p = Promise<int>{};
     var count: int = 0;
     p.then(func (val: int) {
         printf("Callback 1: {}\n", val);

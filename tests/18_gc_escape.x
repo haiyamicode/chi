@@ -13,19 +13,19 @@ struct GCBox {
 
 func get_escaped_ptr() *GCBox {
     // This object MUST escape because we return a pointer to it
-    var obj: GCBox = {100};
+    var obj = GCBox{100};
     return &obj;
 }
 
 func get_non_escaped_value() int {
     // This object should NOT escape - it's only used locally
-    var obj: GCBox = {200};
+    var obj = GCBox{200};
     return obj.id;
 }
 
 func test_lambda_capture() {
     // This object MUST escape because lambda captures it and lambda outlives the scope
-    var captured: GCBox = {300};
+    var captured = GCBox{300};
     var lambda = func () int {
         return captured.id;
     };
@@ -47,7 +47,7 @@ func main() {
     // Test 1: Non-escaping object (should be stack-allocated, destroyed immediately)
     println("Test 1: Non-escaping object");
     {
-        var local: GCBox = {1};
+        var local = GCBox{1};
         println("Local object created, should be destroyed at scope end");
     }
     println("Scope ended - non-escaping object should be destroyed by now");
@@ -56,7 +56,7 @@ func main() {
     println("\nTest 2: Object escaping via pointer assignment");
     var escaped_ptr: *GCBox = null;
     {
-        var local: GCBox = {2};
+        var local = GCBox{2};
         escaped_ptr = &local;
         printf("Inside scope - local.id: {}, escaped_ptr->id: {}\n", local.id, escaped_ptr!.id);
         println("Local object escapes via pointer assignment");
@@ -83,8 +83,8 @@ func main() {
     var ptr1: *GCBox = null;
     var ptr2: *GCBox = null;
     {
-        var a: GCBox = {6};
-        var b: GCBox = {7};
+        var a = GCBox{6};
+        var b = GCBox{7};
         ptr1 = &a;
         ptr2 = &b;
         printf("Inside scope - accessing a.id: {}, b.id: {}\n", a.id, b.id);
@@ -105,7 +105,7 @@ func main() {
     // Final gc objects
     println("Final gc objects...");
     for var i = 0; i < 5; i++ {
-        var temp: GCBox = {1000 + i};
+        var temp = GCBox{1000 + i};
     }
 
     println("Test completed");

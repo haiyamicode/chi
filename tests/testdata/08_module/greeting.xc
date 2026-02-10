@@ -1,17 +1,18 @@
-export "./subgreeting" *; 
+export "./subgreeting" *;
 
 struct Greeting {
-  name: string;
+    name: string;
 
-  mut func new(name: string) {
-    this.name = name;
-  }
+    mut func new(name: string) {
+        this.name = name;
+    }
 
-  func hello() {
-    printf("hello, {}\n", this.name);
-  }
+    func hello() {
+        printf("hello, {}\n", this.name);
+    }
 }
 
 func hello() {
-  println("hello from module");
+    println("hello from module");
 }
+

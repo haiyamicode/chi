@@ -26,7 +26,7 @@ enum Node (type: uint64) {
 }
 
 func main() {
-    var node: Node.FnDef = {.name = "f", .params = {}, .ret = "int"};
+    var node = Node.FnDef{name: "f", params: {}, ret: "int"};
     printf("node.type: {}\n", node.type);
     printf("node.discriminator: {}\n", node.discriminator());
     printf("node.ret: {}\n", node.ret);

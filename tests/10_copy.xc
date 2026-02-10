@@ -24,7 +24,7 @@ struct Foo implements ops.CopyFrom<Foo> {
 }
 
 func return_local() Foo {
-    var a: Foo = {"local"};
+    var a = Foo{"local"};
     a.p! = 42;
     var b = a;
     b.id = "local_b";

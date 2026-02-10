@@ -1,5 +1,5 @@
 func main() {
-    var fib: Fib = {12, .name = "test"};
+    var fib = Fib{12, name: "test"};
     printf("fib {}: {}\n", fib.name, fib.calculate());
 }
 

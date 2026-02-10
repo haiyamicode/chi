@@ -45,7 +45,7 @@ func main() {
         return x * 2;
     });
     printf("transform(5, double) [inferred] = {}\n", doubled_inferred);
-    var container: Container<int> = {65};
+    var container = Container<int>{65};
     var zmap_result = container.zmap<char>(func (value: int) char {
         return (value + 10) as char;
     });
@@ -64,8 +64,8 @@ func main() {
         return i as float * 0.5;
     });
     printf("float result [inferred]: {}\n", float_container_inferred.get());
-    var c1: Container<int> = {100};
-    var c2: Container<int> = {200};
+    var c1 = Container<int>{100};
+    var c2 = Container<int>{200};
     var added = c1.add(c2);
     printf("added: {}\n", added.get());
 }

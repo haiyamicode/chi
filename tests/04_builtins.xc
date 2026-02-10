@@ -28,7 +28,7 @@ func test_array() {
 
 func test_map() {
     println("testing map:");
-    var m: Map<string, int> = {};
+    var m = Map<string, int>{};
     m["abc"] = 1;
     m["d"] = 2;
     printf("m[\"abc\"] = {}\n", m["abc"]);
@@ -43,7 +43,7 @@ func test_map() {
 
 func test_shared() {
     println("testing shared:");
-    var r1: Shared<int> = {42};
+    var r1 = Shared<int>{42};
     printf("r1.as_ref()={}, ref_count={}\n", r1.as_ref(), r1.ref_count());
     var r2: Shared<int> = r1;
     printf("after copy: ref_count={}\n", r1.ref_count());
@@ -74,7 +74,7 @@ struct NestedShared {
 
 func test_nested_shared() {
     println("testing nested shared:");
-    var ns: NestedShared = {};
+    var ns = NestedShared{};
     printf("ns.ref_count()={}\n", ns.ref_count());
     printf("ns.get_count()={}\n", ns.get_count());
     println("");
@@ -107,7 +107,7 @@ struct Traced {
 
 func test_box_helper() {
     println("creating box:");
-    var b1: Box<Traced> = {{1}};
+    var b1 = Box<Traced>{{1}};
     printf("b1.id={}\n", b1.as_ref().id);
     println("copying box:");
     var b2 = b1;
@@ -119,7 +119,7 @@ func test_box_helper() {
 
 func test_box() {
     println("testing box:");
-    var b1: Box<int> = {42};
+    var b1 = Box<int>{42};
     printf("b1.as_ref()={}\n", b1.as_ref());
     b1.set(99);
     printf("after set: b1.as_ref()={}\n", b1.as_ref());

@@ -203,7 +203,7 @@ func add_for_lambda_test(a: int, b: int) int {
 
 func test_method_to_lambda() {
     println("testing method to lambda conversion:");
-    var calc: Calculator = {.multiplier = 3};
+    var calc = Calculator{multiplier: 3};
     var direct_result = calc.multiply(5);
     printf("Direct method call: {}\n", direct_result);
     var method_lambda = calc.multiply;
@@ -212,7 +212,7 @@ func test_method_to_lambda() {
     var abstracted: func (value: int) int = method_lambda;
     var abstracted_result = abstracted(7);
     printf("Abstracted lambda interface: {}\n", abstracted_result);
-    var calc2: Calculator = {.multiplier = 10};
+    var calc2 = Calculator{multiplier: 10};
     var method_lambda2 = calc2.multiply;
     var result2 = method_lambda2(2);
     printf("Different instance lambda: {}\n", result2);
@@ -263,7 +263,7 @@ func test_lambda_copy_semantics() {
 
 func test_lambda_capture_lifecycle() {
     println("testing lambda capture lifecycle:");
-    var box: TrackedBox = {42};
+    var box = TrackedBox{42};
     var f1 = func () int {
         return box.id;
     };
@@ -272,7 +272,7 @@ func test_lambda_capture_lifecycle() {
     printf("f2() = {}\n", f2());
     var f3 = f1;
     printf("f3() = {}\n", f3());
-    var box2: TrackedBox = {99};
+    var box2 = TrackedBox{99};
     f1 = func () int {
         return box2.id;
     };

@@ -42,10 +42,10 @@ func test_basic_types() {
 func test_structs() {
     println("\n=== Structs Test ===");
 
-    var obj: TestStruct = {1, "managed"};
+    var obj = TestStruct{1, "managed"};
     obj.display();
 
-    var obj2: TestStruct = {2, "memory"};
+    var obj2 = TestStruct{2, "memory"};
     obj2.display();
 }
 
@@ -116,7 +116,7 @@ func test_control_flow() {
 func test_functions() {
     println("\n=== Functions Test ===");
 
-    var obj: TestStruct = {99, "local"};
+    var obj = TestStruct{99, "local"};
     printf("Creating local object: ");
     obj.display();
 }

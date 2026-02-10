@@ -273,83 +273,64 @@ void AstPrinter::print_node(Node *node) {
             emit("...");
         }
         emit(node->name);
-        // Collapse `var x = Type{...}` to `var x: Type = {...}`
-        // Collapse `var x = Array<T>{...}` to `var x = [...]`
+        // Collapse construct expressions:
+        // - `var x: Type = {items}` → `var x = Type{items}` (move annotation to construct)
+        // - `var x: Type = Type{items}` → `var x = Type{items}` (strip redundant annotation)
+        // - Array types → `var x: Array<T> = [items]`
         auto *expr = data.expr;
-        if (!data.type && expr && expr->type == NodeType::ConstructExpr &&
-            expr->data.construct_expr.type && !expr->data.construct_expr.is_new &&
-            !expr->data.construct_expr.field_inits.len) {
-            auto *ctype = expr->data.construct_expr.type;
-            // Check if type is Array<T> (SubtypeExpr with base name "Array")
+        if (!data.is_field && expr && expr->type == NodeType::ConstructExpr &&
+            !expr->data.construct_expr.is_new && !expr->data.construct_expr.is_array_literal) {
+            auto &cdata = expr->data.construct_expr;
+            auto *ctype = cdata.type;
+            auto *vtype = data.type;
+            Node *etype = ctype ? ctype : vtype;
+
+            // Check if effective type is Array
             bool is_array = false;
-            if (ctype->type == NodeType::SubtypeExpr && ctype->data.subtype_expr.type &&
-                ctype->data.subtype_expr.type->name == "Array") {
-                is_array = true;
-            } else if (ctype->type == NodeType::Identifier && ctype->name == "Array") {
-                is_array = true;
+            if (etype) {
+                if (etype->type == NodeType::SubtypeExpr && etype->data.subtype_expr.type &&
+                    etype->data.subtype_expr.type->name == "Array") {
+                    is_array = true;
+                } else if (etype->type == NodeType::Identifier && etype->name == "Array") {
+                    is_array = true;
+                }
             }
+
             if (is_array) {
-                emit(": ");
-                print_node(ctype);
+                // Array: var x: Array<T> = [items]
+                if (etype) {
+                    emit(": ");
+                    print_node(etype);
+                }
                 emit(" = [");
-                print_node_list(&expr->data.construct_expr.items);
+                print_node_list(&cdata.items);
                 emit("]");
             } else {
-                emit(": ");
-                print_node(ctype);
-                emit(" = {{");
-                print_node_list(&expr->data.construct_expr.items);
-                emit("}}");
-            }
-        } else if (!data.type && expr && expr->type == NodeType::ConstructExpr &&
-                   expr->data.construct_expr.type && !expr->data.construct_expr.is_new) {
-            emit(": ");
-            print_node(expr->data.construct_expr.type);
-            emit(" = {{");
-            print_node_list(&expr->data.construct_expr.items);
-            if (expr->data.construct_expr.items.len && expr->data.construct_expr.field_inits.len) {
-                emit(", ");
-            }
-            print_node_list(&expr->data.construct_expr.field_inits);
-            emit("}}");
-        } else {
-            // Collapse `var x: Array<T> = {...}` to `var x = [...]`
-            bool collapsed_to_array = false;
-            if (data.type && expr && expr->type == NodeType::ConstructExpr &&
-                !expr->data.construct_expr.is_new && !expr->data.construct_expr.field_inits.len) {
-                auto *vtype = data.type;
-                bool is_array = false;
-                if (vtype->type == NodeType::SubtypeExpr && vtype->data.subtype_expr.type &&
-                    vtype->data.subtype_expr.type->name == "Array") {
-                    is_array = true;
-                } else if (vtype->type == NodeType::Identifier && vtype->name == "Array") {
-                    is_array = true;
-                }
-                if (is_array) {
+                // Non-array: collapse to var x = Type{items}
+                bool keep_annotation = vtype && ctype && !types_match(vtype, ctype);
+                if (keep_annotation) {
                     emit(": ");
                     print_node(vtype);
-                    emit(" = [");
-                    print_node_list(&expr->data.construct_expr.items);
-                    emit("]");
-                    collapsed_to_array = true;
                 }
+                emit(" = ");
+                if (etype) print_node(etype);
+                emit("{{");
+                print_node_list(&cdata.items);
+                if (cdata.items.len && cdata.field_inits.len) {
+                    emit(", ");
+                }
+                print_node_list(&cdata.field_inits);
+                emit("}}");
             }
-            if (!collapsed_to_array) {
-                if (data.type) {
-                    emit(": ");
-                    print_node(data.type);
-                }
-                if (expr) {
-                    emit(" = ");
-                    // Strip redundant type from construct only when it matches the annotation
-                    if (data.type && expr->type == NodeType::ConstructExpr &&
-                        expr->data.construct_expr.type && !expr->data.construct_expr.is_new &&
-                        types_match(data.type, expr->data.construct_expr.type)) {
-                        m_suppress_construct_type = true;
-                    }
-                    print_node(expr);
-                    m_suppress_construct_type = false;
-                }
+        } else {
+            // Non-construct expression or array literal — print normally
+            if (data.type) {
+                emit(": ");
+                print_node(data.type);
+            }
+            if (expr) {
+                emit(" = ");
+                print_node(expr);
             }
         }
         break;
@@ -468,7 +449,7 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::FieldInitExpr: {
         auto &data = node->data.field_init_expr;
-        emit(".{} = ", data.field->str);
+        emit("{}: ", data.field->str);
         print_node(data.value);
         break;
     }
