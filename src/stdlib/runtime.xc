@@ -241,7 +241,7 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
     }
 
     func get(key: string) JsonValue {
-        let new_value: JsonValue = {};
+        let new_value = JsonValue{};
         var key_ptr = &key;
         var value_ptr = &new_value;
         cx_json_value_get(this.data, key_ptr as *string, value_ptr as *void);
@@ -280,10 +280,10 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
     }
 
     func to_array() Array<JsonValue> {
-        let result: Array<JsonValue> = {};
+        let result: Array<JsonValue> = [];
         let len = this.length();
         for var i = 0; i < len; i++ {
-            let new_value: JsonValue = {};
+            let new_value = JsonValue{};
             cx_json_array_index(this.data, i, &new_value);
             result.add(new_value);
         }
@@ -347,7 +347,7 @@ func assert(cond: bool, message: string) {
 }
 
 func json_parse(str: string) JsonValue {
-    let result: JsonValue = {};
+    let result = JsonValue{};
     cx_parse_json(&str, &result);
     return result;
 }
@@ -407,7 +407,7 @@ struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, o
     }
 
     func display() string {
-        var buf: Buffer = {};
+        var buf = Buffer{};
         buf.write("[");
         for item in this {
             buf.write(string.format("{}, ", item));
@@ -428,7 +428,7 @@ struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, o
     }
 
     func filter(predicate: func (value: T) bool) Array<T> {
-        var result: Array<T> = {};
+        var result: Array<T> = [];
         for item in this {
             if predicate(item) {
                 result.add(item);
@@ -438,7 +438,7 @@ struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, o
     }
 
     func map<U>(transform: func (value: T) U) Array<U> {
-        var result: Array<U> = {};
+        var result: Array<U> = [];
         for item in this {
             result.add(transform(item));
         }
@@ -496,13 +496,13 @@ struct __CxString implements ops.Add {
     }
 
     func add(rhs: string) string {
-        var result: string = {};
+        var result = string{};
         cx_string_concat(&result as *string, this as *string, &rhs as *string);
         return result;
     }
 
     func as_chars() Array<char> {
-        var result: Array<char> = {};
+        var result: Array<char> = [];
         var i: uint32 = 0;
         while i < this.length {
             result.add(this.data[i]);
@@ -526,14 +526,14 @@ struct Map<K, V> implements ops.Index<K, V> {
 
     func remove(key: K) {
         var k: any = key;
-        var h: HashBytes = {};
+        var h = HashBytes{};
         cx_hbytes(&k, &h);
         cx_map_remove(this.data, &h);
     }
 
     func find(key: K) ?&V {
         var k: any = key;
-        var h: HashBytes = {};
+        var h = HashBytes{};
         cx_hbytes(&k, &h);
         var p = cx_map_find(this.data, &h) as *V;
         if p {
@@ -544,7 +544,7 @@ struct Map<K, V> implements ops.Index<K, V> {
 
     func index(key: K) &mut<V> {
         var k: any = key;
-        var h: HashBytes = {};
+        var h = HashBytes{};
         cx_hbytes(&k, &h);
         var p = cx_map_find(this.data, &h) as *V;
         if !p {
@@ -635,7 +635,7 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
 }
 
 func promise<T>(executor: func (resolve: func (value: T))) Promise<T> {
-    var p: Promise<T> = {};
+    var p = Promise<T>{};
     executor(func [p] (value) {
         p.resolve(value);
     });
