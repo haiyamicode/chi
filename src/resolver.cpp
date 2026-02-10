@@ -946,6 +946,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Compile-time constants must be evaluable at compile time
         if (data.kind == ast::VarKind::Constant) {
             data.resolved_value = resolve_constant_value(data.expr);
+            if (!data.resolved_value.has_value() && !scope.parent_fn_node) {
+                error(node, "const '{}' cannot be evaluated at compile time; use 'let' for runtime-initialized values", node->name);
+            }
+            return var_type;
+        }
+        // Global mutable variables are not supported (struct fields and let bindings are fine)
+        if (!scope.parent_fn_node && !data.is_field && data.kind == ast::VarKind::Mutable) {
+            error(node, "global variables are not supported; use 'let' or 'const' for module-level declarations");
             return var_type;
         }
         // Add to cleanup_vars if this variable needs destruction

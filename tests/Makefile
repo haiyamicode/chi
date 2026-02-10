@@ -27,7 +27,8 @@ TESTS_LIST = 00_fib.test \
 		23_operator_overloading.test \
 		24_async_await.test \
 		25_default_args.test \
-		26_lambda_inference.test
+		26_lambda_inference.test \
+		28_global_let.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

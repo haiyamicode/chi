@@ -238,6 +238,10 @@ struct CodegenContext {
     map<ChiType *, Function *> destructor_table = {};  // Generated __delete functions
     map<ChiType *, Function *> constructor_table = {}; // Generated __new functions
 
+    // Module-level let vars that need runtime initialization
+    // Collected during compile_module, initialized at start of main
+    array<std::pair<ast::Node *, llvm::GlobalVariable *>> pending_global_inits = {};
+
     // Tracing: track what codegen actually compiles (for comparison with GenericResolver)
     std::set<string> compiled_generic_fns = {};    // function global_ids compiled
     std::set<string> compiled_generic_structs = {}; // struct global_ids compiled

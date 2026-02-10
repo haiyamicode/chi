@@ -315,6 +315,11 @@ void Parser::parse_top_level_decls(NodeList *decls) {
             if (decl->data.struct_decl.decl_spec->is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
+        } else if (decl->type == NodeType::VarDecl) {
+            auto ds = decl->data.var_decl.decl_spec;
+            if (!ds || ds->is_exported()) {
+                m_ctx->module->exports.add(decl);
+            }
         }
     }
 
@@ -786,9 +791,9 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
 
     if (!as_field) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
-        // Allow top-level const declarations, but not var/let outside functions
-        if (!node->parent_fn && var_kind != VarKind::Constant) {
-            error(iden, "variable declaration outside of function (use 'const' for top-level constants)");
+        // Allow top-level const and let declarations, but not var outside functions
+        if (!node->parent_fn && var_kind == VarKind::Mutable) {
+            error(iden, "global variables are not supported; use 'let' or 'const' for module-level declarations");
         }
     }
     if (!next_is(TokenType::ASS)) {

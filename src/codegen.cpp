@@ -220,8 +220,20 @@ void Compiler::compile_module(ast::Module *module) {
                 // No code generation needed here - just skip
                 break;
             }
-            // Global mutable/immutable variables would need different handling
-            panic("global mutable/immutable variables not yet supported");
+            if (var_data.kind == ast::VarKind::Immutable) {
+                // Module-level let: create global variable, defer initialization to main
+                auto var_type_l = compile_type_of(decl);
+                auto initial = llvm::Constant::getNullValue(var_type_l);
+                auto global_name = "__chi_" + module->id_path + "_" + decl->name;
+                auto global = new llvm::GlobalVariable(
+                    *m_ctx->llvm_module, var_type_l, false,
+                    llvm::GlobalValue::InternalLinkage, initial,
+                    global_name);
+                add_var(decl, global);
+                m_ctx->pending_global_inits.add({decl, global});
+                break;
+            }
+            panic("global mutable variables not supported");
             break;
         }
         case ast::NodeType::TypedefDecl:
@@ -621,6 +633,18 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         if (vtable) {
             auto set_vtable = get_system_fn("cx_set_program_vtable");
             builder.CreateCall(set_vtable->llvm_fn, {vtable});
+        }
+
+        // Initialize module-level let variables
+        for (auto &[var_node, global_var] : m_ctx->pending_global_inits) {
+            auto &var_data = var_node->data.var_decl;
+            if (var_data.expr) {
+                auto var_type = get_chitype(var_node);
+                auto value = compile_assignment_to_type(fn, var_data.expr, var_type);
+                if (value) {
+                    compile_copy(fn, value, global_var, var_type, var_data.expr);
+                }
+            }
         }
     }
 
@@ -2809,16 +2833,26 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     if (data.kind == ast::IdentifierKind::This) {
         return RefValue::from_value(fn->get_this_arg());
     }
-    if (data.decl->type == ast::NodeType::VarDecl) {
-        auto &var = data.decl->data.var_decl;
-        if (var.kind == ast::VarKind::Constant && !data.decl->parent_fn) {
+    // Unwrap ImportSymbol to reach the actual declaration
+    auto *resolved_decl = data.decl;
+    if (resolved_decl->type == ast::NodeType::ImportSymbol && resolved_decl->data.import_symbol.resolved_decl) {
+        resolved_decl = resolved_decl->data.import_symbol.resolved_decl;
+    }
+
+    if (resolved_decl->type == ast::NodeType::VarDecl) {
+        auto &var = resolved_decl->data.var_decl;
+        if (var.kind == ast::VarKind::Constant && !resolved_decl->parent_fn) {
             if (var.resolved_value.has_value()) {
                 return RefValue::from_value(
-                    compile_constant_value(fn, *var.resolved_value, get_chitype(data.decl)));
+                    compile_constant_value(fn, *var.resolved_value, get_chitype(resolved_decl)));
             } else if (var.expr) {
                 // Inline the expression if resolved_value wasn't set
                 return compile_expr_ref(fn, var.expr);
             }
+        }
+        // Module-level let: look up the global variable directly
+        if (!resolved_decl->parent_fn) {
+            return RefValue::from_address(get_var(resolved_decl));
         }
         goto normal;
     }
