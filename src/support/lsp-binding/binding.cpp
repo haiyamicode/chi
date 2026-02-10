@@ -4,12 +4,12 @@
 #include <execinfo.h>
 #include <unistd.h>
 
-#define BOOST_JSON_STANDALONE
 #define BOOST_NO_EXCEPTIONS
 #include "../../analyzer.h"
 #include "../../ast_printer.h"
+#include "../../c_importer.h"
 #include "../../package_config.h"
-#include <boost/json/src.hpp>
+#include "../../include/boost/json/src.hpp"
 #include <filesystem>
 #include <fstream>
 
@@ -40,33 +40,22 @@ static void load_package_config(cx::ast::Package* package, const std::string& fi
 
     // Load and parse package.jsonc
     std::ifstream config_file(package_json_path);
-    if (!config_file.is_open()) {
-        return;
-    }
+    if (!config_file.is_open()) return;
 
     std::string config_content((std::istreambuf_iterator<char>(config_file)),
                                std::istreambuf_iterator<char>());
     config_file.close();
 
-    // Parse JSON (boost::json will ignore comments in JSONC)
-    boost::json::value config_json;
-    try {
-        config_json = boost::json::parse(config_content);
-    } catch (...) {
-        return; // Ignore parse errors
-    }
+    // Parse JSONC (allow comments and trailing commas)
+    std::error_code ec;
+    boost::json::parse_options opts;
+    opts.allow_comments = true;
+    opts.allow_trailing_commas = true;
+    auto config_json = boost::json::parse(config_content, ec, {}, opts);
+    if (ec) return;
 
-    // Parse configuration using Boost.JSON
-    cx::PackageConfig config;
-    try {
-        config = boost::json::value_to<cx::PackageConfig>(config_json);
-    } catch (...) {
-        return; // Ignore conversion errors
-    }
-
-    // Store config in a heap-allocated object
-    auto* config_ptr = new cx::PackageConfig(std::move(config));
-    package->config = config_ptr;
+    package->config = new cx::PackageConfig(
+        boost::json::value_to<cx::PackageConfig>(config_json));
 }
 
 static void crash_handler(int sig) {
@@ -332,6 +321,36 @@ static napi_value Method(napi_env env, napi_callback_info info) {
         analyzer.build_runtime();
         auto pkg = analyzer.get_context()->add_package(".");
         load_package_config(pkg, input_file);
+
+        // Process native modules from package config (same as builder.cpp)
+        if (pkg->config && pkg->config->c_interop.has_value() &&
+            !pkg->config->c_interop->native_modules.empty()) {
+            auto* ctx = analyzer.get_context();
+            for (const auto& [mod_name, mod_config] : pkg->config->c_interop->native_modules) {
+                cx::CImporter importer;
+                cx::CImportConfig import_config;
+                import_config.symbols = mod_config.symbols;
+                import_config.include_paths = mod_config.include_paths;
+
+                for (const auto& header : mod_config.includes) {
+                    importer.import_header_by_name(header, import_config);
+                }
+
+                auto* virtual_module = cx::create_native_module(
+                    ctx, mod_name,
+                    importer.get_functions(),
+                    importer.get_enum_constants(),
+                    importer.get_macros(),
+                    importer.get_structs(),
+                    importer.get_typedefs()
+                );
+
+                auto mod_resolver = ctx->create_resolver();
+                mod_resolver.resolve(virtual_module);
+                ctx->module_map[mod_name] = virtual_module;
+            }
+        }
+
         module = analyzer.process_source(pkg, &src, input_file);
     }
 

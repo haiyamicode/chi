@@ -2436,6 +2436,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         node->resolved_type = get_system_types()->void_;
         return node->resolved_type;
     }
+    case NodeType::TypedefDecl: {
+        // TypedefDecl nodes from C interop are pre-resolved
+        return node->resolved_type;
+    }
     default:
         print("\n");
         panic("unhandled node {}", PRINT_ENUM(node->type));

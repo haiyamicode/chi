@@ -165,42 +165,37 @@ PackageConfig tag_invoke(boost::json::value_to_tag<PackageConfig>, const boost::
 bool PackageConfig::validate_with_schema(const boost::json::value &json,
                                          const boost::json::value &schema_json,
                                          std::string &error_message) {
-    try {
-        // Create valijson schema and validator
-        valijson::Schema schema;
-        valijson::SchemaParser parser;
-        valijson::adapters::BoostJsonAdapter schema_adapter(schema_json);
-        parser.populateSchema(schema_adapter, schema);
+    // Create valijson schema and validator
+    valijson::Schema schema;
+    valijson::SchemaParser parser;
+    valijson::adapters::BoostJsonAdapter schema_adapter(schema_json);
+    parser.populateSchema(schema_adapter, schema);
 
-        // Validate the JSON against the schema
-        valijson::Validator validator;
-        valijson::ValidationResults results;
-        valijson::adapters::BoostJsonAdapter target_adapter(json);
+    // Validate the JSON against the schema
+    valijson::Validator validator;
+    valijson::ValidationResults results;
+    valijson::adapters::BoostJsonAdapter target_adapter(json);
 
-        if (!validator.validate(schema, target_adapter, &results)) {
-            std::ostringstream error_stream;
-            error_stream << "Schema validation failed:\n";
+    if (!validator.validate(schema, target_adapter, &results)) {
+        std::ostringstream error_stream;
+        error_stream << "Schema validation failed:\n";
 
-            valijson::ValidationResults::Error error;
-            unsigned int error_num = 1;
-            while (results.popError(error)) {
-                error_stream << "Error #" << error_num << ": " << error.description;
-                for (const std::string &context : error.context) {
-                    error_stream << " (at " << context << ")";
-                }
-                error_stream << "\n";
-                ++error_num;
+        valijson::ValidationResults::Error error;
+        unsigned int error_num = 1;
+        while (results.popError(error)) {
+            error_stream << "Error #" << error_num << ": " << error.description;
+            for (const std::string &context : error.context) {
+                error_stream << " (at " << context << ")";
             }
-
-            error_message = error_stream.str();
-            return false;
+            error_stream << "\n";
+            ++error_num;
         }
 
-        return true;
-    } catch (const std::exception &e) {
-        error_message = "Schema validation exception: " + std::string(e.what());
+        error_message = error_stream.str();
         return false;
     }
+
+    return true;
 }
 
 } // namespace cx

@@ -7,7 +7,6 @@
 #include <string>
 #include <vector>
 #include <set>
-#include <map>
 
 // Forward declarations
 namespace cx {
@@ -52,13 +51,6 @@ struct CImportConfig {
     std::vector<std::string> includes;
     std::vector<std::string> symbols;  // Filter: only extract these symbols (supports patterns like "str*")
     std::vector<std::string> include_paths;
-};
-
-// Cache for C header modules - tracks what symbols have been extracted
-// We re-parse headers when needed (libclang caches internally) but only extract requested symbols
-struct CHeaderCache {
-    cx::ast::Module* module = nullptr;
-    std::set<std::string> extracted_symbols;  // Track what we've extracted already
 };
 
 class CImporter {

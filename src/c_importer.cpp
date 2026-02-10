@@ -847,9 +847,6 @@ void add_symbols_to_module(
     }
 }
 
-// Static cache for C header modules - tracks extracted symbols
-static std::map<std::string, CHeaderCache> header_cache;
-
 // High-level function to import C header symbols lazily
 // Re-parses header when needed (libclang caches internally) but only extracts requested symbols
 ast::Module* import_c_header_as_module(
@@ -864,33 +861,26 @@ ast::Module* import_c_header_as_module(
     return nullptr;
 #else
     bool is_new_module = false;
-    CHeaderCache* cache = nullptr;
 
-    // Check if header is already cached
-    auto cache_it = header_cache.find(header_name);
-    if (cache_it == header_cache.end()) {
-        // First time seeing this header - create empty module
+    // Check if module already exists in this context
+    auto* existing = ctx->module_map.get(header_name);
+    if (!existing) {
         is_new_module = true;
-
-        CHeaderCache new_cache;
-        new_cache.module = create_native_module(ctx, header_name, {}, {}, {}, {}, {});
-        ctx->module_map[header_name] = new_cache.module;
-
-        header_cache[header_name] = std::move(new_cache);
-        cache = &header_cache[header_name];
-    } else {
-        // Header already cached
-        cache = &cache_it->second;
+        auto* module = create_native_module(ctx, header_name, {}, {}, {}, {}, {});
+        ctx->module_map[header_name] = module;
     }
 
     if (out_newly_created) *out_newly_created = is_new_module;
 
+    auto* module = *ctx->module_map.get(header_name);
+
     // Determine which NEW symbols need to be extracted
+    auto* extracted = ctx->header_extracted_symbols.get(header_name);
     std::vector<std::string> patterns_to_extract;
     for (const auto& pattern : symbol_patterns) {
-        if (cache->extracted_symbols.find(pattern) == cache->extracted_symbols.end()) {
+        if (!extracted || !extracted->has_key(pattern)) {
             patterns_to_extract.push_back(pattern);
-            cache->extracted_symbols.insert(pattern);
+            ctx->header_extracted_symbols[header_name][pattern] = true;
         }
     }
 
@@ -899,14 +889,12 @@ ast::Module* import_c_header_as_module(
         // libclang caches parsed system headers internally, so this is fast
         CImporter importer;
         CImportConfig config;
-        config.symbols = patterns_to_extract;  // Only extract these!
+        config.symbols = patterns_to_extract;
         config.include_paths = include_directories;
 
         if (importer.import_header_by_name(header_name, config)) {
-            // Add extracted symbols to existing module
             add_symbols_to_module(
-                ctx,
-                cache->module,
+                ctx, module,
                 importer.get_functions(),
                 importer.get_enum_constants(),
                 importer.get_macros(),
@@ -916,7 +904,7 @@ ast::Module* import_c_header_as_module(
         }
     }
 
-    return cache->module;
+    return module;
 #endif
 }
 
