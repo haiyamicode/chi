@@ -12,9 +12,9 @@ struct TrackedBox implements ops.CopyFrom<TrackedBox> {
         printf("TrackedBox({}) destroyed\n", this.id);
     }
 
-    func copy_from(from: &TrackedBox) {
-        printf("TrackedBox({}) copied from TrackedBox({})\n", this.id, from.id);
-        this.id = from.id;
+    func copy_from(source: &TrackedBox) {
+        printf("TrackedBox({}) copied from TrackedBox({})\n", this.id, source.id);
+        this.id = source.id;
     }
 }
 

@@ -1,4 +1,4 @@
-export "./subgreeting" *;
+export * from "./subgreeting";
 
 struct Greeting {
     name: string;

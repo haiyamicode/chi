@@ -7,7 +7,7 @@ interface Index<K, V> {
 }
 
 interface CopyFrom<T> {
-  func copy_from(from: &T);
+  func copy_from(source: &T);
 }
 
 interface IndexIterable<K, V> {

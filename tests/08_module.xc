@@ -1,6 +1,6 @@
 import "./testdata/08_module" as mod;
 
-import "./testdata/08_module" {Greeting, hello as test, hello_sub as test2};
+import {Greeting, hello as test, hello_sub as test2} from "./testdata/08_module";
 
 func main() {
     println("using function from module");

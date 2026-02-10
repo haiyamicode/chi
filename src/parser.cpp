@@ -2241,15 +2241,56 @@ Node *Parser::parse_import_decl() {
     auto kw = expect(TokenType::KW_IMPORT);
     auto node = create_node(NodeType::ImportDecl, kw);
     node->data.import_decl = {};
-    node->data.import_decl.path = expect(TokenType::STRING);
-    if (next_is(TokenType::KW_AS)) {
-        consume();
+
+    // Support both syntaxes:
+    // New: import * as mod from "./module"
+    // New: import {X, Y} from "./module"
+    // New: import mod from "./module" (JS-style default import, treated as namespace)
+    // Old: import "./module" as mod
+    // Old: import "./module" {X, Y}
+
+    if (next_is(TokenType::IDEN)) {
+        // import mod from "./module" (JS-style, treated as namespace import)
         auto iden = expect(TokenType::IDEN);
         node->data.import_decl.alias = iden;
         add_to_scope(node, iden->str);
-    } else if (next_is(TokenType::LBRACE)) {
+        expect(TokenType::KW_FROM);
+        node->data.import_decl.path = expect(TokenType::STRING);
+    } else if (next_is(TokenType::MUL)) {
+        // import * as mod from "./module"
         consume();
-        while (!next_is(TokenType::RBRACE)) {
+
+        // Error recovery: if we see STRING instead of 'as', the user likely meant the old syntax
+        if (next_is(TokenType::STRING)) {
+            if (!m_ctx->format_mode) {
+                error(get(), "invalid import syntax: expected 'as' after '*', or use 'import \"module\" as alias' for namespace imports");
+            }
+            // Recover: treat as old syntax "import './module' as alias"
+            node->data.import_decl.path = expect(TokenType::STRING);
+            if (next_is(TokenType::KW_AS)) {
+                consume();
+                auto iden = expect(TokenType::IDEN);
+                node->data.import_decl.alias = iden;
+                add_to_scope(node, iden->str);
+            }
+        } else {
+            expect(TokenType::KW_AS);
+            auto iden = expect(TokenType::IDEN);
+            node->data.import_decl.alias = iden;
+            add_to_scope(node, iden->str);
+            expect(TokenType::KW_FROM);
+            node->data.import_decl.path = expect(TokenType::STRING);
+        }
+    } else if (next_is(TokenType::LBRACE)) {
+        // import {X, Y} from "./module" OR import "./module" {X, Y} (after path parsed)
+        consume();
+        while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
+            // Skip if we encounter unexpected tokens that would cause infinite loop
+            if (!next_is(TokenType::IDEN) && !next_is(TokenType::RBRACE)) {
+                consume(); // Skip unexpected token to make progress
+                continue;
+            }
+
             auto iden = expect(TokenType::IDEN);
             auto member = create_node(NodeType::ImportSymbol, iden);
             member->data.import_symbol.name = iden;
@@ -2259,14 +2300,72 @@ Node *Parser::parse_import_decl() {
                 name_iden = expect(TokenType::IDEN);
                 member->data.import_symbol.alias = name_iden;
             }
-            if (!next_is(TokenType::RBRACE)) {
-                expect(TokenType::COMMA);
+            if (!next_is(TokenType::RBRACE) && !next_is(TokenType::SEMICOLON)) {
+                if (next_is(TokenType::COMMA)) {
+                    consume();
+                } else {
+                    // Unexpected token, skip to avoid infinite loop
+                    consume();
+                }
             }
             node->data.import_decl.symbols.add(member);
             member->data.import_symbol.import = node;
             add_to_scope(member, name_iden->get_name());
         }
         expect(TokenType::RBRACE);
+        expect(TokenType::KW_FROM);
+        node->data.import_decl.path = expect(TokenType::STRING);
+    } else if (next_is(TokenType::STRING)) {
+        // Old syntax: import "./module" as mod OR import "./module" {X, Y}
+        node->data.import_decl.path = expect(TokenType::STRING);
+        if (next_is(TokenType::KW_AS)) {
+            consume();
+            auto iden = expect(TokenType::IDEN);
+            node->data.import_decl.alias = iden;
+            add_to_scope(node, iden->str);
+        } else if (next_is(TokenType::LBRACE)) {
+            consume();
+            while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
+                // Skip if we encounter unexpected tokens
+                if (!next_is(TokenType::IDEN) && !next_is(TokenType::RBRACE)) {
+                    consume();
+                    continue;
+                }
+
+                auto iden = expect(TokenType::IDEN);
+                auto member = create_node(NodeType::ImportSymbol, iden);
+                member->data.import_symbol.name = iden;
+                auto name_iden = iden;
+                if (next_is(TokenType::KW_AS)) {
+                    consume();
+                    name_iden = expect(TokenType::IDEN);
+                    member->data.import_symbol.alias = name_iden;
+                }
+                if (!next_is(TokenType::RBRACE) && !next_is(TokenType::SEMICOLON)) {
+                    if (next_is(TokenType::COMMA)) {
+                        consume();
+                    } else {
+                        consume(); // Skip unexpected token
+                    }
+                }
+                node->data.import_decl.symbols.add(member);
+                member->data.import_symbol.import = node;
+                add_to_scope(member, name_iden->get_name());
+            }
+            expect(TokenType::RBRACE);
+        }
+    } else {
+        if (!m_ctx->format_mode) {
+            error(get(), "expected identifier, '*', '{', or module path in import declaration");
+        }
+        // Error recovery: consume tokens until we find a semicolon or reasonable import syntax
+        // For now, just create a dummy path to prevent null pointer crashes
+        node->data.import_decl.path = kw; // Use the import keyword as a dummy path token
+    }
+
+    // Ensure we always have a path set to prevent crashes in the resolver
+    if (!node->data.import_decl.path) {
+        node->data.import_decl.path = kw; // Use import keyword as fallback
     }
 
     expect(TokenType::SEMICOLON);
@@ -2277,42 +2376,58 @@ Node *Parser::parse_export_decl() {
     auto kw = expect(TokenType::KW_EXPORT);
     auto node = create_node(NodeType::ExportDecl, kw);
     node->data.export_decl = {};
-    node->data.export_decl.path = expect(TokenType::STRING);
     node->data.export_decl.decl_spec = m_ctx->allocator->create_decl_spec();
 
-    if (next_is(TokenType::KW_AS)) {
+    // Only support: export * from "./module" or export {X, Y} from "./module"
+    if (next_is(TokenType::MUL)) {
+        auto ellipsis = get();
         consume();
-        auto name_iden = expect(TokenType::IDEN);
-        node->data.export_decl.alias = name_iden;
-        node->name = name_iden->get_name();
-    } else {
-        if (next_is(TokenType::MUL)) {
-            auto ellipsis = get();
-            consume();
-            node->data.export_decl.match_all = ellipsis;
-        } else if (next_is(TokenType::LBRACE)) {
-            consume();
-            while (!next_is(TokenType::RBRACE)) {
-                auto iden = expect(TokenType::IDEN);
-                auto member = create_node(NodeType::ImportSymbol, iden);
-                member->data.import_symbol.name = iden;
-                auto name_iden = iden;
-                if (next_is(TokenType::KW_AS)) {
-                    consume();
-                    name_iden = expect(TokenType::IDEN);
-                    member->data.import_symbol.alias = name_iden;
-                }
-                if (!next_is(TokenType::RBRACE)) {
-                    expect(TokenType::COMMA);
-                }
-                node->data.export_decl.symbols.add(member);
-                member->data.import_symbol.import = node;
-                add_to_scope(member, name_iden->get_name());
+        node->data.export_decl.match_all = ellipsis;
+        expect(TokenType::KW_FROM);
+        node->data.export_decl.path = expect(TokenType::STRING);
+    } else if (next_is(TokenType::LBRACE)) {
+        consume();
+        while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
+            // Skip if we encounter unexpected tokens
+            if (!next_is(TokenType::IDEN) && !next_is(TokenType::RBRACE)) {
+                consume();
+                continue;
             }
-            expect(TokenType::RBRACE);
-        } else {
-            if (!m_ctx->format_mode) error(get(), errors::EXPORT_DECL_MUST_HAVE_SYMBOLS);
+
+            auto iden = expect(TokenType::IDEN);
+            auto member = create_node(NodeType::ImportSymbol, iden);
+            member->data.import_symbol.name = iden;
+            auto name_iden = iden;
+            if (next_is(TokenType::KW_AS)) {
+                consume();
+                name_iden = expect(TokenType::IDEN);
+                member->data.import_symbol.alias = name_iden;
+            }
+            if (!next_is(TokenType::RBRACE) && !next_is(TokenType::SEMICOLON)) {
+                if (next_is(TokenType::COMMA)) {
+                    consume();
+                } else {
+                    consume(); // Skip unexpected token
+                }
+            }
+            node->data.export_decl.symbols.add(member);
+            member->data.import_symbol.import = node;
+            add_to_scope(member, name_iden->get_name());
         }
+        expect(TokenType::RBRACE);
+        expect(TokenType::KW_FROM);
+        node->data.export_decl.path = expect(TokenType::STRING);
+    } else {
+        if (!m_ctx->format_mode) {
+            error(get(), "expected '*' or '{' in export declaration");
+        }
+        // Error recovery: use export keyword as dummy path to prevent crashes
+        node->data.export_decl.path = kw;
+    }
+
+    // Ensure we always have a path set to prevent crashes
+    if (!node->data.export_decl.path) {
+        node->data.export_decl.path = kw;
     }
 
     expect(TokenType::SEMICOLON);
@@ -2325,10 +2440,20 @@ Node *Parser::parse_switch_expr() {
     auto scope = m_ctx->resolver->push_scope(node);
 
     node->data.switch_expr.expr = parse_expr();
+
+    // Handle case where expression is missing or invalid
+    if (!node->data.switch_expr.expr) {
+        // Create a dummy literal node to avoid null pointer crashes
+        node->data.switch_expr.expr = create_node(NodeType::LiteralExpr, kw);
+    }
+
     expect(TokenType::LBRACE);
-    while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END)) {
+    while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
         auto case_expr = parse_case_expr();
-        node->data.switch_expr.cases.add(case_expr);
+        // Only add valid case expressions
+        if (case_expr) {
+            node->data.switch_expr.cases.add(case_expr);
+        }
         if (!at_comma(TokenType::RBRACE)) {
             break;
         }
@@ -2336,7 +2461,8 @@ Node *Parser::parse_switch_expr() {
     }
     bool has_else = false;
     for (auto case_expr : node->data.switch_expr.cases) {
-        if (case_expr->data.case_expr.is_else) {
+        // Check for null to avoid crash
+        if (case_expr && case_expr->data.case_expr.is_else) {
             has_else = true;
             break;
         }

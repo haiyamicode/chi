@@ -63,6 +63,7 @@ void Lexer::setup_keywords() {
     s_keywords["try"] = TokenType::KW_TRY;
     s_keywords["import"] = TokenType::KW_IMPORT;
     s_keywords["as"] = TokenType::KW_AS;
+    s_keywords["from"] = TokenType::KW_FROM;
     s_keywords["sizeof"] = TokenType::KW_SIZEOF;
     s_keywords["extern"] = TokenType::KW_EXTERN;
     s_keywords["export"] = TokenType::KW_EXPORT;

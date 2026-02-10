@@ -107,10 +107,10 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
         this.release();
     }
 
-    func copy_from(from: &Shared<T>) {
-        from.retain();
+    func copy_from(source: &Shared<T>) {
+        source.retain();
         this.release();
-        this.data = from.data;
+        this.data = source.data;
     }
 
     func as_ref() &T {
@@ -148,12 +148,12 @@ struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
         }
     }
 
-    func copy_from(from: &Box<T>) {
+    func copy_from(source: &Box<T>) {
         if this._ptr {
             delete this._ptr;
         }
         this._ptr = cx_malloc(sizeof T, null) as *T;
-        this._ptr! = from._ptr!;
+        this._ptr! = source._ptr!;
     }
 
     func as_ref() &T {
@@ -195,10 +195,10 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
         }
     }
 
-    func copy_from(from: &__CxLambda) {
+    func copy_from(source: &__CxLambda) {
         // Retain the source captures
-        if from.captures {
-            cx_capture_retain(from.captures);
+        if source.captures {
+            cx_capture_retain(source.captures);
         }
 
         // Release our current captures
@@ -207,9 +207,9 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
         }
 
         // Copy all fields
-        this.fn_ptr = from.fn_ptr;
-        this.length = from.length;
-        this.captures = from.captures;
+        this.fn_ptr = source.fn_ptr;
+        this.length = source.length;
+        this.captures = source.captures;
     }
 
     func as_ptr() *void {
@@ -290,8 +290,8 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
         return result;
     }
 
-    func copy_from(from: &JsonValue) {
-        cx_json_value_copy(from.data, this);
+    func copy_from(source: &JsonValue) {
+        cx_json_value_copy(source.data, this);
     }
 }
 
@@ -416,9 +416,9 @@ struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, o
         return buf.to_string();
     }
 
-    func copy_from(from: &Array<T>) {
+    func copy_from(source: &Array<T>) {
         this.clear();
-        for item in from {
+        for item in source {
             this.add(item);
         }
     }
@@ -453,11 +453,11 @@ struct CString implements ops.CopyFrom<CString> {
         this.data = ptr;
     }
 
-    mut func copy_from(from: &CString) {
+    mut func copy_from(source: &CString) {
         if this.data != null {
             cx_free(this.data as *void);
         }
-        this.data = cx_cstring_copy(from.data);
+        this.data = cx_cstring_copy(source.data);
     }
 
     mut func delete() {
@@ -594,8 +594,8 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
         this.data.delete();
     }
 
-    func copy_from(from: &Promise<T>) {
-        this.data.copy_from(&from.data);
+    func copy_from(source: &Promise<T>) {
+        this.data.copy_from(&source.data);
     }
 
     func resolve(value: T) {

@@ -1806,6 +1806,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::SubtypeExpr: {
         auto &data = node->data.subtype_expr;
         auto type = to_value_type(resolve(data.type, scope));
+
+        // Handle invalid/unresolved types gracefully
+        if (!type || type->kind == TypeKind::Error) {
+            return nullptr;
+        }
+
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional) {
             if (data.args.len != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
@@ -1848,6 +1854,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             args.add(resolved);
         }
+
+        // Ensure type is actually a Struct before calling get_subtype
+        if (type->kind != TypeKind::Struct) {
+            error(node, "cannot instantiate non-generic type '{}' with type arguments",
+                  format_type(type));
+            return nullptr;
+        }
+
         auto subtype = get_subtype(type, &args);
         return create_type_symbol({}, subtype);
     }
@@ -2206,10 +2220,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             node->escape.moved = true;
         }
         auto expr_type = resolve(data.expr, scope);
+
+        // Handle invalid switch expressions gracefully
+        if (!expr_type) {
+            return nullptr;
+        }
+
         auto expr_comparator = resolve_comparator(expr_type, scope);
 
         ChiType *ret_type = scope.value_type;
         for (auto scase : data.cases) {
+            // Skip null case expressions
+            if (!scase) continue;
+
             auto case_type = resolve(scase, scope);
 
             if (!scase->data.case_expr.is_else) {
@@ -2217,9 +2240,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto clause_type = resolve(clause, scope);
                     resolve_constant_value(clause);
                     auto clause_comparator = resolve_comparator(clause_type, scope);
-                    check_assignment(clause, clause_comparator, expr_comparator);
-                    if (!clause_comparator->is_int_like()) {
-                        error(clause, errors::INVALID_SWITCH_TYPE, format_type(clause_type));
+
+                    // Only check assignment if both comparators are valid
+                    if (clause_comparator && expr_comparator) {
+                        check_assignment(clause, clause_comparator, expr_comparator);
+
+                        if (!clause_comparator->is_int_like()) {
+                            error(clause, errors::INVALID_SWITCH_TYPE, format_type(clause_type));
+                        }
                     }
                 }
             }
@@ -2250,6 +2278,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 }
 
 ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
+    if (!type) {
+        return nullptr;
+    }
     switch (type->kind) {
     case TypeKind::This:
         return resolve_comparator(type->eval(), scope);
@@ -2329,7 +2360,9 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
 }
 
 string Resolver::format_type(ChiType *type, bool for_display) {
-    assert(type);
+    if (!type) {
+        return "<invalid-type>";
+    }
     if (for_display) {
         if (type->display_name) {
             return *type->display_name;
@@ -3927,7 +3960,7 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
         m_ctx->composite_types[key] = type;
     }
     for (auto param : fn.params) {
-        if (param->is_placeholder) {
+        if (param && param->is_placeholder) {
             type->is_placeholder = true;
             break;
         }

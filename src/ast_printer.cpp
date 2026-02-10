@@ -690,33 +690,39 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::ImportDecl: {
         auto &data = node->data.import_decl;
         emit("import ");
-        emit(data.path->to_string());
         if (data.alias) {
+            // Canonical form: import "./module" as mod;
+            emit(data.path->to_string());
             emit(" as {}", data.alias->to_string());
-        }
-        if (data.symbols.len) {
-            emit(" {{");
+        } else if (data.symbols.len) {
+            // Canonical form: import {X, Y} from "./module";
+            emit("{{");
             print_node_list(&data.symbols);
-            emit("}}");
+            emit("}} from ");
+            emit(data.path->to_string());
+        } else {
+            // Fallback (shouldn't happen in well-formed code)
+            emit(data.path->to_string());
         }
         emit(";\n");
         break;
     }
     case NodeType::ExportDecl: {
-        auto &data = node->data.import_decl;
+        auto &data = node->data.export_decl;
         emit("export ");
-        emit(data.path->to_string());
-        if (data.alias) {
-            emit(" as {}", data.alias->to_string());
-        }
         if (data.match_all) {
-            emit(" *");
+            // Canonical form: export * from "./module";
+            emit("* from ");
+            emit(data.path->to_string());
+        } else if (data.symbols.len) {
+            // Canonical form: export {X, Y} from "./module";
+            emit("{{");
+            print_node_list(&data.symbols);
+            emit("}} from ");
+            emit(data.path->to_string());
         } else {
-            if (data.symbols.len) {
-                emit(" {{");
-                print_node_list(&data.symbols);
-                emit("}}");
-            }
+            // Fallback (shouldn't happen in well-formed code)
+            emit(data.path->to_string());
         }
         emit(";\n");
         break;
