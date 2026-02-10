@@ -696,9 +696,9 @@ void AstPrinter::print_node(Node *node) {
             emit(" as {}", data.alias->to_string());
         } else if (data.symbols.len) {
             // Canonical form: import {X, Y} from "./module";
-            emit("{{");
-            print_node_list(&data.symbols);
-            emit("}} from ");
+            // Use wrapped list for long imports
+            emit_wrapped_list(&data.symbols, "{", "}", ", ");
+            emit(" from ");
             emit(data.path->to_string());
         } else {
             // Fallback (shouldn't happen in well-formed code)
@@ -716,9 +716,9 @@ void AstPrinter::print_node(Node *node) {
             emit(data.path->to_string());
         } else if (data.symbols.len) {
             // Canonical form: export {X, Y} from "./module";
-            emit("{{");
-            print_node_list(&data.symbols);
-            emit("}} from ");
+            // Use wrapped list for long exports
+            emit_wrapped_list(&data.symbols, "{", "}", ", ");
+            emit(" from ");
             emit(data.path->to_string());
         } else {
             // Fallback (shouldn't happen in well-formed code)
@@ -927,6 +927,63 @@ void AstPrinter::print_declspec(DeclSpec *declspec) {
     if (declspec->has_flag(DECL_ASYNC)) {
         emit("async ");
     }
+}
+
+string AstPrinter::format_node_to_string(Node *node) {
+    if (!node)
+        return "";
+    // Create a temporary printer to format this node to a string
+    AstPrinter temp_printer(node, nullptr);
+    return temp_printer.format_to_string();
+}
+
+bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const char *close,
+                                    const char *separator, int extra_indent) {
+    if (!items || items->len == 0) {
+        emit("{}{}", open, close);
+        return false;
+    }
+
+    // Calculate the total length if printed on one line
+    int total_length = m_current_column;
+    total_length += strlen(open);
+    for (int i = 0; i < items->len; i++) {
+        auto item_str = format_node_to_string(items->at(i));
+        total_length += item_str.size();
+        if (i < items->len - 1) {
+            total_length += strlen(separator);
+        }
+    }
+    total_length += strlen(close);
+
+    // If it fits on one line, emit inline
+    if (total_length <= m_max_line_length) {
+        emit("{}", open);
+        for (int i = 0; i < items->len; i++) {
+            print_node(items->at(i));
+            if (i < items->len - 1) {
+                emit("{}", separator);
+            }
+        }
+        emit("{}", close);
+        return false;
+    }
+
+    // Otherwise, wrap with proper indentation
+    emit("{}\n", open);
+    m_indent += extra_indent;
+    for (int i = 0; i < items->len; i++) {
+        print_indent(m_indent);
+        print_node(items->at(i));
+        if (i < items->len - 1) {
+            emit(",");
+        }
+        emit("\n");
+    }
+    m_indent -= extra_indent;
+    print_indent(m_indent);
+    emit("{}", close);
+    return true;
 }
 
 bool AstPrinter::has_blank_line_between(Node *prev, Node *next) {

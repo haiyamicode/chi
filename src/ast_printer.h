@@ -21,11 +21,22 @@ class AstPrinter {
     array<Comment> *m_comments = nullptr;
     size_t m_comment_idx = 0;
     fmt::memory_buffer *m_buffer = nullptr;
+    int m_current_column = 0;
+    int m_max_line_length = 120;
 
     // Shadows global fmt::print — routes output to buffer when set, stdout otherwise.
     template <typename... Args> void emit(fmt::format_string<Args...> fmt, Args &&...args) {
         if (m_buffer) {
-            fmt::format_to(std::back_inserter(*m_buffer), fmt, std::forward<Args>(args)...);
+            auto formatted = fmt::format(fmt, std::forward<Args>(args)...);
+            fmt::format_to(std::back_inserter(*m_buffer), "{}", formatted);
+            // Track column position (reset on newline)
+            for (char c : formatted) {
+                if (c == '\n') {
+                    m_current_column = 0;
+                } else {
+                    m_current_column++;
+                }
+            }
         } else {
             fmt::print(fmt, std::forward<Args>(args)...);
         }
@@ -71,6 +82,14 @@ class AstPrinter {
 
     // Structural comparison of two type nodes (for safe construct collapsing).
     bool types_match(Node *a, Node *b);
+
+    // Helper to format a node to a string (for length calculation).
+    string format_node_to_string(Node *node);
+
+    // Emit a list of nodes with automatic wrapping if it exceeds max_line_length.
+    // Returns true if wrapped, false if emitted on single line.
+    bool emit_wrapped_list(array<Node *> *items, const char *open, const char *close,
+                           const char *separator, int extra_indent = 1);
 };
 
 void print_ast(Node *root);

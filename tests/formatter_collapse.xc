@@ -1,3 +1,10 @@
+// import/export wrapping tests
+// Short import - should stay inline
+import {Foo, Bar, Baz} from "./short";
+
+// Long import - should wrap (>120 chars)
+import {VeryLongIdentifierName1, VeryLongIdentifierName2, VeryLongIdentifierName3, VeryLongIdentifierName4, VeryLongIdentifierName5} from "./long";
+
 func apply(x: int, f: func (n: int) int) int {
     return f(x);
 }
