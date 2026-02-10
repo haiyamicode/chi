@@ -313,6 +313,8 @@ class Compiler {
 
     llvm::Value *compile_string_literal(const string &str);
 
+    llvm::Value *compile_c_string_literal(const string &str);
+
     Function *get_fn(ast::Node *node);
 
     Function *add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn_type = nullptr);

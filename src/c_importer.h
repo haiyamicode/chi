@@ -50,8 +50,15 @@ struct CTypedef {
 
 struct CImportConfig {
     std::vector<std::string> includes;
-    std::vector<std::string> symbols;  // Filter: only extract these symbols
+    std::vector<std::string> symbols;  // Filter: only extract these symbols (supports patterns like "str*")
     std::vector<std::string> include_paths;
+};
+
+// Cache for C header modules - tracks what symbols have been extracted
+// We re-parse headers when needed (libclang caches internally) but only extract requested symbols
+struct CHeaderCache {
+    cx::ast::Module* module = nullptr;
+    std::set<std::string> extracted_symbols;  // Track what we've extracted already
 };
 
 class CImporter {
@@ -79,6 +86,16 @@ public:
 
     // Get error message if import failed
     const std::string& get_error() const { return error_; }
+
+    // Import a header by name (e.g., "string.h") using in-memory wrapper
+    // This avoids creating temporary files on disk
+    bool import_header_by_name(const std::string& header_name, const CImportConfig& config);
+
+#ifdef __clang__
+    // Extract symbols from an already-parsed translation unit
+    // Used for lazy/incremental symbol extraction
+    void extract_symbols_from_tu(CXTranslationUnit tu, const std::vector<std::string>& symbol_patterns);
+#endif
 
 private:
 #ifdef __clang__
@@ -127,6 +144,38 @@ cx::ast::Module* create_native_module(
     const std::vector<CMacro>& macros,
     const std::vector<CStruct>& structs,
     const std::vector<CTypedef>& typedefs
+);
+
+// Get or create a module-scoped virtual "C" module
+// If module_key already exists in module_map, returns existing module
+// Otherwise creates a new empty virtual module
+cx::ast::Module* get_or_create_c_module(
+    cx::CompilationContext* ctx,
+    const std::string& module_key
+);
+
+// Add extracted C symbols to an existing module
+void add_symbols_to_module(
+    cx::CompilationContext* ctx,
+    cx::ast::Module* module,
+    const std::vector<CFunction>& functions,
+    const std::vector<CEnumConstant>& enum_constants,
+    const std::vector<CMacro>& macros,
+    const std::vector<CStruct>& structs,
+    const std::vector<CTypedef>& typedefs
+);
+
+// High-level function to import C header symbols and add to virtual module
+// Uses lazy extraction: only extracts symbols matching the patterns
+// Caches parsed CXTranslationUnit for incremental extraction
+// Returns nullptr on failure
+// If out_newly_created is not null, sets it to true if module was newly created, false if cached
+cx::ast::Module* import_c_header_as_module(
+    cx::CompilationContext* ctx,
+    const std::string& header_name,
+    const std::vector<std::string>& symbol_patterns,  // Patterns like "strlen", "str*"
+    const std::vector<std::string>& include_directories,
+    bool* out_newly_created = nullptr
 );
 
 } // namespace cx

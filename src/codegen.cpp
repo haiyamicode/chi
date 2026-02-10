@@ -722,6 +722,18 @@ llvm::Value *Compiler::compile_string_literal(const string &str) {
     return str_struct;
 }
 
+llvm::Value *Compiler::compile_c_string_literal(const string &str) {
+    auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
+    auto &llvm_module = *(m_ctx->llvm_module.get());
+    // Create null-terminated string constant
+    auto str_value = llvm::ConstantDataArray::getString(llvm_ctx, str, true);  // true = add null terminator
+    auto char_array_type = llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), str.size() + 1);
+    auto str_global = new llvm::GlobalVariable(llvm_module, char_array_type, true,
+                                               llvm::GlobalValue::PrivateLinkage, str_value, "cstr");
+    // Return pointer to first element (char*)
+    return llvm::ConstantExpr::getPointerCast(str_global, llvm::Type::getInt8PtrTy(llvm_ctx));
+}
+
 llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
                                                   ChiType *dest_type) {
     auto src_type = get_chitype(expr);
@@ -1902,6 +1914,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return ref.address ? builder.CreateLoad(type_l, ref.address) : ref.value;
     }
     case ast::NodeType::LiteralExpr: {
+        // Handle C string literals explicitly
+        if (expr->token && expr->token->type == TokenType::C_STRING) {
+            return compile_c_string_literal(expr->token->str);
+        }
         auto value = get_resolver()->resolve_constant_value(expr);
         assert(value.has_value());
         return compile_constant_value(fn, *value, get_chitype(expr));
@@ -4346,6 +4362,19 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
 
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
+
+    // For extern C functions, check if already compiled (shouldn't happen)
+    if (declspec.is_extern()) {
+        auto id = get_resolver()->resolve_global_id(fn);
+        auto existing_entry = m_ctx->function_table.get(id);
+        if (existing_entry) {
+            // Extern C function already compiled - this shouldn't happen
+            fprintf(stderr, "ERROR: Extern C function '%s' (id=%s) is being compiled twice!\n", name.c_str(), id.c_str());
+            fprintf(stderr, "  Node: %p, Module: %s\n", (void*)fn, fn->module ? fn->module->path.c_str() : "<null>");
+            assert(false && "Extern C function compiled twice - virtual module compiled multiple times?");
+        }
+    }
+
     auto fn_l = llvm::Function::Create(ftype_l, llvm::Function::ExternalLinkage, name,
                                        m_ctx->llvm_module.get());
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,

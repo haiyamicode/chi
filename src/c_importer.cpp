@@ -82,7 +82,95 @@ bool CImporter::import_header(const std::string& header_path, const CImportConfi
 #endif
 }
 
+bool CImporter::import_header_by_name(const std::string& header_name, const CImportConfig& config) {
+#ifndef __clang__
+    error_ = "C interop not available - libclang not found";
+    return false;
+#else
+    // Store symbol filter
+    symbol_filter_.clear();
+    for (const auto& sym : config.symbols) {
+        symbol_filter_.insert(sym);
+    }
+
+    // Build compiler arguments
+    std::vector<const char*> args;
+    for (const auto& path : config.include_paths) {
+        args.push_back("-I");
+        args.push_back(path.c_str());
+    }
+    // Default include path
+    args.push_back("-I/usr/include");
+
+    // Create wrapper content in memory (no disk I/O!)
+    std::string wrapper_content;
+    bool is_system = header_name.find('/') == std::string::npos;
+    if (is_system) {
+        wrapper_content = "#include <" + header_name + ">\n";
+    } else {
+        wrapper_content = "#include \"" + header_name + "\"\n";
+    }
+
+    // Use unsaved file for in-memory wrapper
+    CXUnsavedFile unsaved_file;
+    unsaved_file.Filename = "virtual_wrapper.h";
+    unsaved_file.Contents = wrapper_content.c_str();
+    unsaved_file.Length = wrapper_content.size();
+
+    // Parse the virtual wrapper with detailed preprocessing to capture macros
+    tu_ = clang_parseTranslationUnit(
+        index_,
+        "virtual_wrapper.h",  // Virtual filename
+        args.data(), args.size(),
+        &unsaved_file, 1,  // Provide wrapper in memory!
+        CXTranslationUnit_DetailedPreprocessingRecord
+    );
+
+    if (!tu_) {
+        error_ = "Failed to parse header: " + header_name;
+        return false;
+    }
+
+    // Check for parse errors
+    unsigned num_diag = clang_getNumDiagnostics(tu_);
+    if (num_diag > 0) {
+        error_ = "Parse errors in header:\n";
+        for (unsigned i = 0; i < num_diag; i++) {
+            CXDiagnostic diag = clang_getDiagnostic(tu_, i);
+            error_ += to_string(clang_formatDiagnostic(diag, CXDiagnostic_DisplaySourceLocation));
+            error_ += "\n";
+            clang_disposeDiagnostic(diag);
+        }
+    }
+
+    // Visit AST and extract symbols
+    CXCursor cursor = clang_getTranslationUnitCursor(tu_);
+    clang_visitChildren(cursor, visitor_callback, this);
+
+    return true;
+#endif
+}
+
 #ifdef __clang__
+void CImporter::extract_symbols_from_tu(CXTranslationUnit tu, const std::vector<std::string>& symbol_patterns) {
+    // Clear previous extractions
+    functions_.clear();
+    enum_constants_.clear();
+    macros_.clear();
+    structs_.clear();
+    typedefs_.clear();
+
+    // Set up symbol filter
+    symbol_filter_.clear();
+    for (const auto& pattern : symbol_patterns) {
+        symbol_filter_.insert(pattern);
+    }
+
+    // Visit AST and extract matching symbols
+    CXCursor cursor = clang_getTranslationUnitCursor(tu);
+    clang_visitChildren(cursor, visitor_callback, this);
+}
+
 std::string CImporter::to_string(CXString cx_str) {
     std::string result = clang_getCString(cx_str);
     clang_disposeString(cx_str);
@@ -338,6 +426,9 @@ static ChiType* parse_c_type(CompilationContext* ctx, const std::string& c_type_
     if (type_str == "long" || type_str == "int64_t" || type_str == "long long") {
         return resolve_ctx->system_types.int64;
     }
+    if (type_str == "unsigned long" || type_str == "uint64_t" || type_str == "unsigned long long" || type_str == "size_t") {
+        return resolve_ctx->system_types.uint64;
+    }
     if (type_str == "char" || type_str == "signed char") {
         return resolve_ctx->system_types.char_;
     }
@@ -411,8 +502,102 @@ ast::Module* create_native_module(
     extern_type_token->str = "C";
     extern_decl->data.extern_decl.type = extern_type_token;
     extern_decl->data.extern_decl.members = {};
+    module->root->data.root.top_level_decls.add(extern_decl);
 
-    // Create extern function declarations
+    // Add all symbols to the module (reuse add_symbols_to_module logic)
+    add_symbols_to_module(ctx, module, functions, enum_constants, macros, structs, typedefs);
+
+    return module;
+}
+
+// Get or create a module-scoped virtual "C" module
+ast::Module* get_or_create_c_module(
+    CompilationContext* ctx,
+    const std::string& module_key
+) {
+    // Check if module already exists
+    auto existing = ctx->module_map.get(module_key);
+    if (existing) {
+        return *existing;
+    }
+
+    // Create a dummy token for position info
+    auto* dummy_token = ctx->create_token();
+    dummy_token->type = TokenType::KW_IMPORT;
+    dummy_token->str = "<virtual>";
+    dummy_token->pos = Pos{0, 0};
+
+    // Create new virtual "C" module
+    auto* module = new ast::Module();
+    module->name = "C";
+    module->id_path = module_key;  // Use namespaced key as id_path
+    module->kind = ast::ModuleKind::XC;  // Manual memory
+    module->path = "<virtual:" + module_key + ">";
+    module->filename = "<virtual:" + module_key + ">";
+
+    // Create a virtual package for this module
+    auto* package = ctx->add_package("<virtual>");
+    module->package = package;
+
+    // Create root node
+    module->root = ctx->create_node(ast::NodeType::Root);
+    module->root->data.root.top_level_decls = {};
+    module->root->module = module;
+    module->root->token = dummy_token;
+    module->root->start_token = dummy_token;
+    module->root->end_token = dummy_token;
+
+    // Create module scope
+    module->scope = ctx->create_scope(nullptr);
+    module->import_scope = ctx->create_scope(module->scope);
+
+    return module;
+}
+
+// Add extracted C symbols to an existing module
+void add_symbols_to_module(
+    CompilationContext* ctx,
+    ast::Module* module,
+    const std::vector<CFunction>& functions,
+    const std::vector<CEnumConstant>& enum_constants,
+    const std::vector<CMacro>& macros,
+    const std::vector<CStruct>& structs,
+    const std::vector<CTypedef>& typedefs
+) {
+    // Create a dummy token for position info
+    auto* dummy_token = ctx->create_token();
+    dummy_token->type = TokenType::KW_IMPORT;
+    dummy_token->str = "<virtual>";
+    dummy_token->pos = Pos{0, 0};
+
+    // Find or create the extern "C" block in the module
+    ast::Node* extern_decl = nullptr;
+    for (auto* decl : module->root->data.root.top_level_decls) {
+        if (decl->type == ast::NodeType::ExternDecl) {
+            extern_decl = decl;
+            break;
+        }
+    }
+
+    if (!extern_decl) {
+        // Create extern "C" block to wrap function declarations
+        extern_decl = ctx->create_node(ast::NodeType::ExternDecl);
+        extern_decl->module = module;
+        extern_decl->token = dummy_token;
+        extern_decl->start_token = dummy_token;
+        extern_decl->end_token = dummy_token;
+
+        // Create token for extern language type ("C")
+        auto* extern_type_token = ctx->create_token();
+        extern_type_token->type = TokenType::STRING;
+        extern_type_token->str = "C";
+        extern_decl->data.extern_decl.type = extern_type_token;
+        extern_decl->data.extern_decl.members = {};
+
+        module->root->data.root.top_level_decls.add(extern_decl);
+    }
+
+    // Create extern function declarations (same logic as create_native_module)
     for (const auto& func : functions) {
             // Create function name token
             auto* name_token = ctx->create_token();
@@ -459,8 +644,8 @@ ast::Module* create_native_module(
             // Create FnDef node
             auto* fn_def = ctx->create_node(ast::NodeType::FnDef);
             fn_def->name = func.name;
-            // Use module-namespaced global_id to avoid collisions with Chi functions
-            fn_def->global_id = module_name + "." + func.name;
+            // Extern C functions use just the function name (no module prefix) for C linkage
+            fn_def->global_id = func.name;
             fn_def->module = module;
             fn_def->token = name_token;
             fn_def->start_token = name_token;
@@ -468,20 +653,23 @@ ast::Module* create_native_module(
             fn_def->data.fn_def.fn_proto = fn_proto;
             fn_def->data.fn_def.body = nullptr;  // No body for extern
             fn_def->data.fn_def.decl_spec = ctx->create_decl_spec();
-            fn_def->data.fn_def.decl_spec->flags = ast::DECL_EXTERN;  // Extern, public by default
+            fn_def->data.fn_def.decl_spec->flags = ast::DECL_EXTERN;
             fn_def->resolved_type = fn_type;
             fn_proto->data.fn_proto.fn_def_node = fn_def;
 
-            // Add to extern block members (not top-level directly)
-            extern_decl->data.extern_decl.members.add(fn_def);
+            // Check if function already exists in scope (from previous import/export)
+            auto existing = module->scope->find_one(func.name, false);
+            if (!existing) {
+                // Add to extern block members
+                extern_decl->data.extern_decl.members.add(fn_def);
 
-            // Add to exports and scope
-            module->exports.add(fn_def);
-            module->scope->put(func.name, fn_def);
+                // Add to exports, scope, and import_scope
+                module->exports.add(fn_def);
+                module->scope->put(func.name, fn_def);
+                module->import_scope->put(func.name, fn_def);
+            }
+            // else: function already added from a previous import/export, skip
     }
-
-    // Add extern block to module as top-level declaration
-    module->root->data.root.top_level_decls.add(extern_decl);
 
     // Create const declarations for enum constants
     for (const auto& constant : enum_constants) {
@@ -490,12 +678,10 @@ ast::Module* create_native_module(
         const_node->module = module;
         const_node->resolved_type = ctx->resolve_ctx.system_types.int32;
 
-        // Create const value token
         auto* value_token = ctx->create_token();
         value_token->type = TokenType::INT;
         value_token->val.i = constant.value;
 
-        // Create literal expression
         auto* value_node = ctx->create_node(ast::NodeType::LiteralExpr);
         value_node->token = value_token;
         value_node->module = module;
@@ -505,22 +691,24 @@ ast::Module* create_native_module(
         const_node->data.var_decl.decl_spec = ctx->create_decl_spec();
         const_node->data.var_decl.kind = ast::VarKind::Constant;
 
-        // Add to module and scope
-        module->root->data.root.top_level_decls.add(const_node);
-        module->exports.add(const_node);
-        module->scope->put(constant.name, const_node);
+        // Check if already exists before adding
+        if (!module->scope->find_one(constant.name, false)) {
+            module->root->data.root.top_level_decls.add(const_node);
+            module->exports.add(const_node);
+            module->scope->put(constant.name, const_node);
+            module->import_scope->put(constant.name, const_node);
+        }
     }
 
     // Create const declarations for macro constants
     for (const auto& macro : macros) {
         std::string value = macro.value;
 
-        // Detect and strip integer suffixes, determining the type
+        // Detect and strip integer suffixes
         bool is_unsigned = false;
         bool is_long = false;
         bool is_long_long = false;
 
-        // Check for suffixes (case-insensitive combinations)
         if (value.size() >= 3) {
             std::string suffix = value.substr(value.size() - 3);
             std::transform(suffix.begin(), suffix.end(), suffix.begin(), ::tolower);
@@ -553,17 +741,14 @@ ast::Module* create_native_module(
             }
         }
 
-        // Try to parse the value as an integer
         char* endptr;
         long long int_value = std::strtoll(value.c_str(), &endptr, 0);
 
-        // Only create const for simple integer macros
         if (*endptr == '\0' || *endptr == ' ') {
             auto* const_node = ctx->create_node(ast::NodeType::VarDecl);
             const_node->name = macro.name;
             const_node->module = module;
 
-            // Determine the correct type based on suffix
             ChiType* type;
             if (is_long_long) {
                 type = is_unsigned ? ctx->resolve_ctx.system_types.uint64
@@ -590,23 +775,30 @@ ast::Module* create_native_module(
             const_node->data.var_decl.decl_spec = ctx->create_decl_spec();
             const_node->data.var_decl.kind = ast::VarKind::Constant;
 
-            module->root->data.root.top_level_decls.add(const_node);
-            module->exports.add(const_node);
-            module->scope->put(macro.name, const_node);
+            // Check if already exists before adding
+            if (!module->scope->find_one(macro.name, false)) {
+                module->root->data.root.top_level_decls.add(const_node);
+                module->exports.add(const_node);
+                module->scope->put(macro.name, const_node);
+                module->import_scope->put(macro.name, const_node);
+            }
         }
     }
 
     // Create struct declarations
     for (const auto& c_struct : structs) {
-        // Create struct declaration node
+        // Check if already exists before adding
+        if (module->scope->find_one(c_struct.name, false)) {
+            continue;
+        }
+
         auto* struct_decl = ctx->create_node(ast::NodeType::StructDecl);
         struct_decl->name = c_struct.name;
         struct_decl->module = module;
         struct_decl->data.struct_decl.kind = ContainerKind::Struct;
         struct_decl->data.struct_decl.decl_spec = ctx->create_decl_spec();
-        struct_decl->data.struct_decl.decl_spec->flags = ast::DECL_EXTERN;  // Mark as extern C struct
+        struct_decl->data.struct_decl.decl_spec->flags = ast::DECL_EXTERN;
 
-        // Create field declarations as VarDecl nodes
         for (const auto& field : c_struct.fields) {
             auto* field_node = ctx->create_node(ast::NodeType::VarDecl);
             field_node->name = field.name;
@@ -618,7 +810,6 @@ ast::Module* create_native_module(
             field_token->str = field.name;
             field_node->token = field_token;
 
-            // Parse and set field type
             field_node->resolved_type = parse_c_type(ctx, field.type);
             field_node->data.var_decl.is_field = true;
 
@@ -628,10 +819,16 @@ ast::Module* create_native_module(
         module->root->data.root.top_level_decls.add(struct_decl);
         module->exports.add(struct_decl);
         module->scope->put(c_struct.name, struct_decl);
+        module->import_scope->put(c_struct.name, struct_decl);
     }
 
     // Create typedef declarations
     for (const auto& c_typedef : typedefs) {
+        // Check if already exists before adding
+        if (module->scope->find_one(c_typedef.name, false)) {
+            continue;
+        }
+
         auto* typedef_node = ctx->create_node(ast::NodeType::TypedefDecl);
         typedef_node->name = c_typedef.name;
         typedef_node->module = module;
@@ -641,15 +838,86 @@ ast::Module* create_native_module(
         typedef_token->str = c_typedef.name;
         typedef_node->data.typedef_decl.identifier = typedef_token;
 
-        // Parse the underlying type (we'll resolve this later)
         typedef_node->resolved_type = parse_c_type(ctx, c_typedef.underlying_type);
 
         module->root->data.root.top_level_decls.add(typedef_node);
         module->exports.add(typedef_node);
         module->scope->put(c_typedef.name, typedef_node);
+        module->import_scope->put(c_typedef.name, typedef_node);
+    }
+}
+
+// Static cache for C header modules - tracks extracted symbols
+static std::map<std::string, CHeaderCache> header_cache;
+
+// High-level function to import C header symbols lazily
+// Re-parses header when needed (libclang caches internally) but only extracts requested symbols
+ast::Module* import_c_header_as_module(
+    CompilationContext* ctx,
+    const std::string& header_name,
+    const std::vector<std::string>& symbol_patterns,
+    const std::vector<std::string>& include_directories,
+    bool* out_newly_created
+) {
+#ifndef __clang__
+    if (out_newly_created) *out_newly_created = false;
+    return nullptr;
+#else
+    bool is_new_module = false;
+    CHeaderCache* cache = nullptr;
+
+    // Check if header is already cached
+    auto cache_it = header_cache.find(header_name);
+    if (cache_it == header_cache.end()) {
+        // First time seeing this header - create empty module
+        is_new_module = true;
+
+        CHeaderCache new_cache;
+        new_cache.module = create_native_module(ctx, header_name, {}, {}, {}, {}, {});
+        ctx->module_map[header_name] = new_cache.module;
+
+        header_cache[header_name] = std::move(new_cache);
+        cache = &header_cache[header_name];
+    } else {
+        // Header already cached
+        cache = &cache_it->second;
     }
 
-    return module;
+    if (out_newly_created) *out_newly_created = is_new_module;
+
+    // Determine which NEW symbols need to be extracted
+    std::vector<std::string> patterns_to_extract;
+    for (const auto& pattern : symbol_patterns) {
+        if (cache->extracted_symbols.find(pattern) == cache->extracted_symbols.end()) {
+            patterns_to_extract.push_back(pattern);
+            cache->extracted_symbols.insert(pattern);
+        }
+    }
+
+    if (!patterns_to_extract.empty()) {
+        // Re-parse header and extract only the new symbols
+        // libclang caches parsed system headers internally, so this is fast
+        CImporter importer;
+        CImportConfig config;
+        config.symbols = patterns_to_extract;  // Only extract these!
+        config.include_paths = include_directories;
+
+        if (importer.import_header_by_name(header_name, config)) {
+            // Add extracted symbols to existing module
+            add_symbols_to_module(
+                ctx,
+                cache->module,
+                importer.get_functions(),
+                importer.get_enum_constants(),
+                importer.get_macros(),
+                importer.get_structs(),
+                importer.get_typedefs()
+            );
+        }
+    }
+
+    return cache->module;
+#endif
 }
 
 } // namespace cx

@@ -8,3 +8,8 @@ pow(2, 8) = 256
 Variadic test: single arg
 Variadic test: 10 + 20 = 30
 Variadic test: int=42, float=3.140000
+strlen('Hello') = 5
+strlen('World') = 5
+strcmp('Hello', 'World') = -15
+strcmp('Hello', 'Hello') = 0
+strcpy result: Hello

@@ -2,9 +2,18 @@ import "stdio" as stdio;
 
 import "math" as math;
 
+// Test module that re-exports C functions
+import {strlen, strcmp} from "./src/c_strings";
+
+// Test inline extern declarations (traditional approach)
 extern "C" {
     func lib_compute() int64;
     func util_func() int64;
+}
+
+// Test C header import with wildcard pattern
+extern "C" {
+    import {strcpy, mem*} from "string.h";
 }
 
 func main() {
@@ -41,5 +50,23 @@ func main() {
     // Test printf with mixed argument types
     var fmt2 = "Variadic test: int=%d, float=%f\n";
     stdio.printf(cx_string_to_cstring(&fmt2), 42, 3.14);
+
+    // Test C string literals with C functions imported from header
+    let hello = c"Hello";
+    let world = c"World";
+    let hello2 = c"Hello";
+
+    printf("strlen('Hello') = {}\n", strlen(hello));
+    printf("strlen('World') = {}\n", strlen(world));
+    printf("strcmp('Hello', 'World') = {}\n", strcmp(hello, world));
+    printf("strcmp('Hello', 'Hello') = {}\n", strcmp(hello, hello2));
+
+    // Test strcpy from imported header
+    var buf = cx_malloc(100, null) as *char;
+    strcpy(buf, hello);
+
+    var copied: string = "";
+    cx_string_from_chars(buf as *void, 5, &copied);
+    printf("strcpy result: {}\n", copied);
 }
 

@@ -1,0 +1,12 @@
+testing C sqrt:
+sqrt(16.0) = 4
+sqrt(2.0) = 1.4142135623730951
+testing C pow:
+pow(2.0, 8.0) = 256
+pow(3.0, 3.0) = 27
+testing C abs:
+abs(-42) = 42
+abs(99) = 99
+testing C snprintf:
+snprintf returned: 24
+buffer: Hello, World! Number: 42

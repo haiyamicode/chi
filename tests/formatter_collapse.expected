@@ -2,6 +2,10 @@
 // Short import - should stay inline
 import {Foo, Bar, Baz} from "./short";
 
+// Wildcard pattern collapse: str* -> {str*}
+import {str*} from "./wildcard";
+export {SDL_*} from "./sdl";
+
 // Long import - should wrap (>120 chars)
 import {
     VeryLongIdentifierName1,

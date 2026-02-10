@@ -707,6 +707,28 @@ void AstPrinter::print_node(Node *node) {
         emit("extern {} ", data.type->to_string());
         emit("{{\n");
         m_indent++;
+
+        // Print imports
+        for (auto import_node : data.imports) {
+            auto *ft = first_token(import_node);
+            if (ft)
+                flush_comments_before(ft->pos);
+            print_indent(m_indent);
+            print_node(import_node);
+            emit("\n");
+        }
+
+        // Print exports
+        for (auto export_node : data.exports) {
+            auto *ft = first_token(export_node);
+            if (ft)
+                flush_comments_before(ft->pos);
+            print_indent(m_indent);
+            print_node(export_node);
+            emit("\n");
+        }
+
+        // Print inline function declarations
         for (auto member : data.members) {
             auto *ft = first_token(member);
             if (ft)

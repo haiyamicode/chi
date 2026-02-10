@@ -11,6 +11,9 @@
 #include "sema.h"
 
 namespace cx {
+
+struct PackageConfig;  // Forward declaration from package_config.h
+
 namespace ast {
 struct Node;
 struct Package;
@@ -95,6 +98,7 @@ struct Package {
     string id_path = "";
     PackageKind kind = PackageKind::DEFAULT;
     string name = "";
+    cx::PackageConfig* config = nullptr;  // Package configuration (from package.jsonc)
 
     Module *add_module() { return modules.emplace(new Module())->get(); }
 };
@@ -266,6 +270,8 @@ struct StructDecl {
 struct ExternDecl {
     Token *type = nullptr;
     array<Node *> members = {};
+    array<Node *> imports = {};  // Import declarations (ImportDecl nodes) for C headers
+    array<Node *> exports = {};  // Export declarations (ExportDecl nodes) for C headers
 };
 
 struct FieldInitExpr {

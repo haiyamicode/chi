@@ -78,6 +78,10 @@ format_example: build install
 format_all: build install
 	@echo "Formatting all .xc and .x files in src/stdlib and tests..."
 	@find src/stdlib tests -type f \( -name "*.xc" -o -name "*.x" \) -print0 | while IFS= read -r -d '' file; do \
+		if [ "$$file" = "tests/formatter_collapse.xc" ]; then \
+			echo "Skipping $$file (formatter test input)..."; \
+			continue; \
+		fi; \
 		echo "Formatting $$file..."; \
 		$(CHI) -f -c "$$file" > "$$file.tmp" && mv "$$file.tmp" "$$file"; \
 	done

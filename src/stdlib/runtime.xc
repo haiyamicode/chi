@@ -48,7 +48,6 @@ extern "C" {
     func cx_json_value_copy(data: *void, result: *void);
     func cx_file_read(path: *string, result: *string);
     func cx_debug(ptr: *void);
-    // Type-erased captures for lambdas (__CxLambda)
     func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
     func cx_capture_retain(capture_ptr: *void);
     func cx_capture_release(capture_ptr: *void);

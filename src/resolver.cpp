@@ -7,17 +7,56 @@
 
 #include "resolver.h"
 #include "ast.h"
+#include "c_importer.h"
 #include "context.h"
 #include "enum.h"
 #include "errors.h"
 #include "fmt/core.h"
 #include "lexer.h"
+#include "package_config.h"
 #include "sema.h"
 #include "util.h"
 
 using namespace cx;
 
 using ast::NodeType;
+
+// Check if a name matches a pattern (supports * wildcard)
+static bool matches_pattern(const std::string& name, const std::string& pattern) {
+    size_t name_idx = 0;
+    size_t pattern_idx = 0;
+    size_t star_idx = std::string::npos;
+    size_t match_idx = 0;
+
+    while (name_idx < name.length()) {
+        if (pattern_idx < pattern.length() && pattern[pattern_idx] == '*') {
+            // Remember the position of * and the current match position
+            star_idx = pattern_idx;
+            match_idx = name_idx;
+            pattern_idx++;
+        } else if (pattern_idx < pattern.length() &&
+                   (pattern[pattern_idx] == name[name_idx] || pattern[pattern_idx] == '?')) {
+            // Characters match or pattern has ?
+            name_idx++;
+            pattern_idx++;
+        } else if (star_idx != std::string::npos) {
+            // No match, but we have a * - backtrack
+            pattern_idx = star_idx + 1;
+            match_idx++;
+            name_idx = match_idx;
+        } else {
+            // No match and no * to fall back on
+            return false;
+        }
+    }
+
+    // Skip any trailing * in pattern
+    while (pattern_idx < pattern.length() && pattern[pattern_idx] == '*') {
+        pattern_idx++;
+    }
+
+    return pattern_idx == pattern.length();
+}
 
 Resolver::Resolver(ResolveContext *ctx) { m_ctx = ctx; }
 
@@ -1130,6 +1169,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_system_types()->int_;
         case TokenType::STRING:
             return get_system_types()->string;
+        case TokenType::C_STRING:
+            return create_pointer_type(get_system_types()->char_, TypeKind::Pointer);
         case TokenType::FLOAT:
             return get_system_types()->float_;
         case TokenType::KW_UNDEFINED:
@@ -2104,6 +2145,53 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.extern_decl;
         if (!node->resolved_type) {
             node->resolved_type = get_system_types()->void_;
+            auto* ctx = static_cast<CompilationContext*>(m_ctx->allocator);
+
+            // Get include directories from package config
+            std::vector<std::string> include_dirs;
+            if (scope.module->package->config &&
+                scope.module->package->config->c_interop.has_value()) {
+                include_dirs = scope.module->package->config->c_interop->include_directories;
+            }
+
+            // Helper to process C header imports/exports - extracts symbols and resolves header module
+            auto process_c_header_symbols = [&](std::string header_path, array<ast::Node*> symbols) {
+                // Check if this is a C header (ends with .h)
+                if (header_path.size() > 2 && header_path.substr(header_path.size() - 2) == ".h") {
+                    // Extract symbol patterns
+                    std::vector<std::string> symbol_patterns;
+                    for (auto symbol_node : symbols) {
+                        symbol_patterns.push_back(symbol_node->data.import_symbol.name->str);
+                    }
+
+                    bool newly_created = false;
+                    auto* header_module = import_c_header_as_module(
+                        ctx, header_path, symbol_patterns, include_dirs, &newly_created);
+
+                    // Always resolve - newly added symbols need their global_id set
+                    // (already-resolved nodes will return early from resolver)
+                    if (header_module) {
+                        Resolver resolver(m_ctx);
+                        resolver.resolve(header_module);
+                    }
+                }
+            };
+
+            // Process header imports: extern "C" { import {strlen, str*} from "header.h"; }
+            for (auto import_node : data.imports) {
+                auto &import_data = import_node->data.import_decl;
+                process_c_header_symbols(import_data.path->str, import_data.symbols);
+                resolve(import_node, scope);
+            }
+
+            // Process header exports: extern "C" { export {strlen, str*} from "string.h"; }
+            for (auto export_node : data.exports) {
+                auto &export_data = export_node->data.export_decl;
+                process_c_header_symbols(export_data.path->str, export_data.symbols);
+                resolve(export_node, scope);
+            }
+
+            // Process inline function declarations - add directly to current scope
             for (auto member : data.members) {
                 resolve(member, scope);
             }
@@ -2122,7 +2210,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Check if this is a virtual module (e.g., from C interop)
         ast::Module* module = nullptr;
         auto* comp_ctx = static_cast<CompilationContext*>(m_ctx->allocator);
-        auto virtual_mod = comp_ctx->module_map.get(data.path->str);
+
+        // For "C" module, first try module-scoped lookup (e.g., "main.C")
+        // This allows each module to have its own virtual "C" module
+        std::string module_scoped_key = scope.module->id_path + "." + data.path->str;
+        auto virtual_mod = comp_ctx->module_map.get(module_scoped_key);
+        if (!virtual_mod) {
+            // Fall back to global lookup for backwards compatibility
+            virtual_mod = comp_ctx->module_map.get(data.path->str);
+        }
+
         if (virtual_mod) {
             // Use the virtual module directly (already resolved)
             module = *virtual_mod;
@@ -2169,20 +2266,44 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     for (auto symbol : data.symbols) {
                         auto item_type = resolve(symbol, scope);
                         auto &item_data = symbol->data.import_symbol;
-                        assert(item_data.resolved_decl);
-                        auto name = item_data.output_name();
-                        scope.module->exports.add(item_data.resolved_decl);
-                        scope.module->import_scope->put(name, item_data.resolved_decl);
+                        if (!item_data.resolved_decl) {
+                            continue;
+                        }
+
+                        std::string symbol_name = item_data.name->get_name();
+
+                        // Check if this is a wildcard pattern
+                        if (symbol_name.find('*') != std::string::npos) {
+                            // Export all matching symbols
+                            for (auto export_item : module->exports) {
+                                if (matches_pattern(export_item->name, symbol_name)) {
+                                    scope.module->exports.add(export_item);
+                                    scope.module->import_scope->put(export_item->name, export_item);
+                                }
+                            }
+                        } else {
+                            // Regular single symbol export
+                            auto name = item_data.output_name();
+                            scope.module->exports.add(item_data.resolved_decl);
+                            scope.module->import_scope->put(name, item_data.resolved_decl);
+                        }
                     }
                 }
             }
         } else {
             scope.module->imports.add(module);
-            if (data.alias) {
+            if (data.match_all && !data.alias) {
+                // import * from "module" - import all exports directly into scope
+                for (auto item : module->exports) {
+                    scope.module->import_scope->put(item->name, item);
+                }
+            } else if (data.alias) {
+                // import * as alias from "module" OR import alias from "module"
                 for (auto item : module->exports) {
                     type->data.module.scope->put(item->name, item);
                 }
             } else {
+                // import {X, Y} from "module" - import specific symbols
                 for (auto symbol : data.symbols) {
                     auto item_type = resolve(symbol, scope);
                     auto &item_data = symbol->data.import_symbol;
@@ -2190,8 +2311,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     if (!item_data.resolved_decl) {
                         continue;
                     }
-                    auto name = item_data.output_name();
-                    type->data.module.scope->put(name, item_data.resolved_decl);
+
+                    std::string symbol_name = item_data.name->get_name();
+
+                    // Check if this is a wildcard pattern
+                    if (symbol_name.find('*') != std::string::npos) {
+                        // Import all matching symbols (wildcards don't support aliases)
+                        for (auto export_item : module->exports) {
+                            if (matches_pattern(export_item->name, symbol_name)) {
+                                type->data.module.scope->put(export_item->name, export_item);
+                            }
+                        }
+                    } else {
+                        // Regular single symbol import
+                        auto name = item_data.output_name();
+                        type->data.module.scope->put(name, item_data.resolved_decl);
+                    }
                 }
             }
         }
@@ -2208,13 +2343,41 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::ImportSymbol: {
         auto &data = node->data.import_symbol;
         auto module = data.import->data.import_decl.resolved_module;
-        auto decl = module->import_scope->find_one(data.name->get_name());
-        if (!decl) {
-            error(node, errors::SYMBOL_NOT_FOUND_MODULE, data.name->get_name(), module->path);
-            return nullptr;
+        std::string symbol_name = data.name->get_name();
+
+        // Check if this is a wildcard pattern (contains *)
+        if (symbol_name.find('*') != std::string::npos) {
+            // Wildcard import: match pattern against all module exports
+            bool found_any = false;
+            ast::Node* first_match = nullptr;
+
+            for (auto export_item : module->exports) {
+                if (matches_pattern(export_item->name, symbol_name)) {
+                    if (!first_match) {
+                        first_match = export_item;
+                    }
+                    found_any = true;
+                }
+            }
+
+            if (!found_any) {
+                error(node, errors::SYMBOL_NOT_FOUND_MODULE, symbol_name, module->path);
+                return nullptr;
+            }
+
+            // Set resolved_decl to first match (for consistency)
+            data.resolved_decl = first_match;
+            return first_match ? first_match->resolved_type : nullptr;
+        } else {
+            // Regular single symbol import
+            auto decl = module->import_scope->find_one(symbol_name);
+            if (!decl) {
+                error(node, errors::SYMBOL_NOT_FOUND_MODULE, symbol_name, module->path);
+                return nullptr;
+            }
+            data.resolved_decl = decl;
+            return decl->resolved_type;
         }
-        data.resolved_decl = decl;
-        return decl->resolved_type;
     }
     case NodeType::SwitchExpr: {
         auto &data = node->data.switch_expr;
@@ -4207,6 +4370,9 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
             return {token->val.d};
         }
         case TokenType::STRING: {
+            return {token->str};
+        }
+        case TokenType::C_STRING: {
             return {token->str};
         }
         case TokenType::BOOL: {

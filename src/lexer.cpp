@@ -359,6 +359,23 @@ void Lexer::read_string() {
     m_tok.val.i = 0;
 }
 
+void Lexer::read_c_string() {
+    auto buf = new_buf();
+    while (1) {
+        char c;
+        bool ok = read_char('"', &c);
+        if (!ok) {
+            break;
+        }
+
+        buf.push_back(c);
+    }
+
+    m_tok.str = buf;
+    m_tok.type = TokenType::C_STRING;
+    m_tok.val.i = 0;
+}
+
 bool Lexer::read_char(char quote, char *out) {
     auto c = read();
     bool ok = true;
@@ -637,6 +654,17 @@ void Lexer::read_iden(char c) {
     }
 
     unread();
+
+    // Check for c"..." syntax (C string literal)
+    if (buf == "c") {
+        c = read();
+        if (c == '"') {
+            read_c_string();
+            return;
+        }
+        unread();
+    }
+
     if (buf.length() >= 2) {
         auto kw = s_keywords.get(buf);
         if (kw) {
@@ -868,6 +896,8 @@ string Token::to_string() const {
         return fmt::format("'{}'", (char)val.i);
     case TokenType::STRING:
         return fmt::format("\"{}\"", get_strlit_repr(str));
+    case TokenType::C_STRING:
+        return fmt::format("c\"{}\"", get_strlit_repr(str));
     case TokenType::INT:
         return fmt::format("{}", val.i);
     case TokenType::FLOAT: {

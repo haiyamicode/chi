@@ -25,12 +25,13 @@ MAKE_ENUM(TokenType, END, IDEN, ERROR,
           KW_EXPORT, KW_IMPLEMENTS, KW_MUT, KW_IN, KW_UNDEFINED, KW_ASYNC, KW_AWAIT,
 
           // literals
-          BOOL,   // true / false
-          INT,    // 322, 0322, 0xBadFace
-          FLOAT,  // 322.0
-          CHAR,   // '海'
-          STRING, // "Hải"
-          NULLP,  // null
+          BOOL,      // true / false
+          INT,       // 322, 0322, 0xBadFace
+          FLOAT,     // 322.0
+          CHAR,      // '海'
+          STRING,    // "Hải"
+          C_STRING,  // c"hello" - null-terminated C string
+          NULLP,     // null
 
           // operators
           ADD,    // +
@@ -226,6 +227,8 @@ class Lexer {
     void read_number(char c);
 
     void read_string();
+
+    void read_c_string();
 
     void read_raw_string();
 

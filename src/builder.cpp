@@ -43,6 +43,7 @@ ast::Module *Builder::build_runtime() {
     auto rt_file_path = m_ctx.init_rt_stdlib();
     auto rt_source = io::Buffer::from_file(rt_file_path);
     auto module = process_source(m_ctx.rt_package, &rt_source, rt_file_path);
+    resolver.resolve(module);  // Resolve the runtime module to process extern blocks
     resolver.context_init_builtins(module);
     return module;
 }
@@ -172,9 +173,12 @@ void Builder::build_package(const string &package_dir) {
     // Parse configuration using Boost.JSON native serialization
     auto config = boost::json::value_to<PackageConfig>(config_json);
 
+    // Store config in a heap-allocated object for later access
+    auto* config_ptr = new PackageConfig(std::move(config));
+
     // Process native modules (C interop via libclang)
-    if (config.c_interop.has_value() && !config.c_interop->native_modules.empty()) {
-        for (const auto &[module_name, module_config] : config.c_interop->native_modules) {
+    if (config_ptr->c_interop.has_value() && !config_ptr->c_interop->native_modules.empty()) {
+        for (const auto &[module_name, module_config] : config_ptr->c_interop->native_modules) {
 
             CImporter importer;
             CImportConfig import_config;
@@ -229,7 +233,7 @@ void Builder::build_package(const string &package_dir) {
         }
     }
 
-    string entry_file = config.entry_file;
+    string entry_file = config_ptr->entry_file;
 
     auto entry_file_path = fs::path(package_dir) / entry_file;
     if (!fs::exists(entry_file_path)) {
@@ -241,6 +245,7 @@ void Builder::build_package(const string &package_dir) {
     auto runtime_module = build_runtime();
     auto package = add_package(".");
     package->name = "__main";
+    package->config = config_ptr;  // Store parsed config in package
 
     auto module = process_file(package, entry_file_path.string());
     if (m_ctx.flags & FLAG_PRINT_AST) {
@@ -260,8 +265,8 @@ void Builder::build_package(const string &package_dir) {
 
     // Check for C compiler configuration
     array<string> c_object_files;
-    if (config.c_interop.has_value() && config.c_interop->enabled) {
-        const auto &c_config = *config.c_interop;
+    if (config_ptr->c_interop.has_value() && config_ptr->c_interop->enabled) {
+        const auto &c_config = *config_ptr->c_interop;
 
         // Get include directories
         array<string> include_dirs;
@@ -307,8 +312,8 @@ void Builder::build_package(const string &package_dir) {
 
     // Get external libraries to link
     array<string> link_libraries;
-    if (config.c_interop.has_value()) {
-        const auto &c_config = *config.c_interop;
+    if (config_ptr->c_interop.has_value()) {
+        const auto &c_config = *config_ptr->c_interop;
         for (const auto &lib : c_config.link_libraries) {
             link_libraries.add(lib);
         }
@@ -322,8 +327,8 @@ void Builder::build_package(const string &package_dir) {
 
     // Add library search paths
     string library_path_flags = "";
-    if (config.c_interop.has_value()) {
-        for (auto &lib_path : config.c_interop->library_paths) {
+    if (config_ptr->c_interop.has_value()) {
+        for (auto &lib_path : config_ptr->c_interop->library_paths) {
             library_path_flags += fmt::format("-L{} ", lib_path);
         }
     }

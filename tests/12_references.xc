@@ -1,11 +1,5 @@
 import "std/ops" as ops;
 
-extern "C" {
-    // C math functions
-    func sqrt(x: float64) float64;
-    func snprintf(buf: *char, size: uint64, fmt: *char, ...) int32;
-}
-
 struct Pos implements ops.Display {
     x: int = 0;
     y: int = 0;

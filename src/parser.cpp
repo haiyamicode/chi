@@ -28,6 +28,8 @@ static string get_token_type_repr(TokenType token_type) {
         return "character";
     case TokenType::STRING:
         return "string literal";
+    case TokenType::C_STRING:
+        return "c-string literal";
     case TokenType::BOOL:
         return "bool literal";
     case TokenType::NULLP:
@@ -1068,6 +1070,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::FLOAT:
     case TokenType::CHAR:
     case TokenType::STRING:
+    case TokenType::C_STRING:
     case TokenType::LPAREN:
     case TokenType::LBRACK:
     case TokenType::ADD:
@@ -1316,7 +1319,8 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     case TokenType::KW_UNDEFINED:
     case TokenType::FLOAT:
     case TokenType::CHAR:
-    case TokenType::STRING: {
+    case TokenType::STRING:
+    case TokenType::C_STRING: {
         consume();
         return create_node(NodeType::LiteralExpr, token);
     }
@@ -2212,6 +2216,8 @@ Node *Parser::parse_extern_decl() {
     node->data.extern_decl.type = type;
 
     auto &members = node->data.extern_decl.members;
+    auto &imports = node->data.extern_decl.imports;
+    auto &exports = node->data.extern_decl.exports;
     expect(TokenType::LBRACE);
     Token *token;
     for (;;) {
@@ -2225,6 +2231,21 @@ Node *Parser::parse_extern_decl() {
             break;
         }
 
+        // Handle import statements: extern "C" { import "header.h" as h; }
+        if (token->type == TokenType::KW_IMPORT) {
+            auto import_node = parse_import_decl();
+            imports.add(import_node);
+            continue;
+        }
+
+        // Handle export statements: extern "C" { export {strlen} from "string.h"; }
+        if (token->type == TokenType::KW_EXPORT) {
+            auto export_node = parse_export_decl();
+            exports.add(export_node);
+            continue;
+        }
+
+        // Handle inline function declarations
         auto fn = parse_fn_decl(FN_BODY_NONE);
         fn->data.fn_def.decl_spec->flags |= DECL_EXTERN;
         members.add(fn);
@@ -2250,20 +2271,46 @@ Node *Parser::parse_import_decl() {
     // Old: import "./module" {X, Y}
 
     if (next_is(TokenType::IDEN)) {
-        // import mod from "./module" (JS-style, treated as namespace import)
         auto iden = expect(TokenType::IDEN);
-        node->data.import_decl.alias = iden;
-        add_to_scope(node, iden->str);
-        expect(TokenType::KW_FROM);
-        node->data.import_decl.path = expect(TokenType::STRING);
-    } else if (next_is(TokenType::MUL)) {
-        // import * as mod from "./module"
-        consume();
 
+        // Check if followed by * for pattern import: import str* from "module"
+        if (next_is(TokenType::MUL)) {
+            consume();  // consume the *
+
+            // Convert to pattern import: {str*} from "module"
+            std::string pattern = iden->str + "*";
+            iden->str = pattern;
+
+            auto member = create_node(NodeType::ImportSymbol, iden);
+            member->data.import_symbol.name = iden;
+            node->data.import_decl.symbols.add(member);
+            member->data.import_symbol.import = node;
+            add_to_scope(member, pattern);
+
+            expect(TokenType::KW_FROM);
+            node->data.import_decl.path = expect(TokenType::STRING);
+        } else {
+            // Regular namespace import: import mod from "./module"
+            node->data.import_decl.alias = iden;
+            add_to_scope(node, iden->str);
+            expect(TokenType::KW_FROM);
+            node->data.import_decl.path = expect(TokenType::STRING);
+        }
+    } else if (next_is(TokenType::MUL)) {
+        // import * as mod from "./module" OR import * from "./module" (wildcard)
+        auto star = expect(TokenType::MUL);
+        node->data.import_decl.match_all = star;
+
+        // Check if this is: import * from "module" (wildcard without alias)
+        if (next_is(TokenType::KW_FROM)) {
+            consume();
+            node->data.import_decl.path = expect(TokenType::STRING);
+            // No alias - symbols imported directly into scope
+        }
         // Error recovery: if we see STRING instead of 'as', the user likely meant the old syntax
-        if (next_is(TokenType::STRING)) {
+        else if (next_is(TokenType::STRING)) {
             if (!m_ctx->format_mode) {
-                error(get(), "invalid import syntax: expected 'as' after '*', or use 'import \"module\" as alias' for namespace imports");
+                error(get(), "invalid import syntax: expected 'as' or 'from' after '*'");
             }
             // Recover: treat as old syntax "import './module' as alias"
             node->data.import_decl.path = expect(TokenType::STRING);
@@ -2274,6 +2321,7 @@ Node *Parser::parse_import_decl() {
                 add_to_scope(node, iden->str);
             }
         } else {
+            // import * as alias from "module"
             expect(TokenType::KW_AS);
             auto iden = expect(TokenType::IDEN);
             node->data.import_decl.alias = iden;
@@ -2285,13 +2333,41 @@ Node *Parser::parse_import_decl() {
         // import {X, Y} from "./module" OR import "./module" {X, Y} (after path parsed)
         consume();
         while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
-            // Skip if we encounter unexpected tokens that would cause infinite loop
-            if (!next_is(TokenType::IDEN) && !next_is(TokenType::RBRACE)) {
-                consume(); // Skip unexpected token to make progress
+            // Handle wildcard patterns: SDL_*, *_init, etc.
+            Token* pattern_token = nullptr;
+            std::string pattern_str;
+
+            // Check for leading *
+            if (next_is(TokenType::MUL)) {
+                auto star = expect(TokenType::MUL);
+                pattern_str = "*";
+                pattern_token = star;
+
+                // Optionally followed by identifier
+                if (next_is(TokenType::IDEN)) {
+                    auto iden = expect(TokenType::IDEN);
+                    pattern_str += iden->str;
+                }
+            } else if (next_is(TokenType::IDEN)) {
+                auto iden = expect(TokenType::IDEN);
+                pattern_str = iden->str;
+                pattern_token = iden;
+
+                // Optionally followed by *
+                if (next_is(TokenType::MUL)) {
+                    consume();
+                    pattern_str += "*";
+                }
+            } else {
+                // Skip unexpected token to avoid infinite loop
+                consume();
                 continue;
             }
 
-            auto iden = expect(TokenType::IDEN);
+            // Create a synthetic token with the full pattern
+            auto iden = pattern_token;
+            iden->str = pattern_str;
+
             auto member = create_node(NodeType::ImportSymbol, iden);
             member->data.import_symbol.name = iden;
             auto name_iden = iden;
@@ -2385,16 +2461,69 @@ Node *Parser::parse_export_decl() {
         node->data.export_decl.match_all = ellipsis;
         expect(TokenType::KW_FROM);
         node->data.export_decl.path = expect(TokenType::STRING);
+    } else if (next_is(TokenType::IDEN)) {
+        // Check if this is a pattern export: export str* from "module"
+        auto iden = expect(TokenType::IDEN);
+
+        if (next_is(TokenType::MUL)) {
+            consume();  // consume the *
+
+            // Convert to pattern export: {str*} from "module"
+            std::string pattern = iden->str + "*";
+            iden->str = pattern;
+
+            auto member = create_node(NodeType::ImportSymbol, iden);
+            member->data.import_symbol.name = iden;
+            node->data.export_decl.symbols.add(member);
+            member->data.import_symbol.import = node;
+
+            expect(TokenType::KW_FROM);
+            node->data.export_decl.path = expect(TokenType::STRING);
+        } else {
+            // Not a pattern, treat as error or old syntax
+            if (!m_ctx->format_mode) {
+                error(iden, "expected '*' or 'from' after identifier in export declaration");
+            }
+            node->data.export_decl.path = iden;  // Use as dummy path
+        }
     } else if (next_is(TokenType::LBRACE)) {
         consume();
         while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
-            // Skip if we encounter unexpected tokens
-            if (!next_is(TokenType::IDEN) && !next_is(TokenType::RBRACE)) {
+            // Handle wildcard patterns: SDL_*, *_init, etc.
+            Token* pattern_token = nullptr;
+            std::string pattern_str;
+
+            // Check for leading *
+            if (next_is(TokenType::MUL)) {
+                auto star = expect(TokenType::MUL);
+                pattern_str = "*";
+                pattern_token = star;
+
+                // Optionally followed by identifier
+                if (next_is(TokenType::IDEN)) {
+                    auto iden = expect(TokenType::IDEN);
+                    pattern_str += iden->str;
+                }
+            } else if (next_is(TokenType::IDEN)) {
+                auto iden = expect(TokenType::IDEN);
+                pattern_str = iden->str;
+                pattern_token = iden;
+
+                // Optionally followed by *
+                if (next_is(TokenType::MUL)) {
+                    consume();
+                    pattern_str += "*";
+                }
+            } else {
+                // Skip unexpected token to avoid infinite loop
                 consume();
                 continue;
             }
 
-            auto iden = expect(TokenType::IDEN);
+            // Create a synthetic token with the full pattern
+            auto iden = pattern_token;
+            iden->str = pattern_str;
+
             auto member = create_node(NodeType::ImportSymbol, iden);
             member->data.import_symbol.name = iden;
             auto name_iden = iden;
