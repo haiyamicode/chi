@@ -337,7 +337,7 @@ struct CastExpr {
 
 MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short)
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, UnwrappedOptional, MutRef)
 
 struct SigilExpr {
     SigilKind sigil = SigilKind::None;

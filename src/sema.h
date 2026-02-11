@@ -150,6 +150,11 @@ struct ChiTypePointer {
     bool is_null = false;
 };
 
+struct ChiTypeOptional {
+    ChiType *elem = nullptr;
+    bool is_unwrapped = false; // !T (unwrapped) vs ?T (regular)
+};
+
 struct ChiTypeArray {
     ChiType *elem = nullptr;
     ChiType *internal = nullptr;
@@ -260,6 +265,7 @@ struct ChiType {
         ChiTypeTypeSymbol type_symbol;
         ChiTypeStruct struct_;
         ChiTypePointer pointer;
+        ChiTypeOptional optional_;
         ChiTypeArray array;
         ChiTypeInt int_;
         ChiTypeFloat float_;
@@ -296,6 +302,8 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_INIT_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
+            new (&data.optional_) ChiTypeOptional();
+            break;
         case TypeKind::Reference:
         case TypeKind::MutRef:
         case TypeKind::This:
@@ -329,6 +337,8 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_DESTROY_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
+            data.optional_.~ChiTypeOptional();
+            break;
         case TypeKind::Reference:
         case TypeKind::MutRef:
         case TypeKind::This:
@@ -369,6 +379,8 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_CLONE_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
+            b->data.optional_ = data.optional_;
+            break;
         case TypeKind::Reference:
         case TypeKind::MutRef:
         case TypeKind::This:

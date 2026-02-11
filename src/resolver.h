@@ -102,6 +102,8 @@ struct ResolveContext {
     map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
     optional<ErrorHandler> error_handler = {};
     map<string, ChiType *> composite_types = {};
+    map<ChiType *, ChiType *> optional_of = {};
+    map<ChiType *, ChiType *> unwrapped_optional_of = {};
     map<ChiType *, ChiType *> promise_of = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
     ChiType *rt_array_type = nullptr;
@@ -174,6 +176,8 @@ class Resolver {
     ChiType *create_type_symbol(optional<string> name, ChiType *type);
 
     ChiType *create_pointer_type(ChiType *elem, TypeKind kind);
+
+    ChiType *create_optional_type(ChiType *elem, bool is_unwrapped = false);
 
     ChiType *create_int_type(int bit_count, bool is_unsigned);
 
@@ -298,6 +302,8 @@ class Resolver {
     void copy_struct_members(ChiType *from, ChiType *to, ChiStructMember *parent_member = nullptr);
 
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
+
+    ChiType *get_optional_type(ChiType *elem, bool is_unwrapped = false);
 
     ChiType *get_array_type(ChiType *elem);
 

@@ -492,6 +492,8 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
         return SigilKind::Reference;
     case TokenType::QUES:
         return SigilKind::Optional;
+    case TokenType::LNOT:
+        return SigilKind::UnwrappedOptional;
     default:
         return {};
     }

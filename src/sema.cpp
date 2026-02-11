@@ -207,11 +207,12 @@ int ChiTypeFn::get_va_start() { return params.len - (int)(is_variadic && !is_ext
 ChiType *ChiType::get_elem() {
     switch (kind) {
     case TypeKind::Pointer:
-    case TypeKind::Optional:
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::Array:
         return data.array.elem;
+    case TypeKind::Optional:
+        return data.optional_.elem;
     case TypeKind::Result:
         return data.result.value;
     case TypeKind::Promise:

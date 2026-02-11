@@ -1718,6 +1718,26 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
 
 llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                           ChiType *to_type) {
+    // Auto-unwrap: !T -> T (unwrapped optional to its element type)
+    if (from_type->kind == TypeKind::Optional && from_type->data.optional_.is_unwrapped &&
+        to_type->kind != TypeKind::Optional && to_type->kind != TypeKind::Bool) {
+        auto &builder = *m_ctx->llvm_builder;
+        auto opt_type_l = compile_type(from_type);
+        // Store value so we can GEP into it
+        auto opt_ptr = builder.CreateAlloca(opt_type_l, nullptr, "unwrap_tmp");
+        builder.CreateStore(value, opt_ptr);
+        // Check has_value
+        auto has_value_p = builder.CreateStructGEP(opt_type_l, opt_ptr, 0);
+        auto has_value = builder.CreateLoad(compile_type(get_system_types()->bool_), has_value_p);
+        auto assert_fn = get_system_fn("assert");
+        builder.CreateCall(assert_fn->llvm_fn,
+                           {has_value, compile_string_literal("unwrapping null required value")});
+        // Extract value
+        auto value_p = builder.CreateStructGEP(opt_type_l, opt_ptr, 1);
+        auto elem = builder.CreateLoad(compile_type(from_type->get_elem()), value_p);
+        return compile_conversion(fn, elem, from_type->get_elem(), to_type);
+    }
+
     switch (to_type->kind) {
     case TypeKind::Any: {
         if (from_type->kind == TypeKind::Any) {
@@ -1795,7 +1815,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             return llvm::ConstantAggregateZero::get(compile_type(to_type));
         }
         if (from_type->kind == TypeKind::Optional) {
-            // Same optional type - return as-is
+            // ?T -> !T or !T -> ?T or same — same LLVM layout, return as-is
             return value;
         }
         // Implicit T -> ?T wrap: construct optional with has_value=true
@@ -2584,6 +2604,20 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 
 llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     auto ctn_type = get_chitype(expr);
+    if (ctn_type->kind == TypeKind::Optional && ctn_type->data.optional_.is_unwrapped) {
+        // Auto-unwrap !T: assert has_value, return pointer to value field
+        auto &builder = *m_ctx->llvm_builder;
+        auto ref = compile_expr_ref(fn, expr);
+        auto opt_type_l = compile_type(ctn_type);
+        auto opt_addr = ref.address;
+        auto has_value_p = builder.CreateStructGEP(opt_type_l, opt_addr, 0);
+        auto has_value = builder.CreateLoad(
+            llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), has_value_p);
+        auto assert_fn = get_system_fn("assert");
+        builder.CreateCall(assert_fn->llvm_fn,
+                           {has_value, compile_string_literal("unwrapping null required value")});
+        return builder.CreateStructGEP(opt_type_l, opt_addr, 1);
+    }
     if (ctn_type->is_pointer_like()) {
         return compile_expr(fn, expr);
     }
@@ -2704,6 +2738,19 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
 
             return RefValue::from_address(lambda_alloca);
+        } else if (type->kind == TypeKind::Optional && type->data.optional_.is_unwrapped) {
+            // Auto-unwrap !T: assert has_value, then use pointer to value field
+            auto ref = compile_expr_ref(fn, data.expr);
+            auto opt_type_l = compile_type(type);
+            auto opt_addr = ref.address;
+            auto has_value_p = builder.CreateStructGEP(opt_type_l, opt_addr, 0);
+            auto has_value = builder.CreateLoad(
+                llvm::Type::getInt1Ty(llvm_ctx), has_value_p);
+            auto assert_fn = get_system_fn("assert");
+            builder.CreateCall(assert_fn->llvm_fn,
+                               {has_value, compile_string_literal("unwrapping null required value")});
+            ptr = builder.CreateStructGEP(opt_type_l, opt_addr, 1);
+            type = type->get_elem();
         } else if (type->is_pointer_like()) {
             type = type->get_elem();
             ptr = compile_expr(fn, data.expr);
@@ -3130,6 +3177,10 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto dot_expr = data.fn_ref_expr->data.dot_expr;
         if (!ctn_type) {
             ctn_type = get_chitype(dot_expr.expr);
+        }
+        // Unwrap !T to T for method dispatch — compile_dot_ptr returns pointer to inner value
+        if (ctn_type->kind == TypeKind::Optional && ctn_type->data.optional_.is_unwrapped) {
+            ctn_type = ctn_type->get_elem();
         }
         auto ctn_type_l = compile_type(ctn_type);
         auto ptr = compile_dot_ptr(fn, dot_expr.expr);
@@ -3650,12 +3701,11 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 if (data.expr->type == ast::NodeType::ConstructExpr) {
                     compile_construction(fn, fn->return_value, ret_type, data.expr);
                 } else {
-                    // Original path for other expressions
-                    auto ret_ref = compile_expr_ref(fn, data.expr);
-                    if (!ret_ref.value) {
-                        ret_ref.value = llvm_builder.CreateLoad(compile_type(ret_type), ret_ref.address);
+                    // Use compile_assignment_to_type to handle type conversions (e.g. T -> ?T)
+                    auto value = compile_assignment_to_type(fn, data.expr, ret_type);
+                    if (value) {
+                        compile_copy(fn, value, fn->return_value, ret_type, data.expr);
                     }
-                    compile_copy_with_ref(fn, ret_ref, fn->return_value, ret_type, data.expr);
                 }
             }
         }
@@ -4594,7 +4644,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         // return llvm::PointerType::get(elem_type_l, 0);
     }
     case TypeKind::Optional: {
-        auto &data = type->data.pointer;
+        auto &data = type->data.optional_;
         auto elem_type_l = compile_type(data.elem);
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt1Ty(llvm_ctx)); // bool has_value

@@ -292,6 +292,18 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         return true;
     }
 
+    // Unwrapped optional (!T) implicitly converts to T
+    if (from_type->kind == TypeKind::Optional && from_type->data.optional_.is_unwrapped) {
+        return can_assign(from_type->get_elem(), to_type, is_explicit);
+    }
+
+    // Explicit cast: ?T -> !T
+    if (is_explicit && from_type->kind == TypeKind::Optional && to_type->kind == TypeKind::Optional &&
+        !from_type->data.optional_.is_unwrapped && to_type->data.optional_.is_unwrapped &&
+        is_same_type(from_type->get_elem(), to_type->get_elem())) {
+        return true;
+    }
+
     switch (to_type->kind) {
     case TypeKind::Void:
         return from_type->kind == TypeKind::Void;
@@ -888,7 +900,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         auto type = resolve_value(data.type, scope);
-        auto final_type = get_pointer_type(type, get_sigil_type_kind(data.sigil));
+        ChiType *final_type;
+        if (data.sigil == ast::SigilKind::Optional) {
+            final_type = get_optional_type(type, false);
+        } else if (data.sigil == ast::SigilKind::UnwrappedOptional) {
+            final_type = get_optional_type(type, true);
+        } else {
+            final_type = get_pointer_type(type, get_sigil_type_kind(data.sigil));
+        }
         return create_type_symbol({}, final_type);
     }
     case NodeType::ParamDecl: {
@@ -1000,6 +1019,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        // Auto-unwrap !T to T for binary operations
+        if (t1->kind == TypeKind::Optional && t1->data.optional_.is_unwrapped) {
+            t1 = t1->get_elem();
+        }
+        if (t2->kind == TypeKind::Optional && t2->data.optional_.is_unwrapped) {
+            t2 = t2->get_elem();
+        }
+
         // For assignment operators, just check assignment validity
         if (is_assignment_op(data.op_type)) {
             check_assignment(data.op2, t2, t1);
@@ -1079,14 +1106,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!t) {
             return nullptr;
         }
+        // Auto-unwrap !T for unary arithmetic (but not for ! itself)
+        auto t_unwrapped = t;
+        if (t->kind == TypeKind::Optional && t->data.optional_.is_unwrapped &&
+            data.op_type != TokenType::LNOT) {
+            t_unwrapped = t->get_elem();
+        }
         switch (auto tt = data.op_type) {
         case TokenType::SUB:
         case TokenType::ADD:
         case TokenType::INC:
         case TokenType::DEC:
-            check_assignment(data.op1, t,
-                             t->kind == TypeKind::Float ? t : get_system_types()->int_);
-            return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
+            check_assignment(data.op1, t_unwrapped,
+                             t_unwrapped->kind == TypeKind::Float ? t_unwrapped : get_system_types()->int_);
+            return t_unwrapped->kind == TypeKind::Bool ? get_system_types()->int_ : t_unwrapped;
         case TokenType::MUL: {
             error(data.op1, errors::C_STYLE_DEREFERENCE_DEPRECATED);
             break;
@@ -1452,10 +1485,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
-        if (scope.move_outlet && !data.is_new) {
-            data.resolved_outlet = scope.move_outlet;
-            node->escape.moved = true;
-        }
         ChiType *value_type;
         ChiType *result_type;
         if (data.type) {
@@ -1484,6 +1513,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 value_type = data.is_new ? result_type->get_elem() : result_type;
             }
+        }
+        // RVO: only set outlet when the outlet type matches the construct type
+        if (scope.move_outlet && !data.is_new &&
+            (!scope.value_type || is_same_type(result_type, scope.value_type))) {
+            data.resolved_outlet = scope.move_outlet;
+            node->escape.moved = true;
         }
         auto struct_type = resolve_struct_type(value_type);
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
@@ -2588,7 +2623,8 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     case TypeKind::MutRef:
         return "&mut<" + format_type(type->get_elem(), for_display) + ">";
     case TypeKind::Optional:
-        return "?" + format_type(type->get_elem(), for_display);
+        return (type->data.optional_.is_unwrapped ? "!" : "?") +
+               format_type(type->get_elem(), for_display);
     case TypeKind::Array:
         return fmt::format("Array<{}>", format_type(type->get_elem(), for_display));
     case TypeKind::Result:
@@ -3102,10 +3138,13 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::Optional:
     case TypeKind::Array: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
         return get_wrapped_type(elem_type, type->kind);
+    }
+    case TypeKind::Optional: {
+        auto elem_type = make_recursive_call(type->get_elem(), subs);
+        return get_optional_type(elem_type, type->data.optional_.is_unwrapped);
     }
 
     case TypeKind::Subtype: {
@@ -3647,6 +3686,10 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
     if (sty->kind == TypeKind::This) {
         sty = sty->get_elem();
     }
+    // Auto-unwrap !T to T for method access
+    if (sty->kind == TypeKind::Optional && sty->data.optional_.is_unwrapped) {
+        sty = sty->get_elem();
+    }
     if (sty->is_pointer_like()) {
         sty = sty->get_elem();
     }
@@ -4051,6 +4094,24 @@ ChiType *Resolver::get_pointer_type(ChiType *elem, TypeKind kind) {
     return pt;
 }
 
+ChiType *Resolver::create_optional_type(ChiType *elem, bool is_unwrapped) {
+    auto pt = create_type(TypeKind::Optional);
+    pt->data.optional_.elem = elem;
+    pt->data.optional_.is_unwrapped = is_unwrapped;
+    pt->is_placeholder = elem->is_placeholder;
+    return pt;
+}
+
+ChiType *Resolver::get_optional_type(ChiType *elem, bool is_unwrapped) {
+    auto &m = is_unwrapped ? m_ctx->unwrapped_optional_of : m_ctx->optional_of;
+    if (auto cached = m.get(elem)) {
+        return *cached;
+    }
+    auto pt = create_optional_type(elem, is_unwrapped);
+    m[elem] = pt;
+    return pt;
+}
+
 ChiType *Resolver::get_array_type(ChiType *elem) {
     if (auto cached = m_ctx->array_of.get(elem)) {
         return *cached;
@@ -4350,7 +4411,7 @@ ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
     struct_.kind = ContainerKind::Struct;
     struct_.node = nullptr;
 
-    auto err_optional = get_pointer_type(err, TypeKind::Optional);
+    auto err_optional = get_optional_type(err);
     struct_.add_member(get_allocator(), "err", dummy_node, err_optional);
     struct_.add_member(get_allocator(), "value", dummy_node, value);
     return result_type;
@@ -4902,8 +4963,9 @@ ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::Optional:
         return get_pointer_type(elem, kind);
+    case TypeKind::Optional:
+        return get_optional_type(elem);
     case TypeKind::Array:
         return get_array_type(elem);
     case TypeKind::Promise:
