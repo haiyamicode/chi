@@ -120,7 +120,7 @@ func test_box() {
     println("testing box:");
     var p = cx_malloc(sizeof int, null) as *int;
     p! = 42;
-    var b1 = Box<int>{p as &int};
+    var b1 = Box<int>{p as &mut<int>};
     printf("b1.as_ref()={}\n", b1.as_ref());
     var b2 = b1;
     printf("after copy: b1={}, b2={}\n", b1.as_ref(), b2.as_ref());

@@ -136,7 +136,7 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
 struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
     private _ptr: *T = null;
 
-    func new(ptr: &T) {
+    func new(ptr: &mut<T>) {
         this._ptr = ptr as *T;
     }
 

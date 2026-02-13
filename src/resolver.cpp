@@ -1467,7 +1467,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.type) {
             value_type = resolve_value(data.type, scope);
             result_type =
-                data.is_new ? get_pointer_type(value_type, TypeKind::Reference) : value_type;
+                data.is_new ? get_pointer_type(value_type, TypeKind::MutRef) : value_type;
         } else {
             if (!scope.value_type) {
                 // Array literals: infer Array<T> from first element type
@@ -1497,7 +1497,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         return nullptr;
                     }
                 }
-                if (data.is_new != result_type->is_raw_pointer()) {
+                bool is_heap_type = result_type->is_raw_pointer() ||
+                                    result_type->kind == TypeKind::MutRef;
+                if (data.is_new != is_heap_type) {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
                 }
                 value_type = data.is_new ? result_type->get_elem() : result_type;
@@ -2151,7 +2153,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         switch (data.prefix->type) {
         case TokenType::KW_DELETE: {
             auto expr_type = resolve(data.expr, scope);
-            if (!expr_type->is_pointer_like()) {
+            if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MutRef) {
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type(expr_type, true));
             }
