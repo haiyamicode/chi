@@ -72,6 +72,8 @@ constexpr auto ASYNC_MUST_RETURN_PROMISE = "async function must return Promise<T
 constexpr auto MUTATING_METHOD_ON_IMMUTABLE_REFERENCE =
     "cannot access mutating method '{}' on immutable reference {}";
 constexpr auto INVALID_THIS = "'this' keyword can only be used in a method scope";
+constexpr auto BARE_INTERFACE_TYPE =
+    "interface type '{}' cannot be used directly; use '&{}' instead";
 
 } // namespace errors
 } // namespace cx

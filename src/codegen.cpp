@@ -305,6 +305,10 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             auto fn_node = member;
             if (subtype) {
                 auto subtype_member = struct_type->data.struct_.find_member(member->name);
+                if (!subtype_member) {
+                    subtype_member = struct_type->data.struct_.find_static_member(member->name);
+                }
+                if (!subtype_member) continue;
                 fn_node = subtype_member->node;
             }
 
@@ -356,15 +360,16 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         }
     }
 
+    // Generate __delete and __copy before vtables (vtable needs these fn ptrs)
+    if (get_resolver()->type_needs_destruction(type)) {
+        generate_destructor(type, nullptr);
+    }
+    generate_copier(type);
+
     if (!subtype) {
         if (struct_type->data.struct_.interfaces.len) {
             compile_struct_vtables(struct_type);
         }
-    }
-
-    // Generate __delete if this type needs destruction
-    if (get_resolver()->type_needs_destruction(type)) {
-        generate_destructor(type, nullptr);
     }
 
     for (auto member : struct_type->data.struct_.members) {
@@ -812,10 +817,30 @@ void Compiler::compile_struct_vtables(ChiType *type) {
     std::vector<llvm::Constant *> methods;
 
     assert(type->kind == TypeKind::Struct);
+
+    // Get destructor for this concrete type (may be null)
+    auto dtor_it = m_ctx->destructor_table.get(type);
+    llvm::Constant *dtor_ptr = dtor_it && *dtor_it
+        ? (llvm::Constant *)(*dtor_it)->llvm_fn
+        : get_null_ptr();
+
+    // Get copier for this concrete type (may be null)
+    auto copier_it = m_ctx->copier_table.get(type);
+    llvm::Constant *copier_ptr = copier_it && *copier_it
+        ? (llvm::Constant *)(*copier_it)->llvm_fn
+        : get_null_ptr();
+
     for (auto impl : type->data.struct_.interfaces) {
         auto vtable = vtables.add({});
         vtable->offset = count;
         vtable->impl = impl;
+
+        // Vtable header: [typeinfo_ptr, destructor_fn_ptr, copier_fn_ptr, method0, method1, ...]
+        methods.push_back((llvm::Constant *)compile_type_info(type));
+        methods.push_back(dtor_ptr);
+        methods.push_back(copier_ptr);
+        count += 3;
+
         for (auto &method : impl->impl_members) {
             if (method->is_method()) {
                 auto method_fn = get_fn(method->node);
@@ -1759,7 +1784,16 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             return has_value;
         }
         case TypeKind::Pointer:
-        case TypeKind::Reference: {
+        case TypeKind::Reference:
+        case TypeKind::MutRef: {
+            auto elem = from_type->get_elem();
+            if (elem && ChiTypeStruct::is_interface(elem)) {
+                // Fat pointer struct {data_ptr, vtable_ptr} — check data_ptr (field 0) for null
+                auto data_ptr = builder.CreateExtractValue(value, {0}, "data_ptr");
+                return builder.CreateICmp(
+                    llvm::CmpInst::Predicate::ICMP_NE, data_ptr,
+                    get_null_ptr());
+            }
             return builder.CreateICmp(
                 llvm::CmpInst::Predicate::ICMP_NE, value,
                 llvm::ConstantPointerNull::get((llvm::PointerType *)compile_type(from_type)));
@@ -1812,26 +1846,41 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         builder.CreateStore(inner_value, value_p);
         return builder.CreateLoad(opt_type_l, opt_ptr);
     }
-    case TypeKind::Struct: {
-        if (ChiTypeStruct::is_interface(to_type)) {
-            if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference) {
-                auto strct = from_type->get_elem();
-                auto &builder = *m_ctx->llvm_builder;
-                auto vp = builder.CreateAlloca(compile_type(to_type));
-                auto impl = strct->data.struct_.interface_table[to_type];
+    case TypeKind::Pointer:
+    case TypeKind::Reference:
+    case TypeKind::MutRef: {
+        auto to_elem = to_type->get_elem();
+        if (to_elem && ChiTypeStruct::is_interface(to_elem)) {
+            auto from_elem = from_type->get_elem();
+            // If source is already an interface reference, no conversion needed
+            if (from_elem && ChiTypeStruct::is_interface(from_elem)) {
+                return value;
+            }
+            // Build fat pointer {data_ptr, vtable_ptr}
+            auto &builder = *m_ctx->llvm_builder;
+            auto iface_type_l = compile_type(to_type);
+            auto vp = builder.CreateAlloca(iface_type_l);
+            auto data_p = builder.CreateStructGEP(iface_type_l, vp, 0);
+            builder.CreateStore(value, data_p);
+            auto vtable_p = builder.CreateStructGEP(iface_type_l, vp, 1);
+            if (from_elem && from_elem->kind == TypeKind::Struct && !ChiTypeStruct::is_interface(from_elem)) {
+                // &Concrete → &Interface: look up vtable from impl table
+                auto impl = from_elem->data.struct_.interface_table[to_elem];
                 assert(impl);
                 auto vtable = m_ctx->impl_table[impl];
                 assert(vtable);
-                auto iface_type_l = compile_type(to_type);
-                auto ti_p = builder.CreateStructGEP(iface_type_l, vp, 0);
-                builder.CreateStore(compile_type_info(from_type), ti_p);
-                auto data_p = builder.CreateStructGEP(iface_type_l, vp, 1);
-                builder.CreateStore(value, data_p);
-                auto vtable_p = builder.CreateStructGEP(iface_type_l, vp, 2);
                 builder.CreateStore(vtable, vtable_p);
-                return builder.CreateLoad(iface_type_l, vp);
+            } else {
+                // *void → *Interface: no vtable yet, null
+                builder.CreateStore(
+                    get_null_ptr(),
+                    vtable_p);
             }
+            return builder.CreateLoad(iface_type_l, vp);
         }
+        return value;
+    }
+    case TypeKind::Struct: {
     }
 
     default:
@@ -1977,6 +2026,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 // unwrap pointer
                 auto ptr = compile_expr(fn, data.op1);
                 auto elem_type = get_chitype(data.op1)->get_elem();
+                // Interface is abstract — deref returns the fat pointer value itself
+                if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
+                    return ptr;
+                }
                 auto elem_type_l = compile_type(elem_type);
                 auto value = builder.CreateLoad(elem_type_l, ptr);
                 return value;
@@ -2035,13 +2088,27 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::ASS: {
             auto ref = compile_expr_ref(fn, data.op1);
-            auto value = compile_assignment_value(fn, data.op2, data.op1);
             assert(ref.address);
-            if (!data.op2->escape.moved) {
-                // Use destination type since value is already converted to dest type
-                compile_copy(fn, value, ref.address, get_chitype(data.op1), data.op2);
+            auto dest_type = get_chitype(data.op1);
+            auto src_type = get_chitype(data.op2);
+            // Get RHS as ref to preserve source address for efficient copy
+            // (avoids load + temp alloca when source already has an address, e.g. ptr!)
+            auto src_ref = compile_expr_ref(fn, data.op2);
+
+            // Only load the value when needed (type conversion)
+            if (dest_type && src_type != dest_type) {
+                if (!src_ref.value && src_ref.address) {
+                    src_ref.value = builder.CreateLoad(compile_type(src_type), src_ref.address);
+                }
+                emit_dbg_location(data.op2);
+                src_ref = {nullptr, compile_conversion(fn, src_ref.value, src_type, dest_type)};
             }
-            return value;
+
+            if (!data.op2->escape.moved) {
+                compile_copy_with_ref(fn, src_ref, ref.address, dest_type, data.op2,
+                                      /*destruct_old=*/true);
+            }
+            return src_ref.value;
         }
         default: {
             auto target_type = get_chitype(expr);
@@ -2212,16 +2279,32 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         switch (data.prefix->type) {
         case TokenType::KW_SIZEOF: {
+            auto sizeof_type = get_chitype(data.expr);
+            if (sizeof_type && ChiTypeStruct::is_interface(sizeof_type)) {
+                // Interface is abstract — compile the expression to get the fat pointer,
+                // then extract runtime typesize from vtable
+                auto fat_ptr = compile_expr(fn, data.expr);
+                auto vtable_ptr = builder.CreateExtractValue(fat_ptr, {1}, "vtable_ptr");
+                return load_typesize_from_vtable(vtable_ptr);
+            }
             return llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx),
                                           llvm_type_size(compile_type_of(data.expr)));
         }
         case TokenType::KW_DELETE: {
             emit_dbg_location(expr);
             auto ptr = compile_expr(fn, data.expr);
-            // Call __delete on the pointed-to type before freeing
             auto ptr_type = get_chitype(data.expr);
             if (ptr_type && ptr_type->is_pointer_like()) {
                 auto elem_type = ptr_type->get_elem();
+                if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
+                    // delete on fat pointer: destroy via vtable, then free data
+                    auto data_ptr = builder.CreateExtractValue(ptr, {0}, "data_ptr");
+                    auto vtable_ptr = builder.CreateExtractValue(ptr, {1}, "vtable_ptr");
+                    call_vtable_destructor(fn, vtable_ptr, data_ptr);
+                    auto free_fn = get_system_fn("cx_free");
+                    builder.CreateCall(free_fn->llvm_fn, {data_ptr});
+                    return nullptr;
+                }
                 compile_destruction_for_type(fn, ptr, elem_type);
             }
             auto free_fn = get_system_fn("cx_free");
@@ -2329,16 +2412,24 @@ void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest,
 }
 
 void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
-                                     ast::Node *expr) {
+                                     ast::Node *expr, bool destruct_old) {
     auto &builder = *m_ctx->llvm_builder;
-    assert(src.value);
+    assert(src.value || src.address);
+
+    // Lazy load: derive value from address when needed
+    auto ensure_value = [&]() {
+        if (!src.value && src.address) {
+            src.value = builder.CreateLoad(compile_type(type), src.address);
+        }
+        return src.value;
+    };
 
     switch (type->kind) {
     case TypeKind::String: {
         auto from_address = src.address ? src.address : nullptr;
         if (!from_address) {
             from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_str_copy");
-            builder.CreateStore(src.value, from_address);
+            builder.CreateStore(ensure_value(), from_address);
         }
         auto copy_fn = get_system_fn("cx_string_copy");
         auto call = builder.CreateCall(copy_fn->llvm_fn, {dest, from_address});
@@ -2353,15 +2444,15 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         auto llvm_type = compile_type(type);
 
         // Extract fn_ptr (field 0)
-        auto fn_ptr = builder.CreateExtractValue(src.value, {0}, "fn_ptr");
+        auto fn_ptr = builder.CreateExtractValue(ensure_value(), {0}, "fn_ptr");
 
         // Extract size (field 1)
-        auto size_val = builder.CreateExtractValue(src.value, {1}, "size");
+        auto size_val = builder.CreateExtractValue(ensure_value(), {1}, "size");
 
-        auto captures_ptr = builder.CreateExtractValue(src.value, {2}, "captures");
+        auto captures_ptr = builder.CreateExtractValue(ensure_value(), {2}, "captures");
         llvm::Value *typeinfo_val = nullptr;
         if (llvm_type->getStructNumElements() > 3) {
-            typeinfo_val = builder.CreateExtractValue(src.value, {3}, "captures_ti");
+            typeinfo_val = builder.CreateExtractValue(ensure_value(), {3}, "captures_ti");
         } else {
             typeinfo_val = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
         }
@@ -2386,6 +2477,50 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     case TypeKind::Subtype:
     case TypeKind::Array:
     case TypeKind::Struct: {
+        // Interface copy via vtable dispatch
+        // dest and src.address are fat pointer struct VALUES {data_ptr, vtable_ptr}
+        if (ChiTypeStruct::is_interface(type)) {
+            // dest is the ADDRESS of the fat pointer {data_ptr, vtable_ptr}
+            // Load the fat pointer to extract data and vtable pointers
+            auto iface_type_l = llvm::StructType::get(*m_ctx->llvm_ctx, {get_llvm_ptr_type(), get_llvm_ptr_type()});
+            auto dest_fp = builder.CreateLoad(iface_type_l, dest, "dest_fp");
+            auto dest_data_ptr = builder.CreateExtractValue(dest_fp, {0}, "dest_data");
+            auto dest_vtable = builder.CreateExtractValue(dest_fp, {1}, "dest_vtable");
+
+            auto src_addr = src.address ? src.address : nullptr;
+            llvm::Value *src_data_ptr, *src_vtable;
+            if (src_addr) {
+                auto src_fp = builder.CreateLoad(iface_type_l, src_addr, "src_fp");
+                src_data_ptr = builder.CreateExtractValue(src_fp, {0}, "src_data");
+                src_vtable = builder.CreateExtractValue(src_fp, {1}, "src_vtable");
+            } else {
+                src_data_ptr = builder.CreateExtractValue(src.value, {0}, "src_data");
+                src_vtable = builder.CreateExtractValue(src.value, {1}, "src_vtable");
+            }
+
+            // Destruct old value at dest via vtable destructor (skip if vtable is null)
+            if (destruct_old) {
+                auto vtable_is_null = builder.CreateICmpEQ(dest_vtable, get_null_ptr());
+                auto bb_has_vtable = fn->new_label("iface_has_vtable");
+                auto bb_skip_dtor = fn->new_label("iface_skip_dtor");
+                builder.CreateCondBr(vtable_is_null, bb_skip_dtor, bb_has_vtable);
+
+                fn->use_label(bb_has_vtable);
+                call_vtable_destructor(fn, dest_vtable, dest_data_ptr);
+                builder.CreateBr(bb_skip_dtor);
+
+                fn->use_label(bb_skip_dtor);
+            }
+
+            // Copy the underlying concrete value via vtable copier
+            call_vtable_copier(fn, src_vtable, dest_data_ptr, src_data_ptr);
+
+            // Update vtable in destination fat pointer to match source
+            auto vtable_gep = builder.CreateStructGEP(iface_type_l, dest, 1);
+            builder.CreateStore(src_vtable, vtable_gep);
+            return;
+        }
+
         auto sty = get_resolver()->resolve_struct_type(eval_type(type));
         if (!sty) break;  // Not a struct type, fall through to default copy
         auto &builder = *m_ctx->llvm_builder;
@@ -2395,7 +2530,10 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             auto from_address = src.address ? src.address : nullptr;
             if (!from_address) {
                 from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy_from");
-                builder.CreateStore(src.value, from_address);
+                builder.CreateStore(ensure_value(), from_address);
+            }
+            if (destruct_old) {
+                compile_destruction_for_type(fn, dest, type);
             }
             auto size = llvm_type_size(compile_type(type));
             builder.CreateMemSet(
@@ -2440,7 +2578,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                 auto from_address = src.address;
                 if (!from_address) {
                     from_address = builder.CreateAlloca(compile_type(type), nullptr, "_struct_copy_src");
-                    builder.CreateStore(src.value, from_address);
+                    builder.CreateStore(ensure_value(), from_address);
                 }
 
                 auto llvm_type = compile_type(type);
@@ -2462,7 +2600,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
 
     auto size = llvm_type_size(compile_type(type));
     if (size > 0) {
-        builder.CreateStore(src.value, dest);
+        builder.CreateStore(ensure_value(), dest);
     }
 }
 
@@ -2585,6 +2723,12 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     auto ctn_type = get_chitype(expr);
     if (ctn_type->is_pointer_like()) {
+        // Interface references are fat pointers — need address for CreateStructGEP
+        auto elem = ctn_type->get_elem();
+        if (elem && ChiTypeStruct::is_interface(elem)) {
+            auto ref = compile_expr_ref(fn, expr);
+            return ref.address ? ref.address : ref.value;
+        }
         return compile_expr(fn, expr);
     }
     auto ref = compile_expr_ref(fn, expr);
@@ -2761,6 +2905,14 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                     auto value_p = builder.CreateStructGEP(compile_type(data.op1->resolved_type),
                                                            ref.address, 1);
                     return RefValue::from_address(value_p);
+                }
+                // For pointer-to-interface deref, return the fat pointer variable's address
+                // so interface copy can update both data and vtable
+                auto op1_type = get_chitype(data.op1);
+                if (op1_type && op1_type->is_pointer_like() &&
+                    op1_type->get_elem() && ChiTypeStruct::is_interface(op1_type->get_elem())) {
+                    auto ref = compile_expr_ref(fn, data.op1);
+                    return RefValue::from_address(ref.address);
                 }
                 return RefValue::from_address(compile_expr(fn, data.op1));
             }
@@ -2996,6 +3148,38 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
 
+    // Handle __copy_from(dest, src, destruct_old) intrinsic
+    {
+        auto callee_decl = data.fn_ref_expr->get_decl();
+        if (callee_decl && callee_decl->name == "__copy_from" && data.args.len == 3) {
+            auto dest_ptr = compile_expr(fn, data.args[0]);
+            auto src_ptr = compile_expr(fn, data.args[1]);
+            auto elem_type = get_chitype(data.args[0])->get_elem();
+            assert(elem_type && "first arg of __copy_from must be a pointer type");
+            // Third arg must be a compile-time bool literal
+            bool destruct_old = true;
+            if (data.args[2]->type == ast::NodeType::LiteralExpr &&
+                data.args[2]->token->type == TokenType::BOOL) {
+                destruct_old = data.args[2]->token->val.b;
+            }
+
+            if (ChiTypeStruct::is_interface(elem_type)) {
+                // For interface types, dest_ptr and src_ptr are fat pointers {data, vtable}.
+                auto dest_data = builder.CreateExtractValue(dest_ptr, {0}, "dest_data");
+                auto src_data = builder.CreateExtractValue(src_ptr, {0}, "src_data");
+                auto src_vtable = builder.CreateExtractValue(src_ptr, {1}, "src_vtable");
+                call_vtable_copier(fn, src_vtable, dest_data, src_data);
+            } else {
+                compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, elem_type,
+                                      nullptr, destruct_old);
+            }
+            if (invoke) {
+                builder.CreateBr(invoke->normal);
+            }
+            return nullptr;
+        }
+    }
+
     if (data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda) {
         auto ref = compile_expr_ref(fn, data.fn_ref_expr);
         auto lambda_type = get_chitype(data.fn_ref_expr);
@@ -3135,20 +3319,35 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto ptr = compile_dot_ptr(fn, dot_expr.expr);
 
         if (!fn_decl->data.fn_def.body) {
-            // handle interface
-            auto data_gep = builder.CreateStructGEP(ctn_type_l, ptr, 1);
-            auto vtable_gep = builder.CreateStructGEP(ctn_type_l, ptr, 2);
-            auto data_ptr = builder.CreateLoad(ctn_type_l->getStructElementType(1), data_gep);
-            auto vtable_ptr = builder.CreateLoad(ctn_type_l->getStructElementType(2), vtable_gep);
+            // handle interface — ctn_type is &Interface, fat pointer {data_ptr, vtable_ptr}
+            auto data_gep = builder.CreateStructGEP(ctn_type_l, ptr, 0);
+            auto vtable_gep = builder.CreateStructGEP(ctn_type_l, ptr, 1);
+            auto data_ptr = builder.CreateLoad(ctn_type_l->getStructElementType(0), data_gep);
+            auto vtable_ptr = builder.CreateLoad(ctn_type_l->getStructElementType(1), vtable_gep);
             ctn_ptr = data_ptr;
+            // +3 offset for typeinfo + destructor + copier in vtable header
             auto index = llvm::ConstantInt::get(
-                *m_ctx->llvm_ctx, llvm::APInt(32, dot_expr.resolved_struct_member->method_index));
+                *m_ctx->llvm_ctx,
+                llvm::APInt(32, dot_expr.resolved_struct_member->method_index + 3));
             auto fn_gep = builder.CreateGEP(
                 llvm::PointerType::get(compile_type(get_system_types()->void_ptr), 0), vtable_ptr,
                 {index});
             auto callee_ptr =
                 builder.CreateLoad(compile_type(get_system_types()->void_ptr), fn_gep);
-            callee = {(llvm::FunctionType *)compile_type_of(fn_decl), callee_ptr};
+            // Build function type with thin pointer for 'this' (concrete method signature)
+            auto orig_fn_type = (llvm::FunctionType *)compile_type_of(fn_decl);
+            std::vector<llvm::Type *> param_types;
+            for (unsigned i = 0; i < orig_fn_type->getNumParams(); i++) {
+                auto param = orig_fn_type->getParamType(i);
+                if (param == ctn_type_l) {
+                    param_types.push_back(get_llvm_ptr_type()); // thin pointer for 'this'
+                } else {
+                    param_types.push_back(param);
+                }
+            }
+            auto dispatch_fn_type = llvm::FunctionType::get(
+                orig_fn_type->getReturnType(), param_types, orig_fn_type->isVarArg());
+            callee = {dispatch_fn_type, callee_ptr};
         } else {
             ctn_ptr = ptr;
         }
@@ -3887,6 +4086,13 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
+    // Handle interface destruction via vtable
+    if (type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(type)) {
+        auto ref_type = get_resolver()->get_pointer_type(type, TypeKind::Reference);
+        compile_interface_destruction(fn, address, ref_type);
+        return;
+    }
+
     // Handle optionals and structs via generated __delete
     if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct) {
         return;
@@ -3896,6 +4102,168 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
     if (dtor) {
         builder.CreateCall(dtor->llvm_fn, {address});
     }
+}
+
+void Compiler::compile_interface_destruction(Function *fn, llvm::Value *iface_address,
+                                             ChiType *iface_ref_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto iface_type_l = compile_type(iface_ref_type);
+    auto ptr_type = get_llvm_ptr_type();
+
+    // Extract data_ptr (field 0) and vtable_ptr (field 1)
+    auto data_gep = builder.CreateStructGEP(iface_type_l, iface_address, 0);
+    auto data_ptr = builder.CreateLoad(ptr_type, data_gep);
+    auto vtable_gep = builder.CreateStructGEP(iface_type_l, iface_address, 1);
+    auto vtable_ptr = builder.CreateLoad(ptr_type, vtable_gep);
+
+    call_vtable_destructor(fn, vtable_ptr, data_ptr);
+
+    auto free_fn = get_system_fn("cx_free");
+    builder.CreateCall(free_fn->llvm_fn, {data_ptr});
+}
+
+void Compiler::call_vtable_destructor(Function *fn, llvm::Value *vtable_ptr,
+                                      llvm::Value *data_ptr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto ptr_type = get_llvm_ptr_type();
+
+    // Load destructor from vtable[1] (index 0=typeinfo, 1=destructor)
+    auto dtor_gep = builder.CreateGEP(ptr_type, vtable_ptr,
+        {llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, 1))});
+    auto dtor_ptr = builder.CreateLoad(ptr_type, dtor_gep);
+
+    auto is_null = builder.CreateICmpEQ(dtor_ptr, get_null_ptr());
+    auto then_bb = fn->new_label("dtor_call");
+    auto merge_bb = fn->new_label("dtor_merge");
+    builder.CreateCondBr(is_null, merge_bb, then_bb);
+
+    fn->use_label(then_bb);
+    auto dtor_fn_type = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(*m_ctx->llvm_ctx), {ptr_type}, false);
+    builder.CreateCall(dtor_fn_type, dtor_ptr, {data_ptr});
+    builder.CreateBr(merge_bb);
+
+    fn->use_label(merge_bb);
+}
+
+void Compiler::call_vtable_copier(Function *fn, llvm::Value *vtable_ptr,
+                                  llvm::Value *dest_data, llvm::Value *src_data) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto ptr_type = get_llvm_ptr_type();
+
+    // Load copier from vtable[2] (index 0=typeinfo, 1=destructor, 2=copier)
+    auto copier_gep = builder.CreateGEP(ptr_type, vtable_ptr,
+        {llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, 2))});
+    auto copier_fn_ptr = builder.CreateLoad(ptr_type, copier_gep, "copier_fn");
+    auto copier_is_null = builder.CreateICmpEQ(copier_fn_ptr, get_null_ptr());
+    auto bb_copy = fn->new_label("vtable_copy");
+    auto bb_memcpy = fn->new_label("vtable_memcpy");
+    auto bb_done = fn->new_label("vtable_copy_done");
+    builder.CreateCondBr(copier_is_null, bb_memcpy, bb_copy);
+
+    // Call copier(dest_data, src_data)
+    fn->use_label(bb_copy);
+    auto copier_fn_type = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(*m_ctx->llvm_ctx), {ptr_type, ptr_type}, false);
+    builder.CreateCall(copier_fn_type, copier_fn_ptr, {dest_data, src_data});
+    builder.CreateBr(bb_done);
+
+    // Fallback: shallow memcpy using typesize from vtable
+    fn->use_label(bb_memcpy);
+    auto typesize = load_typesize_from_vtable(vtable_ptr);
+    builder.CreateMemCpy(dest_data, {}, src_data, {}, typesize);
+    builder.CreateBr(bb_done);
+
+    fn->use_label(bb_done);
+}
+
+llvm::ConstantPointerNull *Compiler::get_null_ptr() {
+    return llvm::ConstantPointerNull::get(llvm::PointerType::get(*m_ctx->llvm_ctx, 0));
+}
+
+llvm::Value *Compiler::load_typesize_from_vtable(llvm::Value *vtable_ptr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto ptr_type = get_llvm_ptr_type();
+
+    // vtable[0] = typeinfo pointer
+    auto typeinfo_ptr = builder.CreateLoad(ptr_type, vtable_ptr, "typeinfo_ptr");
+
+    // TypeInfo struct is packed: {i32 kind, i32 typesize, ...}
+    // We only need to read the first two i32 fields
+    auto ti_header_l = llvm::StructType::get(
+        llvm_ctx, {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx)}, true);
+    auto size_gep = builder.CreateStructGEP(ti_header_l, typeinfo_ptr, 1);
+    return builder.CreateLoad(llvm::Type::getInt32Ty(llvm_ctx), size_gep, "typesize");
+}
+
+llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    if (!fn || !fn->container_subtype) return nullptr;
+
+    auto container_type = fn->container_subtype->final_type;
+    if (!container_type) return nullptr;
+    container_type = eval_type(container_type);
+    if (container_type->kind != TypeKind::Struct) return nullptr;
+
+    auto &struct_data = container_type->data.struct_;
+
+    // Find a fat pointer field (*T or &T) where T is the interface type
+    auto iface_key = get_resolver()->format_type(iface_type);
+    ChiStructMember *target_field = nullptr;
+    ChiType *field_type = nullptr;
+    for (auto field : struct_data.fields) {
+        auto ftype = eval_type(field->resolved_type);
+        if (ftype->is_pointer_like()) {
+            auto elem = ftype->get_elem();
+            if (elem && ChiTypeStruct::is_interface(elem) &&
+                get_resolver()->format_type(elem) == iface_key) {
+                target_field = field;
+                field_type = ftype;
+                break;
+            }
+        }
+    }
+
+    if (!target_field) return nullptr;
+
+    auto container_type_l = compile_type(container_type);
+    auto fat_ptr_type_l = compile_type(field_type);
+
+    // Prefer function parameters over `this` (params are more likely to have valid data)
+    if (fn->node && fn->node->type == ast::NodeType::FnDef) {
+        auto proto_node = fn->node->data.fn_def.fn_proto;
+        for (auto &param_info : fn->parameter_info) {
+            if (param_info.kind != ParameterKind::Regular) continue;
+            auto param_type = param_info.type;
+            if (!param_type || !param_type->is_pointer_like()) continue;
+            auto param_elem = param_type->get_elem();
+            if (!param_elem) continue;
+            param_elem = eval_type(param_elem);
+            if (get_resolver()->format_type(param_elem) !=
+                get_resolver()->format_type(container_type)) continue;
+
+            // This param references the same container struct — use its fat pointer field
+            auto param_node = proto_node->data.fn_proto.params[param_info.user_param_index];
+            auto param_alloca = get_var(param_node);
+            auto struct_ptr = builder.CreateLoad(get_llvm_ptr_type(), param_alloca, "param_struct_ptr");
+            auto field_gep = builder.CreateStructGEP(container_type_l, struct_ptr,
+                                                     target_field->field_index);
+            auto fat_ptr = builder.CreateLoad(fat_ptr_type_l, field_gep, "iface_fat_ptr");
+            return builder.CreateExtractValue(fat_ptr, {1}, "vtable_ptr");
+        }
+    }
+
+    // Fall back to `this` pointer
+    if (fn->bind_ptr) {
+        auto field_gep = builder.CreateStructGEP(container_type_l, fn->bind_ptr,
+                                                 target_field->field_index);
+        auto fat_ptr = builder.CreateLoad(fat_ptr_type_l, field_gep, "iface_fat_ptr");
+        return builder.CreateExtractValue(fat_ptr, {1}, "vtable_ptr");
+    }
+
+    return nullptr;
 }
 
 Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) {
@@ -4024,6 +4392,82 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         // Pass original field_type to preserve Subtype info for container_subtype resolution
         compile_destruction_for_type(fn, field_gep, field_type);
     }
+
+    builder.CreateRetVoid();
+
+    // Restore insert point
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+
+    return fn;
+}
+
+Function *Compiler::generate_copier(ChiType *type) {
+    // Don't generate copiers for placeholder types
+    if (type->is_placeholder) {
+        return nullptr;
+    }
+
+    // Check if already generated
+    auto existing = m_ctx->copier_table.get(type);
+    if (existing) {
+        return *existing;
+    }
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Resolve subtype if needed
+    auto resolved_type = type;
+    while (resolved_type && resolved_type->kind == TypeKind::Subtype) {
+        auto final_type = resolved_type->data.subtype.final_type;
+        if (final_type) {
+            resolved_type = final_type;
+        } else {
+            break;
+        }
+    }
+
+    if (!resolved_type || resolved_type->is_placeholder) {
+        return nullptr;
+    }
+
+    if (resolved_type->kind != TypeKind::Struct) {
+        return nullptr;
+    }
+
+    // Create function type: void __copy(T* dest, T* src)
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+
+    // Generate unique name for the copier
+    auto type_name = get_resolver()->format_type(type, true);
+    auto fn_name = fmt::format("{}.__copy", type_name);
+
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    // Create Function object
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->copier_table[type] = fn;
+
+    // Save current insert point
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    // Create entry block
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+
+    auto dest_ptr = llvm_fn->getArg(0);
+    auto src_ptr = llvm_fn->getArg(1);
+
+    // Delegate to compile_copy_with_ref — pure copy without destruct_old
+    // The caller is responsible for destructing the old value first if needed
+    compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, resolved_type, nullptr, false);
 
     builder.CreateRetVoid();
 
@@ -4509,6 +4953,12 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 
     type = eval_type(type);
     auto key = get_resolver()->format_type(type);
+    // *Interface, &Interface, Mut<Interface>, and bare Interface are all the same fat pointer type
+    if ((type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
+         type->kind == TypeKind::MutRef) &&
+        type->data.pointer.elem && ChiTypeStruct::is_interface(type->data.pointer.elem)) {
+        key = "FatIFacePointer<" + get_resolver()->format_type(type->data.pointer.elem) + ">";
+    }
     auto it = m_ctx->type_table.get(key);
     if (it) {
         return *it;
@@ -4589,9 +5039,16 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Reference:
     case TypeKind::MutRef: {
         auto &data = type->data.pointer;
+        // Interface references are fat pointers {data_ptr, vtable_ptr}
+        if (data.elem && ChiTypeStruct::is_interface(data.elem)) {
+            std::vector<llvm::Type *> members;
+            members.push_back(get_llvm_ptr_type()); // [0] data
+            members.push_back(get_llvm_ptr_type()); // [1] vtable
+            return llvm::StructType::create(
+                members,
+                "FatIFacePointer<" + get_resolver()->format_type(data.elem, true) + ">");
+        }
         return get_llvm_ptr_type();
-        // auto elem_type_l = compile_type(data.elem);
-        // return llvm::PointerType::get(elem_type_l, 0);
     }
     case TypeKind::Optional: {
         auto &data = type->data.pointer;
@@ -4618,13 +5075,6 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Struct: {
         auto key = get_resolver()->format_type(type);
         auto &data = type->data.struct_;
-        if (data.kind == ContainerKind::Interface) {
-            std::vector<llvm::Type *> members;
-            members.push_back(get_llvm_ptr_type()); // typeinfo
-            members.push_back(get_llvm_ptr_type()); // data
-            members.push_back(get_llvm_ptr_type()); // vtable
-            return llvm::StructType::create(members, get_resolver()->format_type(type, true));
-        }
         if (!data.fields.len) {
             // Empty structs need a placeholder byte for LLVM allocations
             // (void type cannot be allocated)

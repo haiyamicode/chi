@@ -364,6 +364,23 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
             }
         }
 
+        // &Concrete → &Interface conversion
+        auto to_elem = to_type->get_elem();
+        if (to_elem && ChiTypeStruct::is_interface(to_elem)) {
+            if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
+                from_type->kind == TypeKind::MutRef) {
+                auto from_elem = from_type->get_elem();
+                if (from_elem && from_elem->kind == TypeKind::Struct &&
+                    from_elem->data.struct_.kind == ContainerKind::Struct) {
+                    for (auto &impl : from_elem->data.struct_.interfaces) {
+                        if (is_same_type(impl->interface_type, to_elem)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
         // Int to pointer conversion must be explicit (after pointer/ref checks)
         if (from_type->is_int_like()) {
             return is_explicit;
@@ -408,21 +425,6 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         if (m_ctx->rt_string_type && is_same_type(to_type, m_ctx->rt_string_type)) {
             if (from_type->kind == TypeKind::String) {
                 return true;
-            }
-        }
-        if (ChiTypeStruct::is_interface(to_type) && ChiTypeStruct::is_pointer_type(from_type)) {
-            auto ft = from_type->get_elem();
-            if (ft->kind != TypeKind::Struct) {
-                return false;
-            }
-            auto &ss = ft->data.struct_;
-            if (ss.kind == ContainerKind::Struct) {
-                for (auto &impl : ss.interfaces) {
-                    if (is_same_type(impl->interface_type, to_type)) {
-                        return true;
-                    }
-                }
-                return false;
             }
         }
         return false;
@@ -916,6 +918,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *var_type = nullptr;
         if (data.type) {
             var_type = resolve_value(data.type, scope);
+            if (var_type && ChiTypeStruct::is_interface(var_type)) {
+                error(node, errors::BARE_INTERFACE_TYPE, format_type(var_type),
+                      format_type(var_type));
+            }
         }
         if (data.expr) {
             // Use explicit type, or scope.value_type as hint for type inference
@@ -1479,6 +1485,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             } else {
                 result_type = scope.value_type;
+                if (!data.is_new) {
+                    // Construct expressions can only create struct/optional/array values
+                    bool constructible = result_type->is_placeholder ||
+                                         result_type->kind == TypeKind::Struct ||
+                                         result_type->kind == TypeKind::Subtype ||
+                                         result_type->kind == TypeKind::Optional ||
+                                         result_type->kind == TypeKind::Array;
+                    if (!constructible) {
+                        error(node, "cannot construct type '{}'", format_type(result_type, true));
+                        return nullptr;
+                    }
+                }
                 if (data.is_new != result_type->is_raw_pointer()) {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
                 }
@@ -2133,7 +2151,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         switch (data.prefix->type) {
         case TokenType::KW_DELETE: {
             auto expr_type = resolve(data.expr, scope);
-            if (!expr_type->is_raw_pointer()) {
+            if (!expr_type->is_pointer_like()) {
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type(expr_type, true));
             }
@@ -3003,6 +3021,9 @@ bool Resolver::type_needs_destruction(ChiType *type) {
 
     // Strings need destruction
     if (type->kind == TypeKind::String) return true;
+
+    // Interface types need vtable-based destruction
+    if (type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(type)) return true;
 
     // Lambdas may own type-erased captures that must be released.
     if (type->kind == TypeKind::FnLambda) {

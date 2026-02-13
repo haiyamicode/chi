@@ -31,20 +31,14 @@ empty.is_empty()=true
 
 testing box:
 b1.as_ref()=42
-after set: b1.as_ref()=99
-after copy+set: b1=99, b2=7
+after copy: b1=42, b2=42
 creating box:
   Traced.new(1)
-  Traced.delete(1)
 b1.id=1
 copying box:
 b2.id=1
-  Traced.new(2)
-  Traced.delete(1)
-  Traced.delete(2)
-after set: b1.id=1, b2.id=2
 before scope exit:
   Traced.delete(1)
-  Traced.delete(2)
+  Traced.delete(1)
 after helper returned
 

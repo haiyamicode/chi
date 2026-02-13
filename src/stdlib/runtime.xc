@@ -20,6 +20,7 @@ extern "C" {
     func cx_malloc(size: uint32, ignored: *void) *void;
     func cx_free(address: *void);
     func cx_memset(address: *void, v: uint8, n: uint32);
+    func __copy_from(dest: *void, src: *void, destruct_old: bool);
     func cx_runtime_start(stack: *void);
     func cx_set_program_vtable(ptr: *void);
     func cx_runtime_stop();
@@ -108,7 +109,6 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
 
     func copy_from(source: &Shared<T>) {
         source.retain();
-        this.release();
         this.data = source.data;
     }
 
@@ -136,9 +136,8 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
 struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
     private _ptr: *T = null;
 
-    func new(value: T) {
-        this._ptr = cx_malloc(sizeof T, null) as *T;
-        this._ptr! = value;
+    func new(ptr: &T) {
+        this._ptr = ptr as *T;
     }
 
     func delete() {
@@ -148,21 +147,12 @@ struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
     }
 
     func copy_from(source: &Box<T>) {
-        if this._ptr {
-            delete this._ptr;
-        }
-        this._ptr = cx_malloc(sizeof T, null) as *T;
-        this._ptr! = source._ptr!;
+        this._ptr = cx_malloc(sizeof source._ptr!, null) as *T;
+        __copy_from(this._ptr, source._ptr, false);
     }
 
     func as_ref() &T {
         return this._ptr as &T;
-    }
-
-    func set(value: T) {
-        delete this._ptr;
-        this._ptr = cx_malloc(sizeof T, null) as *T;
-        this._ptr! = value;
     }
 
     func display() string {
@@ -198,11 +188,6 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
         // Retain the source captures
         if source.captures {
             cx_capture_retain(source.captures);
-        }
-
-        // Release our current captures
-        if this.captures {
-            cx_capture_release(this.captures);
         }
 
         // Copy all fields
@@ -416,7 +401,6 @@ struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, o
     }
 
     func copy_from(source: &Array<T>) {
-        this.clear();
         for item in source {
             this.add(item);
         }
@@ -453,9 +437,6 @@ struct CString implements ops.CopyFrom<CString> {
     }
 
     mut func copy_from(source: &CString) {
-        if this.data != null {
-            cx_free(this.data as *void);
-        }
         this.data = cx_cstring_copy(source.data);
     }
 

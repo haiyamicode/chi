@@ -236,6 +236,7 @@ struct CodegenContext {
     map<ChiEnumVariant *, llvm::Value *> enum_variant_table = {};
     map<string, llvm::DICompileUnit *> module_cu_table = {};
     map<ChiType *, Function *> destructor_table = {};  // Generated __delete functions
+    map<ChiType *, Function *> copier_table = {};      // Generated __copy functions
     map<ChiType *, Function *> constructor_table = {}; // Generated __new functions
 
     // Module-level let vars that need runtime initialization
@@ -306,7 +307,15 @@ class Compiler {
 
     void compile_destruction(Function *fn, llvm::Value *address, ast::Node *node);
     void compile_destruction_for_type(Function *fn, llvm::Value *address, ChiType *type);
+    void compile_interface_destruction(Function *fn, llvm::Value *iface_address, ChiType *iface_ref_type);
+    void call_vtable_destructor(Function *fn, llvm::Value *vtable_ptr, llvm::Value *data_ptr);
+    void call_vtable_copier(Function *fn, llvm::Value *vtable_ptr, llvm::Value *dest_data,
+                            llvm::Value *src_data);
+    llvm::Value *find_interface_vtable(Function *fn, ChiType *iface_type);
+    llvm::Value *load_typesize_from_vtable(llvm::Value *vtable_ptr);
+    llvm::ConstantPointerNull *get_null_ptr();
     Function *generate_destructor(ChiType *type, ChiType *container_type = nullptr);
+    Function *generate_copier(ChiType *type);
     Function *generate_destructor_optional(ChiType *type, ChiType *resolved_type);
     Function *generate_destructor_continuation(llvm::StructType *capture_struct_type,
                                                ChiType *promise_type,
@@ -343,7 +352,7 @@ class Compiler {
     void compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type,
                       ast::Node *expr = nullptr);
     void compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
-                               ast::Node *expr = nullptr);
+                               ast::Node *expr = nullptr, bool destruct_old = false);
 
     llvm::Value *compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
                                     ChiStructMember *member);

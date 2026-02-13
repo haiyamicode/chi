@@ -1,3 +1,28 @@
+=== basic dispatch ===
 1: baaaaahh
 2: meeoooww
 3: <silence>
+=== heap + delete ===
+circle: area=75
+rect: area=12
+Circle.delete(r=5)
+Rect.delete(3x4)
+Circle.delete(r=9)
+=== function params ===
+circle: area=300
+rect: area=42
+bigger: circle
+Circle.delete(r=10)
+Rect.delete(6x7)
+=== sizeof ===
+sizeof &Shape: 16
+sizeof Circle: 4
+sizeof Rect: 8
+Circle.delete(r=1)
+Rect.delete(1x1)
+=== Box<Shape> ===
+circle: area=147
+rect: area=6
+before cleanup:
+Circle.delete(r=7)
+Rect.delete(2x3)

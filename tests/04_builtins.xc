@@ -107,25 +107,23 @@ struct Traced {
 
 func test_box_helper() {
     println("creating box:");
-    var b1 = Box<Traced>{{1}};
+    var t = new Traced{1};
+    var b1 = Box<Traced>{t};
     printf("b1.id={}\n", b1.as_ref().id);
     println("copying box:");
     var b2 = b1;
     printf("b2.id={}\n", b2.as_ref().id);
-    b2.set({2});
-    printf("after set: b1.id={}, b2.id={}\n", b1.as_ref().id, b2.as_ref().id);
     println("before scope exit:");
 }
 
 func test_box() {
     println("testing box:");
-    var b1 = Box<int>{42};
+    var p = cx_malloc(sizeof int, null) as *int;
+    p! = 42;
+    var b1 = Box<int>{p as &int};
     printf("b1.as_ref()={}\n", b1.as_ref());
-    b1.set(99);
-    printf("after set: b1.as_ref()={}\n", b1.as_ref());
     var b2 = b1;
-    b2.set(7);
-    printf("after copy+set: b1={}, b2={}\n", b1.as_ref(), b2.as_ref());
+    printf("after copy: b1={}, b2={}\n", b1.as_ref(), b2.as_ref());
     test_box_helper();
     println("after helper returned");
     println("");
