@@ -51,17 +51,35 @@ interface Shape {
 
 struct Circle implements Shape {
     radius: int = 0;
-    func area() int { return this.radius * this.radius * 3; }
-    func name() string { return "circle"; }
-    func delete() { printf("Circle.delete(r={})\n", this.radius); }
+
+    func area() int {
+        return this.radius * this.radius * 3;
+    }
+
+    func name() string {
+        return "circle";
+    }
+
+    func delete() {
+        printf("Circle.delete(r={})\n", this.radius);
+    }
 }
 
 struct Rect implements Shape {
     w: int = 0;
     h: int = 0;
-    func area() int { return this.w * this.h; }
-    func name() string { return "rect"; }
-    func delete() { printf("Rect.delete({}x{})\n", this.w, this.h); }
+
+    func area() int {
+        return this.w * this.h;
+    }
+
+    func name() string {
+        return "rect";
+    }
+
+    func delete() {
+        printf("Rect.delete({}x{})\n", this.w, this.h);
+    }
 }
 
 // Pass interface reference as function parameter
@@ -149,3 +167,4 @@ func main() {
     test_sizeof();
     test_box();
 }
+

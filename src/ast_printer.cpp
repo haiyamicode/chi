@@ -51,7 +51,18 @@ void AstPrinter::print_node(Node *node) {
         flush_comments_before(_ft->pos);
     switch (node->type) {
     case NodeType::Root: {
+        Node *prev_decl = nullptr;
         for (auto decl : m_root->data.root.top_level_decls) {
+            // FnDef/StructDecl emit their own trailing \n in print_node,
+            // so the loop's \n already creates a blank line.
+            // VarDecl/ImportDecl/ExportDecl don't, so preserve source
+            // blank lines after them.
+            if (prev_decl && (prev_decl->type == NodeType::VarDecl ||
+                              prev_decl->type == NodeType::ImportDecl ||
+                              prev_decl->type == NodeType::ExportDecl) &&
+                has_blank_line_between(prev_decl, decl)) {
+                emit("\n");
+            }
             auto *ft = first_token(decl);
             if (ft)
                 flush_comments_before(ft->pos);
@@ -60,6 +71,7 @@ void AstPrinter::print_node(Node *node) {
                 emit(";");
             }
             emit("\n");
+            prev_decl = decl;
         }
         // Flush any trailing comments at end of file
         if (m_comments) {
@@ -767,7 +779,7 @@ void AstPrinter::print_node(Node *node) {
             // Fallback (shouldn't happen in well-formed code)
             emit(data.path->to_string());
         }
-        emit(";\n");
+        emit(";");
         break;
     }
     case NodeType::ExportDecl: {
@@ -787,7 +799,7 @@ void AstPrinter::print_node(Node *node) {
             // Fallback (shouldn't happen in well-formed code)
             emit(data.path->to_string());
         }
-        emit(";\n");
+        emit(";");
         break;
     }
     case NodeType::ImportSymbol: {

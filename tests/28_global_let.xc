@@ -1,7 +1,6 @@
 // Test module-level let declarations
 
 import "./testdata/28_global_let" as constants;
-
 import {magic_number, module_greeting} from "./testdata/28_global_let";
 
 let answer = 42;
@@ -32,3 +31,4 @@ func main() {
     printf("magic_number = {}\n", magic_number);
     printf("module_greeting = {}\n", module_greeting);
 }
+
