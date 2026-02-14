@@ -1,0 +1,44 @@
+=== catch-all ===
+caught
+after success
+=== typed catch ===
+caught MyError: typed
+=== void try ===
+caught void
+void ok
+=== destructor unwind ===
+Resource.delete(A)
+Resource.delete(B)
+Resource.delete(mid)
+caught after unwind
+=== error cleanup ===
+msg: heap string error
+after cleanup
+=== sequential ===
+caught first
+caught second
+all done
+=== nested ===
+inner caught
+between
+inner2 caught
+nested done
+=== no throw ===
+no throw ok
+=== result mode ===
+value = 42
+got error: oops
+=== typed result ===
+caught: typed result
+value = 42
+=== catch block ===
+fallback = -1
+success = 42
+handling: bad
+typed fallback = 0
+=== rethrow ===
+caught: original
+re-caught: error code 42
+branch fallback = -1
+branch rethrow: error code 123
+early return = -1

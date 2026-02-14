@@ -23,7 +23,7 @@ struct ChiTypeEnum;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer,
           Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
-          Result, Error, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
+          Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
           Undefined)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)

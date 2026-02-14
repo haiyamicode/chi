@@ -51,6 +51,9 @@ constexpr auto NON_INTERFACE_IMPL_TYPE =
     "cannot use non-interface type '{}' in struct implement list";
 constexpr auto VARIADIC_NOT_FINAL = "cannot use ... with non-final parameter '{}'";
 constexpr auto TRY_NOT_CALL = "try must be used with a function call expression";
+constexpr auto CATCH_NOT_ERROR = "catch type '{}' must implement the Error interface";
+constexpr auto THROW_NOT_ERROR = "throw expression type '{}' must implement the Error interface";
+constexpr auto THROW_NOT_REFERENCE = "throw expression must be a reference type";
 constexpr auto MODULE_NOT_FOUND = "module '{}' not found";
 constexpr auto MODULE_INDEX_NOT_FOUND = "module '{}' has no index file (_index.xc or _index.x)";
 constexpr auto INVALID_ATTRIBUTE_TERM = "invalid attribute term '{}'";

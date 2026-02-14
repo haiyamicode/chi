@@ -675,6 +675,22 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     for (auto var : cleanup_fn_def->cleanup_vars) {
         compile_destruction(fn, get_var(var), var);
     }
+    // Destroy any caught error objects still owned (from diverging catch blocks)
+    for (auto &owner : fn->error_owner_vars) {
+        auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
+        auto is_nonnull = builder.CreateICmpNE(
+            owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
+        auto do_free_b = fn->new_label("_err_cleanup");
+        auto skip_free_b = fn->new_label("_err_cleanup_done");
+        builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
+        fn->use_label(do_free_b);
+        if (owner.concrete_type) {
+            compile_destruction_for_type(fn, owned_ptr, owner.concrete_type);
+        }
+        builder.CreateCall(get_system_fn("cx_free")->llvm_fn, {owned_ptr});
+        builder.CreateBr(skip_free_b);
+        fn->use_label(skip_free_b);
+    }
     for (auto ptr : fn->vararg_pointers) {
         emit_dbg_location(fn->node);
         builder.CreateCall(get_system_fn("cx_array_delete")->llvm_fn, {ptr});
@@ -699,6 +715,21 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         builder.CreateExtractValue(landing, {1});
         for (auto var : fn->get_def()->cleanup_vars) {
             compile_destruction(fn, get_var(var), var);
+        }
+        for (auto &owner : fn->error_owner_vars) {
+            auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
+            auto is_nonnull = builder.CreateICmpNE(
+                owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
+            auto do_free_b = fn->new_label("_err_cleanup");
+            auto skip_free_b = fn->new_label("_err_cleanup_done");
+            builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
+            fn->use_label(do_free_b);
+            if (owner.concrete_type) {
+                compile_destruction_for_type(fn, owned_ptr, owner.concrete_type);
+            }
+            builder.CreateCall(get_system_fn("cx_free")->llvm_fn, {owned_ptr});
+            builder.CreateBr(skip_free_b);
+            fn->use_label(skip_free_b);
         }
         fn->insn_noop();
         builder.CreateResume(landing);
@@ -1135,6 +1166,8 @@ static bool contains_await(ast::Node *node) {
     }
     case ast::NodeType::ReturnStmt:
         return contains_await(node->data.return_stmt.expr);
+    case ast::NodeType::ThrowStmt:
+        return contains_await(node->data.throw_stmt.expr);
     case ast::NodeType::BinOpExpr:
         return contains_await(node->data.bin_op_expr.op1) ||
                contains_await(node->data.bin_op_expr.op2);
@@ -1160,6 +1193,8 @@ static ast::Node *find_await_expr(ast::Node *node) {
         return find_await_expr(node->data.var_decl.expr);
     case ast::NodeType::ReturnStmt:
         return find_await_expr(node->data.return_stmt.expr);
+    case ast::NodeType::ThrowStmt:
+        return find_await_expr(node->data.throw_stmt.expr);
     case ast::NodeType::BinOpExpr: {
         auto lhs = find_await_expr(node->data.bin_op_expr.op1);
         return lhs ? lhs : find_await_expr(node->data.bin_op_expr.op2);
@@ -1193,6 +1228,9 @@ void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> 
         break;
     case ast::NodeType::ReturnStmt:
         collect_vars_used_in_node(node->data.return_stmt.expr, vars);
+        break;
+    case ast::NodeType::ThrowStmt:
+        collect_vars_used_in_node(node->data.throw_stmt.expr, vars);
         break;
     case ast::NodeType::BinOpExpr:
         collect_vars_used_in_node(node->data.bin_op_expr.op1, vars);
@@ -1783,6 +1821,14 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             auto has_value = builder.CreateExtractValue(value, {0}, "has_value");
             return has_value;
         }
+        case TypeKind::Result: {
+            // Result is truthy when err.has_value is false (no error)
+            // Result internal struct: { ?E err, T value }
+            // ?E is { bool has_value, E }
+            auto has_err = builder.CreateExtractValue(value, {0, 0}, "has_err");
+            return builder.CreateXor(
+                has_err, llvm::ConstantInt::getTrue(compile_type(get_system_types()->bool_)));
+        }
         case TypeKind::Pointer:
         case TypeKind::Reference:
         case TypeKind::MutRef: {
@@ -2023,6 +2069,29 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
 
+                if (data.op1->resolved_type->kind == TypeKind::Result) {
+                    // Result! — force unwrap value (panic if error)
+                    auto ref = compile_expr_ref(fn, data.op1);
+                    auto result_type = data.op1->resolved_type;
+                    auto result_type_l = compile_type(result_type);
+                    // Result internal struct: { ?E err, T value }
+                    // err is ?E which is { bool has_value, E }
+                    auto err_type = result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
+                    auto err_type_l = compile_type(err_type);
+                    auto err_p = builder.CreateStructGEP(result_type_l, ref.address, 0);
+                    auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
+                    auto has_err = builder.CreateLoad(compile_type(get_system_types()->bool_), has_err_p);
+                    // Assert no error: has_err must be false → negate for assert
+                    auto is_ok = builder.CreateXor(
+                        has_err, llvm::ConstantInt::getTrue(compile_type(get_system_types()->bool_)));
+                    auto assert = get_system_fn("assert");
+                    emit_dbg_location(expr);
+                    builder.CreateCall(assert->llvm_fn,
+                                       {is_ok, compile_string_literal("unwrapping error Result")});
+                    auto value_p = builder.CreateStructGEP(result_type_l, ref.address, 1);
+                    return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
+                }
+
                 // unwrap pointer
                 auto ptr = compile_expr(fn, data.op1);
                 auto elem_type = get_chitype(data.op1)->get_elem();
@@ -2162,9 +2231,23 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.try_expr;
         auto &builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
-        auto &llvm_module = *m_ctx->llvm_module.get();
-        auto result_type_l = compile_type(get_chitype(expr));
-        llvm::Value *result_var = builder.CreateAlloca(result_type_l, nullptr, "try_result");
+
+        auto result_type = get_chitype(expr);
+        bool is_void = result_type->kind == TypeKind::Void;
+        llvm::Type *result_type_l = nullptr;
+        llvm::Value *result_var = nullptr;
+
+        if (!is_void) {
+            result_type_l = compile_type(result_type);
+            result_var = fn->entry_alloca(result_type_l, "try_result");
+
+            // Zero-initialize the result
+            auto size = llvm_type_size(result_type_l);
+            builder.CreateMemSet(
+                result_var, llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
+                size.getFixedValue(), llvm::MaybeAlign());
+        }
+
         auto continue_b = fn->new_label("_try_continue");
         auto normal_b = fn->new_label("_try_normal");
         auto landing_b = fn->new_label("_try_landing");
@@ -2174,30 +2257,199 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         invoke.landing = landing_b;
         auto value = compile_fn_call(fn, data.expr, &invoke);
 
+        // === LANDING PAD (error path) ===
         fn->use_label(invoke.landing);
         auto caught_type_l = m_ctx->get_caught_result_type();
         auto landing = builder.CreateLandingPad(caught_type_l, 1);
-        auto null_ptr = llvm::ConstantPointerNull::get(
-            llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0));
-        landing->addClause(null_ptr);
-        builder.CreateBr(continue_b);
-        // auto result_err_field_type_l = result_type_l->getStructElementType(0);
-        // auto has_err_type_l = result_err_field_type_l->getStructElementType(0);
-        // auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
-        // auto err_has_value_p = builder.CreateStructGEP(result_err_field_type_l, err_p, 0);
-        // builder.CreateStore(llvm::ConstantInt::get(has_err_type_l, 1), err_has_value_p);
-        // builder.CreateBr(main_b);
+        landing->addClause(llvm::ConstantPointerNull::get(
+            llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)));
 
+        // Extract thrown pointer — null means panic (unrecoverable), non-null means throw
+        auto thrown_ptr = builder.CreateExtractValue(landing, {0}, "thrown_ptr");
+        auto is_typed = builder.CreateICmpNE(
+            thrown_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()), "is_typed_error");
+
+        auto typed_error_b = fn->new_label("_try_typed_error");
+        auto panic_b = fn->new_label("_try_panic");
+        builder.CreateCondBr(is_typed, typed_error_b, panic_b);
+
+        // -- Panic path: re-throw (unrecoverable) --
+        fn->use_label(panic_b);
+        builder.CreateResume(landing);
+
+        // -- Typed error path --
+        fn->use_label(typed_error_b);
+
+        // Get error data from thread-local storage
+        auto get_error_data_fn = get_system_fn("cx_get_error_data");
+        auto get_error_vtable_fn = get_system_fn("cx_get_error_vtable");
+        auto get_error_type_id_fn = get_system_fn("cx_get_error_type_id");
+
+        auto error_data = builder.CreateCall(get_error_data_fn->llvm_fn, {}, "error_data");
+        auto error_vtable = builder.CreateCall(get_error_vtable_fn->llvm_fn, {}, "error_vtable");
+
+        if (data.catch_block) {
+            // === CATCH BLOCK MODE: try f() catch (...) { block } → yields T ===
+
+            // Save error_data pointer for cleanup (initialized to null, set on catch path)
+            // This alloca is in the entry block, so it persists for function-level cleanup
+            auto error_data_var = fn->entry_alloca(builder.getPtrTy(), "error_owner");
+            builder.CreateStore(
+                llvm::ConstantPointerNull::get(builder.getPtrTy()), error_data_var);
+
+            // Type check if specific catch
+            ChiType *catch_type = nullptr;
+            if (data.catch_expr) {
+                catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
+                auto caught_type_id = builder.CreateCall(get_error_type_id_fn->llvm_fn, {}, "caught_type_id");
+                auto expected_id = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(llvm_ctx), catch_type->id);
+                auto type_matches = builder.CreateICmpEQ(caught_type_id, expected_id, "type_matches");
+
+                auto match_b = fn->new_label("_try_type_match");
+                auto nomatch_b = fn->new_label("_try_type_nomatch");
+                builder.CreateCondBr(type_matches, match_b, nomatch_b);
+
+                // Type doesn't match: re-throw
+                fn->use_label(nomatch_b);
+                builder.CreateResume(landing);
+
+                fn->use_label(match_b);
+            }
+
+            // Take ownership of the error data pointer
+            builder.CreateStore(error_data, error_data_var);
+
+            // Set up error binding variable
+            if (data.catch_err_var) {
+                auto err_var = compile_alloc(fn, data.catch_err_var);
+                add_var(data.catch_err_var, err_var);
+
+                if (data.catch_expr) {
+                    // Typed catch: err is &ConcreteError — store data pointer directly
+                    builder.CreateStore(error_data, err_var);
+                } else {
+                    // Catch-all: err is Error interface — build { data, vtable }
+                    auto err_type = get_chitype(data.catch_err_var);
+                    auto err_type_l = compile_type(err_type);
+                    auto data_p = builder.CreateStructGEP(err_type_l, err_var, 0);
+                    builder.CreateStore(error_data, data_p);
+                    auto vtable_p = builder.CreateStructGEP(err_type_l, err_var, 1);
+                    builder.CreateStore(error_vtable, vtable_p);
+                }
+
+                // Clear implicit_vars so compile_block doesn't re-alloca the err var
+                data.catch_block->data.block.implicit_vars.len = 0;
+            }
+
+            // Compile catch block with a cleanup label instead of continue_b
+            auto catch_cleanup_b = fn->new_label("_catch_cleanup");
+            compile_block(fn, expr, data.catch_block, catch_cleanup_b, result_var);
+
+            // === CATCH CLEANUP: destroy error object after catch block ===
+            fn->use_label(catch_cleanup_b);
+            {
+                auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), error_data_var, "err_owned");
+                auto is_nonnull = builder.CreateICmpNE(
+                    owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
+                auto do_free_b = fn->new_label("_catch_free");
+                auto skip_free_b = fn->new_label("_catch_free_done");
+                builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
+
+                fn->use_label(do_free_b);
+                // Destroy the error struct's fields (string fields etc.)
+                if (catch_type) {
+                    compile_destruction_for_type(fn, owned_ptr, catch_type);
+                }
+                // Free the heap allocation
+                auto free_fn = get_system_fn("cx_free");
+                builder.CreateCall(free_fn->llvm_fn, {owned_ptr});
+                // Clear ownership so function-level cleanup doesn't double-free
+                builder.CreateStore(
+                    llvm::ConstantPointerNull::get(builder.getPtrTy()), error_data_var);
+                builder.CreateBr(skip_free_b);
+
+                fn->use_label(skip_free_b);
+            }
+            builder.CreateBr(continue_b);
+
+            // Register error_data_var for function-level cleanup (diverge path)
+            // This handles cases where the catch block returns/breaks
+            fn->error_owner_vars.push_back({error_data_var, catch_type});
+        } else {
+            // === RESULT MODE: try f() → Result<T, E> ===
+
+            if (data.catch_expr) {
+                auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
+                auto caught_type_id = builder.CreateCall(get_error_type_id_fn->llvm_fn, {}, "caught_type_id");
+                auto expected_id = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(llvm_ctx), catch_type->id);
+                auto type_matches = builder.CreateICmpEQ(caught_type_id, expected_id, "type_matches");
+
+                auto match_b = fn->new_label("_try_type_match");
+                auto nomatch_b = fn->new_label("_try_type_nomatch");
+                builder.CreateCondBr(type_matches, match_b, nomatch_b);
+
+                // Type doesn't match: re-throw
+                fn->use_label(nomatch_b);
+                builder.CreateResume(landing);
+
+                // Type matches: populate result with &ConcreteError
+                fn->use_label(match_b);
+                auto err_type = result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
+                auto err_type_l = compile_type(err_type);
+                auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
+                auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
+                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1), has_err_p);
+                auto err_value_p = builder.CreateStructGEP(err_type_l, err_p, 1);
+                builder.CreateStore(error_data, err_value_p);
+            } else {
+                // Catch-all: populate result with Error interface
+                auto err_type = result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
+                auto err_type_l = compile_type(err_type);
+                auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
+                auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
+                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1), has_err_p);
+                auto err_value_p = builder.CreateStructGEP(err_type_l, err_p, 1);
+                auto iface_type_l = compile_type(err_type->get_elem());
+                auto data_p = builder.CreateStructGEP(iface_type_l, err_value_p, 0);
+                builder.CreateStore(error_data, data_p);
+                auto vtable_p = builder.CreateStructGEP(iface_type_l, err_value_p, 1);
+                builder.CreateStore(error_vtable, vtable_p);
+            }
+            builder.CreateBr(continue_b);
+        }
+
+        // === NORMAL PATH (success) ===
         fn->use_label(invoke.normal);
+        if (data.catch_block) {
+            // Catch block mode: store value directly (result_var is T)
+            if (result_var) {
+                if (invoke.sret) {
+                    auto sret_loaded = builder.CreateLoad(invoke.sret_type, invoke.sret);
+                    builder.CreateStore(sret_loaded, result_var);
+                } else if (value && !value->getType()->isVoidTy()) {
+                    builder.CreateStore(value, result_var);
+                }
+            }
+        } else {
+            // Result mode: store value into Result.value field (index 1)
+            auto value_p = builder.CreateStructGEP(result_type_l, result_var, 1);
+            if (invoke.sret) {
+                auto sret_loaded = builder.CreateLoad(invoke.sret_type, invoke.sret);
+                builder.CreateStore(sret_loaded, value_p);
+            } else if (value && !value->getType()->isVoidTy()) {
+                builder.CreateStore(value, value_p);
+            }
+        }
         builder.CreateBr(continue_b);
-        // auto value_type_l = compile_type(get_chitype(data.expr));
-        // auto value_p = builder.CreateStructGEP(result_type_l, result_var, 1);
-        // builder.CreateStore(value, value_p);
 
+        // === CONTINUE ===
         fn->use_label(continue_b);
-        // fn->insn_noop();
-
-        return result_var;
+        if (is_void) {
+            return nullptr;
+        }
+        return builder.CreateLoad(result_type_l, result_var, "try_result");
     }
     case ast::NodeType::AwaitExpr: {
         // For now, implement a simple synchronous await that reads the value directly
@@ -3862,6 +4114,34 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         scope->branched = true;
         break;
     }
+    case ast::NodeType::ThrowStmt: {
+        auto &data = stmt->data.throw_stmt;
+        auto &llvm_builder = *m_ctx->llvm_builder.get();
+        auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+
+        // Compile the error expression — yields &ErrorStruct (a reference)
+        auto error_ref = compile_expr(fn, data.expr);
+        auto expr_type = get_chitype(data.expr);
+        auto elem_type = expr_type->get_elem(); // the concrete struct type
+
+        // Convert &ErrorStruct to Error interface to get vtable and type_info
+        auto rt_error = get_resolver()->get_context()->rt_error_type;
+        auto impl = elem_type->data.struct_.interface_table[rt_error];
+        assert(impl);
+        auto vtable = m_ctx->impl_table[impl];
+        assert(vtable);
+        auto type_info = compile_type_info(elem_type);
+
+        // Call cx_throw(type_info, data_ptr, vtable_ptr, type_id)
+        auto throw_fn = get_system_fn("cx_throw");
+        auto type_id = llvm::ConstantInt::get(
+            llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
+        llvm_builder.CreateCall(throw_fn->llvm_fn,
+                                {type_info, error_ref, vtable, type_id});
+        llvm_builder.CreateUnreachable();
+        scope->branched = true;
+        break;
+    }
     case ast::NodeType::BranchStmt: {
         auto token = stmt->token;
         auto loop = fn->get_loop();
@@ -4093,8 +4373,9 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
-    // Handle optionals and structs via generated __delete
-    if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct) {
+    // Handle optionals, structs, and results via generated __delete
+    if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct &&
+        type->kind != TypeKind::Result) {
         return;
     }
 
@@ -4299,6 +4580,11 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     // Handle Optional types
     if (resolved_type->kind == TypeKind::Optional) {
         return generate_destructor_optional(type, resolved_type);
+    }
+
+    // Handle Result types — owns the error object's heap allocation
+    if (resolved_type->kind == TypeKind::Result) {
+        return generate_destructor_result(type, resolved_type);
     }
 
     if (resolved_type->kind != TypeKind::Struct) {
@@ -4539,6 +4825,12 @@ Function *Compiler::generate_destructor_optional(ChiType *type, ChiType *resolve
     }
 
     return fn;
+}
+
+Function *Compiler::generate_destructor_result(ChiType *type, ChiType *resolved_type) {
+    // TODO: implement once TypeInfo destructor is in place
+    m_ctx->destructor_table[type] = nullptr;
+    return nullptr;
 }
 
 Function *Compiler::generate_destructor_continuation(llvm::StructType *capture_struct_type,
@@ -5088,10 +5380,6 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             members.push_back(compile_type(member->resolved_type));
         }
         return llvm::StructType::create(members, get_resolver()->format_type(type, true));
-    }
-    case TypeKind::Error: {
-        // TODO: implement actual error type
-        return get_llvm_ptr_type();
     }
     // Promise is now a Chi-native struct (TypeKind::Subtype), no special handling needed
     case TypeKind::Subtype: {

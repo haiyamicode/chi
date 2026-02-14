@@ -1105,6 +1105,14 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::KW_RETURN:
         return parse_return_stmt();
 
+    case TokenType::KW_THROW: {
+        auto token = expect(TokenType::KW_THROW);
+        auto node = create_node(NodeType::ThrowStmt, token);
+        node->data.throw_stmt.expr = parse_child_expr_construct(false, node);
+        expect(TokenType::SEMICOLON);
+        return node;
+    }
+
     case TokenType::KW_CONTINUE:
     case TokenType::KW_BREAK:
         return parse_branch_stmt();
@@ -1245,6 +1253,42 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
         consume();
         auto node = create_node(NodeType::TryExpr, token);
         node->data.try_expr.expr = parse_binary_expr(lhs, parent, UNARY_PREC);
+        if (next_is(TokenType::KW_CATCH)) {
+            consume();
+            if (next_is(TokenType::LPAREN)) {
+                // catch (Type) or catch (name: Type)
+                consume();
+                Scope *catch_scope = nullptr;
+                if (get()->type == TokenType::IDEN && lookahead(1)->type == TokenType::COLON) {
+                    // catch (err: FileError) { ... }
+                    auto name_token = get();
+                    consume(); // name
+                    expect(TokenType::COLON);
+                    node->data.try_expr.catch_expr = parse_type_expr(true);
+                    // Create implicit var for the error binding
+                    auto var = create_node(NodeType::VarDecl, name_token);
+                    var->name = name_token->str;
+                    node->data.try_expr.catch_err_var = var;
+                    // Declare in a scope so the block can reference it
+                    catch_scope = m_ctx->resolver->push_scope(node);
+                    m_ctx->resolver->declare_symbol(var->name, var);
+                } else {
+                    // catch (FileError) { ... }
+                    node->data.try_expr.catch_expr = parse_type_expr(true);
+                }
+                expect(TokenType::RPAREN);
+                node->data.try_expr.catch_block = parse_block();
+                if (catch_scope) {
+                    m_ctx->resolver->pop_scope();
+                }
+            } else if (next_is(TokenType::LBRACE)) {
+                // catch { ... } — catch-all
+                node->data.try_expr.catch_block = parse_block();
+            } else {
+                // Old syntax: catch FileError (no block, Result mode)
+                node->data.try_expr.catch_expr = parse_primary_expr(false, node);
+            }
+        }
         return node;
     }
 

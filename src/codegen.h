@@ -79,6 +79,13 @@ struct Function {
     std::vector<ParameterInfo> parameter_info;
     llvm::Value *bind_ptr = nullptr;
 
+    // Error ownership for catch blocks (cleaned up at function return for diverge paths)
+    struct ErrorOwner {
+        llvm::Value *ptr_var;    // alloca holding error data pointer (null if already freed)
+        ChiType *concrete_type;  // concrete error type for destruction (null for catch-all)
+    };
+    std::vector<ErrorOwner> error_owner_vars;
+
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
 
@@ -317,6 +324,7 @@ class Compiler {
     Function *generate_destructor(ChiType *type, ChiType *container_type = nullptr);
     Function *generate_copier(ChiType *type);
     Function *generate_destructor_optional(ChiType *type, ChiType *resolved_type);
+    Function *generate_destructor_result(ChiType *type, ChiType *resolved_type);
     Function *generate_destructor_continuation(llvm::StructType *capture_struct_type,
                                                ChiType *promise_type,
                                                const std::vector<ast::Node *> &captured_vars);

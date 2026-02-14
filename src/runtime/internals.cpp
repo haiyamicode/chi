@@ -30,6 +30,11 @@ using namespace cx;
 struct StackTrace {
     string message;
     char trace[8096];
+    // Typed error support (throw/catch)
+    void *error_type_info = nullptr;  // TypeInfo* from Error interface
+    void *error_data_ptr = nullptr;   // data_ptr from Error interface (heap-allocated struct)
+    void *error_vtable_ptr = nullptr; // vtable_ptr from Error interface
+    uint32_t error_type_id = 0;       // ChiType::id for downcast matching
 };
 
 struct CxCapture {
@@ -391,6 +396,22 @@ void cx_panic(CxString *message) {
     fclose(bt_output_file);
     throw (void *)NULL;
 }
+
+void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_id) {
+    st.error_type_info = type_info;
+    st.error_data_ptr = data_ptr;
+    st.error_vtable_ptr = vtable_ptr;
+    st.error_type_id = type_id;
+    throw data_ptr; // non-null, distinguishes from panic's NULL
+}
+
+void *cx_get_error_type_info() { return st.error_type_info; }
+
+void *cx_get_error_data() { return st.error_data_ptr; }
+
+void *cx_get_error_vtable() { return st.error_vtable_ptr; }
+
+uint32_t cx_get_error_type_id() { return st.error_type_id; }
 
 void *cx_refc_alloc(CxRefc *dest, uint32_t size) {
     dest->data = malloc(size);

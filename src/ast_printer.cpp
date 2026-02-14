@@ -535,6 +535,11 @@ void AstPrinter::print_node(Node *node) {
         }
         break;
     }
+    case NodeType::ThrowStmt: {
+        emit("throw ");
+        print_node(node->data.throw_stmt.expr);
+        break;
+    }
     case NodeType::ParenExpr: {
         auto &child = node->data.child_expr;
         emit("(");
@@ -641,6 +646,23 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.try_expr;
         emit("try ");
         print_node(data.expr);
+        if (data.catch_block) {
+            if (data.catch_expr) {
+                emit(" catch (");
+                if (data.catch_err_var) {
+                    emit(data.catch_err_var->name);
+                    emit(": ");
+                }
+                print_node(data.catch_expr);
+                emit(") ");
+            } else {
+                emit(" catch ");
+            }
+            print_node(data.catch_block);
+        } else if (data.catch_expr) {
+            emit(" catch ");
+            print_node(data.catch_expr);
+        }
         break;
     }
     case NodeType::AwaitExpr: {

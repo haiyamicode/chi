@@ -120,6 +120,12 @@ CHI_RT_EXPORT void cx_debug_i(const char *prefix, int value);
 
 CHI_RT_EXPORT void cx_panic(CxString *message);
 
+CHI_RT_EXPORT void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_id);
+CHI_RT_EXPORT void *cx_get_error_type_info();
+CHI_RT_EXPORT void *cx_get_error_data();
+CHI_RT_EXPORT void *cx_get_error_vtable();
+CHI_RT_EXPORT uint32_t cx_get_error_type_id();
+
 CHI_RT_EXPORT void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
 CHI_RT_EXPORT void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);

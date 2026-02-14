@@ -99,7 +99,6 @@ void Resolver::context_init_primitives() {
     system_types.array = create_type(TypeKind::Array);
     system_types.optional = create_type(TypeKind::Optional);
     system_types.result = create_type(TypeKind::Result);
-    system_types.error = create_type(TypeKind::Error);
     // Promise is now defined as a Chi-native struct in runtime.xc
     // system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
@@ -137,7 +136,6 @@ void Resolver::context_init_primitives() {
 
     // non-primitive builtins
     add_primitive("Result", system_types.result);
-    add_primitive("Error", system_types.error);
     // Promise is now defined as a Chi-native struct in runtime.xc
     // add_primitive("Promise", system_types.promise);
 
@@ -432,6 +430,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Bool:
         // Allow implicit conversion from any int type to bool
         return from_type->is_int_like() || from_type->kind == TypeKind::Optional ||
+               from_type->kind == TypeKind::Result ||
                from_type->is_pointer_like() || (is_explicit && from_type->kind == TypeKind::Char);
     case TypeKind::Optional: {
         // Allow null pointer, same optional type, or implicit T -> ?T wrap
@@ -1108,6 +1107,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     return t->get_elem();
                 } else if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
+                } else if (t->kind == TypeKind::Result) {
+                    return t->data.result.value;
                 }
                 goto invalid;
             } else {
@@ -1145,7 +1146,56 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(data.expr, errors::TRY_NOT_CALL);
         }
         scope.parent_fn_def()->has_try = true;
-        return get_result_type(expr_type, get_system_types()->error);
+
+        if (data.catch_block) {
+            // Catch block mode: try f() catch (...) { block } → yields T
+            ChiType *err_var_type = nullptr;
+            if (data.catch_expr) {
+                auto catch_type = to_value_type(resolve(data.catch_expr, scope));
+                if (catch_type && catch_type->kind == TypeKind::Struct) {
+                    auto rt_error = m_ctx->rt_error_type;
+                    if (rt_error && !catch_type->data.struct_.interface_table.get(rt_error)) {
+                        error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type(catch_type));
+                    }
+                    err_var_type = get_pointer_type(catch_type, TypeKind::Reference);
+                } else {
+                    error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type(catch_type));
+                }
+            } else {
+                // catch-all: error binding is &Error (interface reference)
+                err_var_type = get_pointer_type(m_ctx->rt_error_type, TypeKind::Reference);
+            }
+
+            // Set up error binding var in catch block scope
+            if (data.catch_err_var && err_var_type) {
+                data.catch_err_var->resolved_type = err_var_type;
+                data.catch_err_var->parent_fn = scope.parent_fn_node;
+                data.catch_err_var->data.var_decl.is_generated = true;
+                data.catch_err_var->data.var_decl.initialized_at = node;
+                auto &block_data = data.catch_block->data.block;
+                block_data.implicit_vars.add(data.catch_err_var);
+                block_data.scope->put(data.catch_err_var->name, data.catch_err_var);
+            }
+
+            resolve(data.catch_block, scope);
+            return expr_type;
+        }
+
+        if (data.catch_expr) {
+            // No block, Result mode: try f() catch FileError → Result<T, &FileError>
+            auto catch_type = to_value_type(resolve(data.catch_expr, scope));
+            if (catch_type && catch_type->kind == TypeKind::Struct) {
+                auto rt_error = m_ctx->rt_error_type;
+                if (rt_error && !catch_type->data.struct_.interface_table.get(rt_error)) {
+                    error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type(catch_type));
+                }
+                auto ref_type = get_pointer_type(catch_type, TypeKind::Reference);
+                return get_result_type(expr_type, ref_type);
+            }
+            error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type(catch_type));
+        }
+        // try f() → Result<T, &Error>
+        return get_result_type(expr_type, get_pointer_type(m_ctx->rt_error_type, TypeKind::Reference));
     }
     case NodeType::AwaitExpr: {
         auto &data = node->data.await_expr;
@@ -1248,6 +1298,29 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.expr, expr_type, expected_type);
         }
         return return_type;
+    }
+    case NodeType::ThrowStmt: {
+        auto &data = node->data.throw_stmt;
+        auto expr_type = resolve(data.expr, scope);
+        if (expr_type) {
+            // The thrown value must be a reference to a struct implementing Error
+            if (expr_type->kind != TypeKind::Reference && expr_type->kind != TypeKind::MutRef) {
+                error(data.expr, errors::THROW_NOT_REFERENCE);
+            } else {
+                auto elem = expr_type->get_elem();
+                if (elem && elem->kind == TypeKind::Struct) {
+                    auto rt_error = m_ctx->rt_error_type;
+                    if (rt_error && !elem->data.struct_.interface_table.get(rt_error)) {
+                        error(data.expr, errors::THROW_NOT_ERROR, format_type(elem));
+                    }
+                } else {
+                    error(data.expr, errors::THROW_NOT_ERROR, format_type(expr_type));
+                }
+            }
+        }
+        // throw needs the personality function for unwinding
+        scope.parent_fn_def()->has_try = true;
+        return nullptr;
     }
     case NodeType::ParenExpr: {
         auto &child = node->data.child_expr;
@@ -1570,18 +1643,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::IfStmt: {
         auto &data = node->data.if_stmt;
         auto cond_type = resolve(data.condition, scope);
-        if (data.condition->type == NodeType::Identifier && cond_type->kind == TypeKind::Optional) {
+        if (data.condition->type == NodeType::Identifier &&
+            (cond_type->kind == TypeKind::Optional || cond_type->kind == TypeKind::Result)) {
             auto name = data.condition->token->get_name();
+            // Determine the unwrapped value type
+            auto unwrapped_type = cond_type->kind == TypeKind::Optional
+                                      ? cond_type->get_elem()
+                                      : cond_type->data.result.value;
             auto expr = create_node(ast::NodeType::UnaryOpExpr);
             expr->token = data.condition->token;
             expr->data.unary_op_expr.is_suffix = true;
             expr->data.unary_op_expr.op_type = TokenType::LNOT;
             expr->data.unary_op_expr.op1 = data.condition;
-            expr->resolved_type = cond_type->get_elem();
+            expr->resolved_type = unwrapped_type;
             auto var = get_dummy_var(name, expr);
             var->token = data.condition->token;
             var->parent_fn = scope.parent_fn_node;
-            var->resolved_type = cond_type->get_elem();
+            var->resolved_type = unwrapped_type;
             var->data.var_decl.initialized_at = node;
             auto &block_data = data.then_block->data.block;
             block_data.implicit_vars.add(var);
@@ -1781,6 +1859,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_string_type = struct_type;
                 } else if (node->name == "__CxEnumBase") {
                     m_ctx->rt_enum_base = node;
+                } else if (node->name == "Error") {
+                    m_ctx->rt_error_type = struct_type;
+                } else if (node->name == "Unit") {
+                    m_ctx->rt_unit_type = struct_type;
                 }
             }
             node->resolved_type = type_sym;
@@ -1877,7 +1959,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto type = to_value_type(resolve(data.type, scope));
 
         // Handle invalid/unresolved types gracefully
-        if (!type || type->kind == TypeKind::Error) {
+        if (!type) {
             return nullptr;
         }
 
@@ -3037,6 +3119,11 @@ bool Resolver::type_needs_destruction(ChiType *type) {
     if (type->kind == TypeKind::Optional) {
         auto elem_type = type->get_elem();
         return elem_type && type_needs_destruction(elem_type);
+    }
+
+    // Result always needs destruction — it owns the error object's heap allocation
+    if (type->kind == TypeKind::Result) {
+        return true;
     }
 
     // For Subtype (generic instantiation), check the final resolved type
@@ -4348,7 +4435,7 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
 
 ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
     if (value->kind == TypeKind::Void) {
-        value = get_system_types()->bool_;
+        value = m_ctx->rt_unit_type;
     }
 
     auto key = fmt::format("Result<{},{}>", format_type(value), format_type(err));
@@ -4374,7 +4461,7 @@ ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
     struct_.node = nullptr;
 
     auto err_optional = get_pointer_type(err, TypeKind::Optional);
-    struct_.add_member(get_allocator(), "err", dummy_node, err_optional);
+    struct_.add_member(get_allocator(), "error", dummy_node, err_optional);
     struct_.add_member(get_allocator(), "value", dummy_node, value);
     return result_type;
 }

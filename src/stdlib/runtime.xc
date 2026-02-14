@@ -25,6 +25,11 @@ extern "C" {
     func cx_set_program_vtable(ptr: *void);
     func cx_runtime_stop();
     func cx_panic(message: *string);
+    func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    func cx_get_error_type_info() *void;
+    func cx_get_error_data() *void;
+    func cx_get_error_vtable() *void;
+    func cx_get_error_type_id() uint32;
     func cx_personality(...) int32;
     func cx_timeout(delay: uint64, callback: *void);
     func cx_string_format(format: *string, values: *void, str: *string);
@@ -138,6 +143,13 @@ struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
 
     func new(ptr: &mut<T>) {
         this._ptr = ptr as *T;
+    }
+
+    func from_ptr(ptr: *T) {
+        if this._ptr {
+            delete this._ptr;
+        }
+        this._ptr = ptr;
     }
 
     func delete() {
@@ -553,11 +565,15 @@ struct Buffer {
     }
 }
 
+interface Error {
+    func message() string;
+}
+
 // Unit type for use as a void-like value type (e.g. Promise<Unit>)
 struct Unit {}
 
 // Promise for async operations
-struct PromiseState<T> {
+private struct PromiseState<T> {
     state: uint32 = 0; // 0=pending, 1=resolved, 2=rejected
     value: ?T = null;
     callbacks: Array<func (value: T)> = {};

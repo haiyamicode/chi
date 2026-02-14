@@ -24,7 +24,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn);
+          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -203,6 +203,10 @@ struct ReturnStmt {
     Node *expr = nullptr;
 };
 
+struct ThrowStmt {
+    Node *expr = nullptr;
+};
+
 enum class VarKind {
     Mutable,    // var - can be reassigned
     Immutable,  // let - cannot be reassigned (runtime value OK)
@@ -238,7 +242,9 @@ struct UnaryOpExpr {
 
 struct TryExpr {
     Node *expr = nullptr;
-    Node *catch_expr = nullptr;
+    Node *catch_expr = nullptr;    // catch type (FileError) — null for catch-all
+    Node *catch_block = nullptr;   // the { ... } block — null means no catch (Result mode)
+    Node *catch_err_var = nullptr; // implicit VarDecl for err binding
 };
 
 struct AwaitExpr {
@@ -539,6 +545,7 @@ struct Node {
         FieldInitExpr field_init_expr;
         EnumDecl enum_decl;
         GeneratedFn generated_fn;
+        ThrowStmt throw_stmt;
 
         NodeData() {}
 

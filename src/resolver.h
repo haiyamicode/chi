@@ -60,7 +60,6 @@ struct SystemTypes {
     ChiType *array = nullptr;
     ChiType *optional = nullptr;
     ChiType *result = nullptr;
-    ChiType *error = nullptr;
     ChiType *promise = nullptr;
     ChiType *undefined = nullptr;
     ChiType *lambda = nullptr;
@@ -108,6 +107,8 @@ struct ResolveContext {
     ChiType *rt_promise_type = nullptr;
     ChiType *rt_lambda_type = nullptr;
     ChiType *rt_string_type = nullptr;
+    ChiType *rt_error_type = nullptr;
+    ChiType *rt_unit_type = nullptr;
     ChiType *rt_empty_bind_type = nullptr;
     ast::Node *rt_enum_base = nullptr;
 

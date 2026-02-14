@@ -223,6 +223,8 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
         return find_dot_expr(node->data.unary_op_expr.op1, cursor_pos);
     case ast::NodeType::ReturnStmt:
         return find_dot_expr(node->data.return_stmt.expr, cursor_pos);
+    case ast::NodeType::ThrowStmt:
+        return find_dot_expr(node->data.throw_stmt.expr, cursor_pos);
     case ast::NodeType::FnCallExpr: {
         auto r = find_dot_expr(node->data.fn_call_expr.fn_ref_expr, cursor_pos);
         if (r) return r;
@@ -240,7 +242,11 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
         return find_dot_expr(node->data.cast_expr.expr, cursor_pos);
     case ast::NodeType::TryExpr: {
         auto r = find_dot_expr(node->data.try_expr.expr, cursor_pos);
-        return r ? r : find_dot_expr(node->data.try_expr.catch_expr, cursor_pos);
+        if (!r && node->data.try_expr.catch_expr)
+            r = find_dot_expr(node->data.try_expr.catch_expr, cursor_pos);
+        if (!r && node->data.try_expr.catch_block)
+            r = find_dot_expr(node->data.try_expr.catch_block, cursor_pos);
+        return r;
     }
     case ast::NodeType::AwaitExpr:
         return find_dot_expr(node->data.await_expr.expr, cursor_pos);
@@ -339,6 +345,8 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
         return find_fn_call(node->data.unary_op_expr.op1, cursor_pos, result);
     case ast::NodeType::ReturnStmt:
         return find_fn_call(node->data.return_stmt.expr, cursor_pos, result);
+    case ast::NodeType::ThrowStmt:
+        return find_fn_call(node->data.throw_stmt.expr, cursor_pos, result);
     case ast::NodeType::FnCallExpr: {
         auto &call = node->data.fn_call_expr;
         if (find_fn_call(call.fn_ref_expr, cursor_pos, result)) return true;
