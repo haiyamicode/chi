@@ -2934,6 +2934,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto &data = field_init->data.field_init_expr;
             auto field_gep =
                 builder.CreateStructGEP(compile_type(type), dest, data.resolved_field->field_index);
+            data.compiled_field_address = field_gep;
             auto value =
                 compile_assignment_to_type(fn, data.value, data.resolved_field->resolved_type);
             builder.CreateStore(value, field_gep);

@@ -2126,7 +2126,7 @@ Node *Parser::parse_construct_expr() {
             consume();
             auto field = token;
             expect(TokenType::COLON);
-            auto value = parse_expr();
+            auto value = parse_child_expr_construct(false, node);
             auto field_init = create_node(NodeType::FieldInitExpr, field);
             field_init->data.field_init_expr.token = token;
             field_init->data.field_init_expr.field = field;

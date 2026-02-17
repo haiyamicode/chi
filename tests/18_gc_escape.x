@@ -11,20 +11,21 @@ struct GCBox {
     }
 }
 
-func get_escaped_ptr() *GCBox {
-    // This object MUST escape because we return a pointer to it
+struct Holder {
+    ref: &GCBox = null;
+}
+
+func get_escaped_ref() &GCBox {
     var obj = GCBox{100};
     return &obj;
 }
 
 func get_non_escaped_value() int {
-    // This object should NOT escape - it's only used locally
     var obj = GCBox{200};
     return obj.id;
 }
 
 func test_lambda_capture() {
-    // This object MUST escape because lambda captures it and lambda outlives the scope
     var captured = GCBox{300};
     var lambda = func () int {
         return captured.id;
@@ -34,17 +35,32 @@ func test_lambda_capture() {
     printf("Lambda executed successfully, captured object id: {}\n", result);
 }
 
-// This test validates Chi's escape analysis in managed memory mode (.x files).
-// Key behaviors verified:
-// 1. Non-escaping objects: Stack allocated, immediately destroyed
-// 2. Escaping objects: Heap allocated, GC managed  
-// 3. Pointer validity: Escaped pointers remain valid after scope ends
-// 4. Lambda captures: Properly handle object escape via closures
-// 5. Function returns: Objects escaping via return values
+// Transitive: var p = &obj; return p
+func get_via_reassign() &GCBox {
+    var obj = GCBox{400};
+    var p = &obj;
+    return p;
+}
+
+// Transitive: struct field holds ref
+func get_via_struct() Holder {
+    var obj = GCBox{500};
+    var h = Holder{ref: &obj};
+    return h;
+}
+
+// Transitive: deep chain var a = &x; var b = a; var c = b; return c
+func get_via_chain() &GCBox {
+    var obj = GCBox{600};
+    var a = &obj;
+    var b = a;
+    var c = b;
+    return c;
+}
+
 func main() {
     println("=== Testing Stack vs Heap Allocation ===");
 
-    // Test 1: Non-escaping object (should be stack-allocated, destroyed immediately)
     println("Test 1: Non-escaping object");
     {
         var local = GCBox{1};
@@ -52,69 +68,74 @@ func main() {
     }
     println("Scope ended - non-escaping object should be destroyed by now");
 
-    // Test 2: Escaping via assignment (should be heap-allocated)
-    println("\nTest 2: Object escaping via pointer assignment");
-    var escaped_ptr: *GCBox = null;
+    println("\nTest 2: Object escaping via ref assignment");
+    var escaped: &GCBox = null;
     {
         var local = GCBox{2};
-        escaped_ptr = &local;
-        printf("Inside scope - local.id: {}, escaped_ptr->id: {}\n", local.id, escaped_ptr!.id);
-        println("Local object escapes via pointer assignment");
+        escaped = &local;
+        printf("Inside scope - local.id: {}, escaped.id: {}\n", local.id, escaped.id);
+        println("Local object escapes via ref assignment");
     }
     println("Scope ended - escaped object should still be alive");
     printf(
-        "CRITICAL TEST: Accessing escaped pointer after scope: GCBox({}).id = {}\n",
-        escaped_ptr!.id,
-        escaped_ptr!.id
+        "CRITICAL TEST: Accessing escaped ref after scope: GCBox({}).id = {}\n",
+        escaped.id,
+        escaped.id
     );
 
-    // Test 3: Escaping via return value
     println("\nTest 3: Object escaping via return value");
-    var returned_ptr = get_escaped_ptr();
+    var returned = get_escaped_ref();
     printf(
-        "CRITICAL TEST: Function returned pointer to GCBox({}), accessing id: {}\n",
-        returned_ptr!.id,
-        returned_ptr!.id
+        "CRITICAL TEST: Function returned ref to GCBox({}), accessing id: {}\n",
+        returned.id,
+        returned.id
     );
 
-    // Test 4: Non-escaping function call
     println("\nTest 4: Non-escaping function call");
     var value = get_non_escaped_value();
     printf("Non-escaping function returned value: {} (object was destroyed)\n", value);
 
-    // Test 5: Lambda capture escape
     println("\nTest 5: Lambda capture escape");
     test_lambda_capture();
 
-    // Test 6: Use-after-scope validation
     println("\nTest 6: Use-after-scope validation");
-    var ptr1: *GCBox = null;
-    var ptr2: *GCBox = null;
+    var ref1: &GCBox = null;
+    var ref2: &GCBox = null;
     {
         var a = GCBox{6};
         var b = GCBox{7};
-        ptr1 = &a;
-        ptr2 = &b;
+        ref1 = &a;
+        ref2 = &b;
         printf("Inside scope - accessing a.id: {}, b.id: {}\n", a.id, b.id);
-        printf("Inside scope - accessing via pointers: ptr1->id={}, ptr2->id={}\n", ptr1!.id, ptr2!.id);
-        println("Both objects created and pointers assigned");
+        printf("Inside scope - accessing via refs: ref1.id={}, ref2.id={}\n", ref1.id, ref2.id);
+        println("Both objects created and refs assigned");
     }
     println("Both objects should still be accessible:");
-    printf("CRITICAL TEST: After scope ended - ptr1->id={}, ptr2->id={}\n", ptr1!.id, ptr2!.id);
+    printf("CRITICAL TEST: After scope ended - ref1.id={}, ref2.id={}\n", ref1.id, ref2.id);
     printf(
         "CRITICAL TEST: Accessing values - GCBox({}) and GCBox({}) both accessible!\n",
-        ptr1!.id,
-        ptr2!.id
+        ref1.id,
+        ref2.id
     );
 
-    // Clean up explicitly
-    println("\n=== Cleanup Phase ===");
-    escaped_ptr = null;
-    returned_ptr = null;
-    ptr1 = null;
-    ptr2 = null;
+    println("\nTest 7: Transitive escape via reassignment");
+    var reassigned = get_via_reassign();
+    printf("CRITICAL TEST: reassigned.id = {}\n", reassigned.id);
 
-    // Final gc objects
+    println("\nTest 8: Transitive escape via struct field");
+    var holder = get_via_struct();
+    printf("CRITICAL TEST: holder.ref.id = {}\n", holder.ref.id);
+
+    println("\nTest 9: Transitive escape via deep chain");
+    var chained = get_via_chain();
+    printf("CRITICAL TEST: chained.id = {}\n", chained.id);
+
+    println("\n=== Cleanup Phase ===");
+    escaped = null;
+    returned = null;
+    ref1 = null;
+    ref2 = null;
+
     println("Final gc objects...");
     for var i = 0; i < 5; i++ {
         var temp = GCBox{1000 + i};
@@ -122,4 +143,3 @@ func main() {
 
     println("Test completed");
 }
-

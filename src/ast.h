@@ -158,6 +158,12 @@ struct FnDef {
     array<Node *> cleanup_vars = {};
     bool has_try = false;
     array<Node *> variants = {};
+    map<Node *, array<Node *>> ref_edges = {};  // escape analysis: dependency graph
+
+    void add_ref_edge(Node *from, Node *to) {
+        if (!from || !to || from == to) return;
+        ref_edges[from].add(to);
+    }
 
     bool is_static() { return decl_spec && decl_spec->is_static(); }
     bool is_async() { return decl_spec && decl_spec->is_async(); }

@@ -255,6 +255,7 @@ class Resolver {
     ResolveContext *get_context() { return m_ctx; }
     GenericResolver *get_generics() { return &m_ctx->generics; }
 
+    bool type_contains_ref(ChiType *type);
     bool type_needs_destruction(ChiType *type);
     bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
 
@@ -357,6 +358,8 @@ class Resolver {
                               RecursiveCallHandler make_recursive_call);
 
     ast::Node *find_root_decl(ast::Node *node);
+
+    void mark_escaped_deps(ast::FnDef *fn_def, ast::Node *root);
 
     bool compare_impl_type(ChiType *base, ChiType *impl);
 

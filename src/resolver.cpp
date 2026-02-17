@@ -579,8 +579,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto lambda_fn_type =
                 proto->kind == TypeKind::FnLambda ? proto->data.fn_lambda.fn : proto;
             auto local_fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
-            if (data.body)
+            if (data.body) {
                 resolve(data.body, local_fn_scope);
+                // Params are terminals
+                auto &fn_proto = data.fn_proto->data.fn_proto;
+                for (auto param : fn_proto.params) {
+                    if (data.ref_edges.has_key(param)) {
+                        mark_escaped_deps(&data, param);
+                    }
+                }
+            }
 
             // After body resolution, sync the FnLambda's is_placeholder with the inner Fn type
             // This is needed when return type was inferred from the body (placeholder -> concrete)
@@ -663,8 +671,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             fn_scope = fn_scope.set_parent_fn(proto);
             resolve(data.body, fn_scope);
 
-            // Add params to cleanup_vars (after body resolution ensures types are resolved)
+            // Params are terminals — DFS from each param that has edges
             auto &proto_data = data.fn_proto->data.fn_proto;
+            for (auto param : proto_data.params) {
+                if (data.ref_edges.has_key(param)) {
+                    mark_escaped_deps(&data, param);
+                }
+            }
+
+            // Add params to cleanup_vars (after body resolution ensures types are resolved)
             for (auto param : proto_data.params) {
                 if (should_destroy(param) && !param->escape.is_capture()) {
                     data.cleanup_vars.add(param);
@@ -928,6 +943,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto var_scope = type_hint ? scope.set_value_type(type_hint) : scope;
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
+            // Escape analysis: track ref deps through assignment
+            if (scope.parent_fn_node && data.expr->type == NodeType::Identifier) {
+                auto src_decl = data.expr->data.identifier.decl;
+                if (src_decl && src_decl->type == NodeType::VarDecl) {
+                    scope.parent_fn_node->data.fn_def.add_ref_edge(node, src_decl);
+                }
+            }
             if (var_type) {
                 if (expr_type->kind == TypeKind::Undefined) {
                     return var_type;
@@ -995,6 +1017,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             auto var_scope = scope.set_value_type(t1).set_move_outlet(data.op1);
             t2 = resolve(data.op2, var_scope);
+            if (scope.parent_fn_node) {
+                auto lhs_decl = find_root_decl(data.op1);
+                if (lhs_decl && data.op2->type == NodeType::Identifier) {
+                    auto rhs_decl = data.op2->data.identifier.decl;
+                    if (rhs_decl && rhs_decl->type == NodeType::VarDecl) {
+                        scope.parent_fn_node->data.fn_def.add_ref_edge(lhs_decl, rhs_decl);
+                    }
+                }
+            }
         } else {
             // Propagate type context for literal inference (e.g., `x == 0` where x is uint32)
             auto op2_scope = scope.set_value_type(t1);
@@ -1122,12 +1153,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
+            if (scope.move_outlet && scope.parent_fn_node) {
+                auto ref_target = find_root_decl(data.op1);
+                if (ref_target) {
+                    auto outlet = scope.move_outlet;
+                    if (outlet->type != NodeType::VarDecl) {
+                        auto resolved = find_root_decl(outlet);
+                        if (resolved) outlet = resolved;
+                    }
+                    scope.parent_fn_node->data.fn_def.add_ref_edge(outlet, ref_target);
+                }
+            }
             if (scope.is_escaping) {
                 auto decl = find_root_decl(data.op1);
                 if (decl) {
                     decl->escape.escaped = decl->can_escape();
                 }
-                // If decl is null (e.g., function call result), nothing to mark as escaped
             }
             return get_pointer_type(t, data.op_type == TokenType::MUTREF ? TypeKind::MutRef
                                                                          : TypeKind::Reference);
@@ -1297,6 +1338,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (expected_type) {
             check_assignment(data.expr, expr_type, expected_type);
         }
+
+        if (data.expr && scope.parent_fn_node && expr_type &&
+            type_contains_ref(expr_type)) {
+            auto root = find_root_decl(data.expr);
+            if (root) {
+                mark_escaped_deps(&scope.parent_fn_node->data.fn_def, root);
+            }
+        }
+
         return return_type;
     }
     case NodeType::ThrowStmt: {
@@ -1614,6 +1664,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto init_value_type = resolve(data.value, inner_scope);
             data.resolved_field = field_member;
             check_assignment(data.value, init_value_type, field_member->resolved_type);
+
+            if (scope.parent_fn_node) {
+                auto outlet = scope.move_outlet ? scope.move_outlet : node;
+                scope.parent_fn_node->data.fn_def.add_ref_edge(outlet, field_init);
+                // Track value -> decl edge (like VarDecl init)
+                if (data.value->type == NodeType::Identifier) {
+                    auto src = data.value->data.identifier.decl;
+                    if (src && src->type == NodeType::VarDecl) {
+                        scope.parent_fn_node->data.fn_def.add_ref_edge(field_init, src);
+                    }
+                }
+            }
         }
         return result_type;
     }
@@ -1932,6 +1994,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto fn_scope = struct_scope.set_parent_fn(fn_type).set_parent_fn_node(member);
                     if (auto body = member->data.fn_def.body) {
                         resolve(body, fn_scope);
+                        // Params are terminals
+                        auto &fn_data = member->data.fn_def;
+                        auto &fn_proto = fn_data.fn_proto->data.fn_proto;
+                        for (auto param : fn_proto.params) {
+                            if (fn_data.ref_edges.has_key(param)) {
+                                mark_escaped_deps(&fn_data, param);
+                            }
+                        }
                     }
                 }
             }
@@ -3099,6 +3169,44 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
     }
 }
 
+bool Resolver::type_contains_ref(ChiType *type) {
+    if (!type) return false;
+    switch (type->kind) {
+    case TypeKind::Pointer:
+    case TypeKind::Reference:
+    case TypeKind::MutRef:
+        return true;
+    case TypeKind::Optional:
+    case TypeKind::Array:
+        return type_contains_ref(type->get_elem());
+    case TypeKind::Result:
+        return type_contains_ref(type->get_elem()) ||
+               type_contains_ref(type->data.result.error);
+    case TypeKind::Subtype: {
+        auto final_type = type->data.subtype.final_type;
+        return final_type ? type_contains_ref(final_type) : false;
+    }
+    case TypeKind::Fn: {
+        auto &fn = type->data.fn;
+        if (type_contains_ref(fn.return_type)) return true;
+        for (size_t i = 0; i < fn.params.len; i++) {
+            if (type_contains_ref(fn.params[i])) return true;
+        }
+        return false;
+    }
+    case TypeKind::FnLambda:
+        return type_contains_ref(type->data.fn_lambda.fn);
+    case TypeKind::Struct: {
+        for (auto field : type->data.struct_.fields) {
+            if (type_contains_ref(field->resolved_type)) return true;
+        }
+        return false;
+    }
+    default:
+        return false;
+    }
+}
+
 // Check if a type needs destruction (has destructor or has fields that need destruction)
 bool Resolver::type_needs_destruction(ChiType *type) {
     if (!type) return false;
@@ -4004,6 +4112,12 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
             auto arg_type = resolve(arg, arg_scope);
             arg_types.add(arg_type);
+
+            if (scope.parent_fn_node && arg_type && type_contains_ref(arg_type)) {
+                auto root = find_root_decl(arg);
+                if (!root) root = arg;
+                mark_escaped_deps(&scope.parent_fn_node->data.fn_def, root);
+            }
         }
 
         // If no explicit type args and no return type inference, try argument-based inference
@@ -4135,6 +4249,12 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             // For C variadic functions, param_type is nullptr for variadic args (any type allowed)
             if (param_type) {
                 check_assignment(arg, arg_type, param_type);
+            }
+
+            if (scope.parent_fn_node && arg_type && type_contains_ref(arg_type)) {
+                auto root = find_root_decl(arg);
+                if (!root) root = arg;
+                mark_escaped_deps(&scope.parent_fn_node->data.fn_def, root);
             }
         }
     }
@@ -5057,12 +5177,33 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
     case NodeType::UnaryOpExpr:
         return find_root_decl(node->data.unary_op_expr.op1);
     case NodeType::FnCallExpr:
-        // Function call results are temporaries, return nullptr to indicate no root decl
+    case NodeType::ConstructExpr:
+        // Function call/construct results are temporaries, return nullptr to indicate no root decl
         return nullptr;
     default:
-        panic("unhandled find_root_decl {}", PRINT_ENUM(node->type));
+        // Literals, casts, etc. — no root decl to track
+        return nullptr;
     }
-    return nullptr;
+}
+
+void Resolver::mark_escaped_deps(ast::FnDef *fn_def, ast::Node *root) {
+    if (!root) return;
+    array<ast::Node *> stack = {root};
+    map<ast::Node *, bool> visited = {};
+    while (stack.len > 0) {
+        auto *node = stack.last();
+        stack.len--;
+        if (visited.has_key(node)) continue;
+        visited[node] = true;
+        if (node->type == ast::NodeType::VarDecl) {
+            node->escape.escaped = node->can_escape();
+        }
+        if (auto *deps = fn_def->ref_edges.get(node)) {
+            for (size_t i = 0; i < deps->len; i++) {
+                stack.add(deps->items[i]);
+            }
+        }
+    }
 }
 
 bool Resolver::compare_impl_type(ChiType *base, ChiType *impl) {
