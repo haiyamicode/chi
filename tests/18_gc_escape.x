@@ -3,11 +3,11 @@ struct GCBox {
 
     mut func new(id: int) {
         this.id = id;
-        printf("GCBox({}) created\n", this.id);
+        printf("[gc] GCBox({}) created\n", this.id);
     }
 
     func delete() {
-        printf("GCBox({}) destroyed\n", this.id);
+        printf("[gc] GCBox({}) destroyed\n", this.id);
     }
 }
 
@@ -118,6 +118,15 @@ func main() {
         ref2.id
     );
 
+    // Release earlier refs before transitive tests
+    escaped = null;
+    println("escaped released");
+    returned = null;
+    println("returned released");
+    ref1 = null;
+    ref2 = null;
+    println("refs released");
+
     println("\nTest 7: Transitive escape via reassignment");
     var reassigned = get_via_reassign();
     printf("CRITICAL TEST: reassigned.id = {}\n", reassigned.id);
@@ -131,10 +140,6 @@ func main() {
     printf("CRITICAL TEST: chained.id = {}\n", chained.id);
 
     println("\n=== Cleanup Phase ===");
-    escaped = null;
-    returned = null;
-    ref1 = null;
-    ref2 = null;
 
     println("Final gc objects...");
     for var i = 0; i < 5; i++ {

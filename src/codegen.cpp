@@ -831,6 +831,20 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
     return value;
 }
 
+void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
+                                         ChiType *dest_type) {
+    auto src_type = get_chitype(expr);
+    // RVO: construct directly at destination when types match
+    if (expr->type == ast::NodeType::ConstructExpr && src_type == dest_type) {
+        compile_construction(fn, dest, dest_type, expr);
+        return;
+    }
+    auto value = compile_assignment_to_type(fn, expr, dest_type);
+    if (value) {
+        compile_copy_with_ref(fn, RefValue::from_value(value), dest, dest_type, expr);
+    }
+}
+
 llvm::Value *Compiler::compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest) {
     return compile_assignment_to_type(fn, expr, get_chitype(dest));
 }
@@ -4097,18 +4111,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
             } else {
                 auto ret_type = get_chitype(stmt);
-
-                // RVO: For ConstructExpr, construct directly at return_value
-                if (data.expr->type == ast::NodeType::ConstructExpr) {
-                    compile_construction(fn, fn->return_value, ret_type, data.expr);
-                } else {
-                    // Original path for other expressions
-                    auto ret_ref = compile_expr_ref(fn, data.expr);
-                    if (!ret_ref.value) {
-                        ret_ref.value = llvm_builder.CreateLoad(compile_type(ret_type), ret_ref.address);
-                    }
-                    compile_copy_with_ref(fn, ret_ref, fn->return_value, ret_type, data.expr);
-                }
+                compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
             }
         }
         llvm_builder.CreateBr(fn->return_label);
@@ -4984,13 +4987,8 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
                 }
             };
             clear_outlets(default_expr);
-            compile_construction(fn, field_gep, field->resolved_type, default_expr);
-        } else {
-            auto value = compile_assignment_to_type(fn, default_expr, field->resolved_type);
-            if (value) {
-                builder.CreateStore(value, field_gep);
-            }
         }
+        compile_assignment_to_ptr(fn, default_expr, field_gep, field->resolved_type);
     }
 
     builder.CreateRetVoid();

@@ -385,6 +385,8 @@ class Compiler {
     llvm::Value *compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
+    void compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
+                                   ChiType *dest_type);
 
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                       array<ast::FnCapture> *captures);

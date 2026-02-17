@@ -58,15 +58,23 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 18_gc_escape.test: 18_gc_escape.expect
 	echo Test: 18_gc_escape...
 	@$(CHI) -o $(TMP).18_gc_escape -c 18_gc_escape.x && $(TMP).18_gc_escape 2>&1 >18_gc_escape.output
-	@awk '/^Test completed$$/{found=1; print; next} found{print | "sort"} !found{print}' 18_gc_escape.output > 18_gc_escape.sorted
-	@mv 18_gc_escape.sorted 18_gc_escape.output
-	@if [ "x`diff -qbu 18_gc_escape.expect 18_gc_escape.output`" != "x" ]; \
-	then \
-		echo "error in test 18_gc_escape"; \
-		diff -u 18_gc_escape.expect 18_gc_escape.output; \
-		exit 1; \
+	@grep -v '^\[gc\]' 18_gc_escape.output > 18_gc_escape.out.tmp
+	@grep -v '^\[gc\]' 18_gc_escape.expect > 18_gc_escape.exp.tmp
+	@grep '^\[gc\]' 18_gc_escape.output | sort > 18_gc_escape.out_gc.tmp
+	@grep '^\[gc\]' 18_gc_escape.expect | sort > 18_gc_escape.exp_gc.tmp
+	@failed=0; \
+	if ! diff -qbu 18_gc_escape.exp.tmp 18_gc_escape.out.tmp > /dev/null 2>&1; then \
+		echo "error in test 18_gc_escape (logic)"; \
+		diff -u 18_gc_escape.exp.tmp 18_gc_escape.out.tmp; \
+		failed=1; \
 	fi; \
-	rm -f 18_gc_escape.output
+	if ! diff -qbu 18_gc_escape.exp_gc.tmp 18_gc_escape.out_gc.tmp > /dev/null 2>&1; then \
+		echo "error in test 18_gc_escape (gc)"; \
+		diff -u 18_gc_escape.exp_gc.tmp 18_gc_escape.out_gc.tmp; \
+		failed=1; \
+	fi; \
+	rm -f 18_gc_escape.output 18_gc_escape.*.tmp; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
 
 # Special rule for package tests
 15_package.test: 15_package.expect

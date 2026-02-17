@@ -1,67 +1,70 @@
 === Testing Stack vs Heap Allocation ===
 Test 1: Non-escaping object
-GCBox(1) created
+[gc] GCBox(1) created
 Local object created, should be destroyed at scope end
 Scope ended - non-escaping object should be destroyed by now
 
 Test 2: Object escaping via ref assignment
-GCBox(2) created
+[gc] GCBox(2) created
 Inside scope - local.id: 2, escaped.id: 2
 Local object escapes via ref assignment
 Scope ended - escaped object should still be alive
 CRITICAL TEST: Accessing escaped ref after scope: GCBox(2).id = 2
 
 Test 3: Object escaping via return value
-GCBox(100) created
+[gc] GCBox(100) created
 CRITICAL TEST: Function returned ref to GCBox(100), accessing id: 100
 
 Test 4: Non-escaping function call
-GCBox(200) created
-GCBox(200) destroyed
+[gc] GCBox(200) created
+[gc] GCBox(200) destroyed
 Non-escaping function returned value: 200 (object was destroyed)
 
 Test 5: Lambda capture escape
-GCBox(300) created
+[gc] GCBox(300) created
 Lambda created with captured object
 Lambda executed successfully, captured object id: 300
 
 Test 6: Use-after-scope validation
-GCBox(6) created
-GCBox(7) created
+[gc] GCBox(6) created
+[gc] GCBox(7) created
 Inside scope - accessing a.id: 6, b.id: 7
 Inside scope - accessing via refs: ref1.id=6, ref2.id=7
 Both objects created and refs assigned
 Both objects should still be accessible:
 CRITICAL TEST: After scope ended - ref1.id=6, ref2.id=7
 CRITICAL TEST: Accessing values - GCBox(6) and GCBox(7) both accessible!
+escaped released
+returned released
+refs released
 
 Test 7: Transitive escape via reassignment
-GCBox(300) destroyed
-GCBox(100) destroyed
-GCBox(400) created
+[gc] GCBox(100) destroyed
+[gc] GCBox(300) destroyed
+[gc] GCBox(400) created
 CRITICAL TEST: reassigned.id = 400
 
 Test 8: Transitive escape via struct field
-GCBox(500) created
+[gc] GCBox(500) created
 CRITICAL TEST: holder.ref.id = 500
 
 Test 9: Transitive escape via deep chain
-GCBox(600) created
-GCBox(500) destroyed
+[gc] GCBox(600) created
+[gc] GCBox(400) destroyed
+[gc] GCBox(500) destroyed
 CRITICAL TEST: chained.id = 600
 
 === Cleanup Phase ===
 Final gc objects...
-GCBox(1000) created
-GCBox(1001) created
-GCBox(1002) created
-GCBox(1003) created
-GCBox(1004) created
+[gc] GCBox(1000) created
+[gc] GCBox(1001) created
+[gc] GCBox(1002) created
+[gc] GCBox(1003) created
+[gc] GCBox(1004) created
 Test completed
-GCBox(1) destroyed
-GCBox(1004) destroyed
-GCBox(2) destroyed
-GCBox(400) destroyed
-GCBox(6) destroyed
-GCBox(600) destroyed
-GCBox(7) destroyed
+[gc] GCBox(1) destroyed
+[gc] GCBox(2) destroyed
+[gc] GCBox(6) destroyed
+[gc] GCBox(7) destroyed
+[gc] GCBox(1004) destroyed
+[gc] GCBox(600) destroyed
