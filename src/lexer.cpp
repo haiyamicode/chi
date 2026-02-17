@@ -66,12 +66,12 @@ void Lexer::setup_keywords() {
     s_keywords["from"] = TokenType::KW_FROM;
     s_keywords["sizeof"] = TokenType::KW_SIZEOF;
     s_keywords["extern"] = TokenType::KW_EXTERN;
+    s_keywords["inline"] = TokenType::KW_INLINE;
     s_keywords["export"] = TokenType::KW_EXPORT;
     s_keywords["implements"] = TokenType::KW_IMPLEMENTS;
     s_keywords["mut"] = TokenType::KW_MUT;
     s_keywords["in"] = TokenType::KW_IN;
     s_keywords["undefined"] = TokenType::KW_UNDEFINED;
-    s_keywords["static"] = TokenType::KW_STATIC;
     s_keywords["async"] = TokenType::KW_ASYNC;
     s_keywords["await"] = TokenType::KW_AWAIT;
     s_keywords["throw"] = TokenType::KW_THROW;
@@ -917,7 +917,7 @@ string Token::to_string() const {
     case TokenType::KW_UNDEFINED:
         return "undefined";
     default:
-        if (type >= TokenType::KW_BREAK && type <= TokenType::KW_UNION) {
+        if (type >= TokenType::KW_BREAK && type < TokenType::BOOL) {
             return str;
         }
         return get_token_symbol(type);

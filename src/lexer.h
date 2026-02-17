@@ -130,6 +130,7 @@ struct Token {
     TokenType type = TokenType::ERROR;
     Pos pos = {};
     ast::Node *node = nullptr; // identifier node associated with this token
+    ast::Node *semantic_node = nullptr; // for semantic token classification (does not affect scan)
 
     string to_string() const;
     string get_name() const;

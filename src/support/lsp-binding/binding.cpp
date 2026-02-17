@@ -15,11 +15,13 @@
 
 namespace fs = std::filesystem;
 
-// Find and load package.jsonc starting from the given file path
+// ============================================================================
+// Utilities
+// ============================================================================
+
 static void load_package_config(cx::ast::Package* package, const std::string& file_path) {
     if (!package) return;
 
-    // Find package.jsonc by walking up directories
     fs::path current = fs::path(file_path).parent_path();
     fs::path package_json_path;
 
@@ -30,15 +32,12 @@ static void load_package_config(cx::ast::Package* package, const std::string& fi
             break;
         }
         auto parent = current.parent_path();
-        if (parent == current) break; // Reached root
+        if (parent == current) break;
         current = parent;
     }
 
-    if (package_json_path.empty()) {
-        return; // No package.jsonc found
-    }
+    if (package_json_path.empty()) return;
 
-    // Load and parse package.jsonc
     std::ifstream config_file(package_json_path);
     if (!config_file.is_open()) return;
 
@@ -46,7 +45,6 @@ static void load_package_config(cx::ast::Package* package, const std::string& fi
                                std::istreambuf_iterator<char>());
     config_file.close();
 
-    // Parse JSONC (allow comments and trailing commas)
     std::error_code ec;
     boost::json::parse_options opts;
     opts.allow_comments = true;
@@ -72,6 +70,96 @@ __attribute__((constructor)) static void install_crash_handler() {
     signal(SIGBUS, crash_handler);
     signal(SIGABRT, crash_handler);
 }
+
+// Parse the single string argument from a napi call
+static bool parse_napi_arg(napi_env env, napi_callback_info info, std::string &out) {
+    size_t argc = 1;
+    napi_value args[1];
+    if (napi_get_cb_info(env, info, &argc, args, NULL, NULL) != napi_ok) return false;
+    size_t len;
+    if (napi_get_value_string_utf8(env, args[0], nullptr, 0, &len) != napi_ok) return false;
+    out.resize(len);
+    if (napi_get_value_string_utf8(env, args[0], out.data(), len + 1, &len) != napi_ok) return false;
+    return true;
+}
+
+// Serialize a JSON value and return as napi string
+static napi_value napi_json_result(napi_env env, const boost::json::value &json) {
+    auto str = boost::json::serialize(json);
+    napi_value result;
+    if (napi_create_string_utf8(env, str.c_str(), str.size(), &result) != napi_ok)
+        return nullptr;
+    return result;
+}
+
+// Set up analyzer from common JSON fields (chiRoot, file)
+static void init_analyzer(cx::Analyzer &analyzer, const boost::json::object &input,
+                          std::string &input_file) {
+    if (input.contains("chiRoot")) {
+        analyzer.get_context()->root_path = input.at("chiRoot").as_string().c_str();
+    }
+    input_file = input.at("file").as_string().c_str();
+}
+
+// Process source through the full compiler pipeline (runtime + resolve + sema)
+static cx::ast::Module* process_source(cx::Analyzer &analyzer, const std::string &input_file,
+                                       cx::io::Buffer *src) {
+    auto rt_path = analyzer.get_context()->get_stdlib_path("runtime.xc");
+    if (input_file == rt_path) {
+        return analyzer.build_runtime_from_source(src);
+    }
+
+    analyzer.build_runtime();
+    auto pkg = analyzer.get_context()->add_package(".");
+    load_package_config(pkg, input_file);
+
+    if (pkg->config && pkg->config->c_interop.has_value() &&
+        !pkg->config->c_interop->native_modules.empty()) {
+        auto* ctx = analyzer.get_context();
+        for (const auto& [mod_name, mod_config] : pkg->config->c_interop->native_modules) {
+            cx::CImporter importer;
+            cx::CImportConfig import_config;
+            import_config.symbols = mod_config.symbols;
+            import_config.include_paths = mod_config.include_paths;
+
+            for (const auto& header : mod_config.includes) {
+                importer.import_header_by_name(header, import_config);
+            }
+
+            auto* virtual_module = cx::create_native_module(
+                ctx, mod_name,
+                importer.get_functions(),
+                importer.get_enum_constants(),
+                importer.get_macros(),
+                importer.get_structs(),
+                importer.get_typedefs()
+            );
+
+            auto mod_resolver = ctx->create_resolver();
+            mod_resolver.resolve(virtual_module);
+            ctx->module_map[mod_name] = virtual_module;
+        }
+    }
+
+    return analyzer.process_source(pkg, src, input_file);
+}
+
+static boost::json::array collect_errors(cx::ast::Module *module) {
+    boost::json::array errors;
+    if (!module) return errors;
+    for (auto &error : module->errors) {
+        boost::json::object e;
+        e["message"] = error.message;
+        e["offset"] = error.pos.offset;
+        e["range"] = error.range;
+        errors.push_back(e);
+    }
+    return errors;
+}
+
+// ============================================================================
+// Symbol info helpers
+// ============================================================================
 
 static std::string get_symbol_kind(cx::ast::Node *node) {
     if (node->type == cx::ast::NodeType::ImportSymbol && node->data.import_symbol.resolved_decl) {
@@ -122,7 +210,6 @@ static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolv
 }
 
 static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) {
-    // Unwrap ImportSymbol to the actual declaration
     if (decl->type == cx::ast::NodeType::ImportSymbol && decl->data.import_symbol.resolved_decl) {
         decl = decl->data.import_symbol.resolved_decl;
     }
@@ -135,6 +222,10 @@ static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) 
     return fmt::format("({}) {}: {}", kind, name,
                        type ? resolver.format_type(type, true) : "unknown");
 }
+
+// ============================================================================
+// Scan operation helpers
+// ============================================================================
 
 static cx::ast::Node *get_fn_decl_from_call(cx::ast::Node *call_node) {
     auto fn_ref = call_node->data.fn_call_expr.fn_ref_expr;
@@ -163,7 +254,6 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
     auto *proto = fn_decl->data.fn_def.fn_proto;
     auto &proto_params = proto->data.fn_proto.params;
 
-    // Build the full signature label and track parameter label offsets
     std::string label = fn_decl->name + "(";
     boost::json::array params_json;
 
@@ -215,7 +305,6 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
 
     bool is_static = expr_type->kind == cx::TypeKind::TypeSymbol;
 
-    // Handle enum type completions (e.g. JsonKind.)
     if (is_static) {
         auto underlying = expr_type->data.type_symbol.underlying_type;
         if (underlying && underlying->kind == cx::TypeKind::Enum) {
@@ -249,225 +338,348 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
     return completions;
 }
 
-static napi_value Method(napi_env env, napi_callback_info info) {
-    napi_status status;
-    size_t argc = 1;
-    napi_value args[1];
-    status = napi_get_cb_info(env, info, &argc, args, NULL, NULL);
-    if (status != napi_ok) return nullptr;
+static boost::json::object build_definition(cx::ScanResult &result) {
+    boost::json::object def_link;
+    if (!result.decl) return def_link;
 
-    // get input string length, then allocate on heap (avoid large stack buffers)
-    size_t len;
-    status = napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
-    if (status != napi_ok) return nullptr;
-    std::string input_buf(len, '\0');
-    status = napi_get_value_string_utf8(env, args[0], input_buf.data(), len + 1, &len);
-    if (status != napi_ok) return nullptr;
+    auto start_tok = result.decl->start_token ? result.decl->start_token : result.decl->token;
+    if (!start_tok || !result.decl->module) return def_link;
 
-    auto input = boost::json::parse(input_buf).as_object();
+    auto start_pos = start_tok->pos;
+    auto end_pos = result.decl->end_token ? result.decl->end_token->pos : start_pos.add_line(1);
 
-    // initialize analyzer
-    cx::Analyzer analyzer;
-    auto resolver = analyzer.get_resolver();
-    cx::ScopeResolver scope_resolver(&resolver);
+    auto start = boost::json::object({{"character", start_pos.col - 1}, {"line", start_pos.line}});
+    auto end = boost::json::object({{"character", end_pos.col}, {"line", end_pos.line}});
+    auto range = boost::json::object({{"start", start}, {"end", end}});
 
-    if (input.contains("chiRoot")) {
-        std::string chi_root_path = input["chiRoot"].as_string().c_str();
-        analyzer.get_context()->root_path = chi_root_path;
-    }
+    def_link["targetUri"] = fmt::format("file://{}", result.decl->module->full_path());
+    def_link["targetSelectionRange"] = range;
+    def_link["targetRange"] = range;
+    return def_link;
+}
 
-    std::string input_file = input["file"].as_string().c_str();
-    auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+// ============================================================================
+// Semantic tokens
+// ============================================================================
 
-    // handle format operation early (lightweight path, no runtime needed)
-    if (input.contains("scan")) {
-        auto scan_input = input["scan"].as_object();
-        auto operation = scan_input["operation"].as_string();
-        if (operation == "format") {
-            auto pkg = analyzer.get_context()->add_package(".");
-            load_package_config(pkg, input_file);
-            auto module = analyzer.format_source(pkg, &src, input_file);
+enum SemanticTokenType {
+    ST_Namespace = 0, ST_Type = 1, ST_Function = 2, ST_Method = 3,
+    ST_Variable = 4, ST_Parameter = 5, ST_Property = 6, ST_EnumMember = 7,
+    ST_Keyword = 8, ST_Number = 9, ST_String = 10, ST_Operator = 11, ST_Decorator = 12,
+};
+enum SemanticTokenModifier {
+    SM_Declaration = 1 << 0, SM_Readonly = 1 << 1,
+    SM_Static = 1 << 2, SM_Async = 1 << 3,
+};
 
-            boost::json::array errors_json;
-            if (module) {
-                for (auto &error : module->errors) {
-                    boost::json::object error_json;
-                    error_json["message"] = error.message;
-                    error_json["offset"] = error.pos.offset;
-                    error_json["range"] = error.range;
-                    errors_json.push_back(error_json);
-                }
-            }
+static boost::json::array generate_semantic_tokens(cx::ast::Module *module) {
+    using namespace cx::ast;
+    boost::json::array result;
+    if (!module) return result;
 
-            boost::json::object result_object;
-            if (module && module->errors.len == 0 && module->root) {
-                cx::AstPrinter printer(module->root, &module->comments);
-                result_object["formatted"] = printer.format_to_string();
-            }
+    for (auto tok : module->tokens) {
+        if (tok->pos.line < 0) continue;
 
-            boost::json::object result_json = {
-                {"errors", errors_json},
-                {"scanResult", result_object},
-            };
-            auto str = boost::json::serialize(result_json);
-            napi_value result;
-            status = napi_create_string_utf8(env, str.c_str(), str.size(), &result);
-            if (status != napi_ok) return nullptr;
-            return result;
-        }
-    }
-
-    // process source code
-    auto rt_path = analyzer.get_context()->get_stdlib_path("runtime.xc");
-    bool is_runtime_file = (input_file == rt_path);
-    cx::ast::Module *module;
-    if (is_runtime_file) {
-        // Process the editor content as the runtime to avoid double-processing
-        module = analyzer.build_runtime_from_source(&src);
-    } else {
-        analyzer.build_runtime();
-        auto pkg = analyzer.get_context()->add_package(".");
-        load_package_config(pkg, input_file);
-
-        // Process native modules from package config (same as builder.cpp)
-        if (pkg->config && pkg->config->c_interop.has_value() &&
-            !pkg->config->c_interop->native_modules.empty()) {
-            auto* ctx = analyzer.get_context();
-            for (const auto& [mod_name, mod_config] : pkg->config->c_interop->native_modules) {
-                cx::CImporter importer;
-                cx::CImportConfig import_config;
-                import_config.symbols = mod_config.symbols;
-                import_config.include_paths = mod_config.include_paths;
-
-                for (const auto& header : mod_config.includes) {
-                    importer.import_header_by_name(header, import_config);
-                }
-
-                auto* virtual_module = cx::create_native_module(
-                    ctx, mod_name,
-                    importer.get_functions(),
-                    importer.get_enum_constants(),
-                    importer.get_macros(),
-                    importer.get_structs(),
-                    importer.get_typedefs()
-                );
-
-                auto mod_resolver = ctx->create_resolver();
-                mod_resolver.resolve(virtual_module);
-                ctx->module_map[mod_name] = virtual_module;
-            }
+        // Emit keyword tokens directly
+        if (tok->type >= cx::TokenType::KW_BREAK && tok->type < cx::TokenType::BOOL) {
+            auto len = tok->str.size();
+            if (len == 0) continue;
+            result.push_back(tok->pos.line);
+            result.push_back(tok->pos.col - 1);
+            result.push_back((int64_t)len);
+            result.push_back(ST_Keyword);
+            result.push_back(0);
+            continue;
         }
 
-        module = analyzer.process_source(pkg, &src, input_file);
-    }
+        if (tok->type != cx::TokenType::IDEN && tok->type != cx::TokenType::KW_THIS_TYPE)
+            continue;
 
-    // collect errors from user module and runtime module
-    boost::json::array errors_json = boost::json::array();
-    auto collect_errors = [&](cx::ast::Module *mod) {
-        if (!mod) return;
-        for (auto &error : mod->errors) {
-            boost::json::object error_json;
-            error_json["message"] = error.message;
-            error_json["offset"] = error.pos.offset;
-            error_json["range"] = error.range;
-            errors_json.push_back(error_json);
+        auto node = tok->node ? tok->node : tok->semantic_node;
+        if (!node) continue;
+
+        int token_type = -1;
+        int modifiers = 0;
+
+        if (node->type == NodeType::ImportSymbol && node->data.import_symbol.resolved_decl) {
+            node = node->data.import_symbol.resolved_decl;
         }
-    };
-    collect_errors(module);
 
-    // scan
-    std::optional<boost::json::object> scan_result = std::nullopt;
-    if (input.contains("scan")) {
-        auto scan_input = input["scan"].as_object();
-        auto offset = scan_input["offset"].as_int64();
-        auto operation = scan_input["operation"].as_string();
-        auto pos = cx::Pos::from_offset(offset);
-        auto result = analyzer.scan(module, pos);
-
-        auto result_object = boost::json::object();
-        if (operation == "completion") {
-            // return completion results
-            auto completions = boost::json::array();
-            if (result.scope) {
-                if (result.is_dot) {
-                    completions = complete_dot(result, resolver);
+        switch (node->type) {
+        case NodeType::Identifier: {
+            auto kind = node->data.identifier.kind;
+            if (kind == IdentifierKind::TypeName || kind == IdentifierKind::ThisType) {
+                token_type = ST_Type;
+            } else if (kind == IdentifierKind::This) {
+                continue;
+            } else {
+                auto decl = node->data.identifier.decl;
+                if (!decl) {
+                    token_type = ST_Variable;
                 } else {
-                    long index = 0;
-                    for (auto symbol : scope_resolver.get_all_symbols(result.scope)) {
-                        ++index;
-                        boost::json::object completion;
-                        completion["label"] = symbol->name;
-                        completion["kind"] = get_symbol_kind(symbol);
-                        if (symbol->resolved_type) {
-                            completion["detail"] = resolver.format_type(symbol->resolved_type, true);
-                        }
-                        completion["data"] = index;
-                        completions.push_back(completion);
+                    switch (decl->type) {
+                    case NodeType::ParamDecl:
+                        token_type = ST_Parameter;
+                        break;
+                    case NodeType::VarDecl:
+                        token_type = decl->data.var_decl.is_field ? ST_Property : ST_Variable;
+                        if (decl->data.var_decl.kind != VarKind::Mutable)
+                            modifiers |= SM_Readonly;
+                        break;
+                    case NodeType::FnDef: {
+                        auto fk = decl->data.fn_def.fn_kind;
+                        token_type = (fk == FnKind::Method || fk == FnKind::Constructor ||
+                                      fk == FnKind::Destructor)
+                                         ? ST_Method : ST_Function;
+                        break;
+                    }
+                    case NodeType::EnumVariant:
+                        token_type = ST_EnumMember;
+                        break;
+                    case NodeType::StructDecl:
+                    case NodeType::EnumDecl:
+                    case NodeType::TypedefDecl:
+                    case NodeType::Primitive:
+                        token_type = ST_Type;
+                        break;
+                    default:
+                        token_type = ST_Variable;
+                        break;
                     }
                 }
             }
-            result_object["completions"] = completions;
-        } else if (operation == "signatureHelp") {
-            if (result.fn_call) {
-                result_object["signatureHelp"] = build_signature_help(result, resolver);
-            }
-        } else if (operation == "info") {
-            if (result.decl) {
-                result_object["info"] = get_symbol_info(result.decl, resolver);
-            }
-        } else if (operation == "definition") {
-            auto start_tok = result.decl
-                ? (result.decl->start_token ? result.decl->start_token : result.decl->token)
-                : nullptr;
-            if (result.decl && result.decl->module && start_tok) {
-                boost::json::object def_link = {};
-                def_link["targetUri"] = fmt::format("file://{}", result.decl->module->full_path());
-                auto start_pos = start_tok->pos;
-                auto end_pos =
-                    result.decl->end_token ? result.decl->end_token->pos : start_pos.add_line(1);
-                auto start = boost::json::object({
-                    {"character", start_pos.col - 1},
-                    {"line", start_pos.line},
-                });
-                auto end = boost::json::object({
-                    {"character", end_pos.col},
-                    {"line", end_pos.line},
-                });
-                auto range = boost::json::object({
-                    {"start", start},
-                    {"end", end},
-                });
-                def_link["targetSelectionRange"] = range;
-                def_link["targetRange"] = range;
-                result_object["definition"] = def_link;
-            }
+            break;
         }
-        scan_result = {result_object};
+        case NodeType::FnDef: {
+            auto fk = node->data.fn_def.fn_kind;
+            token_type = (fk == FnKind::Method || fk == FnKind::Constructor ||
+                          fk == FnKind::Destructor)
+                             ? ST_Method : ST_Function;
+            modifiers |= SM_Declaration;
+            auto spec = node->data.fn_def.decl_spec;
+            if (spec) {
+                if (spec->is_static()) modifiers |= SM_Static;
+                if (spec->is_async()) modifiers |= SM_Async;
+            }
+            break;
+        }
+        case NodeType::VarDecl:
+            token_type = node->data.var_decl.is_field ? ST_Property : ST_Variable;
+            modifiers |= SM_Declaration;
+            if (node->data.var_decl.kind != VarKind::Mutable)
+                modifiers |= SM_Readonly;
+            break;
+        case NodeType::ParamDecl:
+            token_type = ST_Parameter;
+            modifiers |= SM_Declaration;
+            break;
+        case NodeType::StructDecl:
+            token_type = ST_Type;
+            modifiers |= SM_Declaration;
+            break;
+        case NodeType::EnumDecl:
+            token_type = ST_Type;
+            modifiers |= SM_Declaration;
+            break;
+        case NodeType::EnumVariant:
+            token_type = ST_EnumMember;
+            modifiers |= SM_Declaration;
+            break;
+        case NodeType::TypedefDecl:
+            token_type = ST_Type;
+            modifiers |= SM_Declaration;
+            break;
+        case NodeType::ImportDecl:
+        case NodeType::ImportSymbol:
+            token_type = ST_Namespace;
+            break;
+        case NodeType::DotExpr: {
+            auto resolved = node->data.dot_expr.resolved_decl;
+            if (resolved && resolved->type == NodeType::FnDef)
+                token_type = ST_Method;
+            else
+                token_type = ST_Property;
+            break;
+        }
+        case NodeType::FieldInitExpr:
+            token_type = ST_Property;
+            break;
+        case NodeType::ConstructExpr:
+            token_type = ST_Type;
+            break;
+        case NodeType::BindIdentifier:
+            token_type = ST_Variable;
+            modifiers |= SM_Declaration;
+            break;
+        case NodeType::TypeParam:
+            token_type = ST_Type;
+            modifiers |= SM_Declaration;
+            break;
+        default:
+            continue;
+        }
+
+        if (token_type < 0) continue;
+
+        auto len = tok->str.size();
+        if (len == 0) len = tok->to_string().size();
+        if (len == 0) continue;
+
+        result.push_back(tok->pos.line);
+        result.push_back(tok->pos.col - 1);
+        result.push_back((int64_t)len);
+        result.push_back(token_type);
+        result.push_back(modifiers);
     }
 
-    // return final result
-    napi_value result;
-    boost::json::object result_json = {
-        {"errors", errors_json},
-    };
-    if (scan_result) {
-        result_json["scanResult"] = *scan_result;
-    }
-    auto str = boost::json::serialize(result_json);
-    status = napi_create_string_utf8(env, str.c_str(), str.size(), &result);
-    if (status != napi_ok) return nullptr;
     return result;
 }
 
-static napi_value Method(napi_env env, napi_callback_info info);
+// ============================================================================
+// N-API methods
+// ============================================================================
 
-#define DECLARE_NAPI_METHOD(name, func)                                                            \
+// analyze: process source, return diagnostics
+// Input:  {"file": "...", "source": "...", "chiRoot": "..."}
+// Output: {"errors": [...]}
+static napi_value AnalyzeMethod(napi_env env, napi_callback_info info) {
+    std::string input_buf;
+    if (!parse_napi_arg(env, info, input_buf)) return nullptr;
+    auto input = boost::json::parse(input_buf).as_object();
+
+    cx::Analyzer analyzer;
+    std::string input_file;
+    init_analyzer(analyzer, input, input_file);
+    auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+
+    auto module = process_source(analyzer, input_file, &src);
+
+    return napi_json_result(env, boost::json::object{{"errors", collect_errors(module)}});
+}
+
+// scan: process source, run cursor scan, return operation-specific result
+// Input:  {"file": "...", "source": "...", "chiRoot": "...", "offset": N, "operation": "..."}
+// Output: {"completions": [...]} | {"definition": {...}} | {"info": "..."} | {"signatureHelp": {...}}
+static napi_value ScanMethod(napi_env env, napi_callback_info info) {
+    std::string input_buf;
+    if (!parse_napi_arg(env, info, input_buf)) return nullptr;
+    auto input = boost::json::parse(input_buf).as_object();
+
+    cx::Analyzer analyzer;
+    std::string input_file;
+    init_analyzer(analyzer, input, input_file);
+    auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+
+    auto module = process_source(analyzer, input_file, &src);
+
+    auto offset = input["offset"].as_int64();
+    auto operation = input["operation"].as_string();
+    auto pos = cx::Pos::from_offset(offset);
+    auto result = analyzer.scan(module, pos);
+
+    auto resolver = analyzer.get_resolver();
+    cx::ScopeResolver scope_resolver(&resolver);
+    boost::json::object output;
+
+    if (operation == "completion") {
+        boost::json::array completions;
+        if (result.scope) {
+            if (result.is_dot) {
+                completions = complete_dot(result, resolver);
+            } else {
+                long index = 0;
+                for (auto symbol : scope_resolver.get_all_symbols(result.scope)) {
+                    ++index;
+                    boost::json::object completion;
+                    completion["label"] = symbol->name;
+                    completion["kind"] = get_symbol_kind(symbol);
+                    if (symbol->resolved_type) {
+                        completion["detail"] = resolver.format_type(symbol->resolved_type, true);
+                    }
+                    completion["data"] = index;
+                    completions.push_back(completion);
+                }
+            }
+        }
+        output["completions"] = completions;
+    } else if (operation == "signatureHelp") {
+        if (result.fn_call) {
+            output["signatureHelp"] = build_signature_help(result, resolver);
+        }
+    } else if (operation == "info") {
+        if (result.decl) {
+            output["info"] = get_symbol_info(result.decl, resolver);
+        }
+    } else if (operation == "definition") {
+        auto def = build_definition(result);
+        if (!def.empty()) {
+            output["definition"] = def;
+        }
+    }
+
+    return napi_json_result(env, output);
+}
+
+// format: lightweight parse + format (no runtime needed)
+// Input:  {"file": "...", "source": "...", "chiRoot": "..."}
+// Output: {"errors": [...], "formatted": "..."}
+static napi_value FormatMethod(napi_env env, napi_callback_info info) {
+    std::string input_buf;
+    if (!parse_napi_arg(env, info, input_buf)) return nullptr;
+    auto input = boost::json::parse(input_buf).as_object();
+
+    cx::Analyzer analyzer;
+    std::string input_file;
+    init_analyzer(analyzer, input, input_file);
+    auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+
+    auto pkg = analyzer.get_context()->add_package(".");
+    load_package_config(pkg, input_file);
+    auto module = analyzer.format_source(pkg, &src, input_file);
+
+    boost::json::object output;
+    output["errors"] = collect_errors(module);
+    if (module && module->errors.len == 0 && module->root) {
+        cx::AstPrinter printer(module->root, &module->comments);
+        output["formatted"] = printer.format_to_string();
+    }
+
+    return napi_json_result(env, output);
+}
+
+// semanticTokens: process source, generate semantic token data
+// Input:  {"file": "...", "source": "...", "chiRoot": "..."}
+// Output: [line, col, len, type, mod, ...]
+static napi_value SemanticTokensMethod(napi_env env, napi_callback_info info) {
+    std::string input_buf;
+    if (!parse_napi_arg(env, info, input_buf)) return nullptr;
+    auto input = boost::json::parse(input_buf).as_object();
+
+    cx::Analyzer analyzer;
+    std::string input_file;
+    init_analyzer(analyzer, input, input_file);
+    auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+
+    auto module = process_source(analyzer, input_file, &src);
+
+    return napi_json_result(env, generate_semantic_tokens(module));
+}
+
+// ============================================================================
+// Module registration
+// ============================================================================
+
+#define DECLARE_NAPI_METHOD(name, func) \
     { name, 0, func, 0, 0, 0, napi_default, 0 }
 
 static napi_value Init(napi_env env, napi_value exports) {
-    napi_status status;
-    napi_property_descriptor desc = DECLARE_NAPI_METHOD("analyze", Method);
-    status = napi_define_properties(env, exports, 1, &desc);
+    napi_property_descriptor descs[] = {
+        DECLARE_NAPI_METHOD("analyze", AnalyzeMethod),
+        DECLARE_NAPI_METHOD("scan", ScanMethod),
+        DECLARE_NAPI_METHOD("format", FormatMethod),
+        DECLARE_NAPI_METHOD("semanticTokens", SemanticTokensMethod),
+    };
+    napi_status status = napi_define_properties(env, exports, 4, descs);
     assert(status == napi_ok);
     return exports;
 }

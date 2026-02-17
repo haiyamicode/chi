@@ -44,7 +44,7 @@ func test_catch_all() {
         println("caught");
     };
 
-    // No throw — catch block not entered
+    // No throw -- catch block not entered
     try succeed() catch {
         println("should not reach");
     };

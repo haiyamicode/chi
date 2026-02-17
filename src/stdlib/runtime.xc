@@ -246,7 +246,13 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(string.format("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
+            panic(
+                string.format(
+                    "expected {}, got {}",
+                    json_kind_display(kind),
+                    json_kind_display(this.kind)
+                )
+            );
         }
     }
 
@@ -354,7 +360,12 @@ func fs_read(path: string) string {
     return result;
 }
 
-struct Array<T> implements ops.Index<uint32, T>, ops.IndexIterable<uint32, T>, ops.CopyFrom<Array<T>>, ops.Display {
+struct Array<T> implements 
+    ops.Index<uint32, T>,
+    ops.IndexIterable<uint32, T>,
+    ops.CopyFrom<Array<T>>,
+    ops.Display
+ {
     private data: *T = null;
     protected length: uint32 = 0;
     protected capacity: uint32 = 0;
@@ -639,10 +650,12 @@ func promise<T>(executor: func (resolve: func (value: T))) Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return promise(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
+    return promise(
+        func (resolve) {
+            timeout(ms, func [resolve] () {
+                resolve({});
+            });
+        }
+    );
 }
 

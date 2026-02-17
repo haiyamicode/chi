@@ -148,7 +148,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
     // find token matching the cursor
     for (auto token : module->tokens) {
         if (token->pos.offset <= cursor_pos.offset &&
-            token->pos.offset + token->to_string().size() > cursor_pos.offset) {
+            token->pos.offset + (long)token->to_string().size() > cursor_pos.offset) {
             result.token = token;
             break;
         }
@@ -380,6 +380,8 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
             if (find_fn_call(stmt, cursor_pos, result)) return true;
         }
         return false;
+    case ast::NodeType::TryExpr:
+        return find_fn_call(node->data.try_expr.expr, cursor_pos, result);
     default:
         return false;
     }

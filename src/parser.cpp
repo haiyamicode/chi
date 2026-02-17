@@ -1901,6 +1901,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
     auto kw = expect(keyword);
     auto iden = expect(TokenType::IDEN);
     Node *node = create_struct_node(kw, iden->str);
+    iden->semantic_node = node;
     node->start_token = kw;
     node->data.struct_decl.decl_spec = decl_spec;
     auto &params = node->data.struct_decl.type_params;
@@ -2190,7 +2191,9 @@ Node *Parser::parse_dot_expr(Node *expr) {
     auto dot = expect(TokenType::DOT);
     auto node = create_node(NodeType::DotExpr, dot);
     node->data.dot_expr.expr = expr;
-    node->data.dot_expr.field = expect_identifier();
+    auto field = expect_identifier();
+    field->semantic_node = node;
+    node->data.dot_expr.field = field;
 
     if (next_is(TokenType::DOT)) {
         return parse_dot_expr(node);
@@ -2211,6 +2214,7 @@ Node *Parser::parse_typedef() {
     auto token = expect(TokenType::KW_TYPEDEF);
     auto node = create_node(NodeType::TypedefDecl, token);
     auto iden = expect(TokenType::IDEN);
+    iden->semantic_node = node;
     node->data.typedef_decl.identifier = iden;
     expect(TokenType::ASS);
     node->data.typedef_decl.type = parse_type_expr(true);
