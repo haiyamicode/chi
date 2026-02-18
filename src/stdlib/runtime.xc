@@ -141,7 +141,7 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
 struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
     private _ptr: *T = null;
 
-    func new(ptr: &mut<T>) {
+    func new(ptr: &mut T) {
         this._ptr = ptr as *T;
     }
 
@@ -396,7 +396,7 @@ struct Array<T> implements
         cx_array_new(this);
     }
 
-    func index(index: uint32) &mut<T> {
+    func index(index: uint32) &mut T {
         assert(index < this.length, "index out of bounds");
         return &mut this.data[index];
     }
@@ -545,7 +545,7 @@ struct Map<K, V> implements ops.Index<K, V> {
         return null;
     }
 
-    func index(key: K) &mut<V> {
+    func index(key: K) &mut V {
         var k: any = key;
         var h = HashBytes{};
         cx_hbytes(&k, &h);

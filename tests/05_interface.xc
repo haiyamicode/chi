@@ -121,7 +121,7 @@ func test_heap_and_delete() {
     delete r;
     // delete through interface reference
     var d = new Circle{radius: 9};
-    var si: &mut<Shape> = d;
+    var si: &mut Shape = d;
     delete si;
 }
 
@@ -149,12 +149,12 @@ func test_sizeof() {
 func test_box() {
     println("=== Box<Shape> ===");
     var c = new Circle{radius: 7};
-    var s: &mut<Shape> = c;
+    var s: &mut Shape = c;
     var b = Box<Shape>{s};
     printf("{}: area={}\n", b.as_ref().name(), b.as_ref().area());
 
     var r = new Rect{w: 2, h: 3};
-    var s2: &mut<Shape> = r;
+    var s2: &mut Shape = r;
     var b2 = Box<Shape>{s2};
     printf("{}: area={}\n", b2.as_ref().name(), b2.as_ref().area());
     println("before cleanup:");

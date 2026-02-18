@@ -592,18 +592,19 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
-        emit("{}", get_sigil_symbol(data.sigil));
-        if (data.sigil == SigilKind::MutRef) {
-            if (data.has_wrapping) {
-                emit("<");
-            } else {
-                emit(" ");
-            }
+        bool has_lifetime = !data.lifetime.empty();
+        bool is_mut = data.sigil == SigilKind::MutRef;
+        if (has_lifetime && is_mut) {
+            emit("&(mut, '{})", data.lifetime);
+        } else if (has_lifetime) {
+            emit("&'{}", data.lifetime);
+        } else {
+            emit("{}", get_sigil_symbol(data.sigil));
+        }
+        if (is_mut || has_lifetime) {
+            emit(" ");
         }
         print_node(data.type);
-        if (data.has_wrapping && data.sigil == SigilKind::MutRef) {
-            emit(">");
-        }
         break;
     }
     case NodeType::TypedefDecl: {

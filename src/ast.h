@@ -159,10 +159,50 @@ struct FnDef {
     bool has_try = false;
     array<Node *> variants = {};
     map<Node *, array<Node *>> ref_edges = {};  // escape analysis: dependency graph
+    array<Node *> terminals = {};  // nodes whose lifetimes extend beyond the function
 
+    // Register a terminal node (return statement, this with field assignments, etc.)
+    void add_terminal(Node *terminal) {
+        if (!terminal) return;
+        for (size_t i = 0; i < terminals.len; i++) {
+            if (terminals[i] == terminal) return;
+        }
+        terminals.add(terminal);
+    }
+
+    // Direct reference: A points to B's memory (from & operator)
     void add_ref_edge(Node *from, Node *to) {
         if (!from || !to || from == to) return;
         ref_edges[from].add(to);
+    }
+
+    // By-value copy: A inherits B's leaf terminals (the actual memory targets)
+    // Traverses B's edges to find leaves, then creates edges from A to each leaf.
+    void copy_ref_edges(Node *to, Node *from) {
+        if (!to || !from || to == from) return;
+        auto *deps = ref_edges.get(from);
+        if (!deps || deps->len == 0) {
+            // from itself is a leaf terminal
+            add_ref_edge(to, from);
+            return;
+        }
+        // Follow edges to find leaf terminals (nodes with no outgoing edges)
+        array<Node *> stack;
+        for (size_t i = 0; i < deps->len; i++) stack.add(deps->items[i]);
+        map<Node *, bool> visited;
+        while (stack.len > 0) {
+            auto *node = stack.last();
+            stack.len--;
+            if (visited.has_key(node)) continue;
+            visited[node] = true;
+            auto *next = ref_edges.get(node);
+            if (next && next->len > 0) {
+                for (size_t i = 0; i < next->len; i++) stack.add(next->items[i]);
+            } else {
+                // Leaf terminal — add direct edge
+                add_ref_edge(to, node);
+            }
+        }
     }
 
     bool is_static() { return decl_spec && decl_spec->is_static(); }
@@ -388,7 +428,7 @@ struct TypeSigil {
     Node *type = nullptr;
     SigilKind sigil = SigilKind::None;
     Node *etype = nullptr;
-    bool has_wrapping = false;
+    string lifetime; // e.g. "This" from &'This int
 };
 
 struct EnumVariant {
@@ -764,6 +804,13 @@ struct Node {
             return data.identifier.kind == IdentifierKind::Value;
         }
         return true;
+    }
+
+    bool is_ancestor_of(Node *child) {
+        for (auto *n = child; n; n = n->parent) {
+            if (n == this) return true;
+        }
+        return false;
     }
 
     bool is_last_stmt() {

@@ -20,6 +20,7 @@ struct ChiTypeSubtype;
 struct Context;
 struct ChiTypeStruct;
 struct ChiTypeEnum;
+struct ChiLifetime;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer,
           Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
@@ -120,6 +121,7 @@ struct ChiTypeStruct {
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
     map<IntrinsicSymbol, ChiStructMember *> member_intrinsics = {};
+    ChiLifetime *this_lifetime = nullptr;  // implicit 'This lifetime
 
     ChiStructMember *add_member(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type);
@@ -145,9 +147,15 @@ struct ChiTypeStruct {
     static ChiStructMember *get_destructor(ChiType *type);
 };
 
+struct ChiLifetime {
+    string name;             // "This", "A", etc.
+    ChiType *owner = nullptr; // the struct/fn type that declares this lifetime
+};
+
 struct ChiTypePointer {
     ChiType *elem = nullptr;
     bool is_null = false;
+    array<ChiLifetime *> lifetimes;
 };
 
 struct ChiTypeArray {
@@ -504,6 +512,7 @@ enum LANG_FLAG : uint32_t {
     LANG_FLAG_NONE = 0,
     LANG_FLAG_MANAGED = 1 << 0,
     LANG_FLAG_SAFE = 1 << 1,
+    LANG_FLAG_VERBOSE = 1 << 2,
 };
 
 inline bool has_lang_flag(uint32_t flags, LANG_FLAG flag) { return (flags & flag) != 0; }

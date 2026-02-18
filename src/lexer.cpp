@@ -147,7 +147,28 @@ l0:
     } else if (c == '`') {
         read_raw_string();
     } else if (c == '\'') {
-        read_rune();
+        // Distinguish char literal ('x') from lifetime ('Ident)
+        // After the opening ', peek at next two chars:
+        //   letter + ' = char literal
+        //   letter + letter/digit = lifetime
+        //   anything else = char literal (escape sequences, unicode, etc.)
+        auto c1 = read();
+        if (is_letter(c1)) {
+            auto c2 = peek();
+            if (c2 == '\'') {
+                // 'x' — char literal: put c1 back, let read_rune handle it
+                unread();
+                read_rune();
+            } else {
+                // 'Ident — lifetime: c1 is first char of identifier
+                unread();
+                read_lifetime();
+            }
+        } else {
+            // Escape sequence, unicode char, etc.
+            unread();
+            read_rune();
+        }
     } else if (c == '#') {
         auto comment_pos = pos();
         string comment_text = "#";
@@ -321,6 +342,18 @@ void Lexer::read_rune() {
 
     m_tok.type = TokenType::CHAR;
     m_tok.val.i = c;
+}
+
+void Lexer::read_lifetime() {
+    auto buf = new_buf();
+    auto c = read();
+    while (is_letter(c) || is_digit(c)) {
+        buf.push_back(c);
+        c = read();
+    }
+    unread();
+    m_tok.str = buf;
+    m_tok.type = TokenType::LIFETIME;
 }
 
 void Lexer::read_raw_string() {
@@ -880,6 +913,7 @@ string cx::get_strlit_repr(const string &str) {
 string Token::get_name() const {
     switch (type) {
     case TokenType::IDEN:
+    case TokenType::LIFETIME:
         return str;
     case TokenType::KW_NEW:
         return "new";
@@ -894,6 +928,8 @@ string Token::to_string() const {
     switch (type) {
     case TokenType::IDEN:
         return str;
+    case TokenType::LIFETIME:
+        return fmt::format("'{}", str);
     case TokenType::CHAR:
         return fmt::format("'{}'", (char)val.i);
     case TokenType::STRING:

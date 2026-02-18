@@ -100,6 +100,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> array_of = {};
     map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
     optional<ErrorHandler> error_handler = {};
+    uint32_t lang_flags = 0;
     map<string, ChiType *> composite_types = {};
     map<ChiType *, ChiType *> promise_of = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
@@ -237,15 +238,27 @@ class Resolver {
 
     template <typename... Args>
     void error(ast::Node *node, const char *format, const Args &...args) {
+        error_with_notes(node, {}, format, args...);
+    }
+
+    template <typename... Args>
+    void error_with_notes(ast::Node *node, array<Note> notes, const char *format,
+                          const Args &...args) {
         auto message = fmt::format(format, args...);
         if (auto fn = m_ctx->error_handler) {
-            (*fn)({message, *node->token});
+            Error err = {message, *node->token};
+            err.notes = std::move(notes);
+            (*fn)(std::move(err));
             return;
         }
 
         auto pos = node->token->pos;
         print("{}:{}:{}: error: {}\n", m_module->full_path(), pos.line_number(), pos.col_number(),
               message);
+        for (auto &note : notes) {
+            print("{}:{}:{}: note: {}\n", m_module->full_path(), note.pos.line_number(),
+                  note.pos.col_number(), note.message);
+        }
         exit(1);
     }
 
@@ -359,7 +372,7 @@ class Resolver {
 
     ast::Node *find_root_decl(ast::Node *node);
 
-    void mark_escaped_deps(ast::FnDef *fn_def, ast::Node *root);
+    void check_lifetime_constraints(ast::FnDef *fn_def);
 
     bool compare_impl_type(ChiType *base, ChiType *impl);
 

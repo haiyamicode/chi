@@ -505,24 +505,42 @@ Node *Parser::parse_type_expr(bool type_only) {
     array<Node *> sigil_nodes;
     for (;;) {
         auto token = get();
-        auto has_wrapping = false;
         if (auto sigil_kind = get_sigil_kind(token->type)) {
             consume();
 
-            if (sigil_kind == SigilKind::Reference && next_is(TokenType::KW_MUT)) {
-                consume();
-                expect(TokenType::LT);
-                has_wrapping = true;
-                sigil_kind = SigilKind::MutRef;
+            string lifetime;
+            if (sigil_kind == SigilKind::Reference) {
+                if (next_is(TokenType::LPAREN)) {
+                    // &(mut, 'This) T  or  &(mut) T  or  &('This) T
+                    consume();
+                    for (;;) {
+                        if (next_is(TokenType::KW_MUT)) {
+                            consume();
+                            sigil_kind = SigilKind::MutRef;
+                        } else if (next_is(TokenType::LIFETIME)) {
+                            lifetime = get()->str;
+                            consume();
+                        } else {
+                            break;
+                        }
+                        if (!next_is(TokenType::COMMA)) break;
+                        consume();
+                    }
+                    expect(TokenType::RPAREN);
+                } else if (next_is(TokenType::KW_MUT)) {
+                    // &mut T
+                    consume();
+                    sigil_kind = SigilKind::MutRef;
+                } else if (next_is(TokenType::LIFETIME)) {
+                    // &'This T
+                    lifetime = get()->str;
+                    consume();
+                }
             }
 
-            if (next_is(TokenType::LT)) {
-                has_wrapping = true;
-                consume();
-            }
             auto node = create_node(NodeType::TypeSigil, token);
             node->data.sigil_type.sigil = *sigil_kind;
-            node->data.sigil_type.has_wrapping = has_wrapping;
+            node->data.sigil_type.lifetime = lifetime;
             sigil_nodes.add(node);
 
         } else {
@@ -580,10 +598,6 @@ Node *Parser::parse_type_expr(bool type_only) {
         auto parent = sigil_nodes[i];
         parent->data.sigil_type.type = node;
         node = parent;
-
-        if (parent->data.sigil_type.has_wrapping) {
-            expect(TokenType::GT);
-        }
     }
 
     return node;

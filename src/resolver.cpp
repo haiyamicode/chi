@@ -581,13 +581,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto local_fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
             if (data.body) {
                 resolve(data.body, local_fn_scope);
-                // Params are terminals
-                auto &fn_proto = data.fn_proto->data.fn_proto;
-                for (auto param : fn_proto.params) {
-                    if (data.ref_edges.has_key(param)) {
-                        mark_escaped_deps(&data, param);
-                    }
-                }
+                check_lifetime_constraints(&data);
             }
 
             // After body resolution, sync the FnLambda's is_placeholder with the inner Fn type
@@ -671,15 +665,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             fn_scope = fn_scope.set_parent_fn(proto);
             resolve(data.body, fn_scope);
 
-            // Params are terminals — DFS from each param that has edges
-            auto &proto_data = data.fn_proto->data.fn_proto;
-            for (auto param : proto_data.params) {
-                if (data.ref_edges.has_key(param)) {
-                    mark_escaped_deps(&data, param);
-                }
-            }
+            check_lifetime_constraints(&data);
 
             // Add params to cleanup_vars (after body resolution ensures types are resolved)
+            auto &proto_data = data.fn_proto->data.fn_proto;
             for (auto param : proto_data.params) {
                 if (should_destroy(param) && !param->escape.is_capture()) {
                     data.cleanup_vars.add(param);
@@ -904,7 +893,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         auto type = resolve_value(data.type, scope);
-        auto final_type = get_pointer_type(type, get_sigil_type_kind(data.sigil));
+        auto kind = get_sigil_type_kind(data.sigil);
+        ChiType *final_type;
+        if (!data.lifetime.empty()) {
+            // Lifetime-annotated ref: create fresh type (not cached) with resolved lifetime
+            final_type = create_pointer_type(type, kind);
+            if (data.lifetime == "This" && scope.parent_struct) {
+                auto *struct_type = scope.parent_struct;
+                auto &st = struct_type->data.struct_;
+                if (!st.this_lifetime) {
+                    st.this_lifetime = new ChiLifetime{"This", struct_type};
+                }
+                final_type->data.pointer.lifetimes.add(st.this_lifetime);
+            } else {
+                error(node, "unknown lifetime '{}'", data.lifetime);
+                return create_type(TypeKind::Unknown);
+            }
+        } else {
+            final_type = get_pointer_type(type, kind);
+        }
         return create_type_symbol({}, final_type);
     }
     case NodeType::ParamDecl: {
@@ -943,11 +950,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto var_scope = type_hint ? scope.set_value_type(type_hint) : scope;
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
-            // Escape analysis: track ref deps through assignment
+            // Escape analysis: by-value copy inherits leaf terminals
             if (scope.parent_fn_node && data.expr->type == NodeType::Identifier) {
                 auto src_decl = data.expr->data.identifier.decl;
-                if (src_decl && src_decl->type == NodeType::VarDecl) {
-                    scope.parent_fn_node->data.fn_def.add_ref_edge(node, src_decl);
+                if (src_decl) {
+                    scope.parent_fn_node->data.fn_def.copy_ref_edges(node, src_decl);
                 }
             }
             if (var_type) {
@@ -1021,8 +1028,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto lhs_decl = find_root_decl(data.op1);
                 if (lhs_decl && data.op2->type == NodeType::Identifier) {
                     auto rhs_decl = data.op2->data.identifier.decl;
-                    if (rhs_decl && rhs_decl->type == NodeType::VarDecl) {
-                        scope.parent_fn_node->data.fn_def.add_ref_edge(lhs_decl, rhs_decl);
+                    if (rhs_decl) {
+                        auto &fn_def = scope.parent_fn_node->data.fn_def;
+                        fn_def.copy_ref_edges(lhs_decl, rhs_decl);
+                        // this.field = r makes 'this' a terminal
+                        if (lhs_decl->type == ast::NodeType::Identifier &&
+                            lhs_decl->data.identifier.kind == ast::IdentifierKind::This) {
+                            fn_def.add_terminal(lhs_decl);
+                        }
                     }
                 }
             }
@@ -1341,10 +1354,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (data.expr && scope.parent_fn_node && expr_type &&
             type_contains_ref(expr_type)) {
+            auto &fn_def = scope.parent_fn_node->data.fn_def;
             auto root = find_root_decl(data.expr);
-            if (root) {
-                mark_escaped_deps(&scope.parent_fn_node->data.fn_def, root);
+            if (!root) root = data.expr;
+            bool is_ref_return = expr_type->kind == TypeKind::Reference ||
+                                 expr_type->kind == TypeKind::MutRef ||
+                                 expr_type->kind == TypeKind::Pointer;
+            if (is_ref_return) {
+                // Direct reference: return points to the target's memory
+                fn_def.add_ref_edge(node, root);
+            } else {
+                // By-value: return inherits the target's leaf terminals
+                fn_def.copy_ref_edges(node, root);
             }
+            fn_def.add_terminal(node);
         }
 
         return return_type;
@@ -1667,12 +1690,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             if (scope.parent_fn_node) {
                 auto outlet = scope.move_outlet ? scope.move_outlet : node;
-                scope.parent_fn_node->data.fn_def.add_ref_edge(outlet, field_init);
-                // Track value -> decl edge (like VarDecl init)
+                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                fn_def.add_ref_edge(outlet, field_init);
+                // By-value: field inherits source's leaf terminals
                 if (data.value->type == NodeType::Identifier) {
                     auto src = data.value->data.identifier.decl;
-                    if (src && src->type == NodeType::VarDecl) {
-                        scope.parent_fn_node->data.fn_def.add_ref_edge(field_init, src);
+                    if (src) {
+                        fn_def.copy_ref_edges(field_init, src);
                     }
                 }
             }
@@ -1700,7 +1724,35 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto &fn = fn_type->data.fn;
         auto fn_decl = data.fn_ref_expr->get_decl();
-        return resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
+        auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
+
+        // Annotation-driven edge creation: for method calls where a param has
+        // 'This lifetime, create edge from receiver to that arg in the caller's graph.
+        if (scope.parent_fn_node &&
+            data.fn_ref_expr->type == NodeType::DotExpr &&
+            fn_decl && fn_decl->type == NodeType::FnDef) {
+            auto *callee_proto = fn_decl->data.fn_def.fn_proto;
+            if (callee_proto) {
+                auto &callee_params = callee_proto->data.fn_proto.params;
+                auto *receiver_expr = data.fn_ref_expr->data.dot_expr.expr;
+                auto *receiver_decl = find_root_decl(receiver_expr);
+                if (receiver_decl) {
+                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    for (size_t i = 0; i < callee_params.len && i < data.args.len; i++) {
+                        auto *pt = callee_params[i]->resolved_type;
+                        if (pt && pt->is_pointer_like() &&
+                            pt->data.pointer.lifetimes.len > 0) {
+                            auto *arg_decl = find_root_decl(data.args[i]);
+                            if (arg_decl) {
+                                fn_def.add_ref_edge(receiver_decl, arg_decl);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
     }
     case NodeType::IfStmt: {
         auto &data = node->data.if_stmt;
@@ -1994,14 +2046,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto fn_scope = struct_scope.set_parent_fn(fn_type).set_parent_fn_node(member);
                     if (auto body = member->data.fn_def.body) {
                         resolve(body, fn_scope);
-                        // Params are terminals
-                        auto &fn_data = member->data.fn_def;
-                        auto &fn_proto = fn_data.fn_proto->data.fn_proto;
-                        for (auto param : fn_proto.params) {
-                            if (fn_data.ref_edges.has_key(param)) {
-                                mark_escaped_deps(&fn_data, param);
-                            }
-                        }
+                        check_lifetime_constraints(&member->data.fn_def);
                     }
                 }
             }
@@ -2995,6 +3040,13 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
     if (node->type == NodeType::VarDecl) {
         member->resolved_type = resolve(node, scope);
         node->data.var_decl.resolved_field = member;
+
+        // Reference fields implicitly have 'This lifetime
+        if (member->resolved_type && member->resolved_type->is_pointer_like()) {
+            if (!struct_.this_lifetime) {
+                struct_.this_lifetime = new ChiLifetime{"This", struct_type};
+            }
+        }
     } else if (node->type == NodeType::FnDef) {
         member->resolved_type = resolve(node, scope);
         for (auto attr : node->declspec_ref().attributes) {
@@ -4113,11 +4165,6 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto arg_type = resolve(arg, arg_scope);
             arg_types.add(arg_type);
 
-            if (scope.parent_fn_node && arg_type && type_contains_ref(arg_type)) {
-                auto root = find_root_decl(arg);
-                if (!root) root = arg;
-                mark_escaped_deps(&scope.parent_fn_node->data.fn_def, root);
-            }
         }
 
         // If no explicit type args and no return type inference, try argument-based inference
@@ -4251,11 +4298,6 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 check_assignment(arg, arg_type, param_type);
             }
 
-            if (scope.parent_fn_node && arg_type && type_contains_ref(arg_type)) {
-                auto root = find_root_decl(arg);
-                if (!root) root = arg;
-                mark_escaped_deps(&scope.parent_fn_node->data.fn_def, root);
-            }
         }
     }
 
@@ -5186,21 +5228,110 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
     }
 }
 
-void Resolver::mark_escaped_deps(ast::FnDef *fn_def, ast::Node *root) {
-    if (!root) return;
-    array<ast::Node *> stack = {root};
-    map<ast::Node *, bool> visited = {};
-    while (stack.len > 0) {
-        auto *node = stack.last();
-        stack.len--;
-        if (visited.has_key(node)) continue;
-        visited[node] = true;
-        if (node->type == ast::NodeType::VarDecl) {
-            node->escape.escaped = node->can_escape();
+static string node_label(ast::Node *n) {
+    std::ostringstream type_ss;
+    type_ss << n->type;
+    auto type_str = type_ss.str();
+    if (n->name.empty()) return type_str;
+    return fmt::format("{} ({})", n->name, type_str);
+}
+
+// Check if a leaf node satisfies a lifetime constraint.
+// Only called on base cases (VarDecl, ParamDecl) — graph construction
+// via copy_ref_edges already flattens intermediate nodes to leaves.
+static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *leaf) {
+    if (leaf->type == ast::NodeType::VarDecl) return false;
+
+    if (leaf->type == ast::NodeType::ParamDecl) {
+        if (!required) return true;
+
+        auto *leaf_type = leaf->resolved_type;
+        if (!leaf_type || !leaf_type->is_pointer_like()) return false;
+
+        auto &lifetimes = leaf_type->data.pointer.lifetimes;
+        for (size_t i = 0; i < lifetimes.len; i++) {
+            if (lifetimes[i] == required) return true;
         }
-        if (auto *deps = fn_def->ref_edges.get(node)) {
-            for (size_t i = 0; i < deps->len; i++) {
-                stack.add(deps->items[i]);
+        return false;
+    }
+
+    return true;
+}
+
+// Check lifetime constraints for all terminals in a function.
+// DFS from each terminal following ref_edges. For every reachable node,
+// satisfies_lifetime_constraint(required, node) determines if the constraint holds.
+void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
+    if (fn_def->terminals.len == 0 && fn_def->ref_edges.data.size() == 0) return;
+    bool is_safe = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE);
+    bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE);
+
+    auto fn_name = fn_def->fn_proto ? fn_def->fn_proto->name : "<lambda>";
+
+    if (verbose && fn_def->ref_edges.data.size() > 0) {
+        fmt::print("[lifetime] === {} ===\n", fn_name);
+        fmt::print("[lifetime] edges:\n");
+        for (auto &[from, tos] : fn_def->ref_edges.data) {
+            for (auto *to : tos) {
+                fmt::print("[lifetime]   {} -> {}\n", node_label(from), node_label(to));
+            }
+        }
+        fmt::print("[lifetime] terminals ({}):\n", fn_def->terminals.len);
+        for (size_t i = 0; i < fn_def->terminals.len; i++) {
+            fmt::print("[lifetime]   {}\n", node_label(fn_def->terminals[i]));
+        }
+    }
+
+    for (size_t t = 0; t < fn_def->terminals.len; t++) {
+        auto *terminal = fn_def->terminals[t];
+
+        // Extract required lifetime from terminal's type.
+        // Value types (struct by value): no lifetime requirement — params outlive the function.
+        // Reference types (e.g. 'this'): resolve to struct and get this_lifetime.
+        auto *term_type = terminal->resolved_type;
+        ChiLifetime *required = nullptr;
+        if (term_type && term_type->kind != TypeKind::Struct) {
+            auto *st = resolve_struct_type(term_type);
+            if (st) required = st->this_lifetime;
+        }
+
+        if (verbose) {
+            fmt::print("[lifetime] checking terminal: {} (required: {})\n",
+                       node_label(terminal), required ? "'" + required->name : "'fn");
+        }
+
+        auto *deps = fn_def->ref_edges.get(terminal);
+        if (!deps) continue;
+
+        array<ast::Node *> stack;
+        map<ast::Node *, bool> visited;
+        for (size_t i = 0; i < deps->len; i++) stack.add(deps->items[i]);
+
+        while (stack.len > 0) {
+            auto *node = stack.last();
+            stack.len--;
+            if (visited.has_key(node)) continue;
+            visited[node] = true;
+
+            bool satisfied = satisfies_lifetime_constraint(required, node);
+            if (verbose) {
+                fmt::print("[lifetime]   leaf {} -> {}\n",
+                           node_label(node), satisfied ? "OK" : "VIOLATION");
+            }
+
+            if (!satisfied) {
+                if (is_safe) {
+                    array<Note> notes;
+                    notes.add({"referenced here", terminal->token->pos});
+                    error_with_notes(node, std::move(notes),
+                                     "'{}' does not live long enough", node->name);
+                } else {
+                    node->escape.escaped = true;
+                }
+            }
+
+            if (auto *next = fn_def->ref_edges.get(node)) {
+                for (size_t i = 0; i < next->len; i++) stack.add(next->items[i]);
             }
         }
     }

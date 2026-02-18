@@ -54,6 +54,9 @@ clean:
 compile_example: build install
 	$(CHI) -c $(INPUT_FILE) -o local/test -w local/build
 
+compile_example_safe: build install
+	$(CHI) -s -c $(INPUT_FILE) -o local/test -w local/build
+
 run_example: compile_example
 	./local/test
 

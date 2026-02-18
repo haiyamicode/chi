@@ -26,6 +26,7 @@ class Builder {
     string working_dir;
     bool debug_mode = false;
     bool safe_mode = false;
+    bool verbose = false;
     BuildMode build_mode = BuildMode::Run;
 
     Builder();

@@ -29,7 +29,8 @@ TESTS_LIST = 00_fib.test \
 		25_default_args.test \
 		26_lambda_inference.test \
 		28_global_let.test \
-		29_error_handling.test
+		29_error_handling.test \
+		30_safe_lifetime.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
@@ -52,6 +53,29 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		exit 1; \
 	fi; \
        	rm -f $*.output
+
+# Special rule for safe lifetime test — needs -s flag.
+# Also tests error cases: each file in testdata/30_safe_errors/ must fail to compile.
+30_safe_lifetime.test: 30_safe_lifetime.expect
+	echo Test: 30_safe_lifetime...
+	@$(CHI) -s -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xc && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
+	@if [ "x`diff -qbu 30_safe_lifetime.expect 30_safe_lifetime.output`" != "x" ]; \
+	then \
+		echo "error in test 30_safe_lifetime (output mismatch)"; \
+		diff -u 30_safe_lifetime.expect 30_safe_lifetime.output; \
+		rm -f 30_safe_lifetime.output; \
+		exit 1; \
+	fi; \
+	rm -f 30_safe_lifetime.output
+	@failed=0; \
+	for f in testdata/30_safe_errors/*.xc; do \
+		name=$$(basename $$f); \
+		if $(CHI) -s -o /dev/null -c $$f -w /tmp/chitest_safe >/dev/null 2>&1; then \
+			echo "error: $$name should have been rejected but compiled successfully"; \
+			failed=1; \
+		fi; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
 
 # Special rule for GC tests - finalization order is non-deterministic,
 # so sort destruction lines (everything after "Test completed") before comparing.

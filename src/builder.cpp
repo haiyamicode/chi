@@ -54,6 +54,8 @@ void Builder::build_single_file(const string &file_name) {
     auto package = add_package(".");
     package->name = "__main";
 
+    if (safe_mode) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_SAFE;
+    if (verbose) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_VERBOSE;
     auto module = process_file(package, file_name);
     if (m_ctx.flags & FLAG_PRINT_AST) {
         return;
@@ -63,8 +65,7 @@ void Builder::build_single_file(const string &file_name) {
     auto settings = compiler.get_settings();
     settings->output_obj_to_file = get_tmp_file_path("main.o");
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
-    settings->lang_flags = module->get_lang_flags();
-    if (safe_mode) settings->lang_flags |= LANG_FLAG_SAFE;
+    settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
@@ -248,6 +249,8 @@ void Builder::build_package(const string &package_dir) {
     package->name = "__main";
     package->config = config_ptr;  // Store parsed config in package
 
+    if (safe_mode) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_SAFE;
+    if (verbose) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_VERBOSE;
     auto module = process_file(package, entry_file_path.string());
     if (m_ctx.flags & FLAG_PRINT_AST) {
         return;
@@ -257,8 +260,7 @@ void Builder::build_package(const string &package_dir) {
     auto settings = compiler.get_settings();
     settings->output_obj_to_file = get_tmp_file_path("main.o");
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
-    settings->lang_flags = module->get_lang_flags();
-    if (safe_mode) settings->lang_flags |= LANG_FLAG_SAFE;
+    settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);

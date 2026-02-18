@@ -1,0 +1,17 @@
+=== holder ===
+h.ref = 42
+=== multi ref ===
+a = 10, b = 20
+=== local ref ===
+result = 11
+=== chain ===
+chain = 99
+=== pair ===
+sum = 10
+=== ref to param ===
+ref = 55
+=== reassign ===
+first = 1
+second = 2
+=== direct init ===
+direct = 77

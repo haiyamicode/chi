@@ -88,7 +88,8 @@ MAKE_ENUM(TokenType, END, IDEN, ERROR,
           QUES,      // ?
           TILDE,     // ~
           AT,        // @
-          ARROW      // =>
+          ARROW,     // =>
+          LIFETIME   // 'Identifier
 )
 
 struct Pos {
@@ -179,10 +180,16 @@ typedef map<string, TokenType> KeywordMap;
 const long BUF_LEN = 4;
 const uint32_t UTF8_MAX = U'\U0010FFFF';
 
+struct Note {
+    string message;
+    Pos pos;
+};
+
 struct Error {
     string message = "";
     Pos pos = {};
     int range = 0;
+    array<Note> notes = {};
 
     Error(string message, Token token) : message(message), pos(token.pos) {
         range = token.to_string().size();
@@ -234,6 +241,8 @@ class Lexer {
     void read_raw_string();
 
     void read_rune();
+
+    void read_lifetime();
 
     bool read_expect(char expect);
 
