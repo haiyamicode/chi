@@ -503,6 +503,7 @@ struct TypeMetaEntry {
 enum LANG_FLAG : uint32_t {
     LANG_FLAG_NONE = 0,
     LANG_FLAG_MANAGED = 1 << 0,
+    LANG_FLAG_SAFE = 1 << 1,
 };
 
 inline bool has_lang_flag(uint32_t flags, LANG_FLAG flag) { return (flags & flag) != 0; }

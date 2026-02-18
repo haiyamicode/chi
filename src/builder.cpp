@@ -64,6 +64,7 @@ void Builder::build_single_file(const string &file_name) {
     settings->output_obj_to_file = get_tmp_file_path("main.o");
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
     settings->lang_flags = module->get_lang_flags();
+    if (safe_mode) settings->lang_flags |= LANG_FLAG_SAFE;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
@@ -257,6 +258,7 @@ void Builder::build_package(const string &package_dir) {
     settings->output_obj_to_file = get_tmp_file_path("main.o");
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
     settings->lang_flags = module->get_lang_flags();
+    if (safe_mode) settings->lang_flags |= LANG_FLAG_SAFE;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);

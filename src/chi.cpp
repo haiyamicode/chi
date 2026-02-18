@@ -15,7 +15,7 @@ using namespace cx;
 
 MAKE_ENUM(FlagType, String, Bool);
 MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Output, Ast, Format, WorkingDir, Analyzer,
-          Help);
+          Safe, Help);
 MAKE_ENUM(InputMode, File, Package)
 MAKE_ENUM(ProcessingMode, Build, Analyzer, Format)
 
@@ -40,6 +40,7 @@ void init_flags() {
     flags.add({FlagId::Format, "f", "format", FlagType::Bool});
     flags.add({FlagId::WorkingDir, "w", "working-dir", FlagType::String});
     flags.add({FlagId::Analyzer, "analyzer", "analyzer", FlagType::Bool});
+    flags.add({FlagId::Safe, "s", "safe", FlagType::Bool});
     flags.add({FlagId::Help, "h", "help", FlagType::Bool});
 
     for (auto &f : flags) {
@@ -75,6 +76,7 @@ int main(int argc, char *argv[]) {
         print("  -f --format: format source code\n");
         print("  -w --working-dir <dir>: working directory\n");
         print("  --analyzer: analyzer mode\n");
+        print("  -s --safe: safe mode (enable managed memory for .xc files)\n");
         print("  -h --help: help\n");
     };
 
@@ -105,6 +107,9 @@ int main(int argc, char *argv[]) {
             break;
         case FlagId::Analyzer:
             processing_mode = ProcessingMode::Analyzer;
+            break;
+        case FlagId::Safe:
+            bld.safe_mode = true;
             break;
         case FlagId::Help:
             print_help();

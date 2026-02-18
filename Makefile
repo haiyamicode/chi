@@ -20,9 +20,6 @@ build:
 install:
 	cd $(BUILD_DIR) && $(MAKE) install
 
-asm: build
-	$(CHI) -s -c $(INPUT_FILE) 
-
 compile_example_debug: build install
 	$(CHI) -d -c $(INPUT_FILE) -o local/test -w local/build
 
