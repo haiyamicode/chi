@@ -672,7 +672,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     // clean up & return
     fn->use_label(return_b);
     auto cleanup_fn_def = fn->get_def();
-    for (auto var : cleanup_fn_def->cleanup_vars) {
+    for (int i = cleanup_fn_def->cleanup_vars.len - 1; i >= 0; i--) {
+        auto var = cleanup_fn_def->cleanup_vars[i];
         compile_destruction(fn, get_var(var), var);
     }
     // Destroy any caught error objects still owned (from diverging catch blocks)
@@ -713,7 +714,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         landing->setCleanup(true);
         builder.CreateExtractValue(landing, {0});
         builder.CreateExtractValue(landing, {1});
-        for (auto var : fn->get_def()->cleanup_vars) {
+        for (int i = fn->get_def()->cleanup_vars.len - 1; i >= 0; i--) {
+            auto var = fn->get_def()->cleanup_vars[i];
             compile_destruction(fn, get_var(var), var);
         }
         for (auto &owner : fn->error_owner_vars) {

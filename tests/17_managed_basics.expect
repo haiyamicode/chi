@@ -8,8 +8,8 @@ bool: true
 === Structs Test ===
 TestStruct(id=1, name=managed)
 TestStruct(id=2, name=memory)
-TestStruct(1) destroyed
 TestStruct(2) destroyed
+TestStruct(1) destroyed
 
 === Arrays Test ===
 Array: [10, 20, 30]

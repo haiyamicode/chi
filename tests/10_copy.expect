@@ -5,13 +5,13 @@ copied local_copy, p = 42
 return_local() done
 creating local_b_copy
 copied local_b_copy, p = 42
-deleting local
 deleting local_b
+deleting local
 result: 42
 === Test 2: RVO - return ConstructExpr ===
 return_construct() returning ConstructExpr
 creating direct
 result: 99
 done
-deleting local_b_copy
 deleting direct
+deleting local_b_copy

@@ -7,8 +7,8 @@ caught MyError: typed
 caught void
 void ok
 === destructor unwind ===
-Resource.delete(A)
 Resource.delete(B)
+Resource.delete(A)
 Resource.delete(mid)
 caught after unwind
 === error cleanup ===

@@ -12,17 +12,17 @@ Circle.delete(r=9)
 circle: area=300
 rect: area=42
 bigger: circle
-Circle.delete(r=10)
 Rect.delete(6x7)
+Circle.delete(r=10)
 === sizeof ===
 sizeof &Shape: 16
 sizeof Circle: 4
 sizeof Rect: 8
-Circle.delete(r=1)
 Rect.delete(1x1)
+Circle.delete(r=1)
 === Box<Shape> ===
 circle: area=147
 rect: area=6
 before cleanup:
-Circle.delete(r=7)
 Rect.delete(2x3)
+Circle.delete(r=7)

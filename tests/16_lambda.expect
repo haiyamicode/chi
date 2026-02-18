@@ -51,6 +51,6 @@ f3() = 42
 TrackedBox(99) constructed
 f1() = 99, f2() = 42, f3() = 42
 
-TrackedBox(42) destroyed
 TrackedBox(99) destroyed
+TrackedBox(42) destroyed
 All lambda tests completed!

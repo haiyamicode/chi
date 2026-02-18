@@ -66,10 +66,10 @@ After helper returned
   TrackedVar.new('first')
   TrackedVar.new('second')
   TrackedVar.new('third')
-Before function exit - destroys in declaration order
-  TrackedVar.delete('first')
-  TrackedVar.delete('second')
+Before function exit - destroys in reverse declaration order
   TrackedVar.delete('third')
+  TrackedVar.delete('second')
+  TrackedVar.delete('first')
 After helper returned
 
 All tests completed!

@@ -296,7 +296,7 @@ func test_multiple_vars_helper() {
     var a = TrackedVar{"first"};
     var b = TrackedVar{"second"};
     var c = TrackedVar{"third"};
-    println("Before function exit - destroys in declaration order");
+    println("Before function exit - destroys in reverse declaration order");
 }
 
 func test_multiple_vars() {
