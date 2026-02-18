@@ -162,6 +162,16 @@ func test_direct_init() {
     printf("direct = {}\n", h.ref!);
 }
 
+// --- Intra-function: local declared before holder (correct order) ---
+
+func test_local_order() {
+    printf("=== local order ===\n");
+    var local = 88;
+    var h = Holder{};
+    h.store(&local);
+    printf("order = {}\n", h.get()!);
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -171,4 +181,5 @@ func main() {
     test_ref_to_param();
     test_reassign();
     test_direct_init();
+    test_local_order();
 }

@@ -15,3 +15,5 @@ first = 1
 second = 2
 === direct init ===
 direct = 77
+=== local order ===
+order = 88

@@ -990,6 +990,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(node, "global variables are not supported; use 'let' or 'const' for module-level declarations");
             return var_type;
         }
+        // Assign declaration order for local variables (used for intra-function lifetime ordering)
+        if (scope.parent_fn_node && !data.is_field) {
+            node->decl_order = scope.parent_fn_def()->next_decl_order++;
+        }
         // Add to cleanup_vars if this variable needs destruction
         if (scope.parent_fn_node && should_destroy(node, var_type) && !node->escape.is_capture()) {
             scope.parent_fn_def()->cleanup_vars.add(node);
@@ -5236,11 +5240,18 @@ static string node_label(ast::Node *n) {
     return fmt::format("{} ({})", n->name, type_str);
 }
 
-// Check if a leaf node satisfies a lifetime constraint.
+// Check if a leaf node satisfies a lifetime constraint relative to a terminal.
 // Only called on base cases (VarDecl, ParamDecl) — graph construction
 // via copy_ref_edges already flattens intermediate nodes to leaves.
-static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *leaf) {
-    if (leaf->type == ast::NodeType::VarDecl) return false;
+static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *terminal, ast::Node *leaf) {
+    if (leaf->type == ast::NodeType::VarDecl) {
+        // Intra-function: leaf declared before terminal → leaf outlives terminal (LIFO)
+        if (terminal->decl_order >= 0 && leaf->decl_order >= 0) {
+            return leaf->decl_order < terminal->decl_order;
+        }
+        // Function-escape terminal: locals can never escape
+        return false;
+    }
 
     if (leaf->type == ast::NodeType::ParamDecl) {
         if (!required) return true;
@@ -5262,6 +5273,13 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *leaf
 // DFS from each terminal following ref_edges. For every reachable node,
 // satisfies_lifetime_constraint(required, node) determines if the constraint holds.
 void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
+    // Any local with outgoing ref_edges is a terminal (intra-function ordering)
+    for (auto &[from, _] : fn_def->ref_edges.data) {
+        if (from->decl_order >= 0) {
+            fn_def->add_terminal(from);
+        }
+    }
+
     if (fn_def->terminals.len == 0 && fn_def->ref_edges.data.size() == 0) return;
     bool is_safe = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE);
     bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE);
@@ -5313,7 +5331,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
             if (visited.has_key(node)) continue;
             visited[node] = true;
 
-            bool satisfied = satisfies_lifetime_constraint(required, node);
+            bool satisfied = satisfies_lifetime_constraint(required, terminal, node);
             if (verbose) {
                 fmt::print("[lifetime]   leaf {} -> {}\n",
                            node_label(node), satisfied ? "OK" : "VIOLATION");

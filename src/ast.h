@@ -160,6 +160,7 @@ struct FnDef {
     array<Node *> variants = {};
     map<Node *, array<Node *>> ref_edges = {};  // escape analysis: dependency graph
     array<Node *> terminals = {};  // nodes whose lifetimes extend beyond the function
+    int32_t next_decl_order = 0;  // counter for assigning decl_order to locals
 
     // Register a terminal node (return statement, this with field assignments, etc.)
     void add_terminal(Node *terminal) {
@@ -547,6 +548,7 @@ struct Node {
     Token *end_token = nullptr;
     string global_id = "";
     IntrinsicSymbol symbol = IntrinsicSymbol::None;
+    int32_t decl_order = -1;  // declaration order within function (-1 = not a local)
 
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;
