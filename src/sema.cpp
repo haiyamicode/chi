@@ -74,11 +74,12 @@ bool ChiTypeStruct::is_generic(ChiType *type) {
 
 bool ChiTypeStruct::is_pointer_type(ChiType *type) {
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-           type->kind == TypeKind::MutRef;
+           type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef;
 }
 
 bool ChiTypeStruct::is_mutable_pointer(ChiType *type) {
-    return type->kind == TypeKind::Pointer || type->kind == TypeKind::MutRef;
+    return type->kind == TypeKind::Pointer || type->kind == TypeKind::MutRef ||
+           type->kind == TypeKind::MoveRef;
 }
 
 ChiStructMember *ChiTypeStruct::get_constructor() { return find_member("new"); }
@@ -210,6 +211,7 @@ ChiType *ChiType::get_elem() {
     case TypeKind::Optional:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
     case TypeKind::Array:
         return data.array.elem;
     case TypeKind::Result:

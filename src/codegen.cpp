@@ -482,7 +482,8 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     case TypeKind::Pointer:
     case TypeKind::Reference:
-    case TypeKind::MutRef: {
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef: {
         auto &data = type->data.pointer;
         auto elem_type = compile_di_type(data.elem);
         auto size = llvm_type_size(compile_type(data.elem));
@@ -674,6 +675,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     auto cleanup_fn_def = fn->get_def();
     for (int i = cleanup_fn_def->cleanup_vars.len - 1; i >= 0; i--) {
         auto var = cleanup_fn_def->cleanup_vars[i];
+        if (cleanup_fn_def->is_sunk(var)) continue;  // moved — ownership transferred
         compile_destruction(fn, get_var(var), var);
     }
     // Destroy any caught error objects still owned (from diverging catch blocks)
@@ -716,6 +718,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         builder.CreateExtractValue(landing, {1});
         for (int i = fn->get_def()->cleanup_vars.len - 1; i >= 0; i--) {
             auto var = fn->get_def()->cleanup_vars[i];
+            if (fn->get_def()->is_sunk(var)) continue;  // moved — ownership transferred
             compile_destruction(fn, get_var(var), var);
         }
         for (auto &owner : fn->error_owner_vars) {
@@ -954,7 +957,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     llvm::Constant *typedata_l;
     llvm::Type *tidata_actual_l;
     if ((type->kind == TypeKind::Reference || type->kind == TypeKind::MutRef ||
-         type->kind == TypeKind::Pointer) &&
+         type->kind == TypeKind::MoveRef || type->kind == TypeKind::Pointer) &&
         type->get_elem()) {
         auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
         tidata_actual_l = ptr_type_l;
@@ -1847,7 +1850,8 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         }
         case TypeKind::Pointer:
         case TypeKind::Reference:
-        case TypeKind::MutRef: {
+        case TypeKind::MutRef:
+        case TypeKind::MoveRef: {
             auto elem = from_type->get_elem();
             if (elem && ChiTypeStruct::is_interface(elem)) {
                 // Fat pointer struct {data_ptr, vtable_ptr} — check data_ptr (field 0) for null
@@ -1910,7 +1914,8 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
     }
     case TypeKind::Pointer:
     case TypeKind::Reference:
-    case TypeKind::MutRef: {
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef: {
         auto to_elem = to_type->get_elem();
         if (to_elem && ChiTypeStruct::is_interface(to_elem)) {
             auto from_elem = from_type->get_elem();
@@ -2125,10 +2130,21 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
         }
         case TokenType::AND:
-        case TokenType::MUTREF: {
+        case TokenType::MUTREF:
+        case TokenType::MOVEREF: {
             auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
-            return ref.address;
+            auto result = ref.address;
+            // For &move: null out the source after taking the pointer
+            if (data.op_type == TokenType::MOVEREF) {
+                auto ptr_val = builder.CreateLoad(compile_type(get_chitype(data.op1)), ref.address);
+                builder.CreateStore(
+                    llvm::ConstantPointerNull::get(
+                        (llvm::PointerType *)compile_type(get_chitype(data.op1))),
+                    ref.address);
+                return ptr_val;
+            }
+            return result;
         }
         case TokenType::INC:
         case TokenType::DEC: {
@@ -2664,6 +2680,7 @@ llvm::Value *Compiler::compile_comparator(Function *fn, ast::Node *expr, ChiType
     }
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
     case TypeKind::Pointer: {
         return compile_comparator(fn, expr, type->get_elem());
     }
@@ -3190,6 +3207,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         }
         case TokenType::AND:
         case TokenType::MUTREF:
+        case TokenType::MOVEREF:
         case TokenType::SUB:
             // These produce rvalues - return value only
             return RefValue::from_value(compile_expr(fn, expr));
@@ -3754,7 +3772,7 @@ std::optional<TypeId> Compiler::resolve_variant_type_id(Function *fn, ChiType *t
 
     // Unwrap pointer-like types
     while (type && (type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-                    type->kind == TypeKind::MutRef)) {
+                    type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef)) {
         type = type->get_elem();
     }
 
@@ -5248,7 +5266,7 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
     auto key = get_resolver()->format_type(type);
     // *Interface, &Interface, Mut<Interface>, and bare Interface are all the same fat pointer type
     if ((type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-         type->kind == TypeKind::MutRef) &&
+         type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef) &&
         type->data.pointer.elem && ChiTypeStruct::is_interface(type->data.pointer.elem)) {
         key = "FatIFacePointer<" + get_resolver()->format_type(type->data.pointer.elem) + ">";
     }
@@ -5330,7 +5348,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     }
     case TypeKind::Pointer:
     case TypeKind::Reference:
-    case TypeKind::MutRef: {
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef: {
         auto &data = type->data.pointer;
         // Interface references are fat pointers {data_ptr, vtable_ptr}
         if (data.elem && ChiTypeStruct::is_interface(data.elem)) {

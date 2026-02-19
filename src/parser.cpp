@@ -511,12 +511,15 @@ Node *Parser::parse_type_expr(bool type_only) {
             string lifetime;
             if (sigil_kind == SigilKind::Reference) {
                 if (next_is(TokenType::LPAREN)) {
-                    // &(mut, 'This) T  or  &(mut) T  or  &('This) T
+                    // &(mut, 'This) T  or  &(mut) T  or  &('This) T  or  &(move) T
                     consume();
                     for (;;) {
                         if (next_is(TokenType::KW_MUT)) {
                             consume();
                             sigil_kind = SigilKind::MutRef;
+                        } else if (next_is(TokenType::KW_MOVE)) {
+                            consume();
+                            sigil_kind = SigilKind::Move;
                         } else if (next_is(TokenType::LIFETIME)) {
                             lifetime = get()->str;
                             consume();
@@ -531,6 +534,10 @@ Node *Parser::parse_type_expr(bool type_only) {
                     // &mut T
                     consume();
                     sigil_kind = SigilKind::MutRef;
+                } else if (next_is(TokenType::KW_MOVE)) {
+                    // &move T
+                    consume();
+                    sigil_kind = SigilKind::Move;
                 } else if (next_is(TokenType::LIFETIME)) {
                     // &'This T
                     lifetime = get()->str;
@@ -1252,6 +1259,9 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
         if (token->type == TokenType::AND && get()->type == TokenType::KW_MUT) {
             consume();
             node->data.unary_op_expr.op_type = TokenType::MUTREF;
+        } else if (token->type == TokenType::AND && get()->type == TokenType::KW_MOVE) {
+            consume();
+            node->data.unary_op_expr.op_type = TokenType::MOVEREF;
         }
 
         auto operand = parse_binary_expr(lhs, parent, UNARY_PREC);

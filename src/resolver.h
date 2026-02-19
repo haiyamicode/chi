@@ -372,6 +372,10 @@ class Resolver {
 
     ast::Node *find_root_decl(ast::Node *node);
 
+    // Move tracking: record a sink edge if the expression transfers ownership
+    void track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiType *expr_type,
+                         ast::Node *dest, ChiType *dest_type);
+
     void check_lifetime_constraints(ast::FnDef *fn_def);
 
     bool compare_impl_type(ChiType *base, ChiType *impl);

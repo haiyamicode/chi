@@ -149,13 +149,11 @@ func test_sizeof() {
 func test_box() {
     println("=== Box<Shape> ===");
     var c = new Circle{radius: 7};
-    var s: &mut Shape = c;
-    var b = Box<Shape>{s};
+    var b = Box<Shape>{c};
     printf("{}: area={}\n", b.as_ref().name(), b.as_ref().area());
 
     var r = new Rect{w: 2, h: 3};
-    var s2: &mut Shape = r;
-    var b2 = Box<Shape>{s2};
+    var b2 = Box<Shape>{r};
     printf("{}: area={}\n", b2.as_ref().name(), b2.as_ref().area());
     println("before cleanup:");
 }

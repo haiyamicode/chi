@@ -23,7 +23,7 @@ struct ChiTypeEnum;
 struct ChiLifetime;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct, Pointer,
-          Reference, MutRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
+          Reference, MutRef, MoveRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
           Undefined)
 
@@ -306,6 +306,7 @@ struct ChiType {
         case TypeKind::Optional:
         case TypeKind::Reference:
         case TypeKind::MutRef:
+        case TypeKind::MoveRef:
         case TypeKind::This:
             new (&data.pointer) ChiTypePointer();
             break;
@@ -402,7 +403,8 @@ struct ChiType {
     bool is_raw_pointer() { return kind == TypeKind::Pointer; }
 
     bool is_pointer_like() {
-        return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::MutRef;
+        return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::MutRef ||
+               kind == TypeKind::MoveRef;
     }
 
     bool is_int_like() {

@@ -70,6 +70,7 @@ void Lexer::setup_keywords() {
     s_keywords["export"] = TokenType::KW_EXPORT;
     s_keywords["implements"] = TokenType::KW_IMPLEMENTS;
     s_keywords["mut"] = TokenType::KW_MUT;
+    s_keywords["move"] = TokenType::KW_MOVE;
     s_keywords["in"] = TokenType::KW_IN;
     s_keywords["undefined"] = TokenType::KW_UNDEFINED;
     s_keywords["async"] = TokenType::KW_ASYNC;

@@ -159,6 +159,7 @@ struct FnDef {
     bool has_try = false;
     array<Node *> variants = {};
     map<Node *, array<Node *>> ref_edges = {};  // escape analysis: dependency graph
+    map<Node *, Node *> sink_edges = {};  // move: a → b means a's ownership transferred to b
     array<Node *> terminals = {};  // nodes whose lifetimes extend beyond the function
     int32_t next_decl_order = 0;  // counter for assigning decl_order to locals
 
@@ -175,6 +176,16 @@ struct FnDef {
     void add_ref_edge(Node *from, Node *to) {
         if (!from || !to || from == to) return;
         ref_edges[from].add(to);
+    }
+
+    // Move/sink: A's ownership was transferred to B (A is dead after this)
+    void add_sink_edge(Node *from, Node *to) {
+        if (!from || !to) return;
+        sink_edges[from] = to;
+    }
+
+    bool is_sunk(Node *node) {
+        return sink_edges.has_key(node);
     }
 
     // By-value copy: A inherits B's leaf terminals (the actual memory targets)
@@ -390,7 +401,7 @@ struct CastExpr {
 
 MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short)
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move)
 
 struct SigilExpr {
     SigilKind sigil = SigilKind::None;

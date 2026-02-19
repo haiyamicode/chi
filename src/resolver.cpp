@@ -300,7 +300,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                can_assign(from_type->get_elem(), to_type->get_elem(), is_explicit);
     case TypeKind::Pointer:
     case TypeKind::Reference:
-    case TypeKind::MutRef: {
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef: {
         // Allow null pointer to any pointer type - check this FIRST
         if (from_type->kind == TypeKind::Pointer && from_type->data.pointer.is_null) {
             return true;
@@ -313,7 +314,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
 
         // Handle pointer/reference conversions
         if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
-            from_type->kind == TypeKind::MutRef) {
+            from_type->kind == TypeKind::MutRef || from_type->kind == TypeKind::MoveRef) {
 
             auto from_elem = from_type->get_elem();
             auto to_elem = to_type->get_elem();
@@ -328,6 +329,10 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                         to_type->kind == TypeKind::Pointer) {
                         return true;
                     }
+                    // MoveRef → Ref, MutRef, MoveRef are all allowed (ownership subsumes borrow)
+                    if (from_type->kind == TypeKind::MoveRef) {
+                        return true;
+                    }
                     // MutRef -> Ref is allowed
                     if (from_type->kind == TypeKind::MutRef &&
                         to_type->kind == TypeKind::Reference) {
@@ -336,6 +341,12 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                     // Ref -> MutRef is NOT allowed
                     if (from_type->kind == TypeKind::Reference &&
                         to_type->kind == TypeKind::MutRef) {
+                        return false;
+                    }
+                    // Ref/MutRef -> MoveRef is NOT allowed (can't create ownership from borrow)
+                    if (to_type->kind == TypeKind::MoveRef &&
+                        (from_type->kind == TypeKind::Reference ||
+                         from_type->kind == TypeKind::MutRef)) {
                         return false;
                     }
                     // Same kind is allowed
@@ -366,7 +377,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         auto to_elem = to_type->get_elem();
         if (to_elem && ChiTypeStruct::is_interface(to_elem)) {
             if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
-                from_type->kind == TypeKind::MutRef) {
+                from_type->kind == TypeKind::MutRef || from_type->kind == TypeKind::MoveRef) {
                 auto from_elem = from_type->get_elem();
                 if (from_elem && from_elem->kind == TypeKind::Struct &&
                     from_elem->data.struct_.kind == ContainerKind::Struct) {
@@ -883,6 +894,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        // Check use-after-move via sink_edges (safe mode only)
+        if (scope.parent_fn_node && !scope.is_lhs &&
+            has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+            auto &fn_def = scope.parent_fn_node->data.fn_def;
+            if (fn_def.is_sunk(data.decl)) {
+                auto *target = fn_def.sink_edges[data.decl];
+                array<Note> notes;
+                if (target && target->token) {
+                    notes.add({"moved here", target->token->pos});
+                }
+                error_with_notes(node, std::move(notes),
+                                 "'{}' used after move", data.decl->name);
+            }
+        }
+
         // Convert function to lambda when used as value (not in call context)
         if (data.decl->type == NodeType::FnDef && !scope.is_fn_call && type->kind == TypeKind::Fn) {
             type = get_lambda_for_fn(type);
@@ -957,6 +983,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     scope.parent_fn_node->data.fn_def.copy_ref_edges(node, src_decl);
                 }
             }
+            // Move tracking: &move x sinks source into this variable
+            track_move_sink(scope.parent_fn_node, data.expr, expr_type,
+                            node, var_type ? var_type : expr_type);
             if (var_type) {
                 if (expr_type->kind == TypeKind::Undefined) {
                     return var_type;
@@ -1041,6 +1070,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             fn_def.add_terminal(lhs_decl);
                         }
                     }
+                }
+                // Move tracking for assignments
+                if (lhs_decl) {
+                    track_move_sink(scope.parent_fn_node, data.op2, t2, lhs_decl, t1);
                 }
             }
         } else {
@@ -1189,6 +1222,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             return get_pointer_type(t, data.op_type == TokenType::MUTREF ? TypeKind::MutRef
                                                                          : TypeKind::Reference);
+        }
+        case TokenType::MOVEREF: {
+            if (!is_addressable(data.op1)) {
+                error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
+            }
+            if (scope.parent_fn_node && has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+                auto *src_decl = find_root_decl(data.op1);
+                if (src_decl) {
+                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    // Check if already moved
+                    if (fn_def.is_sunk(src_decl)) {
+                        error(node, "'{}' used after move", src_decl->name);
+                    }
+                }
+            }
+            return get_pointer_type(t, TypeKind::MoveRef);
         }
         default:
             unreachable();
@@ -1363,6 +1412,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!root) root = data.expr;
             bool is_ref_return = expr_type->kind == TypeKind::Reference ||
                                  expr_type->kind == TypeKind::MutRef ||
+                                 expr_type->kind == TypeKind::MoveRef ||
                                  expr_type->kind == TypeKind::Pointer;
             if (is_ref_return) {
                 // Direct reference: return points to the target's memory
@@ -1381,7 +1431,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto expr_type = resolve(data.expr, scope);
         if (expr_type) {
             // The thrown value must be a reference to a struct implementing Error
-            if (expr_type->kind != TypeKind::Reference && expr_type->kind != TypeKind::MutRef) {
+            if (expr_type->kind != TypeKind::Reference && expr_type->kind != TypeKind::MutRef && expr_type->kind != TypeKind::MoveRef) {
                 error(data.expr, errors::THROW_NOT_REFERENCE);
             } else {
                 auto elem = expr_type->get_elem();
@@ -1617,7 +1667,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.type) {
             value_type = resolve_value(data.type, scope);
             result_type =
-                data.is_new ? get_pointer_type(value_type, TypeKind::MutRef) : value_type;
+                data.is_new ? get_pointer_type(value_type, TypeKind::MoveRef) : value_type;
         } else {
             if (!scope.value_type) {
                 // Array literals: infer Array<T> from first element type
@@ -1648,7 +1698,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
                 bool is_heap_type = result_type->is_raw_pointer() ||
-                                    result_type->kind == TypeKind::MutRef;
+                                    result_type->kind == TypeKind::MutRef ||
+                                    result_type->kind == TypeKind::MoveRef;
                 if (data.is_new != is_heap_type) {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
                 }
@@ -2354,7 +2405,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         switch (data.prefix->type) {
         case TokenType::KW_DELETE: {
             auto expr_type = resolve(data.expr, scope);
-            if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MutRef) {
+            if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MutRef &&
+                expr_type->kind != TypeKind::MoveRef) {
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type(expr_type, true));
             }
@@ -2688,6 +2740,7 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
     case TypeKind::Reference:
     case TypeKind::Pointer:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
         return resolve_comparator(type->get_elem(), scope);
     default:
         return type;
@@ -2807,7 +2860,9 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     case TypeKind::Reference:
         return "&" + format_type(type->get_elem(), for_display);
     case TypeKind::MutRef:
-        return "&mut<" + format_type(type->get_elem(), for_display) + ">";
+        return "&mut " + format_type(type->get_elem(), for_display);
+    case TypeKind::MoveRef:
+        return "&move " + format_type(type->get_elem(), for_display);
     case TypeKind::Optional:
         return "?" + format_type(type->get_elem(), for_display);
     case TypeKind::Array:
@@ -3231,6 +3286,7 @@ bool Resolver::type_contains_ref(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
         return true;
     case TypeKind::Optional:
     case TypeKind::Array:
@@ -3376,6 +3432,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
     case TypeKind::Optional:
     case TypeKind::Array: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
@@ -3642,6 +3699,7 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
     case TypeKind::Optional:
     case TypeKind::Array: {
         // Must have same wrapper kind and unify element types
@@ -3904,6 +3962,7 @@ bool Resolver::is_struct_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
         return false;
     default:
         return (bool)resolve_struct_type(type);
@@ -4302,6 +4361,8 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 check_assignment(arg, arg_type, param_type);
             }
 
+            // Move tracking for function arguments
+            track_move_sink(scope.parent_fn_node, arg, arg_type, node, param_type);
         }
     }
 
@@ -4817,7 +4878,8 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
         }
         // Structural comparison for pointer-like types
         if (a->kind == TypeKind::Pointer || a->kind == TypeKind::Reference ||
-            a->kind == TypeKind::MutRef || a->kind == TypeKind::Optional) {
+            a->kind == TypeKind::MutRef || a->kind == TypeKind::MoveRef ||
+            a->kind == TypeKind::Optional) {
             return is_same_type(a->get_elem(), b->get_elem());
         }
     }
@@ -5178,6 +5240,7 @@ ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MoveRef:
     case TypeKind::Optional:
         return get_pointer_type(elem, kind);
     case TypeKind::Array:
@@ -5198,6 +5261,8 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
         return TypeKind::Reference;
     case ast::SigilKind::MutRef:
         return TypeKind::MutRef;
+    case ast::SigilKind::Move:
+        return TypeKind::MoveRef;
     case ast::SigilKind::Optional:
         return TypeKind::Optional;
     default:
@@ -5229,6 +5294,30 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
     default:
         // Literals, casts, etc. — no root decl to track
         return nullptr;
+    }
+}
+
+void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiType *expr_type,
+                               ast::Node *dest, ChiType *dest_type) {
+    if (!parent_fn_node || !has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) return;
+
+    auto &fn_def = parent_fn_node->data.fn_def;
+    ast::Node *moved_src = nullptr;
+
+    if (expr->type == NodeType::UnaryOpExpr &&
+        expr->data.unary_op_expr.op_type == TokenType::MOVEREF) {
+        // Explicit &move expression: always a move
+        moved_src = find_root_decl(expr->data.unary_op_expr.op1);
+    } else if (expr->type == NodeType::Identifier && expr_type &&
+               expr_type->kind == TypeKind::MoveRef && dest_type &&
+               dest_type->kind == TypeKind::MoveRef) {
+        // &move T identifier passed/assigned to &move destination: natural move
+        moved_src = find_root_decl(expr);
+    }
+
+    if (moved_src) {
+        fn_def.add_sink_edge(moved_src, dest);
+        fn_def.copy_ref_edges(dest, moved_src);
     }
 }
 
