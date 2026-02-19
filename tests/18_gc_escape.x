@@ -77,19 +77,11 @@ func main() {
         println("Local object escapes via ref assignment");
     }
     println("Scope ended - escaped object should still be alive");
-    printf(
-        "CRITICAL TEST: Accessing escaped ref after scope: GCBox({}).id = {}\n",
-        escaped.id,
-        escaped.id
-    );
+    printf("CRITICAL TEST: Accessing escaped ref after scope: GCBox({}).id = {}\n", escaped.id, escaped.id);
 
     println("\nTest 3: Object escaping via return value");
     var returned = get_escaped_ref();
-    printf(
-        "CRITICAL TEST: Function returned ref to GCBox({}), accessing id: {}\n",
-        returned.id,
-        returned.id
-    );
+    printf("CRITICAL TEST: Function returned ref to GCBox({}), accessing id: {}\n", returned.id, returned.id);
 
     println("\nTest 4: Non-escaping function call");
     var value = get_non_escaped_value();
@@ -112,11 +104,7 @@ func main() {
     }
     println("Both objects should still be accessible:");
     printf("CRITICAL TEST: After scope ended - ref1.id={}, ref2.id={}\n", ref1.id, ref2.id);
-    printf(
-        "CRITICAL TEST: Accessing values - GCBox({}) and GCBox({}) both accessible!\n",
-        ref1.id,
-        ref2.id
-    );
+    printf("CRITICAL TEST: Accessing values - GCBox({}) and GCBox({}) both accessible!\n", ref1.id, ref2.id);
 
     // Release earlier refs before transitive tests
     escaped = null;
@@ -148,3 +136,4 @@ func main() {
 
     println("Test completed");
 }
+

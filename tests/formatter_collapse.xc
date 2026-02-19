@@ -87,3 +87,22 @@ func test_arrays() {
     var long_arr = [element_one_with_long_name, element_two_with_long_name, element_three_with_long_name, element_four_with_long_name, element_five];
 }
 
+// unsafe func declaration
+unsafe func dangerous_alloc(size: int) *void {
+    return null;
+}
+
+// unsafe block, &move type, move/delete operators
+func test_unsafe_and_move(r: &move int) {
+    unsafe {
+        var p = dangerous_alloc(10);
+    }
+    var x = move r;
+    delete x;
+}
+
+// &mut type in signature
+func mutate(x: &mut int) {
+    x = 42;
+}
+

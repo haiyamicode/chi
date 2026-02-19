@@ -319,3 +319,4 @@ func main() {
     test_unsafe_block();
     test_unsafe_fn_calls_unsafe();
 }
+

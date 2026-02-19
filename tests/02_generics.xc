@@ -72,7 +72,9 @@ struct Arr<T> {
         unsafe {
             if this.size >= this.capacity {
                 var new_cap: uint32 = this.capacity * 2;
-                if this.capacity == 0 { new_cap = 4; }
+                if this.capacity == 0 {
+                    new_cap = 4;
+                }
                 var new_data = mem.malloc(new_cap * sizeof T) as *T;
                 var i: uint32 = 0;
                 while i < this.size {

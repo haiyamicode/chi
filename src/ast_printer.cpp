@@ -20,6 +20,8 @@ string get_sigil_symbol(SigilKind sigil) {
         return "&";
     case SigilKind::MutRef:
         return "&mut";
+    case SigilKind::Move:
+        return "&move";
     default:
         panic("unknown sigil {}", PRINT_ENUM(sigil));
         return "";
@@ -597,6 +599,7 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.sigil_type;
         bool has_lifetime = !data.lifetime.empty();
         bool is_mut = data.sigil == SigilKind::MutRef;
+        bool is_move = data.sigil == SigilKind::Move;
         if (has_lifetime && is_mut) {
             emit("&(mut, '{})", data.lifetime);
         } else if (has_lifetime) {
@@ -604,7 +607,7 @@ void AstPrinter::print_node(Node *node) {
         } else {
             emit("{}", get_sigil_symbol(data.sigil));
         }
-        if (is_mut || has_lifetime) {
+        if (is_mut || is_move || has_lifetime) {
             emit(" ");
         }
         print_node(data.type);
@@ -636,6 +639,12 @@ void AstPrinter::print_node(Node *node) {
         if (!data.is_suffix) {
             if (data.op_type == TokenType::MUTREF) {
                 emit("&mut ");
+            } else if (data.op_type == TokenType::MOVEREF) {
+                emit("&move ");
+            } else if (data.op_type == TokenType::KW_MOVE) {
+                emit("move ");
+            } else if (data.op_type == TokenType::KW_DELETE) {
+                emit("delete ");
             } else {
                 emit("{}", get_token_symbol(data.op_type));
             }
@@ -1027,6 +1036,9 @@ void AstPrinter::print_declspec(DeclSpec *declspec) {
     }
     if (declspec->has_flag(DECL_ASYNC)) {
         emit("async ");
+    }
+    if (declspec->has_flag(DECL_UNSAFE)) {
+        emit("unsafe ");
     }
 }
 
