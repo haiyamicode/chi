@@ -300,7 +300,19 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     auto subtype = type->kind == TypeKind::Subtype ? type : nullptr;
     auto struct_type = type->kind == TypeKind::Subtype ? type->data.subtype.final_type : type;
 
+    // Collect all FnDef members, including those inside ImplementBlock nodes
+    cx::NodeList fn_members;
     for (auto member : node->data.struct_decl.members) {
+        if (member->type == ast::NodeType::FnDef) {
+            fn_members.add(member);
+        } else if (member->type == ast::NodeType::ImplementBlock) {
+            for (auto impl_member : member->data.implement_block.members) {
+                fn_members.add(impl_member);
+            }
+        }
+    }
+
+    for (auto member : fn_members) {
         if (member->type == ast::NodeType::FnDef) {
             auto fn_node = member;
             if (subtype) {

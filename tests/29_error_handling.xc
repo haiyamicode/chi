@@ -1,18 +1,22 @@
 // Test error handling: throw, try/catch, destructors during unwinding
 
-struct MyError implements Error {
+struct MyError {
     msg: string = "";
 
-    func message() string {
-        return this.msg;
+    impl Error {
+        func message() string {
+            return this.msg;
+        }
     }
 }
 
-struct OtherError implements Error {
+struct OtherError {
     code: int = 0;
 
-    func message() string {
-        return string.format("error code {}", this.code);
+    impl Error {
+        func message() string {
+            return string.format("error code {}", this.code);
+        }
     }
 }
 

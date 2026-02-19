@@ -1,16 +1,18 @@
 import "std/ops" as ops;
 
-struct Pos implements ops.Display {
+struct Pos {
     x: int = 0;
     y: int = 0;
-
-    mut func display() string {
-        return string.format("({}, {})", this.x, this.y);
-    }
 
     mut func reset() {
         this.x = 0;
         this.y = 0;
+    }
+
+    impl ops.Display {
+        mut func display() string {
+            return string.format("({}, {})", this.x, this.y);
+        }
     }
 }
 

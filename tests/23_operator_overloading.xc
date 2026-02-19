@@ -1,14 +1,16 @@
 import "std/ops" as ops;
 
-struct MyInt implements ops.Add {
+struct MyInt {
     value: int = 0;
 
-    func add(rhs: MyInt) MyInt {
-        return {value: this.value + rhs.value};
+    impl ops.Add {
+        func add(rhs: MyInt) MyInt {
+            return {value: this.value + rhs.value};
+        }
     }
 }
 
-struct Point implements ops.Display, ops.Add {
+struct Point {
     x: int;
     y: int;
 
@@ -17,12 +19,16 @@ struct Point implements ops.Display, ops.Add {
         this.y = y;
     }
 
-    func add(other: Point) Point {
-        return {this.x + other.x, this.y + other.y};
+    impl ops.Display {
+        func display() string {
+            return string.format("({}, {})", this.x, this.y);
+        }
     }
 
-    func display() string {
-        return string.format("({}, {})", this.x, this.y);
+    impl ops.Add {
+        func add(other: Point) Point {
+            return {this.x + other.x, this.y + other.y};
+        }
     }
 }
 

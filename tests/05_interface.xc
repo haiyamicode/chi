@@ -2,15 +2,17 @@ interface Animal {
     func make_sound();
 }
 
-struct AnimalBase implements Animal {
+struct AnimalBase {
     id: int;
 
     mut func new(id: int) {
         this.id = id;
     }
 
-    func make_sound() {
-        printf("{}: <silence>\n", this.id);
+    impl Animal {
+        func make_sound() {
+            printf("{}: <silence>\n", this.id);
+        }
     }
 }
 
@@ -30,15 +32,17 @@ struct Sheep {
     }
 }
 
-struct Cat implements Animal {
+struct Cat {
     id: int;
 
     mut func new(id: int) {
         this.id = id;
     }
 
-    func make_sound() {
-        printf("{}: meeoooww\n", this.id);
+    impl Animal {
+        func make_sound() {
+            printf("{}: meeoooww\n", this.id);
+        }
     }
 }
 
@@ -49,36 +53,40 @@ interface Shape {
     func name() string;
 }
 
-struct Circle implements Shape {
+struct Circle {
     radius: int = 0;
-
-    func area() int {
-        return this.radius * this.radius * 3;
-    }
-
-    func name() string {
-        return "circle";
-    }
 
     func delete() {
         printf("Circle.delete(r={})\n", this.radius);
     }
+
+    impl Shape {
+        func area() int {
+            return this.radius * this.radius * 3;
+        }
+
+        func name() string {
+            return "circle";
+        }
+    }
 }
 
-struct Rect implements Shape {
+struct Rect {
     w: int = 0;
     h: int = 0;
 
-    func area() int {
-        return this.w * this.h;
-    }
-
-    func name() string {
-        return "rect";
-    }
-
     func delete() {
         printf("Rect.delete({}x{})\n", this.w, this.h);
+    }
+
+    impl Shape {
+        func area() int {
+            return this.w * this.h;
+        }
+
+        func name() string {
+            return "rect";
+        }
     }
 }
 

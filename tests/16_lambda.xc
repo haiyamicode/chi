@@ -1,6 +1,6 @@
 import "std/ops" as ops;
 
-struct TrackedBox implements ops.CopyFrom<TrackedBox> {
+struct TrackedBox {
     id: int;
 
     func new(id_val: int) {
@@ -12,9 +12,11 @@ struct TrackedBox implements ops.CopyFrom<TrackedBox> {
         printf("TrackedBox({}) destroyed\n", this.id);
     }
 
-    func copy_from(source: &TrackedBox) {
-        printf("TrackedBox({}) copied from TrackedBox({})\n", this.id, source.id);
-        this.id = source.id;
+    impl ops.CopyFrom<TrackedBox> {
+        func copy_from(source: &TrackedBox) {
+            printf("TrackedBox({}) copied from TrackedBox({})\n", this.id, source.id);
+            this.id = source.id;
+        }
     }
 }
 

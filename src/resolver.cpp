@@ -2081,65 +2081,74 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 : scope.set_parent_struct(struct_type).set_parent_type_symbol(type_sym);
 
         if (struct_->resolve_status == ResolveStatus::None) {
-            // second pass
+            // second pass - resolve member types
             for (auto member : data.members) {
-                resolve_struct_member(struct_type, member, struct_scope);
+                if (member->type == NodeType::ImplementBlock) {
+                    for (auto impl_member : member->data.implement_block.members) {
+                        resolve_struct_member(struct_type, impl_member, struct_scope);
+                    }
+                } else {
+                    resolve_struct_member(struct_type, member, struct_scope);
+                }
             }
             struct_->resolve_status = ResolveStatus::MemberTypesKnown;
         } else if (struct_->resolve_status == ResolveStatus::MemberTypesKnown) {
-            // third pass
+            // third pass - resolve embeds and impl blocks
             for (auto member : data.members) {
                 if (member->type == NodeType::VarDecl && member->data.var_decl.is_embed) {
                     resolve_struct_embed(struct_type, member, scope);
                 }
             }
 
-            for (auto implement : data.implements) {
-                // Skip error nodes in implements list
-                if (implement->type == NodeType::Error) {
-                    continue;
-                }
+            for (auto member : data.members) {
+                if (member->type != NodeType::ImplementBlock) continue;
+                auto &impl_data = member->data.implement_block;
 
-                auto impl_trait = resolve_value(implement, scope);
+                auto impl_trait = resolve_value(impl_data.interface_type, scope);
                 if (!impl_trait) continue;
                 auto trait_struct = resolve_struct_type(impl_trait);
                 if (!trait_struct || !ChiTypeStruct::is_interface(trait_struct)) {
-                    error(implement, errors::NON_INTERFACE_IMPL_TYPE, format_type(impl_trait));
+                    error(impl_data.interface_type, errors::NON_INTERFACE_IMPL_TYPE, format_type(impl_trait));
                     if (!trait_struct) continue;
                 }
 
-                resolve_vtable(impl_trait, struct_type, implement);
+                resolve_vtable(impl_trait, struct_type, impl_data.interface_type);
                 if (struct_->is_generic()) {
                     for (auto subtype : struct_->subtypes) {
                         if (subtype->is_placeholder) {
                             continue;
                         }
-                        // For generic struct subtypes, we need to substitute the interface's
-                        // type parameters to match the subtype's instantiation
                         ChiType *subtype_impl_trait = impl_trait;
                         if (impl_trait->kind == TypeKind::Subtype) {
-                            // Substitute the struct's type parameters in the interface type
                             auto &subtype_data = subtype->data.subtype;
                             subtype_impl_trait = type_placeholders_sub(impl_trait, &subtype_data);
                         }
-                        resolve_vtable(subtype_impl_trait, subtype, implement);
+                        resolve_vtable(subtype_impl_trait, subtype, impl_data.interface_type);
                     }
                 }
             }
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
         } else {
-            // fourth pass
+            // fourth pass - resolve method bodies
+            auto resolve_fn_body = [&](ast::Node *fn_member) {
+                if (fn_member->type != NodeType::FnDef) return;
+                auto fn_type = node_get_type(fn_member);
+                auto fn_scope = struct_scope.set_parent_fn(fn_type).set_parent_fn_node(fn_member);
+                if (fn_member->data.fn_def.decl_spec && fn_member->data.fn_def.decl_spec->is_unsafe()) {
+                    fn_scope = fn_scope.set_is_unsafe_block(true);
+                }
+                if (auto body = fn_member->data.fn_def.body) {
+                    resolve(body, fn_scope);
+                    check_lifetime_constraints(&fn_member->data.fn_def);
+                }
+            };
             for (auto member : data.members) {
-                if (member->type == NodeType::FnDef) {
-                    auto fn_type = node_get_type(member);
-                    auto fn_scope = struct_scope.set_parent_fn(fn_type).set_parent_fn_node(member);
-                    if (member->data.fn_def.decl_spec && member->data.fn_def.decl_spec->is_unsafe()) {
-                        fn_scope = fn_scope.set_is_unsafe_block(true);
+                if (member->type == NodeType::ImplementBlock) {
+                    for (auto impl_member : member->data.implement_block.members) {
+                        resolve_fn_body(impl_member);
                     }
-                    if (auto body = member->data.fn_def.body) {
-                        resolve(body, fn_scope);
-                        check_lifetime_constraints(&member->data.fn_def);
-                    }
+                } else {
+                    resolve_fn_body(member);
                 }
             }
 

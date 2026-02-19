@@ -236,16 +236,18 @@ func test_early_delete() {
 
 import "std/ops" as ops;
 
-struct Heavy implements ops.CopyFrom<Heavy> {
+struct Heavy {
     value: int;
-
-    func copy_from(source: &Heavy) {
-        printf("Heavy.copy({})\n", source.value);
-        this.value = source.value;
-    }
 
     func delete() {
         printf("Heavy.delete({})\n", this.value);
+    }
+
+    impl ops.CopyFrom<Heavy> {
+        func copy_from(source: &Heavy) {
+            printf("Heavy.copy({})\n", source.value);
+            this.value = source.value;
+        }
     }
 }
 

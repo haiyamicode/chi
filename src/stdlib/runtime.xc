@@ -66,13 +66,15 @@ extern "C" {
     private unsafe func cx_capture_get_data(capture_ptr: *void) *void;
 }
 
-struct __CxEnumBase<T> implements ops.Display {
+struct __CxEnumBase<T> {
     private __value: T = undefined;
     private __display_name: *string = undefined;
 
-    func display() string {
-        var s = this.__display_name!;
-        return string.format("{}", s);
+    impl ops.Display {
+        func display() string {
+            var s = this.__display_name!;
+            return string.format("{}", s);
+        }
     }
 
     func discriminator() T {
@@ -90,7 +92,7 @@ private struct SharedData<T> {
     }
 }
 
-struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
+struct Shared<T> {
     private data: *SharedData<T> = null;
 
     func new(value: T) {
@@ -117,11 +119,6 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
         this.release();
     }
 
-    func copy_from(source: &Shared<T>) {
-        source.retain();
-        this.data = source.data;
-    }
-
     func as_ref() &T {
         return &this.data.value;
     }
@@ -138,12 +135,21 @@ struct Shared<T> implements ops.CopyFrom<Shared<T>>, ops.Display {
         return this.data.ref_count;
     }
 
-    func display() string {
-        return string.display(this.as_ref());
+    impl ops.CopyFrom<Shared<T>> {
+        func copy_from(source: &Shared<T>) {
+            source.retain();
+            this.data = source.data;
+        }
+    }
+
+    impl ops.Display {
+        func display() string {
+            return string.display(this.as_ref());
+        }
     }
 }
 
-struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
+struct Box<T> {
     private _ptr: *T = null;
 
     func new(ptr: &move T) {
@@ -163,26 +169,30 @@ struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
         }
     }
 
-    func copy_from(source: &Box<T>) {
-        unsafe {
-            this._ptr = cx_malloc(sizeof source._ptr!, null) as *T;
-            __copy_from(this._ptr, source._ptr, false);
-        }
-    }
-
     func as_ref() &T {
         return this._ptr as &T;
     }
 
-    func display() string {
-        return string.display(this._ptr!);
+    impl ops.CopyFrom<Box<T>> {
+        func copy_from(source: &Box<T>) {
+            unsafe {
+                this._ptr = cx_malloc(sizeof source._ptr!, null) as *T;
+                __copy_from(this._ptr, source._ptr, false);
+            }
+        }
+    }
+
+    impl ops.Display {
+        func display() string {
+            return string.display(this._ptr!);
+        }
     }
 }
 
 // Internal lambda struct for compiler-generated closures.
 // Captures are type-erased (CxCapture payload pointer) so lambdas can be converted across
 // capture types with the same call signature.
-struct __CxLambda implements ops.CopyFrom<__CxLambda> {
+struct __CxLambda {
     fn_ptr: *void = null;
     length: uint32 = 0;
     captures: *void = null; // CxCapture payload pointer (or null)
@@ -205,20 +215,6 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
         }
     }
 
-    func copy_from(source: &__CxLambda) {
-        // Retain the source captures
-        if source.captures {
-            unsafe {
-                cx_capture_retain(source.captures);
-            }
-        }
-
-        // Copy all fields
-        this.fn_ptr = source.fn_ptr;
-        this.length = source.length;
-        this.captures = source.captures;
-    }
-
     func as_ptr() *void {
         return this.fn_ptr;
     }
@@ -226,6 +222,22 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
     func data_ptr() *void {
         unsafe {
             return cx_capture_get_data(this.captures);
+        }
+    }
+
+    impl ops.CopyFrom<__CxLambda> {
+        func copy_from(source: &__CxLambda) {
+            // Retain the source captures
+            if source.captures {
+                unsafe {
+                    cx_capture_retain(source.captures);
+                }
+            }
+
+            // Copy all fields
+            this.fn_ptr = source.fn_ptr;
+            this.length = source.length;
+            this.captures = source.captures;
         }
     }
 }
@@ -241,7 +253,7 @@ enum JsonKind {
     Object
 }
 
-struct JsonValue implements ops.CopyFrom<JsonValue> {
+struct JsonValue {
     private data: *void = null;
     protected kind: JsonKind = JsonKind.Null;
 
@@ -319,9 +331,11 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
         return result;
     }
 
-    func copy_from(source: &JsonValue) {
-        unsafe {
-            cx_json_value_copy(source.data, this);
+    impl ops.CopyFrom<JsonValue> {
+        func copy_from(source: &JsonValue) {
+            unsafe {
+                cx_json_value_copy(source.data, this);
+            }
         }
     }
 }
@@ -407,12 +421,7 @@ func fs_read(path: string) string {
     return result;
 }
 
-struct Array<T> implements 
-    ops.Index<uint32, T>,
-    ops.IndexIterable<uint32, T>,
-    ops.CopyFrom<Array<T>>,
-    ops.Display
- {
+struct Array<T> {
     private data: *T = null;
     protected length: uint32 = 0;
     protected capacity: uint32 = 0;
@@ -454,39 +463,6 @@ struct Array<T> implements
         }
     }
 
-    func index(index: uint32) &mut T {
-        assert(index < this.length, "index out of bounds");
-        return &mut this.data[index];
-    }
-
-    func begin() uint32 {
-        return 0;
-    }
-
-    func end() uint32 {
-        return this.length;
-    }
-
-    func next(index: uint32) uint32 {
-        return index + 1;
-    }
-
-    func display() string {
-        var buf = Buffer{};
-        buf.write("[");
-        for item in this {
-            buf.write(string.format("{}, ", item));
-        }
-        buf.write("]");
-        return buf.to_string();
-    }
-
-    func copy_from(source: &Array<T>) {
-        for item in source {
-            this.add(item);
-        }
-    }
-
     func raw_data() &T {
         return this.data;
     }
@@ -508,19 +484,55 @@ struct Array<T> implements
         }
         return result;
     }
+
+    impl ops.Index<uint32, T> {
+    }
+
+    impl ops.IndexIterable<uint32, T> {
+        func index(index: uint32) &mut T {
+            assert(index < this.length, "index out of bounds");
+            return &mut this.data[index];
+        }
+
+        func begin() uint32 {
+            return 0;
+        }
+
+        func end() uint32 {
+            return this.length;
+        }
+
+        func next(index: uint32) uint32 {
+            return index + 1;
+        }
+    }
+
+    impl ops.CopyFrom<Array<T>> {
+        func copy_from(source: &Array<T>) {
+            for item in source {
+                this.add(item);
+            }
+        }
+    }
+
+    impl ops.Display {
+        func display() string {
+            var buf = Buffer{};
+            buf.write("[");
+            for item in this {
+                buf.write(string.format("{}, ", item));
+            }
+            buf.write("]");
+            return buf.to_string();
+        }
+    }
 }
 
-struct CString implements ops.CopyFrom<CString> {
+struct CString {
     data: *char = null;
 
     mut func new(ptr: *char) {
         this.data = ptr;
-    }
-
-    mut func copy_from(source: &CString) {
-        unsafe {
-            this.data = cx_cstring_copy(source.data);
-        }
     }
 
     mut func delete() {
@@ -533,9 +545,17 @@ struct CString implements ops.CopyFrom<CString> {
     func as_ptr() *char {
         return this.data;
     }
+
+    impl ops.CopyFrom<CString> {
+        mut func copy_from(source: &CString) {
+            unsafe {
+                this.data = cx_cstring_copy(source.data);
+            }
+        }
+    }
 }
 
-struct __CxString implements ops.Add {
+struct __CxString {
     private data: *char = null;
     protected length: uint32 = 0;
     private is_static: uint32 = 0;
@@ -568,14 +588,6 @@ struct __CxString implements ops.Add {
         }
     }
 
-    func add(rhs: string) string {
-        var result = string{};
-        unsafe {
-            cx_string_concat(&result as *string, this as *string, &rhs as *string);
-        }
-        return result;
-    }
-
     func as_chars() Array<char> {
         var result: Array<char> = [];
         var i: uint32 = 0;
@@ -585,9 +597,19 @@ struct __CxString implements ops.Add {
         }
         return result;
     }
+
+    impl ops.Add {
+        func add(rhs: string) string {
+            var result = string{};
+            unsafe {
+                cx_string_concat(&result as *string, this as *string, &rhs as *string);
+            }
+            return result;
+        }
+    }
 }
 
-struct Map<K, V> implements ops.Index<K, V> {
+struct Map<K, V> {
     private data: *void;
 
     mut func new() {
@@ -625,17 +647,19 @@ struct Map<K, V> implements ops.Index<K, V> {
         return null;
     }
 
-    func index(key: K) &mut V {
-        var k: any = key;
-        var h = HashBytes{};
-        unsafe {
-            cx_hbytes(&k, &h);
-            var p = cx_map_find(this.data, &h) as *V;
-            if !p {
-                p = new V{};
-                cx_map_add(this.data, &h, p);
+    impl ops.Index<K, V> {
+        func index(key: K) &mut V {
+            var k: any = key;
+            var h = HashBytes{};
+            unsafe {
+                cx_hbytes(&k, &h);
+                var p = cx_map_find(this.data, &h) as *V;
+                if !p {
+                    p = new V{};
+                    cx_map_add(this.data, &h, p);
+                }
+                return p;
             }
-            return p;
         }
     }
 }
@@ -676,7 +700,7 @@ private struct PromiseState<T> {
     callbacks: Array<func (value: T)> = {};
 }
 
-struct Promise<T> implements ops.CopyFrom<Promise<T>> {
+struct Promise<T> {
     protected data: Shared<PromiseState<T>>;
 
     func new() {
@@ -685,10 +709,6 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
 
     func delete() {
         this.data.delete();
-    }
-
-    func copy_from(source: &Promise<T>) {
-        this.data.copy_from(&source.data);
     }
 
     func resolve(value: T) {
@@ -724,6 +744,12 @@ struct Promise<T> implements ops.CopyFrom<Promise<T>> {
 
     func ref_count() uint32 {
         return this.data.ref_count();
+    }
+
+    impl ops.CopyFrom<Promise<T>> {
+        func copy_from(source: &Promise<T>) {
+            this.data.copy_from(&source.data);
+        }
     }
 }
 

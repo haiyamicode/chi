@@ -2,20 +2,24 @@ interface Show {
     func show() string;
 }
 
-struct Point implements Show {
+struct Point {
     x: int = 0;
     y: int = 0;
 
-    func show() string {
-        return string.format("({}, {})", this.x, this.y);
+    impl Show {
+        func show() string {
+            return string.format("({}, {})", this.x, this.y);
+        }
     }
 }
 
-struct Number implements Show {
+struct Number {
     value: int = 0;
 
-    func show() string {
-        return string.format("Number({})", this.value);
+    impl Show {
+        func show() string {
+            return string.format("Number({})", this.value);
+        }
     }
 }
 

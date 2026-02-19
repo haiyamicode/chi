@@ -1994,19 +1994,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
         }
         expect(TokenType::GT);
     }
-    if (next_is(TokenType::KW_IMPLEMENTS)) {
-        save_block_pos(node);
-        consume();
-        while (get()->type != TokenType::LBRACE) {
-            if (get()->type == TokenType::END) {
-                error(get(), errors::UNEXPECTED_EOF);
-                break;
-            }
-            consume();
-        }
-    } else {
-        save_block_pos(node);
-    }
+    save_block_pos(node);
     skip_block();
     if (next_is(TokenType::SEMICOLON)) {
         consume();
@@ -2034,6 +2022,25 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
         return parse_fn_decl(0);
     }
     default:
+        if (next_is(TokenType::KW_IMPL)) {
+            auto kw = expect(TokenType::KW_IMPL);
+            auto node = create_node(NodeType::ImplementBlock, kw);
+            node->start_token = kw;
+            node->data.implement_block.interface_type = parse_type_expr(true);
+            expect(TokenType::LBRACE);
+            while (get()->type != TokenType::RBRACE) {
+                if (get()->type == TokenType::END) {
+                    error(get(), errors::UNEXPECTED_EOF);
+                    break;
+                }
+                auto member = parse_fn_decl(FN_BODY_REQUIRED);
+                node->data.implement_block.members.add(member);
+                member->parent = node;
+            }
+            node->end_token = get();
+            expect(TokenType::RBRACE);
+            return node;
+        }
         auto spec = parse_decl_spec();
         if (next_is(TokenType::KW_FUNC)) {
             return parse_fn_decl(FN_BODY_REQUIRED, spec);
@@ -2089,40 +2096,6 @@ void Parser::parse_struct_block(Node *node) {
     m_ctx->resolver->push_scope(node);
     for (auto param : node->data.struct_decl.type_params) {
         add_to_scope(param);
-    }
-    if (next_is(TokenType::KW_IMPLEMENTS)) {
-        consume();
-        for (;;) {
-            auto token = get();
-            if (token->type == TokenType::END) {
-                error(token, errors::UNEXPECTED_EOF);
-                return;
-            }
-            if (token->type == TokenType::LBRACE) {
-                break;
-            }
-
-            // Check if we have a valid interface type followed by proper syntax
-            auto saved_pos = m_toki;
-            auto expr = parse_type_expr(true);
-
-            // If the next token after the type is not comma or LBRACE,
-            // this is malformed (missing opening brace)
-            auto next_token = get();
-            if (next_token->type != TokenType::COMMA && next_token->type != TokenType::LBRACE) {
-                // This is malformed - missing opening brace after implements
-                error(next_token, "expected '{{' after implements clause, got '{}'",
-                      next_token->to_string());
-                node->data.struct_decl.implements.add(create_error_node());
-                return; // Stop parsing implements and let caller handle the error
-            }
-
-            node->data.struct_decl.implements.add(expr);
-            if (!at_comma(TokenType::LBRACE)) {
-                break;
-            }
-            consume();
-        }
     }
     expect(TokenType::LBRACE);
     while (get()->type != TokenType::RBRACE) {

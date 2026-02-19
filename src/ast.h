@@ -24,7 +24,8 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt);
+          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
+          ImplementBlock);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
@@ -330,8 +331,12 @@ struct StructDecl {
     array<Node *> members = {};
     ContainerKind kind = ContainerKind::Struct;
     array<Node *> type_params = {};
-    array<Node *> implements = {};
     DeclSpec *decl_spec = {};
+};
+
+struct ImplementBlockData {
+    Node *interface_type = nullptr;
+    array<Node *> members = {};
 };
 
 struct ExternDecl {
@@ -608,6 +613,7 @@ struct Node {
         EnumDecl enum_decl;
         GeneratedFn generated_fn;
         ThrowStmt throw_stmt;
+        ImplementBlockData implement_block;
 
         NodeData() {}
 

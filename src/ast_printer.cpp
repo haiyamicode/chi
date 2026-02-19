@@ -400,11 +400,6 @@ void AstPrinter::print_node(Node *node) {
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
-        if (data.implements.len) {
-            emit(" implements ");
-            // Don't wrap implements clause - it uses empty open/close
-            bool wrapped = emit_wrapped_list(&data.implements, "", "", ", ");
-        }
         emit(" {{");
 
         if (data.members.len) {
@@ -459,6 +454,37 @@ void AstPrinter::print_node(Node *node) {
             emit("\n");
             m_indent++;
             flush_comments_before(node->end_token->pos);
+            m_indent--;
+            print_indent(m_indent);
+        }
+        emit("}}");
+        emit("\n");
+        break;
+    }
+    case NodeType::ImplementBlock: {
+        auto &data = node->data.implement_block;
+        emit("impl ");
+        print_node(data.interface_type);
+        emit(" {{");
+        if (data.members.len) {
+            emit("\n");
+            m_indent++;
+            Node *prev_member = nullptr;
+            for (auto member : data.members) {
+                if (prev_member && has_blank_line_between(prev_member, member)) {
+                    emit("\n");
+                }
+                auto *ft = first_token(member);
+                if (ft)
+                    flush_comments_before(ft->pos);
+                print_indent(m_indent);
+                print_node(member);
+                if (member->type == NodeType::FnDef && !member->data.fn_def.body) {
+                    flush_trailing_comment(member);
+                    emit("\n");
+                }
+                prev_member = member;
+            }
             m_indent--;
             print_indent(m_indent);
         }

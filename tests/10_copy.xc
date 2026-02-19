@@ -1,7 +1,7 @@
 import "std/ops" as ops;
 import "std/mem" as mem;
 
-struct Foo implements ops.CopyFrom<Foo> {
+struct Foo {
     p: *int = null;
     id: string;
 
@@ -14,16 +14,18 @@ struct Foo implements ops.CopyFrom<Foo> {
         printf("creating {}\n", this.id);
     }
 
-    mut func copy_from(b: &Foo) {
-        this.new(string.format("{}_copy", b.id));
-        this.p! = b.p!;
-        printf("copied {}, p = {}\n", this.id, b.p!);
-    }
-
     func delete() {
         printf("deleting {}\n", this.id);
         unsafe {
             mem.free(this.p);
+        }
+    }
+
+    impl ops.CopyFrom<Foo> {
+        mut func copy_from(b: &Foo) {
+            this.new(string.format("{}_copy", b.id));
+            this.p! = b.p!;
+            printf("copied {}, p = {}\n", this.id, b.p!);
         }
     }
 }

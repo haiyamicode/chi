@@ -4,7 +4,7 @@ interface Cloneable {
     func clone() This;
 }
 
-struct Color implements ops.Display, Cloneable {
+struct Color {
     private r: int = 0;
     private g: int = 0;
     protected b: int = 0;
@@ -45,17 +45,21 @@ struct Color implements ops.Display, Cloneable {
         return {r, g, b};
     }
 
-    func display() string {
-        return string.format("rgb({},{},{})", this.r, this.g, this.b);
-    }
-
     func brightness() float {
         let t = this.r + this.g + this.b;
         return (t as float) / 3.0 / 255.0;
     }
 
-    func clone() This {
-        return {this.r, this.g, this.b};
+    impl ops.Display {
+        func display() string {
+            return string.format("rgb({},{},{})", this.r, this.g, this.b);
+        }
+    }
+
+    impl Cloneable {
+        func clone() This {
+            return {this.r, this.g, this.b};
+        }
     }
 }
 
