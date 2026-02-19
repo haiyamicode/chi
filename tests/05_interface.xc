@@ -116,10 +116,8 @@ func test_heap_and_delete() {
     printf("{}: area={}\n", s.name(), s.area());
     s = r;
     printf("{}: area={}\n", s.name(), s.area());
-    // delete through concrete pointer
     delete c;
     delete r;
-    // delete through owned reference
     var d = new Circle{radius: 9};
     var si: &Shape = d;
     printf("{}: area={}\n", si.name(), si.area());
