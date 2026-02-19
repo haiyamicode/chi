@@ -169,6 +169,7 @@ bool Parser::is_declaration_start(TokenType type) {
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
     case TokenType::KW_ASYNC:
+    case TokenType::KW_UNSAFE:
     case TokenType::AT:
         return true;
     default:
@@ -343,35 +344,44 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         spec = m_ctx->allocator->create_decl_spec();
     }
     parse_attributes(&spec->attributes);
-    auto token = get();
-    switch (token->type) {
-    case TokenType::KW_PRIVATE: {
-        consume();
-        spec->flags |= DECL_PRIVATE;
-        break;
-    }
-    case TokenType::KW_PROTECTED: {
-        consume();
-        spec->flags |= DECL_PROTECTED;
-        break;
-    }
-    case TokenType::KW_MUT: {
-        consume();
-        spec->flags |= DECL_MUTABLE;
-        break;
-    }
-    case TokenType::KW_STATIC: {
-        consume();
-        spec->flags |= DECL_STATIC;
-        break;
-    }
-    case TokenType::KW_ASYNC: {
-        consume();
-        spec->flags |= DECL_ASYNC;
-        break;
-    }
-    default:
-        break;
+    bool found = true;
+    while (found) {
+        auto token = get();
+        switch (token->type) {
+        case TokenType::KW_PRIVATE: {
+            consume();
+            spec->flags |= DECL_PRIVATE;
+            break;
+        }
+        case TokenType::KW_PROTECTED: {
+            consume();
+            spec->flags |= DECL_PROTECTED;
+            break;
+        }
+        case TokenType::KW_MUT: {
+            consume();
+            spec->flags |= DECL_MUTABLE;
+            break;
+        }
+        case TokenType::KW_STATIC: {
+            consume();
+            spec->flags |= DECL_STATIC;
+            break;
+        }
+        case TokenType::KW_ASYNC: {
+            consume();
+            spec->flags |= DECL_ASYNC;
+            break;
+        }
+        case TokenType::KW_UNSAFE: {
+            consume();
+            spec->flags |= DECL_UNSAFE;
+            break;
+        }
+        default:
+            found = false;
+            break;
+        }
     }
     return spec;
 }
@@ -404,6 +414,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
     case TokenType::KW_ASYNC:
+    case TokenType::KW_UNSAFE:
         return parse_top_level_decl(parse_decl_spec());
     case TokenType::KW_STRUCT:
     case TokenType::KW_UNION:
@@ -422,7 +433,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
         return parse_fn_decl(FN_BODY_REQUIRED, decl_spec);
     }
     case TokenType::KW_EXTERN:
-        return parse_extern_decl();
+        return parse_extern_decl(decl_spec);
     case TokenType::KW_IMPORT:
         return parse_import_decl();
     case TokenType::KW_EXPORT:
@@ -2302,7 +2313,7 @@ Node *Parser::parse_enum_member(Node *parent) {
     return node;
 }
 
-Node *Parser::parse_extern_decl() {
+Node *Parser::parse_extern_decl(DeclSpec *decl_spec) {
     auto kw = expect(TokenType::KW_EXTERN);
     auto type = expect(TokenType::STRING);
 
@@ -2343,6 +2354,9 @@ Node *Parser::parse_extern_decl() {
         // Handle inline function declarations
         auto fn = parse_fn_decl(FN_BODY_NONE);
         fn->data.fn_def.decl_spec->flags |= DECL_EXTERN;
+        if (decl_spec) {
+            fn->data.fn_def.decl_spec->flags |= (decl_spec->flags & DECL_PRIVATE);
+        }
         members.add(fn);
 
         // add export if exported

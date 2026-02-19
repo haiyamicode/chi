@@ -233,7 +233,7 @@ class Parser {
 
     Node *parse_enum_member(Node *parent);
 
-    Node *parse_extern_decl();
+    Node *parse_extern_decl(DeclSpec *decl_spec = nullptr);
 
     Node *parse_import_decl();
 

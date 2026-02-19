@@ -1,5 +1,5 @@
 import "stdio" as stdio;
-
+import "std/mem" as mem;
 import "math" as math;
 
 // Test module that re-exports C functions
@@ -41,15 +41,15 @@ func main() {
 
     // Test C variadic function (printf via stdio module)
     var msg1 = "Variadic test: single arg\n";
-    stdio.printf(cx_string_to_cstring(&msg1));
+    stdio.printf(msg1.to_cstring().data);
 
     // Test printf with multiple integer arguments
     var fmt1 = "Variadic test: %d + %d = %d\n";
-    stdio.printf(cx_string_to_cstring(&fmt1), 10, 20, 30);
+    stdio.printf(fmt1.to_cstring().data, 10, 20, 30);
 
     // Test printf with mixed argument types
     var fmt2 = "Variadic test: int=%d, float=%f\n";
-    stdio.printf(cx_string_to_cstring(&fmt2), 42, 3.14);
+    stdio.printf(fmt2.to_cstring().data, 42, 3.14);
 
     // Test C string literals with C functions imported from header
     let hello = c"Hello";
@@ -62,11 +62,10 @@ func main() {
     printf("strcmp('Hello', 'Hello') = {}\n", strcmp(hello, hello2));
 
     // Test strcpy from imported header
-    var buf = cx_malloc(100, null) as *char;
+    var buf = mem.malloc(100) as *char;
     strcpy(buf, hello);
 
-    var copied: string = "";
-    cx_string_from_chars(buf as *void, 5, &copied);
+    var copied = string.from_char_ptr(buf, 5);
     printf("strcpy result: {}\n", copied);
 }
 

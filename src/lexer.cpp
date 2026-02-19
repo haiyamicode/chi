@@ -77,6 +77,7 @@ void Lexer::setup_keywords() {
     s_keywords["await"] = TokenType::KW_AWAIT;
     s_keywords["throw"] = TokenType::KW_THROW;
     s_keywords["catch"] = TokenType::KW_CATCH;
+    s_keywords["unsafe"] = TokenType::KW_UNSAFE;
 
     // bool
     s_keywords["true"] = TokenType::BOOL;

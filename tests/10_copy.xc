@@ -1,4 +1,5 @@
 import "std/ops" as ops;
+import "std/mem" as mem;
 
 struct Foo implements ops.CopyFrom<Foo> {
     p: *int = null;
@@ -6,8 +7,8 @@ struct Foo implements ops.CopyFrom<Foo> {
 
     mut func new(id: string) {
         this.id = id;
-        this.p = cx_malloc(sizeof int, null);
-        cx_memset(this.p, 0, sizeof int);
+        this.p = mem.malloc(sizeof int);
+        mem.memset(this.p, 0, sizeof int);
         printf("creating {}\n", this.id);
     }
 
@@ -19,7 +20,7 @@ struct Foo implements ops.CopyFrom<Foo> {
 
     func delete() {
         printf("deleting {}\n", this.id);
-        cx_free(this.p);
+        mem.free(this.p);
     }
 }
 

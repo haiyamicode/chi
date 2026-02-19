@@ -5204,15 +5204,12 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
 
-    // For extern C functions, check if already compiled (shouldn't happen)
+    // For extern C functions, reuse existing declaration if already compiled
     if (declspec.is_extern()) {
         auto id = get_resolver()->resolve_global_id(fn);
         auto existing_entry = m_ctx->function_table.get(id);
         if (existing_entry) {
-            // Extern C function already compiled - this shouldn't happen
-            fprintf(stderr, "ERROR: Extern C function '%s' (id=%s) is being compiled twice!\n", name.c_str(), id.c_str());
-            fprintf(stderr, "  Node: %p, Module: %s\n", (void*)fn, fn->module ? fn->module->path.c_str() : "<null>");
-            assert(false && "Extern C function compiled twice - virtual module compiled multiple times?");
+            return *existing_entry;
         }
     }
 

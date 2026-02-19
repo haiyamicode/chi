@@ -1794,6 +1794,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto &fn = fn_type->data.fn;
         auto fn_decl = data.fn_ref_expr->get_decl();
+
+        // Unsafe functions cannot be called in safe mode
+        if (fn_decl && fn_decl->type == NodeType::FnDef &&
+            fn_decl->data.fn_def.decl_spec->is_unsafe() &&
+            has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+            error(node, errors::UNSAFE_CALL_IN_SAFE_MODE, fn_decl->name);
+        }
+
         auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
 
         // Annotation-driven edge creation: for method calls where a param has

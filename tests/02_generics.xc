@@ -1,3 +1,5 @@
+import "std/mem" as mem;
+
 struct GenericBox<T> {
     value: int = 0;
 
@@ -66,13 +68,25 @@ struct Arr<T> {
     size: uint32 = 0;
     capacity: uint32 = 0;
 
-    func new() {
-        cx_array_new(this);
-    }
-
     func add(item: T) {
-        var ptr = cx_array_add(this, sizeof T) as *T;
-        ptr! = item;
+        if this.size >= this.capacity {
+            var new_cap: uint32 = this.capacity * 2;
+            if this.capacity == 0 { new_cap = 4; }
+            var new_data = mem.malloc(new_cap * sizeof T) as *T;
+            if this.data {
+                mem.memset(new_data as *void, 0, new_cap * sizeof T);
+                var i: uint32 = 0;
+                while i < this.size {
+                    new_data[i] = this.data[i];
+                    i = i + 1;
+                }
+                mem.free(this.data as *void);
+            }
+            this.data = new_data;
+            this.capacity = new_cap;
+        }
+        this.data[this.size] = item;
+        this.size = this.size + 1;
     }
 
     func delete() {

@@ -1,4 +1,5 @@
 // Test C interop via extern "C" blocks
+import "std/mem" as mem;
 
 extern "C" {
     func sqrt(x: float64) float64;
@@ -36,14 +37,13 @@ func test_abs() {
 
 func test_snprintf() {
     println("testing C snprintf:");
-    var buf = cx_malloc(100, null) as *char;
+    var buf = mem.malloc(100) as *char;
     let fmt = c"Hello, %s! Number: %d";
     let world = c"World";
     let count = snprintf(buf, 100, fmt, world, 42);
     printf("snprintf returned: {}\n", count);
 
-    var result: string = "";
-    cx_string_from_chars(buf as *void, count as uint32, &result);
+    var result = string.from_char_ptr(buf, count as uint32);
     printf("buffer: {}\n", result);
 }
 

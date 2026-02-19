@@ -5,7 +5,7 @@ private struct HashBytes {
     length: uint32 = 0;
 }
 
-extern "C" {
+private extern "C" {
     func cx_print(str: string);
     func cx_printf(format: *string, values: *void);
     func cx_array_new(dest: *void);
@@ -488,6 +488,12 @@ struct __CxString implements ops.Add {
 
     static func display(value: any) string {
         return string.format("{}", value);
+    }
+
+    static unsafe func from_char_ptr(data: *char, size: uint32) string {
+        var result: string = "";
+        cx_string_from_chars(data as *void, size, &result);
+        return result;
     }
 
     func is_empty() bool {

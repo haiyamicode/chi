@@ -79,6 +79,8 @@ constexpr auto BARE_INTERFACE_TYPE =
     "interface type '{}' cannot be used directly; use '&{}' instead";
 constexpr auto MOVE_REF_IN_STRUCT_FIELD =
     "'&move' references cannot be used as struct fields; use Box<T> instead";
+constexpr auto UNSAFE_CALL_IN_SAFE_MODE =
+    "call to unsafe function '{}' is not allowed in safe mode";
 
 } // namespace errors
 } // namespace cx

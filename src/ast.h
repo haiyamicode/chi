@@ -43,6 +43,7 @@ enum DeclFlag : uint32_t {
     DECL_MUTABLE = 1 << 4,
     DECL_STATIC = 1 << 5,
     DECL_ASYNC = 1 << 6,
+    DECL_UNSAFE = 1 << 7,
 };
 
 struct Module {
@@ -127,6 +128,7 @@ struct DeclSpec {
     bool is_extern() const { return has_flag(DECL_EXTERN); }
     bool is_static() const { return has_flag(DECL_STATIC); }
     bool is_async() const { return has_flag(DECL_ASYNC); }
+    bool is_unsafe() const { return has_flag(DECL_UNSAFE); }
 };
 
 struct FnProto {
