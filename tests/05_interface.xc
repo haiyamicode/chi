@@ -97,10 +97,12 @@ func print_shape(s: &Shape) {
 
 // Return interface reference
 func bigger(a: &Shape, b: &Shape) &Shape {
-    if a.area() > b.area() {
-        return a;
+    unsafe {
+        if a.area() > b.area() {
+            return a;
+        }
+        return b;
     }
-    return b;
 }
 
 func test_basic() {

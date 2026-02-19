@@ -45,3 +45,9 @@ result = 30
 p = 42
 === unsafe fn calls unsafe ===
 result = 7
+=== cross fn ref ===
+get_ref = 99
+=== bigger ref ===
+bigger = 20
+=== method ref ===
+method ref = 42

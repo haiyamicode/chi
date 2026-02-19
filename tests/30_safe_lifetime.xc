@@ -301,6 +301,52 @@ func test_unsafe_fn_calls_unsafe() {
     }
 }
 
+// --- Cross-function reference return (elision) ---
+
+struct RefHolder {
+    val: &int = null;
+}
+
+func get_ref(h: &RefHolder) &int {
+    return h.val;
+}
+
+// Multiple ref params returning either — requires unsafe (no shared lifetime annotation yet)
+func bigger_ref(a: &int, b: &int) &int {
+    unsafe {
+        if a! > b! {
+            return a;
+        }
+        return b;
+    }
+}
+
+func test_cross_fn_ref() {
+    printf("=== cross fn ref ===\n");
+    var x = 99;
+    var h = RefHolder{val: &x};
+    var r = get_ref(&h);
+    printf("get_ref = {}\n", r!);
+}
+
+func test_bigger_ref() {
+    printf("=== bigger ref ===\n");
+    var a = 10;
+    var b = 20;
+    var big = bigger_ref(&a, &b);
+    printf("bigger = {}\n", big!);
+}
+
+// Method returning reference (elision to 'This)
+func test_method_ref_return() {
+    printf("=== method ref ===\n");
+    var val = 42;
+    var h = Holder{};
+    h.store(&val);
+    var r = h.get();
+    printf("method ref = {}\n", r!);
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -320,5 +366,8 @@ func main() {
     test_value_copy();
     test_unsafe_block();
     test_unsafe_fn_calls_unsafe();
+    test_cross_fn_ref();
+    test_bigger_ref();
+    test_method_ref_return();
 }
 

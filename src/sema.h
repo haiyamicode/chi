@@ -147,9 +147,17 @@ struct ChiTypeStruct {
     static ChiStructMember *get_destructor(ChiType *type);
 };
 
+enum class LifetimeKind {
+    Param,   // regular parameter — owner is ParamDecl node
+    This,    // implicit 'this' — owner is null
+    Return,  // function return — owner is null
+};
+
 struct ChiLifetime {
-    string name;             // "This", "A", etc.
-    ChiType *owner = nullptr; // the struct/fn type that declares this lifetime
+    string name;                  // "This", "x", "h", etc.
+    LifetimeKind kind;
+    ast::Node *owner = nullptr;   // ParamDecl node for Param kind, null for This/Return
+    ChiType *origin = nullptr;    // containing function or struct type
 };
 
 struct ChiTypePointer {
@@ -405,6 +413,10 @@ struct ChiType {
     bool is_pointer_like() {
         return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::MutRef ||
                kind == TypeKind::MoveRef;
+    }
+
+    bool is_reference() {
+        return kind == TypeKind::Reference || kind == TypeKind::MutRef || kind == TypeKind::MoveRef;
     }
 
     bool is_int_like() {

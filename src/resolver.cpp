@@ -751,6 +751,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.is_vararg) {
             is_variadic = true;
         }
+        ChiLifetime *first_ref_lifetime = nullptr; // first ref param's lifetime (for return elision)
         for (int i = 0; i < data.params.len; i++) {
             auto param = data.params[i];
             auto &pdata = param->data.param_decl;
@@ -771,7 +772,39 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 param->resolved_type = param_type;
                 is_variadic = true;
             }
+            // Each ref param gets its own distinct lifetime.
+            if (param_type && param_type->is_reference() && param_type->data.pointer.lifetimes.len == 0) {
+                auto *lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
+                if (!first_ref_lifetime) {
+                    first_ref_lifetime = lt;
+                }
+                auto *fresh = create_pointer_type(param_type->data.pointer.elem, param_type->kind);
+                fresh->data.pointer.lifetimes.add(lt);
+                param_type = fresh;
+                param->resolved_type = param_type;
+            }
             param_types.add(param_type);
+        }
+
+        // Return type lifetime elision: infer return lifetime from first ref param
+        if (return_type && return_type->is_reference() && return_type->data.pointer.lifetimes.len == 0) {
+            ChiLifetime *elided_lt = nullptr;
+            if (container) {
+                // For methods: 'this' is implicitly the first ref param → use 'This lifetime
+                auto &st = container->data.struct_;
+                if (!st.this_lifetime) {
+                    st.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, container};
+                }
+                elided_lt = st.this_lifetime;
+            } else {
+                // For free functions: use the shared ref param lifetime
+                elided_lt = first_ref_lifetime;
+            }
+            if (elided_lt) {
+                auto *fresh = create_pointer_type(return_type->data.pointer.elem, return_type->kind);
+                fresh->data.pointer.lifetimes.add(elided_lt);
+                return_type = fresh;
+            }
         }
 
         auto is_extern = node->get_declspec() ? node->get_declspec()->is_extern() : false;
@@ -809,6 +842,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto is_mut = declspec.is_mutable();
             type->data.pointer.elem = get_pointer_type(
                 scope.parent_struct, is_mut ? TypeKind::MutRef : TypeKind::Reference);
+            // Attach 'This lifetime so satisfies_lifetime_constraint can check it
+            auto &st = scope.parent_struct->data.struct_;
+            if (!st.this_lifetime) {
+                st.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, scope.parent_struct};
+            }
+            type->data.pointer.lifetimes.add(st.this_lifetime);
             return type;
         }
         if (data.kind == ast::IdentifierKind::ThisType) {
@@ -931,7 +970,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto *struct_type = scope.parent_struct;
                 auto &st = struct_type->data.struct_;
                 if (!st.this_lifetime) {
-                    st.this_lifetime = new ChiLifetime{"This", struct_type};
+                    st.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, struct_type};
                 }
                 final_type->data.pointer.lifetimes.add(st.this_lifetime);
             } else {
@@ -985,6 +1024,31 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto src_decl = data.expr->data.identifier.decl;
                 if (src_decl) {
                     scope.parent_fn_node->data.fn_def.copy_ref_edges(node, src_decl);
+                }
+            }
+            // Function calls returning references: create edge from VarDecl to source argument
+            if (scope.parent_fn_node && data.expr->type == NodeType::FnCallExpr &&
+                !scope.is_unsafe_block && expr_type && expr_type->is_reference()) {
+                auto &call = data.expr->data.fn_call_expr;
+                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                if (call.fn_ref_expr->type == NodeType::DotExpr) {
+                    // Method call: return lifetime tied to receiver
+                    auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
+                    if (receiver_decl) {
+                        fn_def.add_ref_edge(node, receiver_decl);
+                    }
+                } else {
+                    // Free function call: return lifetime tied to first ref argument
+                    for (size_t i = 0; i < call.args.len; i++) {
+                        auto *arg_type = call.args[i]->resolved_type;
+                        if (arg_type && arg_type->is_reference()) {
+                            auto *arg_decl = find_root_decl(call.args[i]);
+                            if (arg_decl) {
+                                fn_def.add_ref_edge(node, arg_decl);
+                            }
+                            break;
+                        }
+                    }
                 }
             }
             // Move tracking: &move x sinks source into this variable
@@ -1069,10 +1133,31 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     if (rhs_decl) {
                         auto &fn_def = scope.parent_fn_node->data.fn_def;
                         fn_def.copy_ref_edges(lhs_decl, rhs_decl);
-                        // this.field = r makes 'this' a terminal
-                        if (lhs_decl->type == ast::NodeType::Identifier &&
-                            lhs_decl->data.identifier.kind == ast::IdentifierKind::This) {
-                            fn_def.add_terminal(lhs_decl);
+                        // Storing a ref into a struct field makes the root a terminal:
+                        // the stored ref must satisfy the struct's 'This lifetime.
+                        fn_def.add_terminal(lhs_decl);
+                    }
+                }
+                // Function calls returning references: create edge from LHS to source argument
+                if (lhs_decl && data.op2->type == NodeType::FnCallExpr &&
+                    !scope.is_unsafe_block && t2 && t2->is_reference()) {
+                    auto &call = data.op2->data.fn_call_expr;
+                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    if (call.fn_ref_expr->type == NodeType::DotExpr) {
+                        auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
+                        if (receiver_decl) {
+                            fn_def.add_ref_edge(lhs_decl, receiver_decl);
+                        }
+                    } else {
+                        for (size_t i = 0; i < call.args.len; i++) {
+                            auto *arg_type = call.args[i]->resolved_type;
+                            if (arg_type && arg_type->is_reference()) {
+                                auto *arg_decl = find_root_decl(call.args[i]);
+                                if (arg_decl) {
+                                    fn_def.add_ref_edge(lhs_decl, arg_decl);
+                                }
+                                break;
+                            }
                         }
                     }
                 }
@@ -1826,7 +1911,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     for (size_t i = 0; i < callee_params.len && i < data.args.len; i++) {
                         auto *pt = callee_params[i]->resolved_type;
-                        if (pt && pt->is_pointer_like() &&
+                        if (pt && pt->is_reference() &&
                             pt->data.pointer.lifetimes.len > 0) {
                             auto *arg_decl = find_root_decl(data.args[i]);
                             if (arg_decl) {
@@ -3160,7 +3245,7 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         // Reference fields implicitly have 'This lifetime
         if (member->resolved_type && member->resolved_type->is_pointer_like()) {
             if (!struct_.this_lifetime) {
-                struct_.this_lifetime = new ChiLifetime{"This", struct_type};
+                struct_.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, struct_type};
             }
         }
     } else if (node->type == NodeType::FnDef) {
@@ -5420,8 +5505,20 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
         if (!required) return true;
 
         auto *leaf_type = leaf->resolved_type;
-        if (!leaf_type || !leaf_type->is_pointer_like()) return false;
+        if (!leaf_type || !leaf_type->is_reference()) return false;
 
+        auto &lifetimes = leaf_type->data.pointer.lifetimes;
+        for (size_t i = 0; i < lifetimes.len; i++) {
+            if (lifetimes[i] == required) return true;
+        }
+        return false;
+    }
+
+    if (leaf->type == ast::NodeType::Identifier &&
+        leaf->data.identifier.kind == ast::IdentifierKind::This) {
+        if (!required) return true;
+        auto *leaf_type = leaf->resolved_type;
+        if (!leaf_type) return false;
         auto &lifetimes = leaf_type->data.pointer.lifetimes;
         for (size_t i = 0; i < lifetimes.len; i++) {
             if (lifetimes[i] == required) return true;
@@ -5467,13 +5564,23 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
         auto *terminal = fn_def->terminals[t];
 
         // Extract required lifetime from terminal's type.
-        // Value types (struct by value): no lifetime requirement — params outlive the function.
-        // Reference types (e.g. 'this'): resolve to struct and get this_lifetime.
-        auto *term_type = terminal->resolved_type;
         ChiLifetime *required = nullptr;
-        if (term_type && term_type->kind != TypeKind::Struct) {
-            auto *st = resolve_struct_type(term_type);
-            if (st) required = st->this_lifetime;
+        if (terminal->type == ast::NodeType::ReturnStmt) {
+            // Return terminal: use the pre-calculated return type lifetime from elision
+            if (fn_def->fn_proto && fn_def->fn_proto->resolved_type &&
+                fn_def->fn_proto->resolved_type->kind == TypeKind::Fn) {
+                auto *ret_type = fn_def->fn_proto->resolved_type->data.fn.return_type;
+                if (ret_type && ret_type->is_reference() && ret_type->data.pointer.lifetimes.len > 0) {
+                    required = ret_type->data.pointer.lifetimes[0];
+                }
+            }
+        } else {
+            // Struct field assignment terminal: resolve to struct and get this_lifetime
+            auto *term_type = terminal->resolved_type;
+            if (term_type && term_type->kind != TypeKind::Struct) {
+                auto *st = resolve_struct_type(term_type);
+                if (st) required = st->this_lifetime;
+            }
         }
 
         if (verbose) {
