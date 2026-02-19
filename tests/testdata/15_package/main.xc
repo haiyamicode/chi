@@ -62,10 +62,12 @@ func main() {
     printf("strcmp('Hello', 'Hello') = {}\n", strcmp(hello, hello2));
 
     // Test strcpy from imported header
-    var buf = mem.malloc(100) as *char;
-    strcpy(buf, hello);
+    unsafe {
+        var buf = mem.malloc(100) as *char;
+        strcpy(buf, hello);
 
-    var copied = string.from_char_ptr(buf, 5);
-    printf("strcpy result: {}\n", copied);
+        var copied = string.from_char_ptr(buf, 5);
+        printf("strcpy result: {}\n", copied);
+    }
 }
 

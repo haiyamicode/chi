@@ -1,4 +1,4 @@
-private extern "C" {
+private unsafe extern "C" {
     func cx_malloc(size: uint32, ignored: *void) *void;
     func cx_free(address: *void);
     func cx_memset(address: *void, v: uint8, n: uint32);

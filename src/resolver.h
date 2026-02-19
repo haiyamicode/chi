@@ -271,7 +271,7 @@ class Resolver {
     ResolveContext *get_context() { return m_ctx; }
     GenericResolver *get_generics() { return &m_ctx->generics; }
 
-    bool type_contains_ref(ChiType *type);
+    bool is_borrowing_type(ChiType *type);
     bool type_needs_destruction(ChiType *type);
     bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
 

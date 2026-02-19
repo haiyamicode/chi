@@ -37,14 +37,19 @@ func test_abs() {
 
 func test_snprintf() {
     println("testing C snprintf:");
-    var buf = mem.malloc(100) as *char;
+    var buf: *char = null;
+    unsafe {
+        buf = mem.malloc(100) as *char;
+    }
     let fmt = c"Hello, %s! Number: %d";
     let world = c"World";
     let count = snprintf(buf, 100, fmt, world, 42);
     printf("snprintf returned: {}\n", count);
 
-    var result = string.from_char_ptr(buf, count as uint32);
-    printf("buffer: {}\n", result);
+    unsafe {
+        var result = string.from_char_ptr(buf, count as uint32);
+        printf("buffer: {}\n", result);
+    }
 }
 
 func main() {

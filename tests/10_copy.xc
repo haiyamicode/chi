@@ -7,8 +7,10 @@ struct Foo implements ops.CopyFrom<Foo> {
 
     mut func new(id: string) {
         this.id = id;
-        this.p = mem.malloc(sizeof int);
-        mem.memset(this.p, 0, sizeof int);
+        unsafe {
+            this.p = mem.malloc(sizeof int);
+            mem.memset(this.p, 0, sizeof int);
+        }
         printf("creating {}\n", this.id);
     }
 
@@ -20,7 +22,9 @@ struct Foo implements ops.CopyFrom<Foo> {
 
     func delete() {
         printf("deleting {}\n", this.id);
-        mem.free(this.p);
+        unsafe {
+            mem.free(this.p);
+        }
     }
 }
 

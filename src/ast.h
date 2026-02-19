@@ -86,7 +86,7 @@ struct Module {
         if (kind == ModuleKind::XM) {
             return LANG_FLAG_MANAGED;
         }
-        return LANG_FLAG_NONE;
+        return LANG_FLAG_SAFE;
     }
 };
 

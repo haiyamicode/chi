@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
             processing_mode = ProcessingMode::Analyzer;
             break;
         case FlagId::Safe:
-            bld.safe_mode = true;
+            // Safe mode is now automatic for .xc files
             break;
         case FlagId::Verbose:
             bld.verbose = true;

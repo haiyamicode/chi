@@ -54,7 +54,6 @@ void Builder::build_single_file(const string &file_name) {
     auto package = add_package(".");
     package->name = "__main";
 
-    if (safe_mode) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_SAFE;
     if (verbose) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_VERBOSE;
     auto module = process_file(package, file_name);
     if (m_ctx.flags & FLAG_PRINT_AST) {
@@ -249,7 +248,6 @@ void Builder::build_package(const string &package_dir) {
     package->name = "__main";
     package->config = config_ptr;  // Store parsed config in package
 
-    if (safe_mode) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_SAFE;
     if (verbose) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_VERBOSE;
     auto module = process_file(package, entry_file_path.string());
     if (m_ctx.flags & FLAG_PRINT_AST) {

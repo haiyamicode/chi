@@ -229,6 +229,9 @@ void AstPrinter::print_node(Node *node) {
         if (data.is_arrow) {
             emit(" => ");
         }
+        if (data.is_unsafe) {
+            emit("unsafe ");
+        }
         if (data.has_braces) {
             m_indent++;
             emit("{{\n");

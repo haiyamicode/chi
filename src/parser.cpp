@@ -2363,7 +2363,7 @@ Node *Parser::parse_extern_decl(DeclSpec *decl_spec) {
         auto fn = parse_fn_decl(FN_BODY_NONE);
         fn->data.fn_def.decl_spec->flags |= DECL_EXTERN;
         if (decl_spec) {
-            fn->data.fn_def.decl_spec->flags |= (decl_spec->flags & DECL_PRIVATE);
+            fn->data.fn_def.decl_spec->flags |= (decl_spec->flags & (DECL_PRIVATE | DECL_UNSAFE));
         }
         members.add(fn);
 

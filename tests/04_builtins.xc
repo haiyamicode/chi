@@ -120,7 +120,10 @@ func test_box_helper() {
 
 func test_box() {
     println("testing box:");
-    var p = mem.malloc(sizeof int) as *int;
+    var p: *int = null;
+    unsafe {
+        p = mem.malloc(sizeof int) as *int;
+    }
     p! = 42;
     var b1 = Box<int>{p as &move int};
     printf("b1.as_ref()={}\n", b1.as_ref());

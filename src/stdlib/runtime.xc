@@ -5,7 +5,7 @@ private struct HashBytes {
     length: uint32 = 0;
 }
 
-private extern "C" {
+private unsafe extern "C" {
     func cx_print(str: string);
     func cx_printf(format: *string, values: *void);
     func cx_array_new(dest: *void);
@@ -159,8 +159,10 @@ struct Box<T> implements ops.CopyFrom<Box<T>>, ops.Display {
     }
 
     func copy_from(source: &Box<T>) {
-        this._ptr = cx_malloc(sizeof source._ptr!, null) as *T;
-        __copy_from(this._ptr, source._ptr, false);
+        unsafe {
+            this._ptr = cx_malloc(sizeof source._ptr!, null) as *T;
+            __copy_from(this._ptr, source._ptr, false);
+        }
     }
 
     func as_ref() &T {
@@ -191,7 +193,9 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
 
     func delete() {
         if this.captures {
-            cx_capture_release(this.captures);
+            unsafe {
+                cx_capture_release(this.captures);
+            }
             this.captures = null;
         }
     }
@@ -199,7 +203,9 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
     func copy_from(source: &__CxLambda) {
         // Retain the source captures
         if source.captures {
-            cx_capture_retain(source.captures);
+            unsafe {
+                cx_capture_retain(source.captures);
+            }
         }
 
         // Copy all fields
@@ -213,7 +219,9 @@ struct __CxLambda implements ops.CopyFrom<__CxLambda> {
     }
 
     func data_ptr() *void {
-        return cx_capture_get_data(this.captures);
+        unsafe {
+            return cx_capture_get_data(this.captures);
+        }
     }
 }
 
@@ -233,14 +241,18 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
     protected kind: JsonKind = JsonKind.Null;
 
     func delete() {
-        cx_json_value_delete(this.data);
+        unsafe {
+            cx_json_value_delete(this.data);
+        }
     }
 
     func get(key: string) JsonValue {
         let new_value = JsonValue{};
-        var key_ptr = &key;
-        var value_ptr = &new_value;
-        cx_json_value_get(this.data, key_ptr as *string, value_ptr as *void);
+        unsafe {
+            var key_ptr = &key;
+            var value_ptr = &new_value;
+            cx_json_value_get(this.data, key_ptr as *string, value_ptr as *void);
+        }
         return new_value;
     }
 
@@ -259,26 +271,34 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
     func to_string() string {
         this.assert_kind(JsonKind.String);
         let result = "";
-        cx_json_value_convert(this.data, JsonKind.String.discriminator(), &result);
+        unsafe {
+            cx_json_value_convert(this.data, JsonKind.String.discriminator(), &result);
+        }
         return result;
     }
 
     func to_bool() bool {
         this.assert_kind(JsonKind.Bool);
         let result = false;
-        cx_json_value_convert(this.data, JsonKind.Bool.discriminator(), &result);
+        unsafe {
+            cx_json_value_convert(this.data, JsonKind.Bool.discriminator(), &result);
+        }
         return result;
     }
 
     func to_int() int64 {
         this.assert_kind(JsonKind.Int64);
         let result: int64 = 0;
-        cx_json_value_convert(this.data, JsonKind.Int64.discriminator(), &result);
+        unsafe {
+            cx_json_value_convert(this.data, JsonKind.Int64.discriminator(), &result);
+        }
         return result;
     }
 
     func length() uint32 {
-        return cx_json_array_length(this.data);
+        unsafe {
+            return cx_json_array_length(this.data);
+        }
     }
 
     func to_array() Array<JsonValue> {
@@ -286,14 +306,18 @@ struct JsonValue implements ops.CopyFrom<JsonValue> {
         let len = this.length();
         for var i = 0; i < len; i++ {
             let new_value = JsonValue{};
-            cx_json_array_index(this.data, i, &new_value);
+            unsafe {
+                cx_json_array_index(this.data, i, &new_value);
+            }
             result.add(new_value);
         }
         return result;
     }
 
     func copy_from(source: &JsonValue) {
-        cx_json_value_copy(source.data, this);
+        unsafe {
+            cx_json_value_copy(source.data, this);
+        }
     }
 }
 
@@ -312,33 +336,47 @@ func json_kind_display(kind: JsonKind) string {
 }
 
 func println(value: any) {
-    cx_print_any(&value);
-    cx_print("\n");
+    unsafe {
+        cx_print_any(&value);
+        cx_print("\n");
+    }
 }
 
 func gc_alloc(size: uint32) *void {
-    return cx_gc_alloc(size, null);
+    unsafe {
+        return cx_gc_alloc(size, null);
+    }
 }
 
 func print_int(value: uint64) {
-    cx_print_number(value);
+    unsafe {
+        cx_print_number(value);
+    }
 }
 
 func printf(format: string, ...values: any) {
-    cx_printf(&format, &values);
+    unsafe {
+        cx_printf(&format, &values);
+    }
 }
 
 func panic(message: string) {
-    cx_panic(&message);
+    unsafe {
+        cx_panic(&message);
+    }
 }
 
 func timeout(delay: uint64, callback: func) {
-    cx_timeout(delay, &callback);
+    unsafe {
+        cx_timeout(delay, &callback);
+    }
 }
 
 func stringf(format: string, ...values: any) string {
     var str: string = "";
-    cx_string_format(&format, &values, &str);
+    unsafe {
+        cx_string_format(&format, &values, &str);
+    }
     return str;
 }
 
@@ -350,13 +388,17 @@ func assert(cond: bool, message: string) {
 
 func json_parse(str: string) JsonValue {
     let result = JsonValue{};
-    cx_parse_json(&str, &result);
+    unsafe {
+        cx_parse_json(&str, &result);
+    }
     return result;
 }
 
 func fs_read(path: string) string {
     var result: string = "";
-    cx_file_read(&path, &result);
+    unsafe {
+        cx_file_read(&path, &result);
+    }
     return result;
 }
 
@@ -371,9 +413,13 @@ struct Array<T> implements
     protected capacity: uint32 = 0;
 
     func new(...values: T) {
-        cx_array_new(this);
+        unsafe {
+            cx_array_new(this);
+        }
         if values.length > 0 {
-            cx_array_reserve(this, sizeof T, values.length);
+            unsafe {
+                cx_array_reserve(this, sizeof T, values.length);
+            }
             for value in values {
                 this.add(value);
             }
@@ -381,19 +427,26 @@ struct Array<T> implements
     }
 
     func delete() {
-        cx_free(this.data as *void);
+        unsafe {
+            cx_free(this.data as *void);
+        }
     }
 
     func add(item: T) {
-        var ptr = cx_array_add(this, sizeof T) as *T;
+        var ptr: *T = null;
+        unsafe {
+            ptr = cx_array_add(this, sizeof T) as *T;
+        }
         ptr! = item;
     }
 
     func clear() {
-        if this.data {
-            cx_free(this.data as *void);
+        unsafe {
+            if this.data {
+                cx_free(this.data as *void);
+            }
+            cx_array_new(this);
         }
-        cx_array_new(this);
     }
 
     func index(index: uint32) &mut T {
@@ -460,7 +513,9 @@ struct CString implements ops.CopyFrom<CString> {
     }
 
     mut func copy_from(source: &CString) {
-        this.data = cx_cstring_copy(source.data);
+        unsafe {
+            this.data = cx_cstring_copy(source.data);
+        }
     }
 
     mut func delete() {
@@ -482,7 +537,9 @@ struct __CxString implements ops.Add {
 
     static func format(fmt: string, ...values: any) string {
         var result: string = "";
-        cx_string_format(&fmt, &values, &result);
+        unsafe {
+            cx_string_format(&fmt, &values, &result);
+        }
         return result;
     }
 
@@ -501,12 +558,16 @@ struct __CxString implements ops.Add {
     }
 
     func to_cstring() CString {
-        return {cx_string_to_cstring(this as *string)};
+        unsafe {
+            return {cx_string_to_cstring(this as *string)};
+        }
     }
 
     func add(rhs: string) string {
         var result = string{};
-        cx_string_concat(&result as *string, this as *string, &rhs as *string);
+        unsafe {
+            cx_string_concat(&result as *string, this as *string, &rhs as *string);
+        }
         return result;
     }
 
@@ -525,28 +586,36 @@ struct Map<K, V> implements ops.Index<K, V> {
     private data: *void;
 
     mut func new() {
-        this.data = cx_map_new();
+        unsafe {
+            this.data = cx_map_new();
+        }
     }
 
     mut func delete() {
-        cx_map_delete(this.data);
+        unsafe {
+            cx_map_delete(this.data);
+        }
         this.data = null;
     }
 
     func remove(key: K) {
         var k: any = key;
         var h = HashBytes{};
-        cx_hbytes(&k, &h);
-        cx_map_remove(this.data, &h);
+        unsafe {
+            cx_hbytes(&k, &h);
+            cx_map_remove(this.data, &h);
+        }
     }
 
     func find(key: K) ?&V {
         var k: any = key;
         var h = HashBytes{};
-        cx_hbytes(&k, &h);
-        var p = cx_map_find(this.data, &h) as *V;
-        if p {
-            return {p};
+        unsafe {
+            cx_hbytes(&k, &h);
+            var p = cx_map_find(this.data, &h) as *V;
+            if p {
+                return {p};
+            }
         }
         return null;
     }
@@ -554,13 +623,15 @@ struct Map<K, V> implements ops.Index<K, V> {
     func index(key: K) &mut V {
         var k: any = key;
         var h = HashBytes{};
-        cx_hbytes(&k, &h);
-        var p = cx_map_find(this.data, &h) as *V;
-        if !p {
-            p = new V{};
-            cx_map_add(this.data, &h, p);
+        unsafe {
+            cx_hbytes(&k, &h);
+            var p = cx_map_find(this.data, &h) as *V;
+            if !p {
+                p = new V{};
+                cx_map_add(this.data, &h, p);
+            }
+            return p;
         }
-        return p;
     }
 }
 
@@ -572,12 +643,16 @@ struct Buffer {
     }
 
     func write(str: string) {
-        cx_array_write_str(&this.bytes, &str);
+        unsafe {
+            cx_array_write_str(&this.bytes, &str);
+        }
     }
 
     func to_string() string {
         var str: string = "";
-        cx_string_from_chars(this.bytes.raw_data(), this.bytes.length, &str);
+        unsafe {
+            cx_string_from_chars(this.bytes.raw_data(), this.bytes.length, &str);
+        }
         return str;
     }
 }

@@ -899,7 +899,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Check use-after-move via sink_edges (safe mode only)
         if (scope.parent_fn_node && !scope.is_lhs &&
-            has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+            has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
             if (fn_def.is_sunk(data.decl)) {
                 auto *target = fn_def.sink_edges[data.decl];
@@ -979,8 +979,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto var_scope = type_hint ? scope.set_value_type(type_hint) : scope;
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
-            // Escape analysis: by-value copy inherits leaf terminals
-            if (scope.parent_fn_node && data.expr->type == NodeType::Identifier) {
+            // Escape analysis: by-value copy inherits leaf terminals (borrowing types only)
+            if (scope.parent_fn_node && data.expr->type == NodeType::Identifier && !scope.is_unsafe_block &&
+                is_borrowing_type(expr_type)) {
                 auto src_decl = data.expr->data.identifier.decl;
                 if (src_decl) {
                     scope.parent_fn_node->data.fn_def.copy_ref_edges(node, src_decl);
@@ -1062,7 +1063,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             t2 = resolve(data.op2, var_scope);
             if (scope.parent_fn_node) {
                 auto lhs_decl = find_root_decl(data.op1);
-                if (lhs_decl && data.op2->type == NodeType::Identifier) {
+                if (lhs_decl && data.op2->type == NodeType::Identifier && !scope.is_unsafe_block &&
+                    is_borrowing_type(t2)) {
                     auto rhs_decl = data.op2->data.identifier.decl;
                     if (rhs_decl) {
                         auto &fn_def = scope.parent_fn_node->data.fn_def;
@@ -1208,7 +1210,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             if (scope.move_outlet && scope.parent_fn_node) {
                 auto ref_target = find_root_decl(data.op1);
-                if (ref_target) {
+                if (ref_target && !scope.is_unsafe_block) {
                     auto outlet = scope.move_outlet;
                     if (outlet->type != NodeType::VarDecl) {
                         auto resolved = find_root_decl(outlet);
@@ -1230,7 +1232,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
-            if (scope.parent_fn_node && has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+            if (scope.parent_fn_node && has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
                 auto *src_decl = find_root_decl(data.op1);
                 if (src_decl) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
@@ -1246,7 +1248,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
-            if (scope.parent_fn_node && has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+            if (scope.parent_fn_node && has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
                 auto *src_decl = find_root_decl(data.op1);
                 if (src_decl) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
@@ -1424,7 +1426,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         if (data.expr && scope.parent_fn_node && expr_type &&
-            type_contains_ref(expr_type)) {
+            is_borrowing_type(expr_type)) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
             auto root = find_root_decl(data.expr);
             if (!root) root = data.expr;
@@ -1432,14 +1434,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                  expr_type->kind == TypeKind::MutRef ||
                                  expr_type->kind == TypeKind::MoveRef ||
                                  expr_type->kind == TypeKind::Pointer;
-            if (is_ref_return) {
-                // Direct reference: return points to the target's memory
-                fn_def.add_ref_edge(node, root);
-            } else {
-                // By-value: return inherits the target's leaf terminals
-                fn_def.copy_ref_edges(node, root);
+            if (!scope.is_unsafe_block) {
+                if (is_ref_return) {
+                    // Direct reference: return points to the target's memory
+                    fn_def.add_ref_edge(node, root);
+                } else {
+                    // By-value: return inherits the target's leaf terminals
+                    fn_def.copy_ref_edges(node, root);
+                }
+                fn_def.add_terminal(node);
             }
-            fn_def.add_terminal(node);
         }
 
         return return_type;
@@ -1761,7 +1765,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.resolved_field = field_member;
             check_assignment(data.value, init_value_type, field_member->resolved_type);
 
-            if (scope.parent_fn_node) {
+            if (scope.parent_fn_node && !scope.is_unsafe_block) {
                 auto outlet = scope.move_outlet ? scope.move_outlet : node;
                 auto &fn_def = scope.parent_fn_node->data.fn_def;
                 fn_def.add_ref_edge(outlet, field_init);
@@ -1801,7 +1805,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Unsafe functions cannot be called in safe mode (unless inside an unsafe block)
         if (fn_decl && fn_decl->type == NodeType::FnDef &&
             fn_decl->data.fn_def.decl_spec->is_unsafe() &&
-            has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE) &&
+            has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) &&
             !scope.is_unsafe_block) {
             error(node, errors::UNSAFE_CALL_IN_SAFE_MODE, fn_decl->name);
         }
@@ -1818,7 +1822,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto &callee_params = callee_proto->data.fn_proto.params;
                 auto *receiver_expr = data.fn_ref_expr->data.dot_expr.expr;
                 auto *receiver_decl = find_root_decl(receiver_expr);
-                if (receiver_decl) {
+                if (receiver_decl && !scope.is_unsafe_block) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     for (size_t i = 0; i < callee_params.len && i < data.args.len; i++) {
                         auto *pt = callee_params[i]->resolved_type;
@@ -2129,6 +2133,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type == NodeType::FnDef) {
                     auto fn_type = node_get_type(member);
                     auto fn_scope = struct_scope.set_parent_fn(fn_type).set_parent_fn_node(member);
+                    if (member->data.fn_def.decl_spec && member->data.fn_def.decl_spec->is_unsafe()) {
+                        fn_scope = fn_scope.set_is_unsafe_block(true);
+                    }
                     if (auto body = member->data.fn_def.body) {
                         resolve(body, fn_scope);
                         check_lifetime_constraints(&member->data.fn_def);
@@ -3321,37 +3328,45 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
     }
 }
 
-bool Resolver::type_contains_ref(ChiType *type) {
+bool Resolver::is_borrowing_type(ChiType *type) {
     if (!type) return false;
     switch (type->kind) {
-    case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::MoveRef:
         return true;
     case TypeKind::Optional:
     case TypeKind::Array:
-        return type_contains_ref(type->get_elem());
+        return is_borrowing_type(type->get_elem());
     case TypeKind::Result:
-        return type_contains_ref(type->get_elem()) ||
-               type_contains_ref(type->data.result.error);
+        return is_borrowing_type(type->get_elem()) ||
+               is_borrowing_type(type->data.result.error);
     case TypeKind::Subtype: {
         auto final_type = type->data.subtype.final_type;
-        return final_type ? type_contains_ref(final_type) : false;
+        return final_type ? is_borrowing_type(final_type) : false;
     }
     case TypeKind::Fn: {
         auto &fn = type->data.fn;
-        if (type_contains_ref(fn.return_type)) return true;
+        if (is_borrowing_type(fn.return_type)) return true;
         for (size_t i = 0; i < fn.params.len; i++) {
-            if (type_contains_ref(fn.params[i])) return true;
+            if (is_borrowing_type(fn.params[i])) return true;
         }
         return false;
     }
     case TypeKind::FnLambda:
-        return type_contains_ref(type->data.fn_lambda.fn);
+        return is_borrowing_type(type->data.fn_lambda.fn);
     case TypeKind::Struct: {
-        for (auto field : type->data.struct_.fields) {
-            if (type_contains_ref(field->resolved_type)) return true;
+        auto &st = type->data.struct_;
+        if (st.member_intrinsics.has_key(IntrinsicSymbol::CopyFrom)) {
+            // CopyFrom handles the container's own data, but if any type parameter
+            // is borrowing, the borrow propagates through copied elements
+            for (auto tp : st.type_params) {
+                if (is_borrowing_type(tp)) return true;
+            }
+            return false;
+        }
+        for (auto field : st.fields) {
+            if (is_borrowing_type(field->resolved_type)) return true;
         }
         return false;
     }
@@ -5420,7 +5435,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
     }
 
     if (fn_def->terminals.len == 0 && fn_def->ref_edges.data.size() == 0) return;
-    bool is_safe = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE);
+    bool is_safe = has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE);
     bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE);
 
     auto fn_name = fn_def->fn_proto ? fn_def->fn_proto->name : "<lambda>";
