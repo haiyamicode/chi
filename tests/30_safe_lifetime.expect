@@ -40,3 +40,8 @@ Heavy.copy(99)
 a=99, b=99
 Heavy.delete(99)
 Heavy.delete(99)
+=== unsafe block ===
+result = 30
+p = 42
+=== unsafe fn calls unsafe ===
+result = 7

@@ -257,6 +257,7 @@ struct Block {
     bool is_arrow = false;
     Node *return_expr = nullptr;
     bool has_braces = false;
+    bool is_unsafe = false;
 };
 
 struct ReturnStmt {

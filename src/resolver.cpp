@@ -674,6 +674,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto proto = resolve(data.fn_proto, fn_scope, flags | IS_FN_DECL_PROTO);
         if (data.body && should_resolve_fn_body(scope)) {
             fn_scope = fn_scope.set_parent_fn(proto);
+            if (data.decl_spec && data.decl_spec->is_unsafe()) {
+                fn_scope = fn_scope.set_is_unsafe_block(true);
+            }
             resolve(data.body, fn_scope);
 
             check_lifetime_constraints(&data);
@@ -1795,10 +1798,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &fn = fn_type->data.fn;
         auto fn_decl = data.fn_ref_expr->get_decl();
 
-        // Unsafe functions cannot be called in safe mode
+        // Unsafe functions cannot be called in safe mode (unless inside an unsafe block)
         if (fn_decl && fn_decl->type == NodeType::FnDef &&
             fn_decl->data.fn_def.decl_spec->is_unsafe() &&
-            has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+            has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE) &&
+            !scope.is_unsafe_block) {
             error(node, errors::UNSAFE_CALL_IN_SAFE_MODE, fn_decl->name);
         }
 
@@ -1877,6 +1881,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::Block: {
         auto &data = node->data.block;
         auto child_scope = scope.set_block(&data);
+        if (data.is_unsafe) {
+            child_scope = child_scope.set_is_unsafe_block(true);
+        }
         for (auto stmt : data.statements) {
             resolve(stmt, child_scope);
         }
@@ -5604,6 +5611,10 @@ ResolveScope ResolveScope::set_is_lhs(bool is_lhs) const { RS_SET_PROP_COPY(is_l
 
 ResolveScope ResolveScope::set_is_fn_call(bool is_fn_call) const {
     RS_SET_PROP_COPY(is_fn_call, is_fn_call);
+}
+
+ResolveScope ResolveScope::set_is_unsafe_block(bool is_unsafe) const {
+    RS_SET_PROP_COPY(is_unsafe_block, is_unsafe);
 }
 
 optional<Resolver::OperatorMethodCall>

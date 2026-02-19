@@ -265,6 +265,40 @@ func test_value_copy() {
     printf("a={}, b={}\n", a.value, b.value);
 }
 
+// --- Unsafe blocks ---
+
+import "std/mem" as mem;
+
+unsafe func unsafe_add(a: int, b: int) int {
+    return a + b;
+}
+
+// unsafe block allows calling unsafe functions in safe mode
+func test_unsafe_block() {
+    printf("=== unsafe block ===\n");
+    unsafe {
+        var result = unsafe_add(10, 20);
+        printf("result = {}\n", result);
+
+        var p = mem.malloc(sizeof int) as *int;
+        p! = 42;
+        printf("p = {}\n", p!);
+        mem.free(p as *void);
+    }
+}
+
+// unsafe function can call other unsafe functions without a block
+unsafe func unsafe_caller() int {
+    return unsafe_add(3, 4);
+}
+
+func test_unsafe_fn_calls_unsafe() {
+    printf("=== unsafe fn calls unsafe ===\n");
+    unsafe {
+        printf("result = {}\n", unsafe_caller());
+    }
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -282,4 +316,6 @@ func main() {
     test_early_delete();
     test_value_move();
     test_value_copy();
+    test_unsafe_block();
+    test_unsafe_fn_calls_unsafe();
 }

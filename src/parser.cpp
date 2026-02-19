@@ -144,6 +144,7 @@ bool Parser::is_statement_start(TokenType type) {
     case TokenType::KW_BREAK:
     case TokenType::KW_CONTINUE:
     case TokenType::LBRACE:
+    case TokenType::KW_UNSAFE:
     case TokenType::SEMICOLON:
         return true;
     default:
@@ -1151,6 +1152,13 @@ Node *Parser::parse_stmt(bool *as_expr) {
 
     case TokenType::LBRACE:
         return parse_block();
+
+    case TokenType::KW_UNSAFE: {
+        consume();
+        auto block = parse_block();
+        block->data.block.is_unsafe = true;
+        return block;
+    }
 
     case TokenType::SEMICOLON:
         consume();
