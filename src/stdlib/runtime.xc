@@ -5,60 +5,65 @@ private struct HashBytes {
     length: uint32 = 0;
 }
 
-private unsafe extern "C" {
-    func cx_print(str: string);
-    func cx_printf(format: *string, values: *void);
-    func cx_array_new(dest: *void);
-    func cx_array_delete(dest: *void);
-    func cx_array_add(dest: *void, size: uint32) *void;
-    func cx_array_write_str(dest: *void, str: *string);
-    func cx_array_reserve(dest: *void, elem_size: uint32, new_cap: uint32);
-    func cx_print_any(value: *void);
-    func cx_print_number(value: uint64);
-    func cx_print_string(str: *string);
-    func cx_gc_alloc(size: uint32, destructor: *void) *void;
-    func cx_malloc(size: uint32, ignored: *void) *void;
-    func cx_free(address: *void);
-    func cx_memset(address: *void, v: uint8, n: uint32);
-    func __copy_from(dest: *void, src: *void, destruct_old: bool);
-    func cx_runtime_start(stack: *void);
-    func cx_set_program_vtable(ptr: *void);
-    func cx_runtime_stop();
-    func cx_panic(message: *string);
-    func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
-    func cx_get_error_type_info() *void;
-    func cx_get_error_data() *void;
-    func cx_get_error_vtable() *void;
-    func cx_get_error_type_id() uint32;
-    func cx_personality(...) int32;
-    func cx_timeout(delay: uint64, callback: *void);
-    func cx_string_format(format: *string, values: *void, str: *string);
-    func cx_string_from_chars(data: *void, size: uint32, str: *string);
-    func cx_string_delete(dest: *string);
-    func cx_string_copy(dest: *string, src: *string);
-    func cx_string_to_cstring(str: *string) *char;
-    func cx_string_concat(dest: *string, s1: *string, s2: *string);
-    func cx_cstring_copy(src: *char) *char;
-    func cx_hbytes(value: *any, result: *HashBytes);
-    func cx_map_new() *void;
-    func cx_map_delete(data: *void);
-    func cx_map_find(data: *void, key: *HashBytes) *void;
-    func cx_map_add(data: *void, key: *HashBytes, value: *void);
-    func cx_map_remove(data: *void, key: *HashBytes);
-    func cx_parse_json(str: *string, result: *void);
-    func cx_json_value_delete(data: *void);
-    func cx_json_value_get(data: *void, key: *string, result: *void);
-    func cx_json_value_convert(data: *void, kind: uint32, result: *void);
-    func cx_json_array_index(data: *void, index: uint32, result: *void);
-    func cx_json_array_length(data: *void) uint32;
-    func cx_json_value_copy(data: *void, result: *void);
-    func cx_file_read(path: *string, result: *string);
-    func cx_debug(ptr: *void);
-    func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
-    func cx_capture_retain(capture_ptr: *void);
-    func cx_capture_release(capture_ptr: *void);
-    func cx_capture_get_type(capture_ptr: *void) *void;
-    func cx_capture_get_data(capture_ptr: *void) *void;
+extern "C" {
+    private unsafe func cx_print(str: string);
+    private unsafe func cx_printf(format: *string, values: *void);
+    private unsafe func cx_array_new(dest: *void);
+    private unsafe func cx_array_delete(dest: *void);
+    private unsafe func cx_array_add(dest: *void, size: uint32) *void;
+    private unsafe func cx_array_write_str(dest: *void, str: *string);
+    private unsafe func cx_array_reserve(dest: *void, elem_size: uint32, new_cap: uint32);
+    private unsafe func cx_print_any(value: *void);
+    private unsafe func cx_print_number(value: uint64);
+    private unsafe func cx_print_string(str: *string);
+    private unsafe func cx_gc_alloc(size: uint32, destructor: *void) *void;
+    private unsafe func cx_malloc(size: uint32, ignored: *void) *void;
+    private unsafe func cx_free(address: *void);
+    private unsafe func cx_memset(address: *void, v: uint8, n: uint32);
+    private unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
+    private unsafe func cx_runtime_start(stack: *void);
+    private unsafe func cx_set_program_vtable(ptr: *void);
+    private unsafe func cx_runtime_stop();
+    private unsafe func cx_panic(message: *string);
+    private unsafe func cx_throw(
+        type_info: *void,
+        data_ptr: *void,
+        vtable_ptr: *void,
+        type_id: uint32
+    );
+    private unsafe func cx_get_error_type_info() *void;
+    private unsafe func cx_get_error_data() *void;
+    private unsafe func cx_get_error_vtable() *void;
+    private unsafe func cx_get_error_type_id() uint32;
+    private unsafe func cx_personality(...) int32;
+    private unsafe func cx_timeout(delay: uint64, callback: *void);
+    private unsafe func cx_string_format(format: *string, values: *void, str: *string);
+    private unsafe func cx_string_from_chars(data: *void, size: uint32, str: *string);
+    private unsafe func cx_string_delete(dest: *string);
+    private unsafe func cx_string_copy(dest: *string, src: *string);
+    private unsafe func cx_string_to_cstring(str: *string) *char;
+    private unsafe func cx_string_concat(dest: *string, s1: *string, s2: *string);
+    private unsafe func cx_cstring_copy(src: *char) *char;
+    private unsafe func cx_hbytes(value: *any, result: *HashBytes);
+    private unsafe func cx_map_new() *void;
+    private unsafe func cx_map_delete(data: *void);
+    private unsafe func cx_map_find(data: *void, key: *HashBytes) *void;
+    private unsafe func cx_map_add(data: *void, key: *HashBytes, value: *void);
+    private unsafe func cx_map_remove(data: *void, key: *HashBytes);
+    private unsafe func cx_parse_json(str: *string, result: *void);
+    private unsafe func cx_json_value_delete(data: *void);
+    private unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
+    private unsafe func cx_json_value_convert(data: *void, kind: uint32, result: *void);
+    private unsafe func cx_json_array_index(data: *void, index: uint32, result: *void);
+    private unsafe func cx_json_array_length(data: *void) uint32;
+    private unsafe func cx_json_value_copy(data: *void, result: *void);
+    private unsafe func cx_file_read(path: *string, result: *string);
+    private unsafe func cx_debug(ptr: *void);
+    private unsafe func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
+    private unsafe func cx_capture_retain(capture_ptr: *void);
+    private unsafe func cx_capture_release(capture_ptr: *void);
+    private unsafe func cx_capture_get_type(capture_ptr: *void) *void;
+    private unsafe func cx_capture_get_data(capture_ptr: *void) *void;
 }
 
 struct __CxEnumBase<T> implements ops.Display {
