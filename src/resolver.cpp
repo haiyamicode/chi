@@ -2405,8 +2405,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         switch (data.prefix->type) {
         case TokenType::KW_DELETE: {
             auto expr_type = resolve(data.expr, scope);
-            if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MutRef &&
-                expr_type->kind != TypeKind::MoveRef) {
+            if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MoveRef) {
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type(expr_type, true));
             }

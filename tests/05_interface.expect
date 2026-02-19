@@ -7,6 +7,7 @@ circle: area=75
 rect: area=12
 Circle.delete(r=5)
 Rect.delete(3x4)
+circle: area=243
 Circle.delete(r=9)
 === function params ===
 circle: area=300

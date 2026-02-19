@@ -119,10 +119,11 @@ func test_heap_and_delete() {
     // delete through concrete pointer
     delete c;
     delete r;
-    // delete through interface reference
+    // delete through owned reference
     var d = new Circle{radius: 9};
-    var si: &mut Shape = d;
-    delete si;
+    var si: &Shape = d;
+    printf("{}: area={}\n", si.name(), si.area());
+    delete d;
 }
 
 func test_function_params() {
