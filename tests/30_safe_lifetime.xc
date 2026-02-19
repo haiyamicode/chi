@@ -188,33 +188,48 @@ struct Resource {
 
 func take_ownership(r: &move Resource) {
     printf("took: {}\n", r.name);
-    delete r;
+    // r is auto-destroyed at function return (RAII)
 }
 
-// &move T passed to &move param — ownership transfer
+// &move T passed to &move param — ownership transfer, RAII in callee
 func test_move_to_fn() {
     printf("=== move to fn ===\n");
     var r = new Resource{"alpha"};
     take_ownership(r);
 }
 
-// &move T assigned to new var — ownership transfer
+// &move T assigned to new var — ownership transfer, RAII on new owner
 func test_move_to_var() {
     printf("=== move to var ===\n");
     var a = new Resource{"beta"};
     var b = a;
     printf("b.name = {}\n", b.name);
-    delete b;
+    // b is auto-destroyed at scope exit (RAII)
 }
 
-// &move T borrowed as & — no move, source still valid
+// &move T borrowed as & — no move, source still valid, RAII on source
 func test_borrow_from_move() {
     printf("=== borrow from move ===\n");
     var a = new Resource{"gamma"};
     var r: &Resource = a;
     printf("r.name = {}\n", r.name);
     printf("a.name = {}\n", a.name);
+    // a is auto-destroyed at scope exit (RAII)
+}
+
+// RAII: no explicit delete needed, auto-destroyed at scope exit
+func test_raii() {
+    printf("=== raii ===\n");
+    var a = new Resource{"delta"};
+    printf("a.name = {}\n", a.name);
+}
+
+// Explicit delete sinks the variable, RAII skips it
+func test_early_delete() {
+    printf("=== early delete ===\n");
+    var a = new Resource{"epsilon"};
     delete a;
+    // a is sunk — RAII does not destroy again
 }
 
 // --- Move semantics: move (value optimization) ---
@@ -263,6 +278,8 @@ func main() {
     test_move_to_fn();
     test_move_to_var();
     test_borrow_from_move();
+    test_raii();
+    test_early_delete();
     test_value_move();
     test_value_copy();
 }

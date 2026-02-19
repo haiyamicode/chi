@@ -314,6 +314,7 @@ class Compiler {
 
     void compile_destruction(Function *fn, llvm::Value *address, ast::Node *node);
     void compile_destruction_for_type(Function *fn, llvm::Value *address, ChiType *type);
+    void compile_heap_free(Function *fn, llvm::Value *ptr, ChiType *elem_type);
     void compile_interface_destruction(Function *fn, llvm::Value *iface_address, ChiType *iface_ref_type);
     void call_vtable_destructor(Function *fn, llvm::Value *vtable_ptr, llvm::Value *data_ptr);
     void call_vtable_copier(Function *fn, llvm::Value *vtable_ptr, llvm::Value *dest_data,

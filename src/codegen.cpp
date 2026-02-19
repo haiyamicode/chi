@@ -2602,21 +2602,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             emit_dbg_location(expr);
             auto ptr = compile_expr(fn, data.expr);
             auto ptr_type = get_chitype(data.expr);
-            if (ptr_type && ptr_type->is_pointer_like()) {
-                auto elem_type = ptr_type->get_elem();
-                if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
-                    // delete on fat pointer: destroy via vtable, then free data
-                    auto data_ptr = builder.CreateExtractValue(ptr, {0}, "data_ptr");
-                    auto vtable_ptr = builder.CreateExtractValue(ptr, {1}, "vtable_ptr");
-                    call_vtable_destructor(fn, vtable_ptr, data_ptr);
-                    auto free_fn = get_system_fn("cx_free");
-                    builder.CreateCall(free_fn->llvm_fn, {data_ptr});
-                    return nullptr;
-                }
-                compile_destruction_for_type(fn, ptr, elem_type);
-            }
-            auto free_fn = get_system_fn("cx_free");
-            builder.CreateCall(free_fn->llvm_fn, {ptr});
+            auto elem_type = (ptr_type && ptr_type->is_pointer_like()) ? ptr_type->get_elem() : nullptr;
+            compile_heap_free(fn, ptr, elem_type);
             return nullptr;
         }
         default:
@@ -4415,6 +4402,22 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
 
     if (!type) return;
 
+    // &move T RAII: destroy pointee + free (same as delete)
+    if (type->kind == TypeKind::MoveRef) {
+        auto elem_type = type->get_elem();
+        auto ptr = builder.CreateLoad(compile_type(type), address);
+        // Null check — pointer may be null if default-initialized
+        auto is_null = builder.CreateICmpEQ(ptr, get_null_ptr());
+        auto bb_destroy = fn->new_label("_moveref_destroy");
+        auto bb_done = fn->new_label("_moveref_done");
+        builder.CreateCondBr(is_null, bb_done, bb_destroy);
+        fn->use_label(bb_destroy);
+        compile_heap_free(fn, ptr, elem_type);
+        builder.CreateBr(bb_done);
+        fn->use_label(bb_done);
+        return;
+    }
+
     // Handle strings
     if (type->kind == TypeKind::String) {
         auto string_delete = get_system_fn("cx_string_delete");
@@ -4438,6 +4441,23 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
     auto dtor = generate_destructor(original_type, nullptr);
     if (dtor) {
         builder.CreateCall(dtor->llvm_fn, {address});
+    }
+}
+
+void Compiler::compile_heap_free(Function *fn, llvm::Value *ptr, ChiType *elem_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
+        auto data_ptr = builder.CreateExtractValue(ptr, {0}, "data_ptr");
+        auto vtable_ptr = builder.CreateExtractValue(ptr, {1}, "vtable_ptr");
+        call_vtable_destructor(fn, vtable_ptr, data_ptr);
+        auto free_fn = get_system_fn("cx_free");
+        builder.CreateCall(free_fn->llvm_fn, {data_ptr});
+    } else {
+        if (elem_type) {
+            compile_destruction_for_type(fn, ptr, elem_type);
+        }
+        auto free_fn = get_system_fn("cx_free");
+        builder.CreateCall(free_fn->llvm_fn, {ptr});
     }
 }
 

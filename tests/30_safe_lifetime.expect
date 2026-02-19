@@ -27,6 +27,11 @@ Resource.delete(beta)
 r.name = gamma
 a.name = gamma
 Resource.delete(gamma)
+=== raii ===
+a.name = delta
+Resource.delete(delta)
+=== early delete ===
+Resource.delete(epsilon)
 === value move ===
 b.value = 42
 Heavy.delete(42)

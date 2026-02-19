@@ -77,6 +77,8 @@ constexpr auto MUTATING_METHOD_ON_IMMUTABLE_REFERENCE =
 constexpr auto INVALID_THIS = "'this' keyword can only be used in a method scope";
 constexpr auto BARE_INTERFACE_TYPE =
     "interface type '{}' cannot be used directly; use '&{}' instead";
+constexpr auto MOVE_REF_IN_STRUCT_FIELD =
+    "'&move' references cannot be used as struct fields; use Box<T> instead";
 
 } // namespace errors
 } // namespace cx

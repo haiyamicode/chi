@@ -2424,6 +2424,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type(expr_type, true));
             }
+            // delete on &move T sinks the variable (early destroy, RAII skip)
+            if (scope.parent_fn_node && expr_type->kind == TypeKind::MoveRef) {
+                auto *deleted_decl = find_root_decl(data.expr);
+                if (deleted_decl) {
+                    scope.parent_fn_node->data.fn_def.add_sink_edge(deleted_decl, node);
+                }
+            }
             return get_system_types()->void_;
         }
         case TokenType::KW_SIZEOF: {
@@ -3114,6 +3121,11 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         member->resolved_type = resolve(node, scope);
         node->data.var_decl.resolved_field = member;
 
+        // &move references cannot be struct fields
+        if (member->resolved_type && member->resolved_type->kind == TypeKind::MoveRef) {
+            error(node, errors::MOVE_REF_IN_STRUCT_FIELD);
+        }
+
         // Reference fields implicitly have 'This lifetime
         if (member->resolved_type && member->resolved_type->is_pointer_like()) {
             if (!struct_.this_lifetime) {
@@ -3357,6 +3369,11 @@ bool Resolver::type_needs_destruction(ChiType *type) {
 
     // Result always needs destruction — it owns the error object's heap allocation
     if (type->kind == TypeKind::Result) {
+        return true;
+    }
+
+    // &move T owns the pointee — RAII auto-destroy + free at scope exit
+    if (type->kind == TypeKind::MoveRef) {
         return true;
     }
 
