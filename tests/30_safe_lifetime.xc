@@ -172,6 +172,84 @@ func test_local_order() {
     printf("order = {}\n", h.get()!);
 }
 
+// --- Move semantics: &move (ownership transfer) ---
+
+struct Resource {
+    name: string;
+
+    func new(n: string) {
+        this.name = n;
+    }
+
+    func delete() {
+        printf("Resource.delete({})\n", this.name);
+    }
+}
+
+func take_ownership(r: &move Resource) {
+    printf("took: {}\n", r.name);
+    delete r;
+}
+
+// &move T passed to &move param — ownership transfer
+func test_move_to_fn() {
+    printf("=== move to fn ===\n");
+    var r = new Resource{"alpha"};
+    take_ownership(r);
+}
+
+// &move T assigned to new var — ownership transfer
+func test_move_to_var() {
+    printf("=== move to var ===\n");
+    var a = new Resource{"beta"};
+    var b = a;
+    printf("b.name = {}\n", b.name);
+    delete b;
+}
+
+// &move T borrowed as & — no move, source still valid
+func test_borrow_from_move() {
+    printf("=== borrow from move ===\n");
+    var a = new Resource{"gamma"};
+    var r: &Resource = a;
+    printf("r.name = {}\n", r.name);
+    printf("a.name = {}\n", a.name);
+    delete a;
+}
+
+// --- Move semantics: move (value optimization) ---
+
+import "std/ops" as ops;
+
+struct Heavy implements ops.CopyFrom<Heavy> {
+    value: int;
+
+    func copy_from(source: &Heavy) {
+        printf("Heavy.copy({})\n", source.value);
+        this.value = source.value;
+    }
+
+    func delete() {
+        printf("Heavy.delete({})\n", this.value);
+    }
+}
+
+// move x skips copy_from, sinks source
+func test_value_move() {
+    printf("=== value move ===\n");
+    var a = Heavy{value: 42};
+    var b = move a;
+    printf("b.value = {}\n", b.value);
+}
+
+// Regular copy invokes copy_from
+func test_value_copy() {
+    printf("=== value copy ===\n");
+    var a = Heavy{value: 99};
+    var b = a;
+    printf("a={}, b={}\n", a.value, b.value);
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -182,4 +260,9 @@ func main() {
     test_reassign();
     test_direct_init();
     test_local_order();
+    test_move_to_fn();
+    test_move_to_var();
+    test_borrow_from_move();
+    test_value_move();
+    test_value_copy();
 }

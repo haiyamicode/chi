@@ -17,3 +17,21 @@ second = 2
 direct = 77
 === local order ===
 order = 88
+=== move to fn ===
+took: alpha
+Resource.delete(alpha)
+=== move to var ===
+b.name = beta
+Resource.delete(beta)
+=== borrow from move ===
+r.name = gamma
+a.name = gamma
+Resource.delete(gamma)
+=== value move ===
+b.value = 42
+Heavy.delete(42)
+=== value copy ===
+Heavy.copy(99)
+a=99, b=99
+Heavy.delete(99)
+Heavy.delete(99)

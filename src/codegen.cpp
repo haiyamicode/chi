@@ -844,6 +844,16 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
         compile_construction(fn, dest, dest_type, expr);
         return;
     }
+    // move x — bitwise copy, skip copy_from (already handled in compile_expr)
+    if (expr->type == ast::NodeType::UnaryOpExpr &&
+        expr->data.unary_op_expr.op_type == TokenType::KW_MOVE) {
+        auto value = compile_expr(fn, expr);
+        if (value) {
+            auto &builder = *m_ctx->llvm_builder;
+            builder.CreateStore(value, dest);
+        }
+        return;
+    }
     auto value = compile_assignment_to_type(fn, expr, dest_type);
     if (value) {
         compile_copy_with_ref(fn, RefValue::from_value(value), dest, dest_type, expr);
@@ -2146,6 +2156,20 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
             return result;
         }
+        case TokenType::KW_MOVE: {
+            // move x — bitwise load + zero source (skip copy_from)
+            auto ref = compile_expr_ref(fn, data.op1);
+            assert(ref.address);
+            auto type = get_chitype(data.op1);
+            auto type_l = compile_type(type);
+            auto value = builder.CreateLoad(type_l, ref.address);
+            auto size = llvm_type_size(type_l);
+            builder.CreateMemSet(
+                ref.address,
+                llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                size, {});
+            return value;
+        }
         case TokenType::INC:
         case TokenType::DEC: {
             auto ref = compile_expr_ref(fn, data.op1);
@@ -3208,6 +3232,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         case TokenType::AND:
         case TokenType::MUTREF:
         case TokenType::MOVEREF:
+        case TokenType::KW_MOVE:
         case TokenType::SUB:
             // These produce rvalues - return value only
             return RefValue::from_value(compile_expr(fn, expr));
@@ -4058,6 +4083,13 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     if (value && !data.expr->escape.moved) {
                         compile_copy(fn, value, var, var_type, data.expr);
                     }
+                }
+            } else if (data.expr->type == ast::NodeType::UnaryOpExpr &&
+                       data.expr->data.unary_op_expr.op_type == TokenType::KW_MOVE) {
+                // move x — bitwise copy, skip copy_from
+                auto value = compile_expr(fn, data.expr);
+                if (value) {
+                    llvm_builder.CreateStore(value, var);
                 }
             } else {
                 // For all other expressions, use original path

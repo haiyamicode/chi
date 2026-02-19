@@ -1231,13 +1231,28 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto *src_decl = find_root_decl(data.op1);
                 if (src_decl) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
-                    // Check if already moved
                     if (fn_def.is_sunk(src_decl)) {
                         error(node, "'{}' used after move", src_decl->name);
                     }
                 }
             }
             return get_pointer_type(t, TypeKind::MoveRef);
+        }
+        case TokenType::KW_MOVE: {
+            // move x — value move optimization: produces T, sinks source
+            if (!is_addressable(data.op1)) {
+                error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
+            }
+            if (scope.parent_fn_node && has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) {
+                auto *src_decl = find_root_decl(data.op1);
+                if (src_decl) {
+                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    if (fn_def.is_sunk(src_decl)) {
+                        error(node, "'{}' used after move", src_decl->name);
+                    }
+                }
+            }
+            return t;  // move produces the value type, not a reference
         }
         default:
             unreachable();
@@ -5298,7 +5313,7 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
 
 void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiType *expr_type,
                                ast::Node *dest, ChiType *dest_type) {
-    if (!parent_fn_node || !has_lang_flag(m_ctx->lang_flags, LANG_FLAG_SAFE)) return;
+    if (!parent_fn_node) return;
 
     auto &fn_def = parent_fn_node->data.fn_def;
     ast::Node *moved_src = nullptr;
@@ -5306,6 +5321,10 @@ void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiTy
     if (expr->type == NodeType::UnaryOpExpr &&
         expr->data.unary_op_expr.op_type == TokenType::MOVEREF) {
         // Explicit &move expression: always a move
+        moved_src = find_root_decl(expr->data.unary_op_expr.op1);
+    } else if (expr->type == NodeType::UnaryOpExpr &&
+               expr->data.unary_op_expr.op_type == TokenType::KW_MOVE) {
+        // Explicit move expression (value move): always a move
         moved_src = find_root_decl(expr->data.unary_op_expr.op1);
     } else if (expr->type == NodeType::Identifier && expr_type &&
                expr_type->kind == TypeKind::MoveRef && dest_type &&

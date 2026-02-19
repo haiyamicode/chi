@@ -1246,6 +1246,14 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
     case TokenType::KW_DELETE:
         return parse_prefix_expr();
 
+    case TokenType::KW_MOVE: {
+        consume();
+        auto node = create_unary_expr_node(token);
+        node->data.unary_op_expr.op_type = TokenType::KW_MOVE;
+        node->data.unary_op_expr.op1 = parse_binary_expr(lhs, parent, UNARY_PREC);
+        return node;
+    }
+
     case TokenType::ADD:
     case TokenType::AND:
     case TokenType::MUL:
