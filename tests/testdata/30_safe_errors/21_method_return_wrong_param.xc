@@ -1,5 +1,5 @@
 // Method returning a non-this param ref.
-// Return type elides to 'This, but other has its own param lifetime.
+// Return type elides to 'this, but other has its own param lifetime.
 
 struct Holder {
     ref: &int = null;

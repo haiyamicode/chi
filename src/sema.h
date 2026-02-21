@@ -57,6 +57,7 @@ struct ChiTypeFn {
     ChiType *container_ref = nullptr;
     bool is_extern = false;
     array<ChiType *> type_params = {};
+    array<ChiLifetime *> lifetime_params = {};
 
     ChiType *get_param_at(size_t index);
     int get_va_start();
@@ -121,7 +122,7 @@ struct ChiTypeStruct {
     ResolveStatus resolve_status = ResolveStatus::None;
     int vtable_size = 0;
     map<IntrinsicSymbol, ChiStructMember *> member_intrinsics = {};
-    ChiLifetime *this_lifetime = nullptr;  // implicit 'This lifetime
+    ChiLifetime *this_lifetime = nullptr;  // implicit 'this lifetime
 
     ChiStructMember *add_member(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type);
@@ -154,10 +155,11 @@ enum class LifetimeKind {
 };
 
 struct ChiLifetime {
-    string name;                  // "This", "x", "h", etc.
+    string name;                  // "this", "x", "h", etc.
     LifetimeKind kind;
     ast::Node *owner = nullptr;   // ParamDecl node for Param kind, null for This/Return
     ChiType *origin = nullptr;    // containing function or struct type
+    array<ChiLifetime *> outlives;  // 'a: 'b → a.outlives = {b}
 };
 
 struct ChiTypePointer {

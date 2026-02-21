@@ -3,11 +3,11 @@ struct MultiRef {
     a: &int = null;
     b: &int = null;
 
-    mut func set_a(x: &'This int) {
+    mut func set_a(x: &'this int) {
         this.a = x;
     }
 
-    mut func set_b(x: &'This int) {
+    mut func set_b(x: &'this int) {
         this.b = x;
     }
 }

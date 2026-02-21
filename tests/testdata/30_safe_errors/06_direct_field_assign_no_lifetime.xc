@@ -1,4 +1,4 @@
-// Direct field assignment in method without 'This — must be rejected
+// Direct field assignment in method without 'this — must be rejected
 struct Container {
     val: &int = null;
 

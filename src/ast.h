@@ -22,7 +22,7 @@ struct Scope;
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
           ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
-          TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, PrefixExpr,
+          TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, LifetimeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
           ImplementBlock);
@@ -137,8 +137,11 @@ struct FnProto {
     Node *return_type = nullptr;
     Node *fn_def_node = nullptr;
     array<Node *> type_params = {};
+    array<Node *> lifetime_params = {};
     bool is_vararg = false;
     bool is_type_expr = false;
+    array<ChiLifetime *> resolved_param_lifetimes = {};
+    ChiLifetime *resolved_return_lifetime = nullptr;
 };
 
 MAKE_ENUM(FnKind, TopLevel, Method, Constructor, Destructor, Lambda);
@@ -249,6 +252,12 @@ struct TypeParam {
     Node *type_bound = nullptr;
     Node *default_type = nullptr;
     Node *source_decl = nullptr; // The struct/function that owns this type parameter
+};
+
+struct LifetimeParam {
+    long index = 0;
+    string bound;            // "b" for 'a: 'b (outlives bound)
+    Node *source_decl = nullptr;
 };
 
 struct Block {
@@ -448,7 +457,7 @@ struct TypeSigil {
     Node *type = nullptr;
     SigilKind sigil = SigilKind::None;
     Node *etype = nullptr;
-    string lifetime; // e.g. "This" from &'This int
+    string lifetime; // e.g. "this" from &'this int
 };
 
 struct EnumVariant {
@@ -601,6 +610,7 @@ struct Node {
         ForStmt for_stmt;
         WhileStmt while_stmt;
         TypeParam type_param;
+        LifetimeParam lifetime_param;
         PrefixExpr prefix_expr;
         ExternDecl extern_decl;
         ImportDecl import_decl;
@@ -649,6 +659,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(field_init_expr, FieldInitExpr)
             _AST_CASE_INITIALIZE_FIELD(enum_decl, EnumDecl)
             _AST_CASE_INITIALIZE_FIELD(generated_fn, GeneratedFn)
+            _AST_CASE_INITIALIZE_FIELD(lifetime_param, LifetimeParam)
         default:
             break;
         }

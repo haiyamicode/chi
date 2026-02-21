@@ -2,7 +2,7 @@
 struct Holder {
     ref: &int = null;
 
-    mut func store(r: &'This int) {
+    mut func store(r: &'this int) {
         this.ref = r;
     }
 }

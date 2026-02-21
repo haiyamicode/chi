@@ -5,7 +5,7 @@
 struct Holder {
     ref: &int = null;
 
-    mut func store(r: &'This int) {
+    mut func store(r: &'this int) {
         this.ref = r;
     }
 
@@ -20,12 +20,12 @@ struct MultiRef {
     a: &int = null;
     b: &int = null;
 
-    mut func set_both(x: &'This int, y: &'This int) {
+    mut func set_both(x: &'this int, y: &'this int) {
         this.a = x;
         this.b = y;
     }
 
-    mut func set_a(x: &'This int) {
+    mut func set_a(x: &'this int) {
         this.a = x;
     }
 }
@@ -34,7 +34,7 @@ struct MultiRef {
 
 func make_holder(x: &int) Holder {
     var h = Holder{};
-    // 'This annotation on store's param creates edge h -> x at caller site.
+    // 'this annotation on store's param creates edge h -> x at caller site.
     // Returning h by value: param x outlives the function, so this is fine.
     h.store(x);
     return h;
@@ -71,11 +71,11 @@ struct Pair {
     first: &int = null;
     second: &int = null;
 
-    mut func set_first(v: &'This int) {
+    mut func set_first(v: &'this int) {
         this.first = v;
     }
 
-    mut func set_second(v: &'This int) {
+    mut func set_second(v: &'this int) {
         this.second = v;
     }
 
@@ -311,14 +311,12 @@ func get_ref(h: &RefHolder) &int {
     return h.val;
 }
 
-// Multiple ref params returning either — requires unsafe (no shared lifetime annotation yet)
-func bigger_ref(a: &int, b: &int) &int {
-    unsafe {
-        if a! > b! {
-            return a;
-        }
-        return b;
+// Multiple ref params returning either — shared lifetime allows both
+func bigger_ref<'a>(a: &'a int, b: &'a int) &'a int {
+    if a! > b! {
+        return a;
     }
+    return b;
 }
 
 func test_cross_fn_ref() {
@@ -337,7 +335,7 @@ func test_bigger_ref() {
     printf("bigger = {}\n", big!);
 }
 
-// Method returning reference (elision to 'This)
+// Method returning reference (elision to 'this)
 func test_method_ref_return() {
     printf("=== method ref ===\n");
     var val = 42;

@@ -1,4 +1,4 @@
-// Store param without 'This into struct field — must be rejected
+// Store param without 'this into struct field — must be rejected
 struct Holder {
     ref: &int = null;
 

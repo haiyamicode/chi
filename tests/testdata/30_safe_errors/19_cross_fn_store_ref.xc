@@ -1,5 +1,5 @@
 // Free function storing a ref into a struct field.
-// Can't prove r lives long enough for holder's 'This lifetime.
+// Can't prove r lives long enough for holder's 'this lifetime.
 
 struct RefHolder {
     val: &int = null;

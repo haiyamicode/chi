@@ -132,6 +132,7 @@ struct ResolveScope {
     ChiType *parent_type_symbol = nullptr;
     bool is_fn_call = false; // True when resolving function reference for call
     bool is_unsafe_block = false; // True when inside an unsafe block or unsafe function
+    map<string, ChiLifetime *> *fn_lifetime_params = nullptr; // Explicit lifetime params from function declaration
 
     ast::FnDef *parent_fn_def() {
         assert(parent_fn_node);
@@ -374,6 +375,8 @@ class Resolver {
                               RecursiveCallHandler make_recursive_call);
 
     ast::Node *find_root_decl(ast::Node *node);
+    void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target);
+    void resolve_fn_lifetimes(ast::Node *fn_node);
 
     // Move tracking: record a sink edge if the expression transfers ownership
     void track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiType *expr_type,

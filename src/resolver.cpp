@@ -487,6 +487,15 @@ ChiType *Resolver::to_value_type(ChiType *type) {
     return type;
 }
 
+// Does lifetime 'a outlive 'b? True if a == b or 'a: 'b was declared (transitively).
+static bool lifetime_outlives(ChiLifetime *a, ChiLifetime *b) {
+    if (a == b) return true;
+    for (size_t i = 0; i < a->outlives.len; i++) {
+        if (lifetime_outlives(a->outlives[i], b)) return true;
+    }
+    return false;
+}
+
 ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     auto value_type = to_value_type(resolve(node, scope));
     if (!value_type) return nullptr;
@@ -539,6 +548,26 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         for (auto decl : data.top_level_decls) {
             if (decl->type == NodeType::StructDecl || decl->type == NodeType::EnumDecl) {
                 _resolve(decl, scope);
+            }
+        }
+
+        // lifetime resolution pass: populate resolved lifetimes on all functions
+        // (must run after struct members are resolved so is_borrowing_type works)
+        for (auto decl : data.top_level_decls) {
+            if (decl->type == NodeType::FnDef) {
+                resolve_fn_lifetimes(decl);
+            } else if (decl->type == NodeType::StructDecl) {
+                for (auto member : decl->data.struct_decl.members) {
+                    if (member->type == NodeType::FnDef) {
+                        resolve_fn_lifetimes(member);
+                    } else if (member->type == NodeType::ImplementBlock) {
+                        for (auto impl_member : member->data.implement_block.members) {
+                            if (impl_member->type == NodeType::FnDef) {
+                                resolve_fn_lifetimes(impl_member);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -700,6 +729,30 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto fn_scope = scope;
         TypeList type_param_types;
 
+        // Process explicit lifetime parameters: create shared ChiLifetime objects
+        map<string, ChiLifetime *> lifetime_map;
+        array<ChiLifetime *> fn_lifetime_list;
+        for (auto lt_node : data.lifetime_params) {
+            auto *lt = new ChiLifetime{lt_node->name, LifetimeKind::Param, nullptr, nullptr};
+            lifetime_map[lt_node->name] = lt;
+            fn_lifetime_list.add(lt);
+        }
+        // Second pass: wire up outlives bounds ('a: 'b)
+        for (auto lt_node : data.lifetime_params) {
+            auto &bound = lt_node->data.lifetime_param.bound;
+            if (!bound.empty()) {
+                auto *target = lifetime_map.get(bound);
+                if (target) {
+                    lifetime_map[lt_node->name]->outlives.add(*target);
+                } else {
+                    error(lt_node, "unknown lifetime '{}'", bound);
+                }
+            }
+        }
+        if (lifetime_map.size() > 0) {
+            fn_scope.fn_lifetime_params = &lifetime_map;
+        }
+
         // Process type parameters first
         for (auto param : data.type_params) {
             auto type_param = resolve(param, fn_scope);
@@ -790,10 +843,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (return_type && return_type->is_reference() && return_type->data.pointer.lifetimes.len == 0) {
             ChiLifetime *elided_lt = nullptr;
             if (container) {
-                // For methods: 'this' is implicitly the first ref param → use 'This lifetime
+                // For methods: 'this' is implicitly the first ref param → use 'this lifetime
                 auto &st = container->data.struct_;
                 if (!st.this_lifetime) {
-                    st.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, container};
+                    st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, container};
                 }
                 elided_lt = st.this_lifetime;
             } else {
@@ -810,8 +863,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto is_extern = node->get_declspec() ? node->get_declspec()->is_extern() : false;
         // Only pass container for method declarations, not for function parameter types
         auto method_container = is_fn_decl ? container : nullptr;
+
         auto fn_type = get_fn_type(return_type, &param_types, is_variadic, method_container,
                                    is_extern, &type_param_types);
+
+        if (fn_lifetime_list.len > 0) {
+            fn_type->data.fn.lifetime_params = fn_lifetime_list;
+        }
 
         if (is_lambda || !is_fn_decl) {
             return get_lambda_for_fn(fn_type);
@@ -842,10 +900,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto is_mut = declspec.is_mutable();
             type->data.pointer.elem = get_pointer_type(
                 scope.parent_struct, is_mut ? TypeKind::MutRef : TypeKind::Reference);
-            // Attach 'This lifetime so satisfies_lifetime_constraint can check it
+            // Attach 'this lifetime so satisfies_lifetime_constraint can check it
             auto &st = scope.parent_struct->data.struct_;
             if (!st.this_lifetime) {
-                st.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, scope.parent_struct};
+                st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, scope.parent_struct};
             }
             type->data.pointer.lifetimes.add(st.this_lifetime);
             return type;
@@ -966,13 +1024,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!data.lifetime.empty()) {
             // Lifetime-annotated ref: create fresh type (not cached) with resolved lifetime
             final_type = create_pointer_type(type, kind);
-            if (data.lifetime == "This" && scope.parent_struct) {
+            if (data.lifetime == "this" && scope.parent_struct) {
                 auto *struct_type = scope.parent_struct;
                 auto &st = struct_type->data.struct_;
                 if (!st.this_lifetime) {
-                    st.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, struct_type};
+                    st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
                 }
                 final_type->data.pointer.lifetimes.add(st.this_lifetime);
+            } else if (scope.fn_lifetime_params) {
+                auto *lt = scope.fn_lifetime_params->get(data.lifetime);
+                if (lt) {
+                    final_type->data.pointer.lifetimes.add(*lt);
+                } else {
+                    error(node, "unknown lifetime '{}'", data.lifetime);
+                    return create_type(TypeKind::Unknown);
+                }
             } else {
                 error(node, "unknown lifetime '{}'", data.lifetime);
                 return create_type(TypeKind::Unknown);
@@ -1026,30 +1092,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     scope.parent_fn_node->data.fn_def.copy_ref_edges(node, src_decl);
                 }
             }
-            // Function calls returning references: create edge from VarDecl to source argument
+            // Function calls returning borrowing types: create edge from VarDecl to source argument
             if (scope.parent_fn_node && data.expr->type == NodeType::FnCallExpr &&
-                !scope.is_unsafe_block && expr_type && expr_type->is_reference()) {
-                auto &call = data.expr->data.fn_call_expr;
-                auto &fn_def = scope.parent_fn_node->data.fn_def;
-                if (call.fn_ref_expr->type == NodeType::DotExpr) {
-                    // Method call: return lifetime tied to receiver
-                    auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
-                    if (receiver_decl) {
-                        fn_def.add_ref_edge(node, receiver_decl);
-                    }
-                } else {
-                    // Free function call: return lifetime tied to first ref argument
-                    for (size_t i = 0; i < call.args.len; i++) {
-                        auto *arg_type = call.args[i]->resolved_type;
-                        if (arg_type && arg_type->is_reference()) {
-                            auto *arg_decl = find_root_decl(call.args[i]);
-                            if (arg_decl) {
-                                fn_def.add_ref_edge(node, arg_decl);
-                            }
-                            break;
-                        }
-                    }
-                }
+                !scope.is_unsafe_block && expr_type && is_borrowing_type(expr_type)) {
+                add_call_borrow_edges(scope.parent_fn_node->data.fn_def,
+                                      data.expr->data.fn_call_expr, node);
             }
             // Move tracking: &move x sinks source into this variable
             track_move_sink(scope.parent_fn_node, data.expr, expr_type,
@@ -1134,32 +1181,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         auto &fn_def = scope.parent_fn_node->data.fn_def;
                         fn_def.copy_ref_edges(lhs_decl, rhs_decl);
                         // Storing a ref into a struct field makes the root a terminal:
-                        // the stored ref must satisfy the struct's 'This lifetime.
+                        // the stored ref must satisfy the struct's 'this lifetime.
                         fn_def.add_terminal(lhs_decl);
                     }
                 }
-                // Function calls returning references: create edge from LHS to source argument
+                // Function calls returning borrowing types: create edge from LHS to source argument
                 if (lhs_decl && data.op2->type == NodeType::FnCallExpr &&
-                    !scope.is_unsafe_block && t2 && t2->is_reference()) {
-                    auto &call = data.op2->data.fn_call_expr;
-                    auto &fn_def = scope.parent_fn_node->data.fn_def;
-                    if (call.fn_ref_expr->type == NodeType::DotExpr) {
-                        auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
-                        if (receiver_decl) {
-                            fn_def.add_ref_edge(lhs_decl, receiver_decl);
-                        }
-                    } else {
-                        for (size_t i = 0; i < call.args.len; i++) {
-                            auto *arg_type = call.args[i]->resolved_type;
-                            if (arg_type && arg_type->is_reference()) {
-                                auto *arg_decl = find_root_decl(call.args[i]);
-                                if (arg_decl) {
-                                    fn_def.add_ref_edge(lhs_decl, arg_decl);
-                                }
-                                break;
-                            }
-                        }
-                    }
+                    !scope.is_unsafe_block && t2 && is_borrowing_type(t2)) {
+                    add_call_borrow_edges(scope.parent_fn_node->data.fn_def,
+                                          data.op2->data.fn_call_expr, lhs_decl);
                 }
                 // Move tracking for assignments
                 if (lhs_decl) {
@@ -1898,7 +1928,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
 
         // Annotation-driven edge creation: for method calls where a param has
-        // 'This lifetime, create edge from receiver to that arg in the caller's graph.
+        // 'this lifetime, create edge from receiver to that arg in the caller's graph.
         if (scope.parent_fn_node &&
             data.fn_ref_expr->type == NodeType::DotExpr &&
             fn_decl && fn_decl->type == NodeType::FnDef) {
@@ -3242,10 +3272,10 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
             error(node, errors::MOVE_REF_IN_STRUCT_FIELD);
         }
 
-        // Reference fields implicitly have 'This lifetime
+        // Reference fields implicitly have 'this lifetime
         if (member->resolved_type && member->resolved_type->is_pointer_like()) {
             if (!struct_.this_lifetime) {
-                struct_.this_lifetime = new ChiLifetime{"This", LifetimeKind::This, nullptr, struct_type};
+                struct_.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
             }
         }
     } else if (node->type == NodeType::FnDef) {
@@ -5198,6 +5228,7 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
         m_ctx->generics.record_fn(variant_id, fn_name, fn_node, generic_fn, subs);
     }
 
+    resolve_fn_lifetimes(generated_fn);
     return generated_fn;
 }
 
@@ -5452,6 +5483,88 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
     }
 }
 
+void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
+    auto *fn_type_sym = fn_node->resolved_type;
+    if (!fn_type_sym) return;
+    auto *fn_type = to_value_type(fn_type_sym);
+    if (!fn_type || fn_type->kind != TypeKind::Fn) return;
+    auto &fn = fn_type->data.fn;
+
+    ast::FnProto *proto = nullptr;
+    if (fn_node->type == NodeType::FnDef) {
+        proto = &fn_node->data.fn_def.fn_proto->data.fn_proto;
+    } else if (fn_node->type == NodeType::GeneratedFn) {
+        proto = &fn_node->data.generated_fn.fn_proto->data.fn_proto;
+    }
+    if (!proto) return;
+
+    // Extract param lifetimes from resolved param types
+    for (size_t i = 0; i < fn.params.len; i++) {
+        auto *pt = fn.params[i];
+        ChiLifetime *lt = (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0)
+            ? pt->data.pointer.lifetimes[0] : nullptr;
+        proto->resolved_param_lifetimes.add(lt);
+    }
+
+    // Extract return lifetime
+    auto *ret = fn.return_type;
+    if (ret && ret->is_reference() && ret->data.pointer.lifetimes.len > 0) {
+        proto->resolved_return_lifetime = ret->data.pointer.lifetimes[0];
+    } else if (ret && is_borrowing_type(ret)) {
+        // Struct/value return containing references: elide to first ref param or 'this
+        if (fn.container_ref) {
+            auto *container = fn.container_ref->get_elem();
+            auto &st = container->data.struct_;
+            if (!st.this_lifetime) {
+                st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, container};
+            }
+            proto->resolved_return_lifetime = st.this_lifetime;
+        } else {
+            for (size_t i = 0; i < proto->resolved_param_lifetimes.len; i++) {
+                if (proto->resolved_param_lifetimes[i]) {
+                    proto->resolved_return_lifetime = proto->resolved_param_lifetimes[i];
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target) {
+    // Find the callee's FnProto node to read resolved lifetime data
+    ast::FnProto *proto = nullptr;
+    if (call.generated_fn) {
+        proto = &call.generated_fn->data.generated_fn.fn_proto->data.fn_proto;
+    } else {
+        ast::Node *decl = nullptr;
+        if (call.fn_ref_expr->type == NodeType::Identifier) {
+            decl = call.fn_ref_expr->data.identifier.decl;
+        } else if (call.fn_ref_expr->type == NodeType::DotExpr) {
+            decl = call.fn_ref_expr->data.dot_expr.resolved_decl;
+        }
+        if (decl && decl->type == NodeType::FnDef) {
+            proto = &decl->data.fn_def.fn_proto->data.fn_proto;
+        } else if (decl && decl->type == NodeType::GeneratedFn) {
+            proto = &decl->data.generated_fn.fn_proto->data.fn_proto;
+        }
+    }
+    if (!proto) return;
+
+    if (proto->resolved_return_lifetime &&
+        proto->resolved_return_lifetime->kind == LifetimeKind::This &&
+        call.fn_ref_expr->type == NodeType::DotExpr) {
+        auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
+        if (receiver_decl) fn_def.add_ref_edge(target, receiver_decl);
+    }
+    for (size_t i = 0; i < proto->resolved_param_lifetimes.len && i < call.args.len; i++) {
+        if (proto->resolved_param_lifetimes[i] && proto->resolved_return_lifetime &&
+            lifetime_outlives(proto->resolved_param_lifetimes[i], proto->resolved_return_lifetime)) {
+            auto *arg_decl = find_root_decl(call.args[i]);
+            if (arg_decl) fn_def.add_ref_edge(target, arg_decl);
+        }
+    }
+}
+
 void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiType *expr_type,
                                ast::Node *dest, ChiType *dest_type) {
     if (!parent_fn_node) return;
@@ -5509,7 +5622,7 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
 
         auto &lifetimes = leaf_type->data.pointer.lifetimes;
         for (size_t i = 0; i < lifetimes.len; i++) {
-            if (lifetimes[i] == required) return true;
+            if (lifetime_outlives(lifetimes[i], required)) return true;
         }
         return false;
     }
@@ -5521,7 +5634,7 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
         if (!leaf_type) return false;
         auto &lifetimes = leaf_type->data.pointer.lifetimes;
         for (size_t i = 0; i < lifetimes.len; i++) {
-            if (lifetimes[i] == required) return true;
+            if (lifetime_outlives(lifetimes[i], required)) return true;
         }
         return false;
     }

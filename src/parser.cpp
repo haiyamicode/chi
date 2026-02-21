@@ -523,7 +523,7 @@ Node *Parser::parse_type_expr(bool type_only) {
             string lifetime;
             if (sigil_kind == SigilKind::Reference) {
                 if (next_is(TokenType::LPAREN)) {
-                    // &(mut, 'This) T  or  &(mut) T  or  &('This) T  or  &(move) T
+                    // &(mut, 'this) T  or  &(mut) T  or  &('this) T  or  &(move) T
                     consume();
                     for (;;) {
                         if (next_is(TokenType::KW_MUT)) {
@@ -551,7 +551,7 @@ Node *Parser::parse_type_expr(bool type_only) {
                     consume();
                     sigil_kind = SigilKind::Move;
                 } else if (next_is(TokenType::LIFETIME)) {
-                    // &'This T
+                    // &'this T
                     lifetime = get()->str;
                     consume();
                 }
@@ -860,8 +860,9 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
     // Push a scope for function prototype parsing
     auto proto_scope = m_ctx->resolver->push_scope(proto);
 
-    // Parse type parameters like <T, U>
+    // Parse type parameters and lifetime parameters like <'a, 'b: 'a, T, U: Show>
     auto &type_params = proto->data.fn_proto.type_params;
+    auto &lifetime_params = proto->data.fn_proto.lifetime_params;
     if (next_is(TokenType::LT)) {
         expect(TokenType::LT);
         Token *param_token;
@@ -876,22 +877,40 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
                 break;
             }
 
-            auto param_iden = expect(TokenType::IDEN);
-            auto param_node = create_node(NodeType::TypeParam, param_iden);
-            param_node->name = param_iden->str; // Set the name explicitly
-            param_node->data.type_param.index = type_params.len;
-            param_node->data.type_param.source_decl = fn_node;
+            if (param_token->type == TokenType::LIFETIME) {
+                // Lifetime parameter: 'a or 'a: 'b
+                consume();
+                if (param_token->str == "this") {
+                    error(param_token, "'this is a reserved lifetime and cannot be declared");
+                }
+                auto lt_node = create_node(NodeType::LifetimeParam, param_token);
+                lt_node->name = param_token->str;
+                lt_node->data.lifetime_param.index = lifetime_params.len;
+                lt_node->data.lifetime_param.source_decl = fn_node;
 
-            // Check for colon syntax for type bounds: T: SomeInterface
-            if (next_is(TokenType::COLON)) {
-                consume(); // consume the colon
-                param_node->data.type_param.type_bound = parse_type_expr(true);
+                if (next_is(TokenType::COLON)) {
+                    consume();
+                    auto bound_token = expect(TokenType::LIFETIME);
+                    lt_node->data.lifetime_param.bound = bound_token->str;
+                }
+
+                lifetime_params.add(lt_node);
+            } else {
+                // Type parameter: T or T: SomeInterface
+                auto param_iden = expect(TokenType::IDEN);
+                auto param_node = create_node(NodeType::TypeParam, param_iden);
+                param_node->name = param_iden->str;
+                param_node->data.type_param.index = type_params.len;
+                param_node->data.type_param.source_decl = fn_node;
+
+                if (next_is(TokenType::COLON)) {
+                    consume();
+                    param_node->data.type_param.type_bound = parse_type_expr(true);
+                }
+
+                type_params.add(param_node);
+                add_to_scope(param_node);
             }
-
-            type_params.add(param_node);
-
-            // Add type parameter to scope
-            add_to_scope(param_node);
 
             if (!at_comma(TokenType::GT)) {
                 break;
