@@ -376,6 +376,8 @@ class Resolver {
 
     ast::Node *find_root_decl(ast::Node *node);
     void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target);
+    void add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
+                                 bool is_ref = false);
     void resolve_fn_lifetimes(ast::Node *fn_node);
 
     // Move tracking: record a sink edge if the expression transfers ownership

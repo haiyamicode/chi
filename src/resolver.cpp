@@ -1089,19 +1089,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto var_scope = type_hint ? scope.set_value_type(type_hint) : scope;
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
-            // Escape analysis: by-value copy inherits leaf terminals (borrowing types only)
-            if (scope.parent_fn_node && data.expr->type == NodeType::Identifier && !scope.is_unsafe_block &&
-                is_borrowing_type(expr_type)) {
-                auto src_decl = data.expr->data.identifier.decl;
-                if (src_decl) {
-                    scope.parent_fn_node->data.fn_def.copy_ref_edges(node, src_decl);
-                }
-            }
-            // Function calls returning borrowing types: create edge from VarDecl to source argument
-            if (scope.parent_fn_node && data.expr->type == NodeType::FnCallExpr &&
-                !scope.is_unsafe_block && expr_type && is_borrowing_type(expr_type)) {
-                add_call_borrow_edges(scope.parent_fn_node->data.fn_def,
-                                      data.expr->data.fn_call_expr, node);
+            // Escape analysis: track borrow sources for borrowing types
+            if (scope.parent_fn_node && !scope.is_unsafe_block &&
+                expr_type && is_borrowing_type(expr_type)) {
+                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, data.expr, node);
             }
             // Move tracking: &move x sinks source into this variable
             track_move_sink(scope.parent_fn_node, data.expr, expr_type,
@@ -1179,22 +1170,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             t2 = resolve(data.op2, var_scope);
             if (scope.parent_fn_node) {
                 auto lhs_decl = find_root_decl(data.op1);
-                if (lhs_decl && data.op2->type == NodeType::Identifier && !scope.is_unsafe_block &&
-                    is_borrowing_type(t2)) {
-                    auto rhs_decl = data.op2->data.identifier.decl;
-                    if (rhs_decl) {
-                        auto &fn_def = scope.parent_fn_node->data.fn_def;
-                        fn_def.copy_ref_edges(lhs_decl, rhs_decl);
-                        // Storing a ref into a struct field makes the root a terminal:
-                        // the stored ref must satisfy the struct's 'this lifetime.
-                        fn_def.add_terminal(lhs_decl);
-                    }
-                }
-                // Function calls returning borrowing types: create edge from LHS to source argument
-                if (lhs_decl && data.op2->type == NodeType::FnCallExpr &&
-                    !scope.is_unsafe_block && t2 && is_borrowing_type(t2)) {
-                    add_call_borrow_edges(scope.parent_fn_node->data.fn_def,
-                                          data.op2->data.fn_call_expr, lhs_decl);
+                if (lhs_decl && !scope.is_unsafe_block && t2 && is_borrowing_type(t2)) {
+                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    add_borrow_source_edges(fn_def, data.op2, lhs_decl);
+                    fn_def.add_terminal(lhs_decl);
                 }
                 // Move tracking for assignments
                 if (lhs_decl) {
@@ -1546,24 +1525,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         if (data.expr && scope.parent_fn_node && expr_type &&
-            is_borrowing_type(expr_type)) {
+            is_borrowing_type(expr_type) && !scope.is_unsafe_block) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
-            auto root = find_root_decl(data.expr);
-            if (!root) root = data.expr;
-            bool is_ref_return = expr_type->kind == TypeKind::Reference ||
-                                 expr_type->kind == TypeKind::MutRef ||
-                                 expr_type->kind == TypeKind::MoveRef ||
-                                 expr_type->kind == TypeKind::Pointer;
-            if (!scope.is_unsafe_block) {
-                if (is_ref_return) {
-                    // Direct reference: return points to the target's memory
-                    fn_def.add_ref_edge(node, root);
-                } else {
-                    // By-value: return inherits the target's leaf terminals
-                    fn_def.copy_ref_edges(node, root);
-                }
-                fn_def.add_terminal(node);
-            }
+            bool is_ref = expr_type->is_reference();
+            add_borrow_source_edges(fn_def, data.expr, node, is_ref);
+            fn_def.add_terminal(node);
         }
 
         return return_type;
@@ -1889,12 +1855,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto outlet = scope.move_outlet ? scope.move_outlet : node;
                 auto &fn_def = scope.parent_fn_node->data.fn_def;
                 fn_def.add_ref_edge(outlet, field_init);
-                // By-value: field inherits source's leaf terminals
-                if (data.value->type == NodeType::Identifier) {
-                    auto src = data.value->data.identifier.decl;
-                    if (src) {
-                        fn_def.copy_ref_edges(field_init, src);
-                    }
+                if (init_value_type && is_borrowing_type(init_value_type)) {
+                    add_borrow_source_edges(fn_def, data.value, field_init);
                 }
             }
         }
@@ -5565,15 +5527,57 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
     if (proto->resolved_return_lifetime &&
         proto->resolved_return_lifetime->kind == LifetimeKind::This &&
         call.fn_ref_expr->type == NodeType::DotExpr) {
-        auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
-        if (receiver_decl) fn_def.add_ref_edge(target, receiver_decl);
+        add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.expr, target, true);
     }
     for (size_t i = 0; i < proto->resolved_param_lifetimes.len && i < call.args.len; i++) {
         if (proto->resolved_param_lifetimes[i] && proto->resolved_return_lifetime &&
             lifetime_outlives(proto->resolved_param_lifetimes[i], proto->resolved_return_lifetime)) {
-            auto *arg_decl = find_root_decl(call.args[i]);
-            if (arg_decl) fn_def.add_ref_edge(target, arg_decl);
+            add_borrow_source_edges(fn_def, call.args[i], target, true);
         }
+    }
+}
+
+void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
+                                        bool is_ref) {
+    if (!expr) return;
+    // If the expression traces to a root declaration (variable, field, index, etc.):
+    // - is_ref=true (reference): add_ref_edge — target depends on root's own lifetime
+    // - is_ref=false (by-value): copy_ref_edges — target inherits root's dependencies
+    //   but doesn't depend on root itself (the data is copied out)
+    auto *root = find_root_decl(expr);
+    if (root) {
+        if (is_ref) {
+            fn_def.add_ref_edge(target, root);
+        } else {
+            fn_def.copy_ref_edges(target, root);
+        }
+        return;
+    }
+    // Otherwise, recurse into compound expressions.
+    switch (expr->type) {
+    case NodeType::FnCallExpr:
+        add_call_borrow_edges(fn_def, expr->data.fn_call_expr, target);
+        break;
+    case NodeType::ConstructExpr:
+        // Field inits already set up edges on the ConstructExpr node during resolution.
+        // Transitively copy those leaf edges to the target.
+        fn_def.copy_ref_edges(target, expr);
+        break;
+    case NodeType::TryExpr:
+        add_borrow_source_edges(fn_def, expr->data.try_expr.expr, target, is_ref);
+        break;
+    case NodeType::CastExpr:
+        add_borrow_source_edges(fn_def, expr->data.cast_expr.expr, target, is_ref);
+        break;
+    case NodeType::SwitchExpr:
+        for (auto scase : expr->data.switch_expr.cases) {
+            if (scase) {
+                add_borrow_source_edges(fn_def, scase->data.case_expr.body, target, is_ref);
+            }
+        }
+        break;
+    default:
+        break;
     }
 }
 
