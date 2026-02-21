@@ -1018,19 +1018,28 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // Check use-after-move via sink_edges (safe mode only)
+        // Check use-after-move/delete via sink_edges (safe mode only)
         if (scope.parent_fn_node && !scope.is_lhs &&
             has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
             if (fn_def.is_sunk(data.decl)) {
                 auto *target = fn_def.sink_edges[data.decl];
+                bool is_delete = target && target->type == NodeType::PrefixExpr &&
+                                 target->data.prefix_expr.prefix->type == TokenType::KW_DELETE;
                 array<Note> notes;
                 if (target && target->token) {
-                    notes.add({"moved here", target->token->pos});
+                    notes.add({is_delete ? "deleted here" : "moved here", target->token->pos});
                 }
                 error_with_notes(node, std::move(notes),
-                                 "'{}' used after move", data.decl->name);
+                                 "'{}' used after {}", data.decl->name,
+                                 is_delete ? "delete" : "move");
             }
+        }
+
+        // Track last-use position for sink check (NLL-like)
+        if (scope.parent_fn_node && node->token) {
+            auto &fn_def = scope.parent_fn_node->data.fn_def;
+            fn_def.terminal_last_use[data.decl] = node->token->pos.offset;
         }
 
         // Convert function to lambda when used as value (not in call context)
@@ -1191,6 +1200,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto lhs_decl = find_root_decl(data.op1);
                 if (lhs_decl && !scope.is_unsafe_block && t2 && is_borrowing_type(t2)) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    fn_def.bump_edge_offset(lhs_decl);
                     add_borrow_source_edges(fn_def, data.op2, lhs_decl);
                     fn_def.add_terminal(lhs_decl);
                 }
@@ -2555,11 +2565,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type(expr_type, true));
             }
-            // delete on &move T sinks the variable (early destroy, RAII skip)
-            if (scope.parent_fn_node && expr_type->kind == TypeKind::MoveRef) {
+            // delete sinks the variable and its current borrow leaves
+            if (scope.parent_fn_node) {
                 auto *deleted_decl = find_root_decl(data.expr);
                 if (deleted_decl) {
-                    scope.parent_fn_node->data.fn_def.add_sink_edge(deleted_decl, node);
+                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    fn_def.add_sink_edge(deleted_decl, node);
+                    // Propagate sink to the data this variable currently points to
+                    auto *edges = fn_def.ref_edges.get(deleted_decl);
+                    if (edges) {
+                        size_t offset = fn_def.current_edge_offset(deleted_decl);
+                        for (size_t i = offset; i < edges->len; i++) {
+                            fn_def.add_sink_edge(edges->items[i], node);
+                        }
+                    }
                 }
             }
             return get_system_types()->void_;
@@ -5842,6 +5861,48 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
 
             if (auto *next = fn_def->ref_edges.get(node)) {
                 for (size_t i = 0; i < next->len; i++) stack.add(next->items[i]);
+            }
+        }
+    }
+
+    // Separate sink check: for each terminal, check if its CURRENT borrow sources
+    // have been sunk (deleted/moved). Uses current_edge_offset to skip stale edges
+    // from previous assignments (e.g. s was reassigned from c to r before delete c).
+    // Also uses terminal_last_use for NLL-like precision: if the terminal's last use
+    // is before the sink point, it's safe (the dangling ref is never dereferenced).
+    if (is_safe) {
+        for (size_t t = 0; t < fn_def->terminals.len; t++) {
+            auto *terminal = fn_def->terminals[t];
+            // Skip terminals that were themselves sunk — the direct use-after-delete
+            // check at Identifier resolution handles that case
+            if (fn_def->is_sunk(terminal)) continue;
+            auto *deps = fn_def->ref_edges.get(terminal);
+            if (!deps) continue;
+            size_t offset = fn_def->current_edge_offset(terminal);
+            auto *last_use = fn_def->terminal_last_use.get(terminal);
+            for (size_t i = offset; i < deps->len; i++) {
+                auto *node = deps->items[i];
+                if (fn_def->is_sunk(node)) {
+                    auto *sink_target = fn_def->sink_edges[node];
+                    // Move ownership: if the sunk node was moved INTO this terminal, skip
+                    // (e.g. var b = move a; — b owns the data, a is sunk with dest=b)
+                    if (sink_target == terminal) continue;
+                    // NLL: if terminal's last use is before the sink point, skip
+                    if (last_use && sink_target && sink_target->token) {
+                        if (*last_use < sink_target->token->pos.offset) continue;
+                    }
+                    bool is_delete = sink_target && sink_target->type == NodeType::PrefixExpr &&
+                                     sink_target->data.prefix_expr.prefix->type == TokenType::KW_DELETE;
+                    array<Note> notes;
+                    if (sink_target && sink_target->token) {
+                        notes.add({is_delete ? "deleted here" : "moved here",
+                                   sink_target->token->pos});
+                    }
+                    notes.add({"referenced here", terminal->token->pos});
+                    error_with_notes(terminal, std::move(notes),
+                                     "'{}' used after {}", terminal->name,
+                                     is_delete ? "delete" : "move");
+                }
             }
         }
     }

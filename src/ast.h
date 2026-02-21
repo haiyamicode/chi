@@ -166,6 +166,8 @@ struct FnDef {
     array<Node *> variants = {};
     map<Node *, array<Node *>> ref_edges = {};  // escape analysis: dependency graph
     map<Node *, Node *> sink_edges = {};  // move: a → b means a's ownership transferred to b
+    map<Node *, size_t> edge_offsets = {};  // per-variable: index where current edges start
+    map<Node *, long> terminal_last_use = {};  // per-terminal: offset of last reference
     array<Node *> terminals = {};  // nodes whose lifetimes extend beyond the function
     int32_t next_decl_order = 0;  // counter for assigning decl_order to locals
 
@@ -192,6 +194,18 @@ struct FnDef {
 
     bool is_sunk(Node *node) {
         return sink_edges.has_key(node);
+    }
+
+    // Get the offset where current (non-stale) edges start for a variable
+    size_t current_edge_offset(Node *node) {
+        auto *offset = edge_offsets.get(node);
+        return offset ? *offset : 0;
+    }
+
+    // Mark current edges as stale (called before adding new edges on reassignment)
+    void bump_edge_offset(Node *node) {
+        auto *edges = ref_edges.get(node);
+        edge_offsets[node] = edges ? edges->len : 0;
     }
 
     // By-value copy: A inherits B's leaf terminals (the actual memory targets)
