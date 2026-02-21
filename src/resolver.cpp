@@ -723,11 +723,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             check_lifetime_constraints(&data);
 
-            // Add params to cleanup_vars (after body resolution ensures types are resolved)
+            // Add params to cleanup_vars on the body block
             auto &proto_data = data.fn_proto->data.fn_proto;
             for (auto param : proto_data.params) {
                 if (should_destroy(param) && !param->escape.is_capture()) {
-                    data.cleanup_vars.add(param);
+                    data.body->data.block.cleanup_vars.add(param);
+                    data.has_cleanup = true;
                 }
             }
         }
@@ -1162,9 +1163,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (scope.parent_fn_node && !data.is_field) {
             node->decl_order = scope.parent_fn_def()->next_decl_order++;
         }
-        // Add to cleanup_vars if this variable needs destruction
-        if (scope.parent_fn_node && should_destroy(node, var_type) && !node->escape.is_capture()) {
-            scope.parent_fn_def()->cleanup_vars.add(node);
+        // Add to cleanup_vars on the current block
+        if (scope.parent_fn_node && scope.block && should_destroy(node, var_type) && !node->escape.is_capture()) {
+            scope.block->cleanup_vars.add(node);
+            scope.parent_fn_def()->has_cleanup = true;
         }
         return var_type;
     }
@@ -2787,8 +2789,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::BindIdentifier: {
         // Add to cleanup_vars if this bind variable needs destruction (for-range by value)
         auto bind_type = scope.value_type;
-        if (scope.parent_fn_node && should_destroy(node, bind_type) && !node->escape.is_capture()) {
-            scope.parent_fn_def()->cleanup_vars.add(node);
+        if (scope.parent_fn_node && scope.block && should_destroy(node, bind_type) && !node->escape.is_capture()) {
+            scope.block->cleanup_vars.add(node);
+            scope.parent_fn_def()->has_cleanup = true;
         }
         return bind_type;
     }

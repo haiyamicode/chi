@@ -682,14 +682,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
     }
 
-    // clean up & return
+    // clean up & return (block-local vars are destroyed at block exit or inline at return sites)
     fn->use_label(return_b);
-    auto cleanup_fn_def = fn->get_def();
-    for (int i = cleanup_fn_def->cleanup_vars.len - 1; i >= 0; i--) {
-        auto var = cleanup_fn_def->cleanup_vars[i];
-        if (cleanup_fn_def->is_sunk(var)) continue;  // moved — ownership transferred
-        compile_destruction(fn, get_var(var), var);
-    }
     // Destroy any caught error objects still owned (from diverging catch blocks)
     for (auto &owner : fn->error_owner_vars) {
         auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
@@ -728,10 +722,9 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         landing->setCleanup(true);
         builder.CreateExtractValue(landing, {0});
         builder.CreateExtractValue(landing, {1});
-        for (int i = fn->get_def()->cleanup_vars.len - 1; i >= 0; i--) {
-            auto var = fn->get_def()->cleanup_vars[i];
-            if (fn->get_def()->is_sunk(var)) continue;  // moved — ownership transferred
-            compile_destruction(fn, get_var(var), var);
+        // Destroy function body block's vars (conservative: covers all function-level locals)
+        if (fn->get_def()->body) {
+            compile_block_cleanup(fn, &fn->get_def()->body->data.block);
         }
         for (auto &owner : fn->error_owner_vars) {
             auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
@@ -2049,7 +2042,7 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op, ChiType *type) {
 llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
-        if (fn->get_def()->cleanup_vars.len) {
+        if (fn->get_def()->has_cleanup) {
             auto &builder = *m_ctx->llvm_builder.get();
             InvokeInfo invoke;
             auto next_label = fn->new_label("_invoke_next");
@@ -4165,6 +4158,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
             }
         }
+        // Destroy all active block-local vars (inner to outer) before returning
+        for (int i = fn->active_blocks.size() - 1; i >= 0; i--) {
+            compile_block_cleanup(fn, fn->active_blocks[i]);
+        }
         llvm_builder.CreateBr(fn->return_label);
         scope->branched = true;
         break;
@@ -4201,6 +4198,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto token = stmt->token;
         auto loop = fn->get_loop();
         auto &builder = *m_ctx->llvm_builder.get();
+        // Destroy block-local vars between current scope and the loop boundary
+        for (int i = fn->active_blocks.size() - 1; i >= (int)loop->active_blocks_depth; i--) {
+            compile_block_cleanup(fn, fn->active_blocks[i]);
+        }
         if (token->type == TokenType::KW_BREAK) {
             builder.CreateBr(loop->end);
         }
@@ -4376,6 +4377,15 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
     default:
         compile_assignment_to_type(fn, stmt, nullptr);
+    }
+}
+
+void Compiler::compile_block_cleanup(Function *fn, ast::Block *block) {
+    auto *fn_def = fn->get_def();
+    for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
+        auto var = block->cleanup_vars[i];
+        if (fn_def->is_sunk(var)) continue;
+        compile_destruction(fn, get_var(var), var);
     }
 }
 
@@ -5098,12 +5108,19 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
     }
 
     auto scope = fn->push_scope();
+    fn->active_blocks.push_back(&data);
     for (auto stmt : data.statements) {
         compile_stmt(fn, stmt);
     }
     if (data.return_expr) {
         result = compile_expr(fn, data.return_expr);
     }
+
+    // Destroy block-local vars (only if block didn't already branch away via return/break)
+    if (!scope->branched) {
+        compile_block_cleanup(fn, &data);
+    }
+    fn->active_blocks.pop_back();
     fn->pop_scope();
 
     if (data.return_expr) {

@@ -29,6 +29,7 @@ typedef llvm::BasicBlock label_t;
 struct LoopLabels {
     label_t *start = nullptr;
     label_t *end = nullptr;
+    size_t active_blocks_depth = 0;  // active_blocks.size() when loop was entered
 };
 
 enum class ParameterKind {
@@ -73,6 +74,7 @@ struct Function {
     std::list<BlockScope> block_scopes;
     std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
+    std::vector<ast::Block *> active_blocks;  // block cleanup stack (inner to outer)
     bool has_cleanup_invoke = false;
 
     // Parameter information
@@ -161,7 +163,11 @@ struct Function {
     void pop_scope() { scope_stack.pop_back(); }
     BlockScope *get_scope() { return scope_stack.back(); }
 
-    LoopLabels *push_loop() { return &loop_labels.emplace_back(); }
+    LoopLabels *push_loop() {
+        auto *loop = &loop_labels.emplace_back();
+        loop->active_blocks_depth = active_blocks.size();
+        return loop;
+    }
     void pop_loop() { loop_labels.pop_back(); }
     LoopLabels *get_loop() { return &loop_labels.back(); }
 
@@ -312,6 +318,7 @@ class Compiler {
 
     inline llvm::Type *compile_type_of(ast::Node *node);
 
+    void compile_block_cleanup(Function *fn, ast::Block *block);
     void compile_destruction(Function *fn, llvm::Value *address, ast::Node *node);
     void compile_destruction_for_type(Function *fn, llvm::Value *address, ChiType *type);
     void compile_heap_free(Function *fn, llvm::Value *ptr, ChiType *elem_type);

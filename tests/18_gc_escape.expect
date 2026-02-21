@@ -57,9 +57,13 @@ CRITICAL TEST: chained.id = 600
 === Cleanup Phase ===
 Final gc objects...
 [gc] GCBox(1000) created
+[gc] GCBox(1000) destroyed
 [gc] GCBox(1001) created
+[gc] GCBox(1001) destroyed
 [gc] GCBox(1002) created
+[gc] GCBox(1002) destroyed
 [gc] GCBox(1003) created
+[gc] GCBox(1003) destroyed
 [gc] GCBox(1004) created
 Test completed
 [gc] GCBox(1) destroyed

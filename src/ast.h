@@ -161,8 +161,8 @@ struct FnDef {
     map<Node *, int32_t> capture_map = {};
     array<string> value_captures = {};  // parsed [ident, ...] names, consumed during resolution
     bool is_generated = false;
-    array<Node *> cleanup_vars = {};
     bool has_try = false;
+    bool has_cleanup = false;
     array<Node *> variants = {};
     map<Node *, array<Node *>> ref_edges = {};  // escape analysis: dependency graph
     map<Node *, Node *> sink_edges = {};  // move: a → b means a's ownership transferred to b
@@ -252,7 +252,7 @@ struct FnDef {
         }
     }
 
-    bool has_try_or_cleanup() { return has_try || cleanup_vars.len; }
+    bool has_try_or_cleanup() { return has_try || has_cleanup; }
 };
 
 struct ParamDecl {
@@ -278,6 +278,7 @@ struct LifetimeParam {
 struct Block {
     array<Node *> statements = {};
     array<Node *> implicit_vars = {};
+    array<Node *> cleanup_vars = {};
     cx::Scope *scope = nullptr;
     bool is_arrow = false;
     Node *return_expr = nullptr;
