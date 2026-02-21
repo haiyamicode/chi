@@ -5540,7 +5540,7 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
 }
 
 void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target) {
-    // Find the callee's FnProto node to read resolved lifetime data
+    // Find the callee's FnProto to read resolved lifetime data (direct calls only)
     ast::FnProto *proto = nullptr;
     if (call.generated_fn) {
         proto = &call.generated_fn->data.generated_fn.fn_proto->data.fn_proto;
@@ -5557,16 +5557,50 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
             proto = &decl->data.generated_fn.fn_proto->data.fn_proto;
         }
     }
-    if (!proto) return;
 
-    if (proto->resolved_return_lifetime &&
-        proto->resolved_return_lifetime->kind == LifetimeKind::This &&
-        call.fn_ref_expr->type == NodeType::DotExpr) {
-        add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.expr, target, true);
+    // Extract return lifetime and per-param lifetimes.
+    // Direct calls: read from proto (includes borrowing value params via borrow_lifetime).
+    // Indirect calls: read from the function type (ref params only; conservatively
+    // assume all borrowing params flow to a borrowing return).
+    ChiLifetime *ret_lt = nullptr;
+    array<ChiLifetime *> param_lts;
+    bool conservative = false;
+
+    if (proto) {
+        ret_lt = proto->resolved_return_lifetime;
+        param_lts = proto->resolved_param_lifetimes;
+        // Method return tied to 'this — borrow from the receiver
+        if (ret_lt && ret_lt->kind == LifetimeKind::This &&
+            call.fn_ref_expr->type == NodeType::DotExpr) {
+            add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.expr, target, true);
+        }
+    } else {
+        // Indirect call — extract lifetimes from the callee's function type
+        auto *ct = to_value_type(call.fn_ref_expr->resolved_type);
+        if (ct && ct->kind == TypeKind::FnLambda) ct = to_value_type(ct->data.fn_lambda.fn);
+        if (!ct || ct->kind != TypeKind::Fn) return;
+        auto &fn = ct->data.fn;
+        auto *ret = fn.return_type;
+        if (ret && ret->is_reference() && ret->data.pointer.lifetimes.len > 0) {
+            ret_lt = ret->data.pointer.lifetimes[0];
+        }
+        conservative = (!ret_lt && ret && is_borrowing_type(ret));
+        for (size_t i = 0; i < fn.params.len; i++) {
+            auto *pt = fn.params[i];
+            ChiLifetime *lt = nullptr;
+            if (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0)
+                lt = pt->data.pointer.lifetimes[0];
+            param_lts.add(lt);
+        }
     }
-    for (size_t i = 0; i < proto->resolved_param_lifetimes.len && i < call.args.len; i++) {
-        if (proto->resolved_param_lifetimes[i] && proto->resolved_return_lifetime &&
-            lifetime_outlives(proto->resolved_param_lifetimes[i], proto->resolved_return_lifetime)) {
+
+    if (!ret_lt && !conservative) return;
+
+    for (size_t i = 0; i < param_lts.len && i < call.args.len; i++) {
+        if (param_lts[i] && ret_lt && lifetime_outlives(param_lts[i], ret_lt)) {
+            add_borrow_source_edges(fn_def, call.args[i], target, true);
+        } else if (conservative && !param_lts[i]) {
+            // No lifetime info for this param — conservatively assume it flows to return
             add_borrow_source_edges(fn_def, call.args[i], target, true);
         }
     }
