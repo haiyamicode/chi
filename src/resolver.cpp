@@ -804,7 +804,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.is_vararg) {
             is_variadic = true;
         }
-        ChiLifetime *first_ref_lifetime = nullptr; // first ref param's lifetime (for return elision)
+        array<ChiLifetime *> all_ref_lifetimes; // all ref param lifetimes (for return elision)
         for (int i = 0; i < data.params.len; i++) {
             auto param = data.params[i];
             auto &pdata = param->data.param_decl;
@@ -828,9 +828,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Each ref param gets its own distinct lifetime.
             if (param_type && param_type->is_reference() && param_type->data.pointer.lifetimes.len == 0) {
                 auto *lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
-                if (!first_ref_lifetime) {
-                    first_ref_lifetime = lt;
-                }
+                all_ref_lifetimes.add(lt);
                 auto *fresh = create_pointer_type(param_type->data.pointer.elem, param_type->kind);
                 fresh->data.pointer.lifetimes.add(lt);
                 param_type = fresh;
@@ -839,21 +837,28 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             param_types.add(param_type);
         }
 
-        // Return type lifetime elision: infer return lifetime from first ref param
+        // Return type lifetime elision: return borrows from min(all ref params)
         if (return_type && return_type->is_reference() && return_type->data.pointer.lifetimes.len == 0) {
-            ChiLifetime *elided_lt = nullptr;
+            // Include 'this for methods
             if (container) {
-                // For methods: 'this' is implicitly the first ref param → use 'this lifetime
                 auto &st = container->data.struct_;
                 if (!st.this_lifetime) {
                     st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, container};
                 }
-                elided_lt = st.this_lifetime;
-            } else {
-                // For free functions: use the shared ref param lifetime
-                elided_lt = first_ref_lifetime;
+                all_ref_lifetimes.add(st.this_lifetime);
             }
-            if (elided_lt) {
+            if (all_ref_lifetimes.len > 0) {
+                // If only one ref source, use it directly; otherwise create a Return
+                // lifetime that all ref lifetimes outlive
+                ChiLifetime *elided_lt = nullptr;
+                if (all_ref_lifetimes.len == 1) {
+                    elided_lt = all_ref_lifetimes[0];
+                } else {
+                    elided_lt = new ChiLifetime{"fn", LifetimeKind::Return, nullptr, nullptr};
+                    for (size_t i = 0; i < all_ref_lifetimes.len; i++) {
+                        all_ref_lifetimes[i]->outlives.add(elided_lt);
+                    }
+                }
                 auto *fresh = create_pointer_type(return_type->data.pointer.elem, return_type->kind);
                 fresh->data.pointer.lifetimes.add(elided_lt);
                 return_type = fresh;
@@ -5511,21 +5516,28 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     if (ret && ret->is_reference() && ret->data.pointer.lifetimes.len > 0) {
         proto->resolved_return_lifetime = ret->data.pointer.lifetimes[0];
     } else if (ret && is_borrowing_type(ret)) {
-        // Struct/value return containing references: elide to first ref param or 'this
+        // Struct/value return containing references: elide to min(all ref params)
+        array<ChiLifetime *> all_ref_lts;
+        for (size_t i = 0; i < proto->resolved_param_lifetimes.len; i++) {
+            if (proto->resolved_param_lifetimes[i])
+                all_ref_lts.add(proto->resolved_param_lifetimes[i]);
+        }
         if (fn.container_ref) {
             auto *container = fn.container_ref->get_elem();
             auto &st = container->data.struct_;
             if (!st.this_lifetime) {
                 st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, container};
             }
-            proto->resolved_return_lifetime = st.this_lifetime;
-        } else {
-            for (size_t i = 0; i < proto->resolved_param_lifetimes.len; i++) {
-                if (proto->resolved_param_lifetimes[i]) {
-                    proto->resolved_return_lifetime = proto->resolved_param_lifetimes[i];
-                    break;
-                }
+            all_ref_lts.add(st.this_lifetime);
+        }
+        if (all_ref_lts.len == 1) {
+            proto->resolved_return_lifetime = all_ref_lts[0];
+        } else if (all_ref_lts.len > 1) {
+            auto *return_lt = new ChiLifetime{"fn", LifetimeKind::Return, nullptr, nullptr};
+            for (size_t i = 0; i < all_ref_lts.len; i++) {
+                all_ref_lts[i]->outlives.add(return_lt);
             }
+            proto->resolved_return_lifetime = return_lt;
         }
     }
 }
