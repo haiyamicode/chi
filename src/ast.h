@@ -245,6 +245,7 @@ struct ParamDecl {
     Node *type = nullptr;
     bool is_variadic = false;
     Node *default_value = nullptr;
+    ChiLifetime *borrow_lifetime = nullptr; // for borrowing value params (e.g. func() types)
 };
 
 struct TypeParam {

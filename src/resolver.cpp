@@ -636,6 +636,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 proto->data.fn_lambda.captures.add(type);
             }
 
+            // Borrow tracking: by-ref captures create edges in the function that
+            // owns the captured variable, so the lambda is treated as borrowing
+            // from that local. Only add edges for variables owned by the immediate
+            // enclosing function — deeper captures propagate through the chain.
+            if (scope.parent_fn_node) {
+                for (auto &cap : data.captures) {
+                    if (cap.mode == ast::CaptureMode::ByRef &&
+                        cap.decl->parent_fn == scope.parent_fn_node) {
+                        scope.parent_fn_node->data.fn_def.add_ref_edge(node, cap.decl);
+                    }
+                }
+            }
+
             // create bound form of the lambda function - always create for consistent calling
             // convention
             auto fn_type = proto->data.fn_lambda.fn;
@@ -833,6 +846,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 fresh->data.pointer.lifetimes.add(lt);
                 param_type = fresh;
                 param->resolved_type = param_type;
+            } else if (param_type && !param_type->is_reference() && is_borrowing_type(param_type)) {
+                // Borrowing value params (e.g. func() types) get lifetimes so borrows
+                // from captured lambdas flow through calls
+                auto *lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
+                pdata.borrow_lifetime = lt;
+                all_ref_lifetimes.add(lt);
             }
             param_types.add(param_type);
         }
@@ -1851,13 +1870,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.resolved_field = field_member;
             check_assignment(data.value, init_value_type, field_member->resolved_type);
 
-            if (scope.parent_fn_node && !scope.is_unsafe_block) {
+            if (scope.parent_fn_node && !scope.is_unsafe_block &&
+                init_value_type && is_borrowing_type(init_value_type)) {
                 auto outlet = scope.move_outlet ? scope.move_outlet : node;
                 auto &fn_def = scope.parent_fn_node->data.fn_def;
                 fn_def.add_ref_edge(outlet, field_init);
-                if (init_value_type && is_borrowing_type(init_value_type)) {
-                    add_borrow_source_edges(fn_def, data.value, field_init);
-                }
+                add_borrow_source_edges(fn_def, data.value, field_init);
             }
         }
         return result_type;
@@ -3436,16 +3454,22 @@ bool Resolver::is_borrowing_type(ChiType *type) {
         auto final_type = type->data.subtype.final_type;
         return final_type ? is_borrowing_type(final_type) : false;
     }
-    case TypeKind::Fn: {
-        auto &fn = type->data.fn;
-        if (is_borrowing_type(fn.return_type)) return true;
-        for (size_t i = 0; i < fn.params.len; i++) {
-            if (is_borrowing_type(fn.params[i])) return true;
+    case TypeKind::Fn:
+        // Function types are always potentially borrowing because a func() value
+        // can hold a lambda with by-ref captures (type erasure hides the borrows)
+        return true;
+    case TypeKind::FnLambda: {
+        if (is_borrowing_type(type->data.fn_lambda.fn)) return true;
+        // By-ref captures are stored as reference fields in the bind struct —
+        // the lambda borrows from the captured variables' lifetimes
+        auto *bs = type->data.fn_lambda.bind_struct;
+        if (bs && bs->kind == TypeKind::Struct) {
+            for (auto field : bs->data.struct_.fields) {
+                if (is_borrowing_type(field->resolved_type)) return true;
+            }
         }
         return false;
     }
-    case TypeKind::FnLambda:
-        return is_borrowing_type(type->data.fn_lambda.fn);
     case TypeKind::Struct: {
         auto &st = type->data.struct_;
         if (st.member_intrinsics.has_key(IntrinsicSymbol::CopyFrom)) {
@@ -5468,8 +5492,19 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     // Extract param lifetimes from resolved param types
     for (size_t i = 0; i < fn.params.len; i++) {
         auto *pt = fn.params[i];
-        ChiLifetime *lt = (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0)
-            ? pt->data.pointer.lifetimes[0] : nullptr;
+        ChiLifetime *lt = nullptr;
+        if (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0) {
+            lt = pt->data.pointer.lifetimes[0];
+        } else if (i < proto->params.len && proto->params[i]->data.param_decl.borrow_lifetime) {
+            // Reuse borrow_lifetime set during FnProto resolution
+            lt = proto->params[i]->data.param_decl.borrow_lifetime;
+        } else if (pt && !pt->is_reference() && is_borrowing_type(pt)) {
+            // Borrowing value params resolved after struct members (e.g. Holder with ref fields)
+            auto *param_node = (i < proto->params.len) ? proto->params[i] : nullptr;
+            string name = param_node ? string(param_node->name) : "fn_param";
+            lt = new ChiLifetime{name, LifetimeKind::Param, param_node, nullptr};
+            if (param_node) param_node->data.param_decl.borrow_lifetime = lt;
+        }
         proto->resolved_param_lifetimes.add(lt);
     }
 
@@ -5576,6 +5611,11 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
             }
         }
         break;
+    case NodeType::FnDef:
+        // Lambda with by-ref captures: capture edges were added during resolution.
+        // Transitively copy them to the target.
+        fn_def.copy_ref_edges(target, expr);
+        break;
     default:
         break;
     }
@@ -5631,16 +5671,26 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
     }
 
     if (leaf->type == ast::NodeType::ParamDecl) {
-        if (!required) return true;
-
         auto *leaf_type = leaf->resolved_type;
-        if (!leaf_type || !leaf_type->is_reference()) return false;
+        auto &pdata = leaf->data.param_decl;
 
-        auto &lifetimes = leaf_type->data.pointer.lifetimes;
-        for (size_t i = 0; i < lifetimes.len; i++) {
-            if (lifetime_outlives(lifetimes[i], required)) return true;
+        // Determine the param's lifetime: from the reference type or from borrow_lifetime
+        ChiLifetime *param_lt = nullptr;
+        if (leaf_type && leaf_type->is_reference() && leaf_type->data.pointer.lifetimes.len > 0) {
+            param_lt = leaf_type->data.pointer.lifetimes[0];
+        } else if (pdata.borrow_lifetime) {
+            param_lt = pdata.borrow_lifetime;
         }
-        return false;
+
+        // No lifetime → plain value param (int, bool, etc.) that was captured by-ref.
+        // It dies at function exit — fail for returns, pass for intra-function.
+        if (!param_lt) {
+            return terminal->type != ast::NodeType::ReturnStmt;
+        }
+
+        // Has lifetime → check against required (null required = always OK)
+        if (!required) return true;
+        return lifetime_outlives(param_lt, required);
     }
 
     if (leaf->type == ast::NodeType::Identifier &&
@@ -5701,6 +5751,15 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
                 auto *ret_type = fn_def->fn_proto->resolved_type->data.fn.return_type;
                 if (ret_type && ret_type->is_reference() && ret_type->data.pointer.lifetimes.len > 0) {
                     required = ret_type->data.pointer.lifetimes[0];
+                }
+            }
+            // Also check resolved_return_lifetime for borrowing value returns (func(), structs)
+            if (!required && fn_def->fn_proto) {
+                auto *proto = fn_def->fn_proto->type == ast::NodeType::FnProto
+                    ? &fn_def->fn_proto->data.fn_proto
+                    : nullptr;
+                if (proto && proto->resolved_return_lifetime) {
+                    required = proto->resolved_return_lifetime;
                 }
             }
         } else {

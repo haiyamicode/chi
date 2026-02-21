@@ -266,6 +266,7 @@ func test_lambda_copy_semantics() {
 func test_lambda_capture_lifecycle() {
     println("testing lambda capture lifecycle:");
     var box = TrackedBox{42};
+    var box2 = TrackedBox{99};
     var f1 = func () int {
         return box.id;
     };
@@ -274,7 +275,6 @@ func test_lambda_capture_lifecycle() {
     printf("f2() = {}\n", f2());
     var f3 = f1;
     printf("f3() = {}\n", f3());
-    var box2 = TrackedBox{99};
     f1 = func () int {
         return box2.id;
     };

@@ -45,10 +45,10 @@ After reassignment: 20
 
 testing lambda capture lifecycle:
 TrackedBox(42) constructed
+TrackedBox(99) constructed
 f1() = 42
 f2() = 42
 f3() = 42
-TrackedBox(99) constructed
 f1() = 99, f2() = 42, f3() = 42
 
 TrackedBox(99) destroyed
