@@ -1,4 +1,5 @@
 // Borrow created in loop body, source deleted after loop.
+// expect-error: used after delete
 
 struct Data {
     value: int = 0;

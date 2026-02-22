@@ -3,7 +3,11 @@
 // --- Basic struct with reference field ---
 
 struct Holder {
-    ref: &int = null;
+    ref: &int;
+
+    func new(r: &'this int) {
+        this.ref = r;
+    }
 
     mut func store(r: &'this int) {
         this.ref = r;
@@ -17,8 +21,13 @@ struct Holder {
 // --- Struct with multiple reference fields ---
 
 struct MultiRef {
-    a: &int = null;
-    b: &int = null;
+    a: &int;
+    b: &int;
+
+    func new(a: &'this int, b: &'this int) {
+        this.a = a;
+        this.b = b;
+    }
 
     mut func set_both(x: &'this int, y: &'this int) {
         this.a = x;
@@ -33,17 +42,11 @@ struct MultiRef {
 // --- Return struct by value with param refs ---
 
 func make_holder(x: &int) Holder {
-    var h = Holder{};
-    // 'this annotation on store's param creates edge h -> x at caller site.
-    // Returning h by value: param x outlives the function, so this is fine.
-    h.store(x);
-    return h;
+    return {x};
 }
 
 func make_multi(x: &int, y: &int) MultiRef {
-    var m = MultiRef{};
-    m.set_both(x, y);
-    return m;
+    return {x, y};
 }
 
 // --- Passing references locally (no escape) ---
@@ -60,16 +63,20 @@ func local_ref_use() int {
 // --- Chained struct operations ---
 
 func chain_test(val: &int) int {
-    var h = Holder{};
-    h.store(val);
+    var h = Holder{val};
     return h.get()!;
 }
 
 // --- Nested struct with references ---
 
 struct Pair {
-    first: &int = null;
-    second: &int = null;
+    first: &int;
+    second: &int;
+
+    func new(first: &'this int, second: &'this int) {
+        this.first = first;
+        this.second = second;
+    }
 
     mut func set_first(v: &'this int) {
         this.first = v;
@@ -85,10 +92,7 @@ struct Pair {
 }
 
 func make_pair(a: &int, b: &int) Pair {
-    var p = Pair{};
-    p.set_first(a);
-    p.set_second(b);
-    return p;
+    return {a, b};
 }
 
 // --- Reference to param (not local) ---
@@ -146,8 +150,7 @@ func test_reassign() {
     printf("=== reassign ===\n");
     var a = 1;
     var b = 2;
-    var h = Holder{};
-    h.store(&a);
+    var h = Holder{&a};
     printf("first = {}\n", h.get()!);
     h.store(&b);
     printf("second = {}\n", h.get()!);
@@ -158,7 +161,7 @@ func test_reassign() {
 func test_direct_init() {
     printf("=== direct init ===\n");
     var val = 77;
-    var h = Holder{ref: &val};
+    var h = Holder{&val};
     printf("direct = {}\n", h.ref!);
 }
 
@@ -167,8 +170,7 @@ func test_direct_init() {
 func test_local_order() {
     printf("=== local order ===\n");
     var local = 88;
-    var h = Holder{};
-    h.store(&local);
+    var h = Holder{&local};
     printf("order = {}\n", h.get()!);
 }
 
@@ -308,7 +310,11 @@ func test_unsafe_fn_calls_unsafe() {
 // --- Cross-function reference return (elision) ---
 
 struct RefHolder {
-    val: &int = null;
+    val: &int;
+
+    func new(v: &'this int) {
+        this.val = v;
+    }
 }
 
 func get_ref(h: &RefHolder) &int {
@@ -326,7 +332,7 @@ func bigger_ref<'a>(a: &'a int, b: &'a int) &'a int {
 func test_cross_fn_ref() {
     printf("=== cross fn ref ===\n");
     var x = 99;
-    var h = RefHolder{val: &x};
+    var h = RefHolder{&x};
     var r = get_ref(&h);
     printf("get_ref = {}\n", r!);
 }
@@ -343,8 +349,7 @@ func test_bigger_ref() {
 func test_method_ref_return() {
     printf("=== method ref ===\n");
     var val = 42;
-    var h = Holder{};
-    h.store(&val);
+    var h = Holder{&val};
     var r = h.get();
     printf("method ref = {}\n", r!);
 }

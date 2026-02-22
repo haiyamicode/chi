@@ -1,4 +1,5 @@
 // Borrow escapes inner block, source deleted in outer scope.
+// expect-error: used after delete
 
 struct Data {
     value: int = 0;

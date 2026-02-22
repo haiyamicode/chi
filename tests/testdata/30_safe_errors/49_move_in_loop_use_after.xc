@@ -1,4 +1,5 @@
 // Move in loop body, use after loop.
+// expect-error: has not been initialized
 
 struct Obj {
     value: int;

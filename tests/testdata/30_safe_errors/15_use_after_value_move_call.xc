@@ -1,4 +1,5 @@
 // Use after value move passed to function
+// expect-error: has not been initialized
 struct Obj {
     value: int;
 }

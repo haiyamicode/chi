@@ -1,4 +1,5 @@
 // Lambda escapes through a wrapper function that stores it in a struct.
+// expect-error: does not live long enough
 
 struct Holder {
     f: func() int = func() int { return 0; };

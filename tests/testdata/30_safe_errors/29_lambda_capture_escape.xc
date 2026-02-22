@@ -1,4 +1,5 @@
 // Lambda captures local by-ref and escapes the function — dangling capture.
+// expect-error: does not live long enough
 
 func make_fn() func() int {
     var secret = 12345;

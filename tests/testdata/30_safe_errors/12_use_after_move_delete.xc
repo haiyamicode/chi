@@ -1,4 +1,5 @@
 // Use after move: deleting a moved reference
+// expect-error: used after move
 struct Obj {
     value: int;
     func new(v: int) { this.value = v; }

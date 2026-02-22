@@ -1,5 +1,6 @@
 // Chain: local -> lambda A captures it -> lambda B captures A -> B escapes.
 // The transitive capture chain must be detected.
+// expect-error: does not live long enough
 
 func make_chain() func() int {
     var secret = 777;

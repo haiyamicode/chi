@@ -1,5 +1,6 @@
 // Two lambdas where the second captures a local declared after the first,
 // then the first is reassigned to call the second — LIFO violation.
+// expect-error: does not live long enough
 
 func main() {
     var f1: func() int = func() int { return 0; };

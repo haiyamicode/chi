@@ -1,4 +1,5 @@
 // Lambda captures a struct by-ref and escapes via return.
+// expect-error: does not live long enough
 
 struct Wrapper {
     val: int = 0;

@@ -70,9 +70,17 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	@failed=0; \
 	for f in testdata/30_safe_errors/*.xc; do \
 		name=$$(basename $$f); \
-		if $(CHI) -s -o /dev/null -c $$f -w /tmp/chitest_safe >/dev/null 2>&1; then \
+		errmsg=$$($(CHI) -s -o /dev/null -c $$f -w /tmp/chitest_safe 2>&1); \
+		if [ $$? -eq 0 ]; then \
 			echo "error: $$name should have been rejected but compiled successfully"; \
 			failed=1; \
+		else \
+			expected=$$(grep '// expect-error:' $$f | head -1 | sed 's/.*expect-error: *//'); \
+			if [ -n "$$expected" ] && ! echo "$$errmsg" | grep -q "$$expected"; then \
+				echo "error: $$name wrong error (expected '$$expected')"; \
+				echo "  got: $$(echo "$$errmsg" | head -1)"; \
+				failed=1; \
+			fi; \
 		fi; \
 	done; \
 	if [ "$$failed" = "1" ]; then exit 1; fi

@@ -1,7 +1,13 @@
 // One field gets a local ref — must be rejected even if other field is fine
+// expect-error: does not live long enough
 struct MultiRef {
-    a: &int = null;
-    b: &int = null;
+    a: &int;
+    b: &int;
+
+    func new(a: &'this int, b: &'this int) {
+        this.a = a;
+        this.b = b;
+    }
 
     mut func set_a(x: &'this int) {
         this.a = x;
@@ -13,10 +19,8 @@ struct MultiRef {
 }
 
 func bad(good_ref: &int) MultiRef {
-    var m = MultiRef{};
     var local = 99;
-    m.set_a(good_ref);
-    m.set_b(&local);
+    var m = MultiRef{good_ref, &local};
     return m;
 }
 func main() {}

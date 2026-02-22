@@ -1,4 +1,5 @@
 // Borrow after value move — source is sunk.
+// expect-error: has not been initialized
 
 struct Obj {
     value: int;

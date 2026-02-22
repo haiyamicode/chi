@@ -1,4 +1,5 @@
 // Generic with lifetime bound still catches dangling references at call site.
+// expect-error: does not live long enough
 
 func get_val<'a, T: 'a>(val: T) T { return val; }
 

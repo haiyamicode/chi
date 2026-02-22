@@ -1,4 +1,5 @@
 // Lambda captures multiple locals and one outlives the lambda variable.
+// expect-error: does not live long enough
 
 func main() {
     var a = 10;

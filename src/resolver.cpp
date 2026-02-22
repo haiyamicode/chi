@@ -1864,6 +1864,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (constructor) {
             auto &fn_type = constructor->resolved_type->data.fn;
             resolve_fn_call(node, scope, &fn_type, &data.items, constructor->node);
+
+            // Track borrow edges from constructor arguments to the constructed struct.
+            // Constructor params with a borrow_lifetime (e.g., &'this int) mean the
+            // argument is stored in the struct — the struct borrows from it.
+            if (scope.parent_fn_node && !scope.is_unsafe_block &&
+                constructor->node->type == NodeType::FnDef) {
+                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                auto *ctor_proto = &constructor->node->data.fn_def.fn_proto->data.fn_proto;
+                for (size_t i = 0; i < ctor_proto->resolved_param_lifetimes.len &&
+                                   i < data.items.len; i++) {
+                    if (ctor_proto->resolved_param_lifetimes[i]) {
+                        add_borrow_source_edges(fn_def, data.items[i], node, true);
+                    }
+                }
+            }
         } else {
             if (result_type->kind == TypeKind::Optional) {
                 if (data.items.len != 1) {

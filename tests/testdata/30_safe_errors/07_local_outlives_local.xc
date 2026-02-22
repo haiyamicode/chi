@@ -1,6 +1,11 @@
 // h declared before local — h outlives local (LIFO), dangling ref during destruction
+// expect-error: does not live long enough
 struct Holder {
-    ref: &int = null;
+    ref: &int;
+
+    func new(r: &'this int) {
+        this.ref = r;
+    }
 
     mut func store(r: &'this int) {
         this.ref = r;
@@ -8,7 +13,8 @@ struct Holder {
 }
 
 func bad() {
-    var h = Holder{};
+    var dummy = 0;
+    var h = Holder{&dummy};
     var local = 42;
     h.store(&local);
 }

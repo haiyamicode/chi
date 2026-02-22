@@ -1,4 +1,5 @@
 // Move twice: passing the same &move value to two different owners
+// expect-error: used after move
 struct Obj {
     value: int;
     func new(v: int) { this.value = v; }

@@ -1,8 +1,14 @@
 // Struct literal with a function call producing a dangling ref in a field.
+// expect-error: does not live long enough
 
 struct Pair {
-    a: &int = null;
-    b: &int = null;
+    a: &int;
+    b: &int;
+
+    func new(a: &'this int, b: &'this int) {
+        this.a = a;
+        this.b = b;
+    }
 }
 
 func identity(r: &int) &int {
@@ -11,7 +17,7 @@ func identity(r: &int) &int {
 
 func make_pair(x: &int) Pair {
     var local = 999;
-    return Pair { a: x, b: identity(&local) };
+    return Pair{x, identity(&local)};
 }
 
 func main() {

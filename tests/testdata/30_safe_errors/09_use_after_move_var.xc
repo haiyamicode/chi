@@ -1,4 +1,5 @@
 // Use after move: assigning &move T to another &move variable sinks the source
+// expect-error: used after move
 struct Obj {
     value: int;
     func new(v: int) { this.value = v; }

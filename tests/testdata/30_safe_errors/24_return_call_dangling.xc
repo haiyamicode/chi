@@ -1,5 +1,6 @@
 // Return a function call that produces a dangling reference.
 // The return expression is a FnCallExpr, not a simple Identifier.
+// expect-error: does not live long enough
 
 func identity(r: &int) &int {
     return r;

@@ -12,7 +12,11 @@ struct GCBox {
 }
 
 struct Holder {
-    ref: &GCBox = null;
+    ref: &GCBox;
+
+    func new(r: &GCBox) {
+        this.ref = r;
+    }
 }
 
 func get_escaped_ref() &GCBox {
@@ -45,7 +49,7 @@ func get_via_reassign() &GCBox {
 // Transitive: struct field holds ref
 func get_via_struct() Holder {
     var obj = GCBox{500};
-    var h = Holder{ref: &obj};
+    var h = Holder{&obj};
     return h;
 }
 

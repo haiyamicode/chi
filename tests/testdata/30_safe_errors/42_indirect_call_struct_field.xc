@@ -1,4 +1,5 @@
 // Indirect call through a func stored in a struct field.
+// expect-error: does not live long enough
 
 struct CallbackHolder {
     f: func(r: &int) &int = func(r: &int) &int { return r; };

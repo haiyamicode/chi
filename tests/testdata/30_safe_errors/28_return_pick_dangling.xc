@@ -1,4 +1,5 @@
 // Return through a pick function where one argument is a dangling local.
+// expect-error: does not live long enough
 
 func pick(a: &int, b: &int, cond: bool) &int {
     if cond {

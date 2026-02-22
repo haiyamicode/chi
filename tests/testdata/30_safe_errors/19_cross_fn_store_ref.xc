@@ -1,8 +1,13 @@
 // Free function storing a ref into a struct field.
 // Can't prove r lives long enough for holder's 'this lifetime.
+// expect-error: does not live long enough
 
 struct RefHolder {
-    val: &int = null;
+    val: &int;
+
+    func new(v: &'this int) {
+        this.val = v;
+    }
 }
 
 func store_ref(holder: &mut RefHolder, r: &int) {
@@ -10,7 +15,8 @@ func store_ref(holder: &mut RefHolder, r: &int) {
 }
 
 func main() {
-    var h = RefHolder{};
+    var safe = 0;
+    var h = RefHolder{&safe};
     {
         var x = 99;
         store_ref(&mut h, &x);

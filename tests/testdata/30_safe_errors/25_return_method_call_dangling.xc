@@ -1,5 +1,6 @@
 // Return a method call that produces a dangling reference.
 // The receiver dies when the function returns.
+// expect-error: does not live long enough
 
 struct Container {
     value: int = 0;

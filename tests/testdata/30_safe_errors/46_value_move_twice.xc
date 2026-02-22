@@ -1,4 +1,5 @@
 // Value move twice: second move uses already-sunk source.
+// expect-error: has not been initialized
 
 struct Obj {
     value: int;

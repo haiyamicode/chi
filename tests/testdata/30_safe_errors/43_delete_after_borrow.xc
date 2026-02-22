@@ -1,4 +1,5 @@
 // Delete while borrow is still live in the same scope.
+// expect-error: used after delete
 
 struct Data {
     value: int = 0;

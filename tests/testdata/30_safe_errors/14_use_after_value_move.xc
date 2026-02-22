@@ -1,4 +1,5 @@
 // Use after value move: move x sinks the source
+// expect-error: has not been initialized
 struct Obj {
     value: int;
 }
