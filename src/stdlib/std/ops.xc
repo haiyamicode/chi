@@ -23,6 +23,8 @@ interface Add {
 
 interface Sized {}
 
+interface AllowUnsized {}
+
 // interface Sub<T> {
 //   func sub(rhs: T) T;
 // }

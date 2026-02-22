@@ -9,3 +9,8 @@ c.value=42
 cs.value=hello
 w.get_inner().value=123
 rh.get()=999
+chain: 100
+chain_str: chain
+struct_free: 200
+struct_chain: 200
+struct_free_str: method

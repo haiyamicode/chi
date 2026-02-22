@@ -100,13 +100,11 @@ struct ImplWhereBox<T> {
     }
 }
 
-import "std/ops" as ops;
-
-func sized_identity<T: ops.Sized>(v: T) T {
+func sized_identity<T>(v: T) T {
     return v;
 }
 
-struct SizedBox<T: ops.Sized> {
+struct SizedBox<T> {
     value: T = {};
 
     func get() T {

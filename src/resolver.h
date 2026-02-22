@@ -114,6 +114,7 @@ struct ResolveContext {
     ChiType *rt_empty_bind_type = nullptr;
     ast::Node *rt_enum_base = nullptr;
     ChiType *rt_sized_interface = nullptr;
+    ChiType *rt_allow_unsized_interface = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
@@ -231,6 +232,7 @@ class Resolver {
     array<IntrinsicSymbol> interface_get_intrinsics(ChiType *interface_type);
 
     bool interface_satisfies_trait(ChiType *interface_type, ChiType *required_trait);
+    bool check_trait_bound(ChiType *type_arg, ChiType *trait_type);
     bool check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data);
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);

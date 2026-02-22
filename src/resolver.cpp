@@ -146,6 +146,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
     m_ctx->intrinsic_symbols["std.ops.Sized"] = IntrinsicSymbol::Sized;
+    m_ctx->intrinsic_symbols["std.ops.AllowUnsized"] = IntrinsicSymbol::AllowUnsized;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -2238,6 +2239,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_unit_type = struct_type;
                 } else if (node->name == "Sized") {
                     m_ctx->rt_sized_interface = struct_type;
+                } else if (node->name == "AllowUnsized") {
+                    m_ctx->rt_allow_unsized_interface = struct_type;
                 }
             }
             node->resolved_type = type_sym;
@@ -2471,6 +2474,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        // Validate trait bounds on type arguments
+        for (size_t i = 0; i < args.len && i < params.len; i++) {
+            auto param_type = to_value_type(params[i]);
+            if (!param_type || !param_type->data.placeholder.trait) continue;
+            auto type_arg = args[i];
+            if (!type_arg || type_arg->is_placeholder) continue;
+            if (!check_trait_bound(type_arg, param_type->data.placeholder.trait)) {
+                error(node, "Type '{}' does not satisfy trait bound '{}'",
+                      format_type(type_arg, true), format_type(param_type->data.placeholder.trait, true));
+                return nullptr;
+            }
+        }
+
         auto subtype = get_subtype(type, &args);
         return create_type_symbol({}, subtype);
     }
@@ -2675,6 +2691,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (data.type_bound) {
             phty->data.placeholder.trait = to_value_type(resolve(data.type_bound, scope));
+        }
+
+        // Implicit Sized bound: all type params get Sized unless AllowUnsized
+        if (m_ctx->rt_sized_interface) {
+            auto trait = phty->data.placeholder.trait;
+            bool is_allow_unsized = trait && trait->kind == TypeKind::Struct &&
+                                    trait->data.struct_.node &&
+                                    resolve_intrinsic_symbol(trait->data.struct_.node) == IntrinsicSymbol::AllowUnsized;
+            if (is_allow_unsized) {
+                // AllowUnsized: no constraint
+                phty->data.placeholder.trait = nullptr;
+            } else if (!trait) {
+                // No explicit bound: add implicit Sized
+                phty->data.placeholder.trait = m_ctx->rt_sized_interface;
+            }
+            // Otherwise keep the explicit bound (e.g. Show) — any type satisfying
+            // a user trait is necessarily Sized (interfaces auto-implement Sized)
         }
 
         // Resolve lifetime bound: T: 'a
@@ -4624,59 +4657,9 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             }
 
             if (lookup_key->data.placeholder.trait) {
-                auto trait_type = lookup_key->data.placeholder.trait;
-
-                // Check if type_arg implements the required trait
-                bool satisfies_bound = false;
-
-                // Resolve subtypes to their concrete struct for interface checking
-                auto check_arg = type_arg;
-                if (check_arg->kind == TypeKind::Subtype) {
-                    check_arg = resolve_subtype(check_arg);
-                }
-
-                // Check if it's a struct that implements the interface
-                if (check_arg->kind == TypeKind::Struct) {
-                    for (auto &impl : check_arg->data.struct_.interfaces) {
-                        if (impl->interface_type == trait_type) {
-                            satisfies_bound = true;
-                            break;
-                        }
-
-                        // Check if this implemented interface satisfies the required trait
-                        // (including embeds)
-                        if (interface_satisfies_trait(impl->interface_type, trait_type)) {
-                            satisfies_bound = true;
-                            break;
-                        }
-                    }
-                }
-                // Check if it's a built-in type that naturally supports the trait
-                else {
-                    // Get all intrinsics required by the trait
-                    auto required_intrinsics = interface_get_intrinsics(trait_type);
-
-                    // For built-in types, check if they naturally support the required operations
-                    for (auto &intrinsic : required_intrinsics) {
-                        if (intrinsic == IntrinsicSymbol::Sized) {
-                            // All concrete built-in types are Sized
-                            satisfies_bound = true;
-                            break;
-                        }
-                        if (intrinsic == IntrinsicSymbol::Add) {
-                            // Built-in types that support the + operator satisfy ops.Add
-                            satisfies_bound = type_arg->is_int_like() ||
-                                              type_arg->kind == TypeKind::Float ||
-                                              type_arg->kind == TypeKind::String;
-                            break;
-                        }
-                    }
-                    // Add more intrinsic checks here as needed
-                }
-
-                if (!satisfies_bound) {
-                    error(node, "Type '{}' does not satisfy trait bound '{}'", format_type(type_arg),
-                          format_type(trait_type, true));
+                if (!check_trait_bound(type_arg, lookup_key->data.placeholder.trait)) {
+                    error(node, "Type '{}' does not satisfy trait bound '{}'", format_type(type_arg, true),
+                          format_type(lookup_key->data.placeholder.trait, true));
                     return fn->return_type;
                 }
             }
@@ -6382,10 +6365,45 @@ bool Resolver::interface_satisfies_trait(ChiType *interface_type, ChiType *requi
     return false;
 }
 
+bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
+    auto check_arg = type_arg;
+    if (check_arg->kind == TypeKind::Subtype) {
+        check_arg = resolve_subtype(check_arg);
+    }
+
+    if (check_arg->kind == TypeKind::Struct) {
+        // If the struct hasn't finished resolving its interfaces yet (e.g. Sized
+        // auto-impl happens in the third pass), and it's not an interface type,
+        // assume it will satisfy the bound once fully resolved.
+        if (check_arg->data.struct_.resolve_status < ResolveStatus::EmbedsResolved &&
+            !ChiTypeStruct::is_interface(check_arg)) {
+            return true;
+        }
+        for (auto &impl : check_arg->data.struct_.interfaces) {
+            if (impl->interface_type == trait_type ||
+                interface_satisfies_trait(impl->interface_type, trait_type)) {
+                return true;
+            }
+        }
+    } else {
+        // Built-in types: check intrinsics
+        auto required = interface_get_intrinsics(trait_type);
+        for (auto &intrinsic : required) {
+            if (intrinsic == IntrinsicSymbol::Sized) return true;
+            if (intrinsic == IntrinsicSymbol::Add) {
+                if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
+                    type_arg->kind == TypeKind::String) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data) {
     if (!cond) return true; // No condition = always included
 
-    // All bounds must be satisfied
     for (auto &bound : cond->bounds) {
         if (bound.param_index < 0 || bound.param_index >= (long)subtype_data->args.len) {
             return false;
@@ -6393,39 +6411,10 @@ bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subty
 
         auto type_arg = subtype_data->args[bound.param_index];
 
-        // Resolve subtypes to concrete struct
-        if (type_arg->kind == TypeKind::Subtype) {
-            type_arg = resolve_subtype(type_arg);
-        }
-
         // If type arg is still a placeholder (partially specialized), keep the member
         if (type_arg->is_placeholder) continue;
 
-        bool satisfies = false;
-        if (type_arg->kind == TypeKind::Struct) {
-            for (auto &impl : type_arg->data.struct_.interfaces) {
-                if (impl->interface_type == bound.trait ||
-                    interface_satisfies_trait(impl->interface_type, bound.trait)) {
-                    satisfies = true;
-                    break;
-                }
-            }
-        } else {
-            // Built-in types: check intrinsics
-            auto required = interface_get_intrinsics(bound.trait);
-            for (auto &intrinsic : required) {
-                if (intrinsic == IntrinsicSymbol::Sized) { satisfies = true; break; }
-                if (intrinsic == IntrinsicSymbol::Add) {
-                    if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
-                        type_arg->kind == TypeKind::String) {
-                        satisfies = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!satisfies) return false;
+        if (!check_trait_bound(type_arg, bound.trait)) return false;
     }
 
     return true;

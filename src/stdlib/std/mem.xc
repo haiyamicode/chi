@@ -1,3 +1,5 @@
+import "std/ops" as ops;
+
 private unsafe extern "C" {
     func cx_malloc(size: uint32, ignored: *void) *void;
     func cx_free(address: *void);
@@ -13,10 +15,12 @@ unsafe func alloc<T>() &move T {
     return cx_malloc(sizeof T, null) as *T as &move T;
 }
 
-unsafe func copy<T>(val: &T) &move T {
-    var ref = alloc<T>();
-    __copy_from(ref as *T, val as *T, false);
-    return ref;
+func copy_from<T: ops.AllowUnsized>(val: &T) &move T {
+    unsafe {
+        var ref = cx_malloc(sizeof val, null) as *T as &move T;
+        __copy_from(ref as *T, val as *T, false);
+        return ref;
+    }
 }
 
 unsafe func free(address: *void) {

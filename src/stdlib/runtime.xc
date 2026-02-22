@@ -150,7 +150,7 @@ struct Shared<T> {
     }
 }
 
-struct Box<T> {
+struct Box<T: ops.AllowUnsized> {
     private _ptr: *T = null;
 
     func new(ptr: &move T) {
@@ -176,18 +176,13 @@ struct Box<T> {
 
     impl ops.CopyFrom<Box<T>> {
         func copy_from(source: &Box<T>) {
-            unsafe {
-                this._ptr = cx_malloc(sizeof source._ptr!, null) as *T;
-                __copy_from(this._ptr, source._ptr, false);
-            }
+            this._ptr = mem.copy_from<T>(source._ptr as &T) as *T;
         }
     }
 
     impl where T: ops.Sized {
         static func from_value(val: T) Box<T> {
-            var ref: &move T = undefined;
-            unsafe { ref = mem.copy<T>(&val); }
-            return Box<T>{ref};
+            return Box<T>{mem.copy_from<T>(&val)};
         }
     }
 

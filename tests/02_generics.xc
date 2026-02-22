@@ -100,6 +100,31 @@ struct Arr<T> {
     }
 }
 
+// Generic function calling another generic function
+func generic_identity<T>(v: T) T {
+    return v;
+}
+
+func wrap_generic<T>(v: T) T {
+    return generic_identity<T>(v);
+}
+
+func double_wrap_generic<T>(v: T) T {
+    return wrap_generic<T>(v);
+}
+
+struct GenericCaller<T> {
+    val: T = {};
+
+    func call_free_fn() T {
+        return generic_identity<T>(this.val);
+    }
+
+    func call_chain() T {
+        return wrap_generic<T>(this.val);
+    }
+}
+
 func main() {
     var box_stack = GenericBox<int>{};
     printf("box_stack.value={}\n", box_stack.value);
@@ -126,5 +151,14 @@ func main() {
     printf("w.get_inner().value={}\n", w.get_inner().value);
     var rh = RefHolder<int>{999};
     printf("rh.get()={}\n", rh.get());
+
+    // Generic function chaining
+    printf("chain: {}\n", double_wrap_generic<int>(100));
+    printf("chain_str: {}\n", double_wrap_generic<string>("chain"));
+    var gc = GenericCaller<int>{val: 200};
+    printf("struct_free: {}\n", gc.call_free_fn());
+    printf("struct_chain: {}\n", gc.call_chain());
+    var gcs = GenericCaller<string>{val: "method"};
+    printf("struct_free_str: {}\n", gcs.call_free_fn());
 }
 

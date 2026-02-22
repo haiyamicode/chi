@@ -5172,6 +5172,24 @@ Function *Compiler::get_fn(ast::Node *node) {
         }
     }
 
+    // Placeholder GeneratedFn with type_env: the concrete variant exists on the
+    // original fn_def but wasn't compiled yet (created after codegen passed over
+    // the function's declaration). Compile its proto now; body goes to pending_fns.
+    if (!entry && m_fn && m_fn->type_env &&
+        node->type == ast::NodeType::GeneratedFn &&
+        node->data.generated_fn.fn_subtype->is_placeholder) {
+        auto &gfn = node->data.generated_fn;
+        array<ChiType *> concrete_args;
+        for (auto arg : gfn.fn_subtype->data.subtype.args)
+            concrete_args.add(eval_type(arg));
+
+        auto variant = get_resolver()->get_fn_variant(
+            get_resolver()->node_get_type(gfn.original_fn), &concrete_args, gfn.original_fn);
+        auto fn = compile_fn_proto(gfn.original_fn->data.fn_def.fn_proto, variant, "");
+        m_ctx->pending_fns.add(fn);
+        entry = m_ctx->function_table.get(get_resolver()->resolve_global_id(variant));
+    }
+
     if (!entry) {
         panic("Function not found: {}", id);
     }
