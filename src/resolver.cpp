@@ -953,6 +953,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 // In struct context, directly resolve to the struct type
                 assert(scope.parent_type_symbol);
+                if (scope.parent_struct->data.struct_.is_generic()) {
+                    // For generic structs, This resolves to e.g. Wrapper<T> (a Subtype with placeholder args)
+                    // so that placeholder substitution produces the correct concrete type.
+                    // type_params contains TypeSymbols — unwrap to get the underlying Placeholders.
+                    auto &tparams = scope.parent_struct->data.struct_.type_params;
+                    TypeList placeholders;
+                    for (auto tp : tparams) {
+                        placeholders.add(to_value_type(tp));
+                    }
+                    return get_subtype(scope.parent_struct, &placeholders);
+                }
                 return scope.parent_type_symbol;
             }
         }
@@ -1642,6 +1653,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.resolved_decl = member->node;
                 data.field->node = member->node;
                 data.resolved_dot_kind = DotKind::EnumVariant;
+                return member->resolved_type;
+            }
+            case TypeKind::Subtype: {
+                auto resolved = resolve_subtype(underlying_type);
+                if (!resolved) {
+                    error(node, errors::MEMBER_NOT_FOUND, field_name,
+                          format_type(underlying_type, true));
+                    return nullptr;
+                }
+                auto member = resolved->data.struct_.find_static_member(field_name);
+                if (!member) {
+                    error(node, errors::MEMBER_NOT_FOUND, field_name,
+                          format_type(underlying_type, true));
+                    return nullptr;
+                }
+                data.resolved_decl = member->node;
+                data.field->node = member->node;
                 return member->resolved_type;
             }
             case TypeKind::Struct: {
@@ -3703,6 +3731,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         fn_type->data.fn.container_ref = data.container_ref
             ? make_recursive_call(data.container_ref, subs) : nullptr;
         fn_type->data.fn.is_extern = data.is_extern;
+        fn_type->data.fn.is_static = data.is_static;
 
         // Mark as placeholder if any component is still a placeholder
         // This must be consistent with get_fn_type()
@@ -5377,6 +5406,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
             // preserving method type parameters for later inference
             type = type_placeholders_sub_selective(type, &data, base.node);
         }
+
         auto node = get_allocator()->create_node(member->node->type);
         member->node->clone(node);
         node->name = member->node->name;
@@ -5395,8 +5425,49 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
             node->data.fn_def.fn_proto->data.fn_proto.fn_def_node = node;
         }
 
-        if (member->get_name() == "filter" &&
-            format_type(type) == "(&Array<T>) func(Lambda<func(T) bool>) Array<T>") {
+        auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type);
+        if (member->symbol != IntrinsicSymbol::None) {
+            scpy.member_intrinsics[member->symbol] = new_member;
+            new_member->symbol = member->symbol;
+        }
+        member->variants[subtype->id] = new_member;
+        new_member->root_variant = member->root_variant ? member->root_variant : member;
+    }
+
+    // Copy static members into the specialized struct
+    for (auto member : base.static_members) {
+        if (!member->resolved_type) continue;
+        auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
+        member->resolved_type->clone(type);
+
+        // Set container_ref for unique global ID (e.g., "Box<int>.create" not just "create")
+        // Mark is_static so codegen doesn't add a 'this' parameter
+        if (type->kind == TypeKind::Fn) {
+            type->data.fn.container_ref = get_pointer_type(sty, TypeKind::Reference);
+            type->data.fn.is_static = true;
+        }
+
+        if (base.node && base.node->name == "__CxEnumBase") {
+            type = type_placeholders_sub(type, &data);
+        } else {
+            type = type_placeholders_sub_selective(type, &data, base.node);
+        }
+
+        auto node = get_allocator()->create_node(member->node->type);
+        member->node->clone(node);
+        node->name = member->node->name;
+        node->token = member->node->token;
+        node->resolved_type = type;
+        node->root_node = member->node->get_root_node();
+
+        if (member->node->type == NodeType::FnDef) {
+            node->data.fn_def.is_generated = true;
+            auto new_proto = get_allocator()->create_node(NodeType::FnProto);
+            auto orig_proto = member->node->data.fn_def.fn_proto;
+            orig_proto->clone(new_proto);
+            new_proto->resolved_type = type;
+            node->data.fn_def.fn_proto = new_proto;
+            node->data.fn_def.fn_proto->data.fn_proto.fn_def_node = node;
         }
 
         auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type);

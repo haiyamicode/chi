@@ -56,6 +56,7 @@ struct ChiTypeFn {
     bool is_variadic = false;
     ChiType *container_ref = nullptr;
     bool is_extern = false;
+    bool is_static = false; // static method variant — container_ref for ID only, no 'this' param
     array<ChiType *> type_params = {};
     array<ChiLifetime *> lifetime_params = {};
 

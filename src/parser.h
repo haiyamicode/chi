@@ -191,6 +191,7 @@ class Parser {
 
     Node *parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent);
     bool is_function_call_with_type_params();
+    bool is_type_access_with_type_params();
     bool is_construct_expr_with_type();
     Node *parse_construct_expr();
     Node *parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *parent);

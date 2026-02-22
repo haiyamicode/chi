@@ -3614,7 +3614,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
 
     llvm::FunctionCallee callee;
     llvm::Value *ctn_ptr = nullptr;
-    if (fn_spec.container_ref) {
+    if (fn_spec.container_ref && !fn_decl->declspec().is_static()) {
         auto dot_expr = data.fn_ref_expr->data.dot_expr;
         if (!ctn_type) {
             ctn_type = get_chitype(dot_expr.expr);
@@ -5225,7 +5225,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     assert(!ftype->is_placeholder && "Compiling placeholder type");
 
     if (ftype->kind == TypeKind::Fn) {
-        if (ftype->data.fn.container_ref) {
+        if (ftype->data.fn.container_ref && !declspec.is_static()) {
             has_bind = true;
             bind_name = "this";
         }
@@ -5411,7 +5411,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             param_types.push_back(ret_type_l->getPointerTo());
             ret_type_l = llvm::Type::getVoidTy(llvm_ctx);
         }
-        if (data.container_ref) {
+        if (data.container_ref && !data.is_static) {
             param_types.push_back(compile_type(data.container_ref));
         }
         // For extern C variadic functions, exclude the varargs parameter from the param list

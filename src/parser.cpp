@@ -1398,6 +1398,29 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
             // Check if this is a function call with type parameters
             if (is_function_call_with_type_params()) {
                 node = parse_fn_call_with_type_params(node, lhs, parent);
+            } else if (is_type_access_with_type_params()) {
+                // Type<Args>.method() — parse as SubtypeExpr, loop continues with '.'
+                auto subtype_node = create_node(NodeType::SubtypeExpr, node->token);
+                subtype_node->data.subtype_expr.type = node;
+                expect(TokenType::LT);
+                for (;;) {
+                    auto tok = get();
+                    if (tok->type == TokenType::END) {
+                        error(tok, errors::UNEXPECTED_EOF);
+                        return subtype_node;
+                    }
+                    if (tok->type == TokenType::GT) {
+                        break;
+                    }
+                    auto param = parse_type_expr(true);
+                    subtype_node->data.subtype_expr.args.add(param);
+                    if (!at_comma(TokenType::GT)) {
+                        break;
+                    }
+                    consume();
+                }
+                expect(TokenType::GT);
+                node = subtype_node;
             } else {
                 return node; // Let the expression parser handle it as a comparison
             }
@@ -1557,6 +1580,39 @@ bool Parser::is_function_call_with_type_params() {
     // After parsing type arguments, next token should be '('
     auto token = lookahead(pos);
     return token->type == TokenType::LPAREN;
+}
+
+bool Parser::is_type_access_with_type_params() {
+    // Check if we have Type<Args>.method — type params followed by '.'
+    int pos = 1; // Start after the '<' token
+
+    for (;;) {
+        auto token = lookahead(pos);
+        if (token->type == TokenType::END) {
+            return false;
+        }
+        if (token->type == TokenType::GT) {
+            pos++;
+            break;
+        }
+
+        if (!try_parse_type_expr_lookahead(pos)) {
+            return false;
+        }
+
+        token = lookahead(pos);
+        if (token->type == TokenType::COMMA) {
+            pos++;
+        } else if (token->type == TokenType::GT) {
+            pos++;
+            break;
+        } else {
+            return false;
+        }
+    }
+
+    auto token = lookahead(pos);
+    return token->type == TokenType::DOT;
 }
 
 bool Parser::is_construct_expr_with_type() {

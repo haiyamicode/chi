@@ -63,6 +63,18 @@ struct Color {
     }
 }
 
+struct Wrapper<T> {
+    value: T = {};
+
+    static func create(v: T) This {
+        return {value: v};
+    }
+
+    func get() T {
+        return this.value;
+    }
+}
+
 func main() {
     let a = Color.black();
     printf("a: {}\n", a);
@@ -80,5 +92,11 @@ func main() {
     printf("e (copy of d): {}\n", e);
     let cloned_color = c.clone();
     printf("cloned white: {}\n", cloned_color);
+
+    printf("\n-- Generic static methods --\n");
+    var box_int = Wrapper<int>.create(42);
+    printf("Wrapper<int>.create(42) = {}\n", box_int.get());
+    var box_str = Wrapper<string>.create("hello");
+    printf("Wrapper<string>.create(\"hello\") = {}\n", box_str.get());
 }
 
