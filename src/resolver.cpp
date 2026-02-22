@@ -4476,9 +4476,20 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 lookup_key = type_param->data.type_symbol.giving_type;
             }
 
-            if (lookup_key->kind == TypeKind::Placeholder && lookup_key->data.placeholder.trait) {
+            if (lookup_key->kind != TypeKind::Placeholder) continue;
+            auto type_arg = type_args[i];
+
+            // In safe mode, reject borrowing types (references, structs with ref fields)
+            // as generic type arguments — T is value-only by default
+            if (type_arg && is_borrowing_type(type_arg) &&
+                has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
+                error(node, "cannot use borrowing type '{}' as type argument for '{}'",
+                      format_type(type_arg, true), lookup_key->name.value_or("T"));
+                return fn->return_type;
+            }
+
+            if (lookup_key->data.placeholder.trait) {
                 auto trait_type = lookup_key->data.placeholder.trait;
-                auto type_arg = type_args[i];
 
                 // Check if type_arg implements the required trait
                 bool satisfies_bound = false;
