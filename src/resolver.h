@@ -112,6 +112,7 @@ struct ResolveContext {
     ChiType *rt_unit_type = nullptr;
     ChiType *rt_empty_bind_type = nullptr;
     ast::Node *rt_enum_base = nullptr;
+    ChiType *rt_sized_interface = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
 };

@@ -145,6 +145,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
+    m_ctx->intrinsic_symbols["std.ops.Sized"] = IntrinsicSymbol::Sized;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -2235,6 +2236,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_error_type = struct_type;
                 } else if (node->name == "Unit") {
                     m_ctx->rt_unit_type = struct_type;
+                } else if (node->name == "Sized") {
+                    m_ctx->rt_sized_interface = struct_type;
                 }
             }
             node->resolved_type = type_sym;
@@ -2296,6 +2299,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             }
+
+            // Auto-implement ops.Sized for all non-interface types
+            if (m_ctx->rt_sized_interface && !ChiTypeStruct::is_interface(struct_type)) {
+                struct_->add_interface(get_allocator(), m_ctx->rt_sized_interface, struct_type);
+            }
+
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
         } else {
             // fourth pass - resolve method bodies
@@ -4556,9 +4565,15 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 // Check if type_arg implements the required trait
                 bool satisfies_bound = false;
 
+                // Resolve subtypes to their concrete struct for interface checking
+                auto check_arg = type_arg;
+                if (check_arg->kind == TypeKind::Subtype) {
+                    check_arg = resolve_subtype(check_arg);
+                }
+
                 // Check if it's a struct that implements the interface
-                if (type_arg->kind == TypeKind::Struct) {
-                    for (auto &impl : type_arg->data.struct_.interfaces) {
+                if (check_arg->kind == TypeKind::Struct) {
+                    for (auto &impl : check_arg->data.struct_.interfaces) {
                         if (impl->interface_type == trait_type) {
                             satisfies_bound = true;
                             break;
@@ -4579,6 +4594,11 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
 
                     // For built-in types, check if they naturally support the required operations
                     for (auto &intrinsic : required_intrinsics) {
+                        if (intrinsic == IntrinsicSymbol::Sized) {
+                            // All concrete built-in types are Sized
+                            satisfies_bound = true;
+                            break;
+                        }
                         if (intrinsic == IntrinsicSymbol::Add) {
                             // Built-in types that support the + operator satisfy ops.Add
                             satisfies_bound = type_arg->is_int_like() ||

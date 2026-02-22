@@ -21,6 +21,8 @@ interface Add {
     func add(rhs: This) This;
 }
 
+interface Sized {}
+
 // interface Sub<T> {
 //   func sub(rhs: T) T;
 // }

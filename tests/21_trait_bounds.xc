@@ -53,6 +53,20 @@ struct Pair<T: Show, U: Show> {
     }
 }
 
+import "std/ops" as ops;
+
+func sized_identity<T: ops.Sized>(v: T) T {
+    return v;
+}
+
+struct SizedBox<T: ops.Sized> {
+    value: T = {};
+
+    func get() T {
+        return this.value;
+    }
+}
+
 func main() {
     printf("=== Type Parameter Trait Bounds Test ===\n");
     printf("\n-- Function trait bounds --\n");
@@ -71,6 +85,17 @@ func main() {
     printf("Multiple type params: {}\n", pair.show_both());
     var num_container = Container<Number>{item: n, name: "NumberContainer"};
     printf("Different type, same interface: {}\n", num_container.show_container());
+
+    printf("\n-- Sized trait bound --\n");
+    printf("int: {}\n", sized_identity(42));
+    printf("string: {}\n", sized_identity("hello"));
+    printf("bool: {}\n", sized_identity(true));
+    printf("float: {}\n", sized_identity(3.14));
+    var sp: Point = sized_identity(Point{x: 5, y: 10});
+    printf("struct: ({}, {})\n", sp.x, sp.y);
+    var sb = SizedBox<int>{value: 99};
+    printf("SizedBox<int>: {}\n", sb.get());
+
     printf("\n=== All trait bound tests passed! ===\n");
 }
 

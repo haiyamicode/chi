@@ -12,4 +12,12 @@ Retrieved item: (10, 20)
 Multiple type params: Pair((10, 20), Number(42))
 Different type, same interface: Container[NumberContainer]: Number(42)
 
+-- Sized trait bound --
+int: 42
+string: hello
+bool: true
+float: 3.14
+struct: (5, 10)
+SizedBox<int>: 99
+
 === All trait bound tests passed! ===
