@@ -207,7 +207,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::TypeParam: {
         auto &data = node->data.type_param;
         emit("{}", node->name);
-        if (data.type_bound) {
+        if (!data.lifetime_bound.empty()) {
+            emit(": '{}", data.lifetime_bound);
+        } else if (data.type_bound) {
             emit(": ");
             print_node(data.type_bound);
         }

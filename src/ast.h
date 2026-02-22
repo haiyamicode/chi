@@ -267,6 +267,7 @@ struct TypeParam {
     Node *type_bound = nullptr;
     Node *default_type = nullptr;
     Node *source_decl = nullptr; // The struct/function that owns this type parameter
+    string lifetime_bound;       // "a" for T: 'a (lifetime bound)
 };
 
 struct LifetimeParam {

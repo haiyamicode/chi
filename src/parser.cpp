@@ -905,7 +905,14 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
 
                 if (next_is(TokenType::COLON)) {
                     consume();
-                    param_node->data.type_param.type_bound = parse_type_expr(true);
+                    if (next_is(TokenType::LIFETIME)) {
+                        // T: 'a — lifetime bound
+                        param_node->data.type_param.lifetime_bound = get()->str;
+                        consume();
+                    } else {
+                        // T: Trait — trait bound
+                        param_node->data.type_param.type_bound = parse_type_expr(true);
+                    }
                 }
 
                 type_params.add(param_node);

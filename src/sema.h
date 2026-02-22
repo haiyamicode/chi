@@ -231,6 +231,7 @@ struct ChiTypePlaceholder {
     ast::Node *source_decl =
         nullptr; // The struct/function declaration that owns this type parameter
     string name; // The name of the type parameter (T, U, etc.)
+    ChiLifetime *lifetime_bound = nullptr; // Resolved lifetime from T: 'a
 };
 
 struct ChiTypeFnLambda {

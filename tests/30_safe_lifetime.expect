@@ -99,4 +99,6 @@ Heavy.delete(302)
 b.name = rho
 Resource.delete(rho)
 after block
+=== generic lifetime bound ===
+r = 42
 Heavy.delete(20)

@@ -458,6 +458,17 @@ func test_move_ptr_block() {
     // a was moved — not destroyed
 }
 
+func get_val_lt<'a, T: 'a>(val: T) T {
+    return val;
+}
+
+func test_generic_lifetime_bound() {
+    printf("=== generic lifetime bound ===\n");
+    var x = 42;
+    var r = get_val_lt<&int>(&x);
+    printf("r = {}\n", r!);
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -491,5 +502,6 @@ func main() {
     test_move_block_cleanup();
     test_move_in_loop();
     test_move_ptr_block();
+    test_generic_lifetime_bound();
 }
 

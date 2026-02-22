@@ -848,9 +848,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 param_type = fresh;
                 param->resolved_type = param_type;
             } else if (param_type && !param_type->is_reference() && is_borrowing_type(param_type)) {
-                // Borrowing value params (e.g. func() types) get lifetimes so borrows
-                // from captured lambdas flow through calls
-                auto *lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
+                // Borrowing value params get lifetimes so borrows flow through calls.
+                // For lifetime-bounded placeholders (T: 'a), use the declared lifetime.
+                ChiLifetime *lt;
+                if (param_type->kind == TypeKind::Placeholder && param_type->data.placeholder.lifetime_bound) {
+                    lt = param_type->data.placeholder.lifetime_bound;
+                } else {
+                    lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
+                }
                 pdata.borrow_lifetime = lt;
                 all_ref_lifetimes.add(lt);
             }
@@ -2556,6 +2561,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             phty->data.placeholder.trait = to_value_type(resolve(data.type_bound, scope));
         }
 
+        // Resolve lifetime bound: T: 'a
+        if (!data.lifetime_bound.empty() && scope.fn_lifetime_params) {
+            auto *lt = scope.fn_lifetime_params->get(data.lifetime_bound);
+            if (lt) {
+                phty->data.placeholder.lifetime_bound = *lt;
+            } else {
+                error(node, "unknown lifetime '{}'", data.lifetime_bound);
+            }
+        }
+
         phty->data.placeholder.index = data.index;
         phty->data.placeholder.name = node->name;
 
@@ -3516,6 +3531,8 @@ bool Resolver::is_borrowing_type(ChiType *type) {
         }
         return false;
     }
+    case TypeKind::Placeholder:
+        return type->data.placeholder.lifetime_bound != nullptr;
     default:
         return false;
     }
@@ -4480,9 +4497,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto type_arg = type_args[i];
 
             // In safe mode, reject borrowing types (references, structs with ref fields)
-            // as generic type arguments — T is value-only by default
+            // as generic type arguments — unless T has a lifetime bound (T: 'a)
             if (type_arg && is_borrowing_type(type_arg) &&
-                has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
+                has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) &&
+                !lookup_key->data.placeholder.lifetime_bound) {
                 error(node, "cannot use borrowing type '{}' as type argument for '{}'",
                       format_type(type_arg, true), lookup_key->name.value_or("T"));
                 return fn->return_type;
