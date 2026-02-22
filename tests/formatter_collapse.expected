@@ -149,3 +149,20 @@ func mutate_ref(x: &(mut, 'this) int) {
     x = 99;
 }
 
+// arrow lambda with &mut param type (exercises type expr lookahead)
+func apply_mut(x: &mut int, f: func (n: &mut int)) {
+    f(x);
+}
+
+func test_lambda_ref_types() {
+    var a = 10;
+    apply_mut(&mut a, func (n: &mut int) {
+        n = 99;
+    });
+
+    // func type with &move param (exercises fn type lookahead)
+    var f: func (n: &move int) = func (n: &move int) {
+        delete n;
+    };
+}
+

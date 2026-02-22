@@ -1706,12 +1706,43 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         }
     }
 
-    // Handle reference sigil
+    // Handle reference sigil: &T, &mut T, &move T, &'a T, &(mut, 'a) T
     if (token->type == TokenType::AND) {
         pos++;
         token = lookahead(pos);
         if (token->type == TokenType::END) {
             return false;
+        }
+        if (token->type == TokenType::LPAREN) {
+            // &(mut, 'a) T or &('a) T or &(move) T
+            pos++;
+            for (;;) {
+                token = lookahead(pos);
+                if (token->type == TokenType::KW_MUT ||
+                    token->type == TokenType::KW_MOVE ||
+                    token->type == TokenType::LIFETIME) {
+                    pos++;
+                } else {
+                    break;
+                }
+                token = lookahead(pos);
+                if (token->type != TokenType::COMMA) break;
+                pos++;
+            }
+            if (lookahead(pos)->type != TokenType::RPAREN) return false;
+            pos++;
+            token = lookahead(pos);
+            if (token->type == TokenType::END) return false;
+        } else if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MOVE) {
+            // &mut T, &move T
+            pos++;
+            token = lookahead(pos);
+            if (token->type == TokenType::END) return false;
+        } else if (token->type == TokenType::LIFETIME) {
+            // &'a T
+            pos++;
+            token = lookahead(pos);
+            if (token->type == TokenType::END) return false;
         }
     }
 
