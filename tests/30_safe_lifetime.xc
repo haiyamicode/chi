@@ -251,6 +251,10 @@ struct Heavy {
     }
 }
 
+func consume_heavy(h: Heavy) {
+    printf("consumed: {}\n", h.value);
+}
+
 // move x skips copy_from, sinks source
 func test_value_move() {
     printf("=== value move ===\n");
@@ -345,6 +349,115 @@ func test_method_ref_return() {
     printf("method ref = {}\n", r!);
 }
 
+// --- Block-based destruction ---
+
+// Borrow scoped in block, delete after block is safe
+func test_block_scoped_borrow() {
+    printf("=== block scoped borrow ===\n");
+    var x = new Resource{"block_res"};
+    {
+        var r: &Resource = x;
+        printf("r.name = {}\n", r.name);
+    }
+    // r is out of scope, safe to delete
+    delete x;
+}
+
+// Block destruction order: inner vars destroyed before outer
+func test_block_destruction_order() {
+    printf("=== block destruction order ===\n");
+    var outer = Heavy{value: 1};
+    {
+        var inner1 = Heavy{value: 2};
+        var inner2 = Heavy{value: 3};
+        printf("inner: {} {}\n", inner1.value, inner2.value);
+    }
+    printf("outer still alive: {}\n", outer.value);
+}
+
+// Early return from nested block: all blocks cleaned up
+func test_early_return_cleanup() Heavy {
+    var a = Heavy{value: 10};
+    {
+        var b = Heavy{value: 20};
+        return move b;
+    }
+}
+
+// Break from loop with block-local vars: cleaned up before exiting
+func test_break_cleanup() {
+    printf("=== break cleanup ===\n");
+    for var i = 0; i < 3; i++ {
+        var h = Heavy{value: 100 + i};
+        if i == 1 {
+            printf("breaking at {}\n", h.value);
+            break;
+        }
+        printf("iter {}\n", h.value);
+    }
+    printf("after loop\n");
+}
+
+// Continue from loop: block vars cleaned up each iteration
+func test_continue_cleanup() {
+    printf("=== continue cleanup ===\n");
+    for var i = 0; i < 3; i++ {
+        var h = Heavy{value: 200 + i};
+        if i == 1 {
+            printf("skipping {}\n", h.value);
+            continue;
+        }
+        printf("iter {}\n", h.value);
+    }
+    printf("after loop\n");
+}
+
+// --- Move tests ---
+
+// Value move into function arg — source sunk, not double-destroyed
+func test_move_to_fn_arg() {
+    printf("=== move to fn arg ===\n");
+    var h = Heavy{value: 55};
+    consume_heavy(move h);
+    // h is sunk — not destroyed here
+}
+
+// Move in inner block — moved var skipped by block cleanup
+func test_move_block_cleanup() {
+    printf("=== move block cleanup ===\n");
+    var a = Heavy{value: 60};
+    {
+        var b = move a;
+        printf("b = {}\n", b.value);
+        // b destroyed at block exit
+    }
+    printf("after block\n");
+    // a was moved — not destroyed at function exit
+}
+
+// Move in loop — each iteration creates and moves, no double-destroy
+func test_move_in_loop() {
+    printf("=== move in loop ===\n");
+    for var i = 0; i < 3; i++ {
+        var h = Heavy{value: 300 + i};
+        consume_heavy(move h);
+        // h sunk each iteration
+    }
+}
+
+// &move pointer move in inner block — only destination destroyed
+func test_move_ptr_block() {
+    printf("=== move ptr block ===\n");
+    var a = new Resource{"rho"};
+    {
+        var b = a; // &move: ownership transfer
+        printf("b.name = {}\n", b.name);
+        // b destroyed at block exit
+    }
+    printf("after block\n");
+    // a was moved — not destroyed
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -367,5 +480,16 @@ func main() {
     test_cross_fn_ref();
     test_bigger_ref();
     test_method_ref_return();
+    test_block_scoped_borrow();
+    test_block_destruction_order();
+    var ret = test_early_return_cleanup();
+    printf("=== early return cleanup ===\n");
+    printf("returned: {}\n", ret.value);
+    test_break_cleanup();
+    test_continue_cleanup();
+    test_move_to_fn_arg();
+    test_move_block_cleanup();
+    test_move_in_loop();
+    test_move_ptr_block();
 }
 

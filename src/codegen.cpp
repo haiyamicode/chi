@@ -4206,7 +4206,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             builder.CreateBr(loop->end);
         }
         if (token->type == TokenType::KW_CONTINUE) {
-            builder.CreateBr(loop->start);
+            builder.CreateBr(loop->continue_target ? loop->continue_target : loop->start);
         }
         break;
     }
@@ -4285,6 +4285,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
             fn->use_label(loop_main);
             auto loop_post = fn->new_label("_for_post");
+            loop->continue_target = loop_post;
             if (item_var) {
                 auto item_ref =
                     builder.CreateCall(get_fn(index->node)->llvm_fn,
@@ -4331,6 +4332,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
             fn->use_label(loop_main);
             auto loop_post = fn->new_label("_for_post");
+            loop->continue_target = loop_post;
             compile_block(fn, stmt, data.body, loop_post);
             fn->use_label(loop_post);
             if (data.post) {
@@ -4349,6 +4351,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto loop = fn->push_loop();
         loop->start = fn->new_label("_while_start");
         loop->end = fn->new_label("_while_end");
+        loop->continue_target = loop->start;
         auto loop_main = fn->new_label("_while_main");
         builder.CreateBr(loop->start);
 
@@ -5116,8 +5119,9 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
         result = compile_expr(fn, data.return_expr);
     }
 
-    // Destroy block-local vars (only if block didn't already branch away via return/break)
-    if (!scope->branched) {
+    // Destroy block-local vars (only if block didn't already branch away via return/break
+    // and current BB isn't already terminated by a nested return/break)
+    if (!scope->branched && !builder.GetInsertBlock()->getTerminator()) {
         compile_block_cleanup(fn, &data);
     }
     fn->active_blocks.pop_back();

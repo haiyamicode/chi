@@ -1378,13 +1378,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
-            if (scope.parent_fn_node && has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
+            if (scope.parent_fn_node) {
                 auto *src_decl = find_root_decl(data.op1);
                 if (src_decl) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
-                    if (fn_def.is_sunk(src_decl)) {
+                    if (has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) &&
+                        fn_def.is_sunk(src_decl)) {
                         error(node, "'{}' used after move", src_decl->name);
                     }
+                    // Sink the source at the move site — works for all contexts
+                    // (return, assignment, function arg, etc.)
+                    fn_def.add_sink_edge(src_decl, node);
                 }
             }
             return t;  // move produces the value type, not a reference
@@ -1553,6 +1557,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (expected_type) {
             check_assignment(data.expr, expr_type, expected_type);
+        }
+
+        // Track move in return expression (e.g. return move b)
+        if (data.expr && scope.parent_fn_node) {
+            track_move_sink(scope.parent_fn_node, data.expr, expr_type, node, return_type);
         }
 
         if (data.expr && scope.parent_fn_node && expr_type &&

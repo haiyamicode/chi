@@ -29,6 +29,7 @@ typedef llvm::BasicBlock label_t;
 struct LoopLabels {
     label_t *start = nullptr;
     label_t *end = nullptr;
+    label_t *continue_target = nullptr;  // where continue jumps (post-increment for for/range loops)
     size_t active_blocks_depth = 0;  // active_blocks.size() when loop was entered
 };
 
