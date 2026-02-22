@@ -1,4 +1,5 @@
 import "std/ops" as ops;
+import "std/mem" as mem;
 
 private struct HashBytes {
     data: *void = null;
@@ -179,6 +180,14 @@ struct Box<T> {
                 this._ptr = cx_malloc(sizeof source._ptr!, null) as *T;
                 __copy_from(this._ptr, source._ptr, false);
             }
+        }
+    }
+
+    impl where T: ops.Sized {
+        static func from_value(val: T) Box<T> {
+            var ref: &move T = undefined;
+            unsafe { ref = mem.copy<T>(&val); }
+            return Box<T>{ref};
         }
     }
 

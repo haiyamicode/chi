@@ -2137,6 +2137,33 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
     default:
         if (next_is(TokenType::KW_IMPL)) {
             auto kw = expect(TokenType::KW_IMPL);
+            // impl where T: Bound { ... } — alternative syntax for where blocks
+            if (next_is(TokenType::KW_WHERE)) {
+                consume(); // consume 'where'
+                auto node = create_node(NodeType::ImplementBlock, kw);
+                node->start_token = kw;
+                node->data.implement_block.interface_type = nullptr;
+                do {
+                    ast::WhereClause clause;
+                    clause.param_name = expect(TokenType::IDEN);
+                    expect(TokenType::COLON);
+                    clause.bound_type = parse_type_expr(true);
+                    node->data.implement_block.where_clauses.add(clause);
+                } while (next_is(TokenType::COMMA) && (consume(), true));
+                expect(TokenType::LBRACE);
+                while (get()->type != TokenType::RBRACE) {
+                    if (get()->type == TokenType::END) {
+                        error(get(), errors::UNEXPECTED_EOF);
+                        break;
+                    }
+                    auto member = parse_fn_decl(FN_BODY_REQUIRED);
+                    node->data.implement_block.members.add(member);
+                    member->parent = node;
+                }
+                node->end_token = get();
+                expect(TokenType::RBRACE);
+                return node;
+            }
             auto node = create_node(NodeType::ImplementBlock, kw);
             node->start_token = kw;
             node->data.implement_block.interface_type = parse_type_expr(true);

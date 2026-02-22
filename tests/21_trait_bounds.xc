@@ -53,6 +53,53 @@ struct Pair<T: Show, U: Show> {
     }
 }
 
+struct ShowBox<T> {
+    item: T = {};
+
+    impl where T: Show {
+        func show_item() string {
+            return this.item.show();
+        }
+    }
+
+    func get() T {
+        return this.item;
+    }
+}
+
+struct WherePair<T, U> {
+    first: T = {};
+    second: U = {};
+
+    impl where T: Show, U: Show {
+        func show_both() string {
+            return string.format("({}, {})", this.first.show(), this.second.show());
+        }
+    }
+
+    func get_first() T {
+        return this.first;
+    }
+}
+
+struct ImplWhereBox<T> {
+    item: T = {};
+
+    impl where T: Show {
+        func show_item() string {
+            return this.item.show();
+        }
+
+        static func describe(val: T) string {
+            return string.format("ImplWhereBox[{}]", val.show());
+        }
+    }
+
+    func get() T {
+        return this.item;
+    }
+}
+
 import "std/ops" as ops;
 
 func sized_identity<T: ops.Sized>(v: T) T {
@@ -85,6 +132,25 @@ func main() {
     printf("Multiple type params: {}\n", pair.show_both());
     var num_container = Container<Number>{item: n, name: "NumberContainer"};
     printf("Different type, same interface: {}\n", num_container.show_container());
+
+    printf("\n-- Where block --\n");
+    var sb1 = ShowBox<Point>{item: Point{x: 3, y: 4}};
+    printf("show_item: {}\n", sb1.show_item());
+    printf("get point: ({}, {})\n", sb1.get().x, sb1.get().y);
+    var sb2 = ShowBox<int>{item: 99};
+    printf("get int: {}\n", sb2.get());
+    var sb3 = ShowBox<Number>{item: Number{value: 7}};
+    printf("show_item Number: {}\n", sb3.show_item());
+    var wp = WherePair<Point, Number>{first: Point{x: 5, y: 6}, second: Number{value: 8}};
+    printf("multi where: {}\n", wp.show_both());
+    var wp2 = WherePair<int, Number>{first: 10, second: Number{value: 9}};
+    printf("partial get_first: {}\n", wp2.get_first());
+    var iwb = ImplWhereBox<Point>{item: Point{x: 7, y: 8}};
+    printf("impl where show: {}\n", iwb.show_item());
+    var iwb2 = ImplWhereBox<int>{item: 55};
+    printf("impl where get: {}\n", iwb2.get());
+    var desc_p = Point{x: 9, y: 10};
+    printf("static where: {}\n", ImplWhereBox<Point>.describe(desc_p));
 
     printf("\n-- Sized trait bound --\n");
     printf("int: {}\n", sized_identity(42));

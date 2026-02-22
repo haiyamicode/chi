@@ -2276,6 +2276,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type != NodeType::ImplementBlock) continue;
                 auto &impl_data = member->data.implement_block;
 
+                // Skip where-blocks (handled below)
+                if (!impl_data.interface_type) continue;
+
                 auto impl_trait = resolve_value(impl_data.interface_type, scope);
                 if (!impl_trait) continue;
                 auto trait_struct = resolve_struct_type(impl_trait);
@@ -2297,6 +2300,43 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         }
                         resolve_vtable(subtype_impl_trait, subtype, impl_data.interface_type);
                     }
+                }
+            }
+
+            // Resolve where-blocks: tag members with where conditions
+            for (auto member : data.members) {
+                if (member->type != NodeType::ImplementBlock) continue;
+                auto &impl_data = member->data.implement_block;
+                if (impl_data.interface_type || impl_data.where_clauses.len == 0) continue;
+
+                auto *cond = get_allocator()->create_where_condition();
+
+                for (auto &clause : impl_data.where_clauses) {
+                    auto param_name = clause.param_name->str;
+                    long param_index = -1;
+                    for (long i = 0; i < (long)struct_->type_params.len; i++) {
+                        auto tp = to_value_type(struct_->type_params[i]);
+                        if (tp->name == param_name) {
+                            param_index = i;
+                            break;
+                        }
+                    }
+                    if (param_index < 0) {
+                        error(clause.bound_type, "unknown type parameter '{}'", param_name);
+                        continue;
+                    }
+
+                    auto trait_type = resolve_value(clause.bound_type, scope);
+                    if (!trait_type) continue;
+
+                    cond->bounds.add({param_index, trait_type});
+                }
+
+                for (auto impl_member : impl_data.members) {
+                    auto *sm = struct_->find_member(impl_member->name);
+                    if (sm) sm->where_condition = cond;
+                    auto *ssm = struct_->find_static_member(impl_member->name);
+                    if (ssm) ssm->where_condition = cond;
                 }
             }
 
@@ -2322,8 +2362,32 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             };
             for (auto member : data.members) {
                 if (member->type == NodeType::ImplementBlock) {
-                    for (auto impl_member : member->data.implement_block.members) {
+                    auto &impl_data = member->data.implement_block;
+
+                    // For where-blocks, temporarily set placeholder traits so method
+                    // bodies can access trait methods on the constrained type params
+                    array<std::pair<ChiType *, ChiType *>> saved_traits;
+                    if (!impl_data.interface_type && impl_data.where_clauses.len > 0) {
+                        for (auto &clause : impl_data.where_clauses) {
+                            auto param_name = clause.param_name->str;
+                            for (auto tp : struct_->type_params) {
+                                auto ph = to_value_type(tp);
+                                if (ph->kind == TypeKind::Placeholder && ph->name == param_name) {
+                                    saved_traits.add({ph, ph->data.placeholder.trait});
+                                    ph->data.placeholder.trait = resolve_value(clause.bound_type, scope);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    for (auto impl_member : impl_data.members) {
                         resolve_fn_body(impl_member);
+                    }
+
+                    // Restore original placeholder traits
+                    for (auto &[ph, old_trait] : saved_traits) {
+                        ph->data.placeholder.trait = old_trait;
                     }
                 } else {
                     resolve_fn_body(member);
@@ -5410,6 +5474,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
 
     for (auto member : base.members) {
         if (!member->resolved_type) continue;
+        if (!check_where_condition(member->where_condition, &data)) continue;
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
         if (member->is_method()) {
@@ -5457,6 +5522,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     // Copy static members into the specialized struct
     for (auto member : base.static_members) {
         if (!member->resolved_type) continue;
+        if (!check_where_condition(member->where_condition, &data)) continue;
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
 
@@ -6314,6 +6380,55 @@ bool Resolver::interface_satisfies_trait(ChiType *interface_type, ChiType *requi
     }
 
     return false;
+}
+
+bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data) {
+    if (!cond) return true; // No condition = always included
+
+    // All bounds must be satisfied
+    for (auto &bound : cond->bounds) {
+        if (bound.param_index < 0 || bound.param_index >= (long)subtype_data->args.len) {
+            return false;
+        }
+
+        auto type_arg = subtype_data->args[bound.param_index];
+
+        // Resolve subtypes to concrete struct
+        if (type_arg->kind == TypeKind::Subtype) {
+            type_arg = resolve_subtype(type_arg);
+        }
+
+        // If type arg is still a placeholder (partially specialized), keep the member
+        if (type_arg->is_placeholder) continue;
+
+        bool satisfies = false;
+        if (type_arg->kind == TypeKind::Struct) {
+            for (auto &impl : type_arg->data.struct_.interfaces) {
+                if (impl->interface_type == bound.trait ||
+                    interface_satisfies_trait(impl->interface_type, bound.trait)) {
+                    satisfies = true;
+                    break;
+                }
+            }
+        } else {
+            // Built-in types: check intrinsics
+            auto required = interface_get_intrinsics(bound.trait);
+            for (auto &intrinsic : required) {
+                if (intrinsic == IntrinsicSymbol::Sized) { satisfies = true; break; }
+                if (intrinsic == IntrinsicSymbol::Add) {
+                    if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
+                        type_arg->kind == TypeKind::String) {
+                        satisfies = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!satisfies) return false;
+    }
+
+    return true;
 }
 
 // ============================================================================

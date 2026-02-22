@@ -66,6 +66,15 @@ struct ChiTypeFn {
     bool is_generic() const { return type_params.len > 0; }
 };
 
+struct WhereBound {
+    long param_index = -1;    // Index into parent struct's type_params
+    ChiType *trait = nullptr; // Required interface type
+};
+
+struct WhereCondition {
+    array<WhereBound> bounds = {};  // All bounds must be satisfied
+};
+
 struct ChiStructMember {
     ast::Node *node = nullptr;
     ChiType *orig_parent = nullptr;
@@ -78,6 +87,7 @@ struct ChiStructMember {
     map<TypeId, ChiStructMember *> variants = {};
     ChiStructMember *parent_member = nullptr;
     long vtable_index = -1;
+    WhereCondition *where_condition = nullptr;
 
     string get_name();
     Visibility get_visibility();

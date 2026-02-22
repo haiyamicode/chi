@@ -28,6 +28,7 @@ struct Context {
     virtual ChiStructMember *create_struct_member() = 0;
     virtual InterfaceImpl *create_interface_impl() = 0;
     virtual ChiEnumVariant *create_enum_member() = 0;
+    virtual WhereCondition *create_where_condition() = 0;
 
     virtual ast::Module *module_from_path(ast::Package *package, const string &path,
                                           bool import = false) = 0;
@@ -230,6 +231,7 @@ class Resolver {
     array<IntrinsicSymbol> interface_get_intrinsics(ChiType *interface_type);
 
     bool interface_satisfies_trait(ChiType *interface_type, ChiType *required_trait);
+    bool check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data);
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);
 

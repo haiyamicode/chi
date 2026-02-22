@@ -25,6 +25,7 @@ struct CompilationContext : public Context {
     array<box<ChiStructMember>> struct_members = {};
     array<box<ChiEnumVariant>> enum_members = {};
     array<box<InterfaceImpl>> interface_impls = {};
+    array<box<WhereCondition>> where_conditions = {};
     uint32_t flags = 0;
     array<string> file_extensions = {"xc", "x"};
     string root_path = "";
@@ -100,6 +101,10 @@ struct CompilationContext : public Context {
 
     InterfaceImpl *create_interface_impl() {
         return interface_impls.emplace(new InterfaceImpl())->get();
+    }
+
+    WhereCondition *create_where_condition() {
+        return where_conditions.emplace(new WhereCondition())->get();
     }
 };
 } // namespace cx

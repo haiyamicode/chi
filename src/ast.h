@@ -360,9 +360,15 @@ struct StructDecl {
     DeclSpec *decl_spec = {};
 };
 
+struct WhereClause {
+    Token *param_name = nullptr;  // type parameter name token (e.g., T)
+    Node *bound_type = nullptr;   // trait type expression (e.g., Show)
+};
+
 struct ImplementBlockData {
     Node *interface_type = nullptr;
     array<Node *> members = {};
+    array<WhereClause> where_clauses = {};  // Non-empty = conditional where-block
 };
 
 struct ExternDecl {

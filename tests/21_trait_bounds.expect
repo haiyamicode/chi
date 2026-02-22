@@ -12,6 +12,17 @@ Retrieved item: (10, 20)
 Multiple type params: Pair((10, 20), Number(42))
 Different type, same interface: Container[NumberContainer]: Number(42)
 
+-- Where block --
+show_item: (3, 4)
+get point: (3, 4)
+get int: 99
+show_item Number: Number(7)
+multi where: ((5, 6), Number(8))
+partial get_first: 10
+impl where show: (7, 8)
+impl where get: 55
+static where: ImplWhereBox[(9, 10)]
+
 -- Sized trait bound --
 int: 42
 string: hello

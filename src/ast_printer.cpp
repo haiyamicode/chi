@@ -473,8 +473,18 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ImplementBlock: {
         auto &data = node->data.implement_block;
-        emit("impl ");
-        print_node(data.interface_type);
+        if (data.where_clauses.len > 0) {
+            emit("impl where ");
+            for (size_t i = 0; i < data.where_clauses.len; i++) {
+                if (i > 0) emit(", ");
+                emit(data.where_clauses[i].param_name->str);
+                emit(": ");
+                print_node(data.where_clauses[i].bound_type);
+            }
+        } else {
+            emit("impl ");
+            print_node(data.interface_type);
+        }
         emit(" {{");
         if (data.members.len) {
             emit("\n");
