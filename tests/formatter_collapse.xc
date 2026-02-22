@@ -106,3 +106,23 @@ func mutate(x: &mut int) {
     x = 42;
 }
 
+// lifetime params and lifetime bounds on type params
+func identity<'a, T: 'a>(val: T) T {
+    return val;
+}
+
+// lifetime param with outlives bound
+func nested<'a, 'b: 'a, T: 'b>(outer: T, inner: T) T {
+    return outer;
+}
+
+// explicit lifetime annotation on reference params
+func pick<'a>(a: &'a int, b: &'a int) &'a int {
+    return a;
+}
+
+// combined mut + lifetime annotation
+func mutate_ref(x: &(mut, 'this) int) {
+    x = 99;
+}
+
