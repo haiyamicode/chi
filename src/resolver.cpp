@@ -1546,9 +1546,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             value_type_hint = get_promise_value_type(return_type);
         }
 
-        // Don't use placeholder or Infer as value type hint - let expression infer its type
-        if (value_type_hint && (value_type_hint->kind == TypeKind::Placeholder ||
-                                value_type_hint->kind == TypeKind::Infer)) {
+        // Don't use Infer as value type hint - let expression infer its type.
+        // Placeholders are kept: construct expressions need them to find the constructor
+        // from trait bounds (e.g., return {v} where return type is T: IntConstruct).
+        if (value_type_hint && value_type_hint->kind == TypeKind::Infer) {
             value_type_hint = nullptr;
         }
 
