@@ -60,7 +60,7 @@ struct RefHolder<T> {
     }
 
     func delete() {
-        delete this.data;
+        unsafe { delete this.data; }
     }
 }
 
@@ -92,7 +92,7 @@ struct Arr<T> {
     }
 
     func delete() {
-        delete this.data;
+        unsafe { delete this.data; }
     }
 
     func get(index: uint32) T {
@@ -129,7 +129,7 @@ struct GenericCaller<T: ops.Construct> {
 func main() {
     var box_stack = GenericBox<int>{};
     printf("box_stack.value={}\n", box_stack.value);
-    var box_heap: *GenericBox<int> = new GenericBox<int>{};
+    var box_heap = new GenericBox<int>{};
     printf("box_heap.value={}\n", box_heap.value);
     delete box_heap;
     var a = Arr<int>{};

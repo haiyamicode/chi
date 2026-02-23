@@ -1334,6 +1334,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::LNOT: {
             if (data.is_suffix) {
                 if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
+                    if (t->is_raw_pointer() && !scope.is_unsafe_block) {
+                        error(node, "raw pointer dereference requires unsafe block");
+                        return nullptr;
+                    }
                     if (scope.is_lhs && !ChiTypeStruct::is_mutable_pointer(t)) {
                         error(data.op1, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, format_type(t),
                               format_type(t));
@@ -1496,7 +1500,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::CastExpr: {
         auto &data = node->data.cast_expr;
         auto dest_type = resolve_value(data.dest_type, scope);
-        check_cast(node, resolve(data.expr, scope), dest_type);
+        auto from_type = resolve(data.expr, scope);
+        if (!scope.is_unsafe_block &&
+            (from_type->is_raw_pointer() || dest_type->is_raw_pointer())) {
+            error(node, "pointer cast requires unsafe block");
+            return nullptr;
+        }
+        check_cast(node, from_type, dest_type);
         return dest_type;
     }
     case NodeType::LiteralExpr: {
@@ -2795,6 +2805,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MoveRef) {
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type(expr_type, true));
+            }
+            if (expr_type->is_raw_pointer() && !scope.is_unsafe_block) {
+                error(node, "'delete' on raw pointer requires unsafe block");
+                return nullptr;
             }
             // delete sinks the variable and its current borrow leaves
             if (scope.parent_fn_node) {

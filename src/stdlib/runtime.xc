@@ -73,8 +73,10 @@ struct __CxEnumBase<T> {
 
     impl ops.Display {
         func display() string {
-            var s = this.__display_name!;
-            return string.format("{}", s);
+            unsafe {
+                var s = this.__display_name!;
+                return string.format("{}", s);
+            }
         }
     }
 
@@ -111,7 +113,7 @@ struct Shared<T> {
             var rc = this.data.ref_count - 1;
             this.data.ref_count = rc;
             if rc == 0 {
-                delete this.data;
+                unsafe { delete this.data; }
             }
         }
     }
@@ -154,29 +156,37 @@ struct Box<T: ops.AllowUnsized> {
     private _ptr: *T = null;
 
     func new(ptr: &move T) {
-        this._ptr = ptr as *T;
+        unsafe { this._ptr = ptr as *T; }
     }
 
     func from_ptr(ptr: *T) {
-        if this._ptr {
-            delete this._ptr;
+        unsafe {
+            if this._ptr {
+                delete this._ptr;
+            }
         }
         this._ptr = ptr;
     }
 
     func delete() {
-        if this._ptr {
-            delete this._ptr;
+        unsafe {
+            if this._ptr {
+                delete this._ptr;
+            }
         }
     }
 
     func as_ref() &T {
-        return this._ptr as &T;
+        unsafe {
+            return this._ptr as &T;
+        }
     }
 
     impl ops.CopyFrom<Box<T>> {
         func copy_from(source: &Box<T>) {
-            this._ptr = mem.copy_from<T>(source._ptr as &T) as *T;
+            unsafe {
+                this._ptr = mem.copy_from<T>(source._ptr as &T) as *T;
+            }
         }
     }
 
@@ -188,7 +198,9 @@ struct Box<T: ops.AllowUnsized> {
 
     impl ops.Display {
         func display() string {
-            return string.display(this._ptr!);
+            unsafe {
+                return string.display(this._ptr!);
+            }
         }
     }
 }
@@ -451,11 +463,10 @@ struct Array<T> {
     }
 
     func add(item: T) {
-        var ptr: *T = null;
         unsafe {
-            ptr = cx_array_add(this, sizeof T) as *T;
+            var ptr = cx_array_add(this, sizeof T) as *T;
+            ptr! = item;
         }
-        ptr! = item;
     }
 
     func clear() {
@@ -541,7 +552,7 @@ struct CString {
 
     mut func delete() {
         if this.data != null {
-            delete this.data;
+            unsafe { delete this.data; }
             this.data = null;
         }
     }

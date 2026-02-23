@@ -24,15 +24,17 @@ struct Foo {
     impl ops.CopyFrom<Foo> {
         mut func copy_from(b: &Foo) {
             this.new(string.format("{}_copy", b.id));
-            this.p! = b.p!;
-            printf("copied {}, p = {}\n", this.id, b.p!);
+            unsafe {
+                this.p! = b.p!;
+                printf("copied {}, p = {}\n", this.id, b.p!);
+            }
         }
     }
 }
 
 func return_local() Foo {
     var a = Foo{"local"};
-    a.p! = 42;
+    unsafe { a.p! = 42; }
     var b = a;
     b.id = "local_b";
     println("return_local() done");
@@ -47,11 +49,13 @@ func return_construct() Foo {
 func main() {
     println("=== Test 1: Return local variable ===");
     var foo = return_local();
-    printf("result: {}\n", foo.p!);
+    unsafe { printf("result: {}\n", foo.p!); }
     println("=== Test 2: RVO - return ConstructExpr ===");
     var bar = return_construct();
-    bar.p! = 99;
-    printf("result: {}\n", bar.p!);
+    unsafe {
+        bar.p! = 99;
+        printf("result: {}\n", bar.p!);
+    }
     println("done");
 }
 

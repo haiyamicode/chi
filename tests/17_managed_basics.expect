@@ -17,9 +17,9 @@ arr[0] = 10
 arr[1] = 20
 arr[2] = 30
 
-=== Pointers Test ===
+=== References Test ===
 value = 100
-*ptr = 100
+*ref = 100
 After modification: value = 200
 
 === Enums Test ===

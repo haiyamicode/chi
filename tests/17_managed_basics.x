@@ -64,16 +64,16 @@ func test_arrays() {
     }
 }
 
-func test_pointers() {
-    println("\n=== Pointers Test ===");
+func test_references() {
+    println("\n=== References Test ===");
 
     var value: int = 100;
-    var ptr: *int = &value;
+    var ref: &mut int = &mut value;
 
     printf("value = {}\n", value);
-    printf("*ptr = {}\n", ptr!);
+    printf("*ref = {}\n", ref!);
 
-    ptr! = 200;
+    ref! = 200;
     printf("After modification: value = {}\n", value);
 }
 
@@ -145,7 +145,7 @@ func main() {
     test_basic_types();
     test_structs();
     test_arrays();
-    test_pointers();
+    test_references();
     test_enums();
     test_control_flow();
     test_functions();
