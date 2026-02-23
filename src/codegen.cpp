@@ -1489,27 +1489,25 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         if (stmt->type == ast::NodeType::ReturnStmt) {
             // For return in async function, resolve the result promise
             auto &data = stmt->data.return_stmt;
+            // Compile return value, or synthesize Unit{} for bare `return;`
+            llvm::Value *ret_value;
             if (data.expr) {
-                auto ret_value = compile_expr(cont_fn, data.expr);
-
-                // Get the Promise<T> type and look up the resolve() method
-                // Use variant lookup to get the specialized Promise<T>.resolve() method
-                auto promise_struct = get_resolver()->resolve_struct_type(ctx.promise_type);
-                auto resolve_member = promise_struct->find_member("resolve");
-                assert(resolve_member && "Promise.resolve() method not found");
-                std::optional<TypeId> variant_type_id = std::nullopt;
-                if (ctx.promise_type->kind == TypeKind::Subtype && !ctx.promise_type->is_placeholder) {
-                    variant_type_id = ctx.promise_type->id;
-                }
-                auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
-                auto resolve_method = get_fn(resolve_method_node);
-
-                // Call promise.resolve(value): takes this (Promise*) and value (T)
-                builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
+                ret_value = compile_expr(cont_fn, data.expr);
             } else {
-                // void return - Promise<void> not yet supported, skip for now
-                // TODO: Handle Promise<void> when needed
+                auto inner_type = get_resolver()->get_promise_value_type(ctx.promise_type);
+                ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
             }
+
+            auto promise_struct = get_resolver()->resolve_struct_type(ctx.promise_type);
+            std::optional<TypeId> variant_type_id = std::nullopt;
+            if (ctx.promise_type->kind == TypeKind::Subtype && !ctx.promise_type->is_placeholder) {
+                variant_type_id = ctx.promise_type->id;
+            }
+            auto resolve_member = promise_struct->find_member("resolve");
+            assert(resolve_member && "Promise.resolve() method not found");
+            auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
+            auto resolve_method = get_fn(resolve_method_node);
+            builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
         } else if (contains_await(stmt)) {
             // This segment has another await - chain to next continuation
             auto await_expr = find_await_expr(stmt);
@@ -4128,7 +4126,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         assert(fn->return_label);
         auto scope = fn->get_scope();
 
-        if (data.expr) {
+        {
             // Check if this is an async function returning T (wrapped to Promise<T>)
             bool is_async = fn->node && fn->node->type == ast::NodeType::FnDef &&
                             fn->node->data.fn_def.is_async();
@@ -4136,21 +4134,15 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
             if (is_async && get_resolver()->is_promise_type(return_type)) {
                 // For async functions, wrap the return value in a resolved Promise
-                // 1. Call Promise.new() to initialize the promise at fn->return_value
-                // 2. Compile the expression value
-                // 3. Call Promise.resolve(value) to resolve with the value
-
                 auto promise_struct = get_resolver()->resolve_struct_type(return_type);
                 auto return_type_l = compile_type(return_type);
 
                 // Zero-initialize return_value before calling Promise.new()
-                // This ensures Shared.data is null, not garbage
                 auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(return_type_l);
                 llvm_builder.CreateMemSet(fn->return_value,
                     llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
                     size, {});
 
-                // Use variant lookup to get specialized Promise<T> methods
                 std::optional<TypeId> variant_type_id = std::nullopt;
                 if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
                     variant_type_id = return_type->id;
@@ -4163,9 +4155,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto new_method = get_fn(new_method_node);
                 llvm_builder.CreateCall(new_method->llvm_fn, {fn->return_value});
 
-                // Compile the expression value (using inner type T, not Promise<T>)
+                // Compile return value, or synthesize Unit{} for bare `return;`
                 auto inner_type = get_resolver()->get_promise_value_type(return_type);
-                auto ret_value = compile_assignment_to_type(fn, data.expr, inner_type);
+                llvm::Value *ret_value;
+                if (data.expr) {
+                    ret_value = compile_assignment_to_type(fn, data.expr, inner_type);
+                } else {
+                    ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
+                }
 
                 // Call Promise.resolve(value)
                 auto resolve_member = promise_struct->find_member("resolve");
@@ -4173,7 +4170,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
                 auto resolve_method = get_fn(resolve_method_node);
                 llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
-            } else {
+            } else if (data.expr) {
                 auto ret_type = get_chitype(stmt);
                 compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
             }

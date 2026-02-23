@@ -1575,7 +1575,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         if (expected_type) {
-            check_assignment(data.expr, expr_type, expected_type);
+            // Bare `return;` in async func returning Promise<Unit> is valid
+            bool is_void_unit_return = !data.expr && expected_type == m_ctx->rt_unit_type;
+            if (!is_void_unit_return) {
+                check_assignment(data.expr, expr_type, expected_type);
+            }
         }
 
         // Track move in return expression (e.g. return move b)
