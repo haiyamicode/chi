@@ -22,7 +22,7 @@ using namespace cx;
 using ast::NodeType;
 
 // Check if a name matches a pattern (supports * wildcard)
-static bool matches_pattern(const std::string& name, const std::string& pattern) {
+static bool matches_pattern(const std::string &name, const std::string &pattern) {
     size_t name_idx = 0;
     size_t pattern_idx = 0;
     size_t star_idx = std::string::npos;
@@ -444,8 +444,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Bool:
         // Allow implicit conversion from any int type to bool
         return from_type->is_int_like() || from_type->kind == TypeKind::Optional ||
-               from_type->kind == TypeKind::Result ||
-               from_type->is_pointer_like() || (is_explicit && from_type->kind == TypeKind::Char);
+               from_type->kind == TypeKind::Result || from_type->is_pointer_like() ||
+               (is_explicit && from_type->kind == TypeKind::Char);
     case TypeKind::Optional: {
         // Allow null pointer, same optional type, or implicit T -> ?T wrap
         if (from_type->kind == TypeKind::Pointer) {
@@ -483,7 +483,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
 }
 
 ChiType *Resolver::to_value_type(ChiType *type) {
-    if (!type) return nullptr;
+    if (!type)
+        return nullptr;
     if (type->kind == TypeKind::TypeSymbol) {
         return type->data.type_symbol.giving_type;
     }
@@ -492,16 +493,19 @@ ChiType *Resolver::to_value_type(ChiType *type) {
 
 // Does lifetime 'a outlive 'b? True if a == b or 'a: 'b was declared (transitively).
 static bool lifetime_outlives(ChiLifetime *a, ChiLifetime *b) {
-    if (a == b) return true;
+    if (a == b)
+        return true;
     for (size_t i = 0; i < a->outlives.len; i++) {
-        if (lifetime_outlives(a->outlives[i], b)) return true;
+        if (lifetime_outlives(a->outlives[i], b))
+            return true;
     }
     return false;
 }
 
 ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     auto value_type = to_value_type(resolve(node, scope));
-    if (!value_type) return nullptr;
+    if (!value_type)
+        return nullptr;
     if (ChiTypeStruct::is_generic(value_type)) {
         // Check if all type params have defaults — if so, instantiate with defaults
         auto &struct_ = value_type->data.struct_;
@@ -674,11 +678,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 for (int i = 0; i < data.captures.len; i++) {
                     auto &cap = data.captures[i];
                     auto name = fmt::format("capture_{}", i);
-                    auto field_type = (cap.mode == ast::CaptureMode::ByValue)
-                        ? cap.decl->resolved_type
-                        : get_pointer_type(cap.decl->resolved_type, TypeKind::Reference);
-                    bstruct_data.add_member(
-                        get_allocator(), cap.decl->name, get_dummy_var(name), field_type);
+                    auto field_type =
+                        (cap.mode == ast::CaptureMode::ByValue)
+                            ? cap.decl->resolved_type
+                            : get_pointer_type(cap.decl->resolved_type, TypeKind::Reference);
+                    bstruct_data.add_member(get_allocator(), cap.decl->name, get_dummy_var(name),
+                                            field_type);
                 }
                 // Mark bind struct as placeholder if any field has placeholder types
                 for (auto field : bstruct_data.fields) {
@@ -705,7 +710,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             // Use __CxLambda directly (no longer generic)
             auto rt_lambda = m_ctx->rt_lambda_type;
-            if (rt_lambda && rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
+            if (rt_lambda &&
+                rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
                 proto->data.fn_lambda.internal = to_value_type(rt_lambda);
             } else {
                 // Defer if __CxLambda not resolved yet
@@ -798,7 +804,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (expected_return && expected_return->kind == TypeKind::Placeholder) {
                 auto infer_type = create_type(TypeKind::Infer);
                 infer_type->data.infer.placeholder = expected_return;
-                infer_type->is_placeholder = true;  // Mark as placeholder until inferred
+                infer_type->is_placeholder = true; // Mark as placeholder until inferred
                 return_type = infer_type;
             } else {
                 return_type = expected_return;
@@ -835,7 +841,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (expected_fn && (size_t)i < expected_fn->params.len) {
                 expected_param_type = expected_fn->params[i];
             }
-            auto param_scope = expected_param_type ? fn_scope.set_value_type(expected_param_type) : fn_scope;
+            auto param_scope =
+                expected_param_type ? fn_scope.set_value_type(expected_param_type) : fn_scope;
             auto param_type = resolve_value(param, param_scope);
             if (pdata.is_variadic) {
                 param_type = get_array_type(param_type);
@@ -843,8 +850,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 is_variadic = true;
             }
             // Each ref param gets its own distinct lifetime.
-            if (param_type && param_type->is_reference() && param_type->data.pointer.lifetimes.len == 0) {
-                auto *lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
+            if (param_type && param_type->is_reference() &&
+                param_type->data.pointer.lifetimes.len == 0) {
+                auto *lt =
+                    new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
                 all_ref_lifetimes.add(lt);
                 auto *fresh = create_pointer_type(param_type->data.pointer.elem, param_type->kind);
                 fresh->data.pointer.lifetimes.add(lt);
@@ -854,7 +863,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 // Borrowing value params get lifetimes so borrows flow through calls.
                 // For lifetime-bounded placeholders (T: 'a), use the declared lifetime.
                 ChiLifetime *lt;
-                if (param_type->kind == TypeKind::Placeholder && param_type->data.placeholder.lifetime_bound) {
+                if (param_type->kind == TypeKind::Placeholder &&
+                    param_type->data.placeholder.lifetime_bound) {
                     lt = param_type->data.placeholder.lifetime_bound;
                 } else {
                     lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
@@ -866,12 +876,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         // Return type lifetime elision: return borrows from min(all ref params)
-        if (return_type && return_type->is_reference() && return_type->data.pointer.lifetimes.len == 0) {
+        if (return_type && return_type->is_reference() &&
+            return_type->data.pointer.lifetimes.len == 0) {
             // Include 'this for methods
             if (container) {
                 auto &st = container->data.struct_;
                 if (!st.this_lifetime) {
-                    st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, container};
+                    st.this_lifetime =
+                        new ChiLifetime{"this", LifetimeKind::This, nullptr, container};
                 }
                 all_ref_lifetimes.add(st.this_lifetime);
             }
@@ -887,7 +899,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         all_ref_lifetimes[i]->outlives.add(elided_lt);
                     }
                 }
-                auto *fresh = create_pointer_type(return_type->data.pointer.elem, return_type->kind);
+                auto *fresh =
+                    create_pointer_type(return_type->data.pointer.elem, return_type->kind);
                 fresh->data.pointer.lifetimes.add(elided_lt);
                 return_type = fresh;
             }
@@ -936,7 +949,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Attach 'this lifetime so satisfies_lifetime_constraint can check it
             auto &st = scope.parent_struct->data.struct_;
             if (!st.this_lifetime) {
-                st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, scope.parent_struct};
+                st.this_lifetime =
+                    new ChiLifetime{"this", LifetimeKind::This, nullptr, scope.parent_struct};
             }
             type->data.pointer.lifetimes.add(st.this_lifetime);
             return type;
@@ -957,9 +971,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 // In struct context, directly resolve to the struct type
                 assert(scope.parent_type_symbol);
                 if (scope.parent_struct->data.struct_.is_generic()) {
-                    // For generic structs, This resolves to e.g. Wrapper<T> (a Subtype with placeholder args)
-                    // so that placeholder substitution produces the correct concrete type.
-                    // type_params contains TypeSymbols — unwrap to get the underlying Placeholders.
+                    // For generic structs, This resolves to e.g. Wrapper<T> (a Subtype with
+                    // placeholder args) so that placeholder substitution produces the correct
+                    // concrete type. type_params contains TypeSymbols — unwrap to get the
+                    // underlying Placeholders.
                     auto &tparams = scope.parent_struct->data.struct_.type_params;
                     TypeList placeholders;
                     for (auto tp : tparams) {
@@ -1050,8 +1065,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (target && target->token) {
                     notes.add({is_delete ? "deleted here" : "moved here", target->token->pos});
                 }
-                error_with_notes(node, std::move(notes),
-                                 "'{}' used after {}", data.decl->name,
+                error_with_notes(node, std::move(notes), "'{}' used after {}", data.decl->name,
                                  is_delete ? "delete" : "move");
             }
         }
@@ -1073,6 +1087,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.sigil_type;
         auto type = resolve_value(data.type, scope);
         auto kind = get_sigil_type_kind(data.sigil);
+        // Raw pointer types are forbidden in managed mode
+        if (kind == TypeKind::Pointer &&
+            has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
+            error(node, "raw pointer types are not allowed in managed mode, please use reference "
+                        "(&) instead");
+            return create_type(TypeKind::Unknown);
+        }
         ChiType *final_type;
         if (!data.lifetime.empty()) {
             // Lifetime-annotated ref: create fresh type (not cached) with resolved lifetime
@@ -1081,7 +1102,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto *struct_type = scope.parent_struct;
                 auto &st = struct_type->data.struct_;
                 if (!st.this_lifetime) {
-                    st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
+                    st.this_lifetime =
+                        new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
                 }
                 final_type->data.pointer.lifetimes.add(st.this_lifetime);
             } else if (scope.fn_lifetime_params) {
@@ -1138,13 +1160,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
             // Escape analysis: track borrow sources for borrowing types
-            if (scope.parent_fn_node && !scope.is_unsafe_block &&
-                expr_type && is_borrowing_type(expr_type)) {
+            if (scope.parent_fn_node && !scope.is_unsafe_block && expr_type &&
+                is_borrowing_type(expr_type)) {
                 add_borrow_source_edges(scope.parent_fn_node->data.fn_def, data.expr, node);
             }
             // Move tracking: &move x sinks source into this variable
-            track_move_sink(scope.parent_fn_node, data.expr, expr_type,
-                            node, var_type ? var_type : expr_type);
+            track_move_sink(scope.parent_fn_node, data.expr, expr_type, node,
+                            var_type ? var_type : expr_type);
             if (var_type) {
                 if (expr_type->kind == TypeKind::Undefined) {
                     return var_type;
@@ -1169,13 +1191,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.kind == ast::VarKind::Constant) {
             data.resolved_value = resolve_constant_value(data.expr);
             if (!data.resolved_value.has_value() && !scope.parent_fn_node) {
-                error(node, "const '{}' cannot be evaluated at compile time; use 'let' for runtime-initialized values", node->name);
+                error(node,
+                      "const '{}' cannot be evaluated at compile time; use 'let' for "
+                      "runtime-initialized values",
+                      node->name);
             }
             return var_type;
         }
         // Global mutable variables are not supported (struct fields and let bindings are fine)
         if (!scope.parent_fn_node && !data.is_field && data.kind == ast::VarKind::Mutable) {
-            error(node, "global variables are not supported; use 'let' or 'const' for module-level declarations");
+            error(node, "global variables are not supported; use 'let' or 'const' for module-level "
+                        "declarations");
             return var_type;
         }
         // Assign declaration order for local variables (used for intra-function lifetime ordering)
@@ -1183,7 +1209,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             node->decl_order = scope.parent_fn_def()->next_decl_order++;
         }
         // Add to cleanup_vars on the current block
-        if (scope.parent_fn_node && scope.block && should_destroy(node, var_type) && !node->escape.is_capture()) {
+        if (scope.parent_fn_node && scope.block && should_destroy(node, var_type) &&
+            !node->escape.is_capture()) {
             scope.block->cleanup_vars.add(node);
             scope.parent_fn_def()->has_cleanup = true;
         }
@@ -1367,7 +1394,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto outlet = scope.move_outlet;
                     if (outlet->type != NodeType::VarDecl) {
                         auto resolved = find_root_decl(outlet);
-                        if (resolved) outlet = resolved;
+                        if (resolved)
+                            outlet = resolved;
                     }
                     scope.parent_fn_node->data.fn_def.add_ref_edge(outlet, ref_target);
                 }
@@ -1414,7 +1442,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     fn_def.add_sink_edge(src_decl, node);
                 }
             }
-            return t;  // move produces the value type, not a reference
+            return t; // move produces the value type, not a reference
         }
         default:
             unreachable();
@@ -1479,7 +1507,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type(catch_type));
         }
         // try f() → Result<T, &Error>
-        return get_result_type(expr_type, get_pointer_type(m_ctx->rt_error_type, TypeKind::Reference));
+        return get_result_type(expr_type,
+                               get_pointer_type(m_ctx->rt_error_type, TypeKind::Reference));
     }
     case NodeType::AwaitExpr: {
         auto &data = node->data.await_expr;
@@ -1598,8 +1627,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             track_move_sink(scope.parent_fn_node, data.expr, expr_type, node, return_type);
         }
 
-        if (data.expr && scope.parent_fn_node && expr_type &&
-            is_borrowing_type(expr_type) && !scope.is_unsafe_block) {
+        if (data.expr && scope.parent_fn_node && expr_type && is_borrowing_type(expr_type) &&
+            !scope.is_unsafe_block) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
             bool is_ref = expr_type->is_reference();
             add_borrow_source_edges(fn_def, data.expr, node, is_ref);
@@ -1613,7 +1642,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto expr_type = resolve(data.expr, scope);
         if (expr_type) {
             // The thrown value must be a reference to a struct implementing Error
-            if (expr_type->kind != TypeKind::Reference && expr_type->kind != TypeKind::MutRef && expr_type->kind != TypeKind::MoveRef) {
+            if (expr_type->kind != TypeKind::Reference && expr_type->kind != TypeKind::MutRef &&
+                expr_type->kind != TypeKind::MoveRef) {
                 error(data.expr, errors::THROW_NOT_REFERENCE);
             } else {
                 auto elem = expr_type->get_elem();
@@ -1704,7 +1734,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             case TypeKind::String: {
                 // Handle builtin string type's static members via __CxString
                 if (m_ctx->rt_string_type) {
-                    auto member = m_ctx->rt_string_type->data.struct_.find_static_member(field_name);
+                    auto member =
+                        m_ctx->rt_string_type->data.struct_.find_static_member(field_name);
                     if (!member) {
                         error(node, errors::MEMBER_NOT_FOUND, field_name, "string");
                         return nullptr;
@@ -1717,7 +1748,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
             default:
-                error(node, errors::MEMBER_NOT_FOUND, field_name, format_type(underlying_type, true));
+                error(node, errors::MEMBER_NOT_FOUND, field_name,
+                      format_type(underlying_type, true));
                 return nullptr;
             }
         }
@@ -1727,9 +1759,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (expr_type->is_pointer_like()) {
             check_type = expr_type->get_elem();
         }
-        if (check_type->kind == TypeKind::Placeholder && check_type->data.placeholder.traits.len > 0) {
+        if (check_type->kind == TypeKind::Placeholder &&
+            check_type->data.placeholder.traits.len > 0) {
             for (auto trait_type : check_type->data.placeholder.traits) {
-                if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
+                if (trait_type->kind == TypeKind::Struct &&
+                    ChiTypeStruct::is_interface(trait_type)) {
                     auto trait_struct = &trait_type->data.struct_;
                     auto member = trait_struct->find_member(field_name);
                     if (member && member->is_method()) {
@@ -1888,8 +1922,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (!data.is_new) {
                     // Empty construct on placeholder (= {}) requires a constructor
                     // interface bound whose new() has zero params
-                    if (data.items.len == 0 &&
-                        result_type->kind == TypeKind::Placeholder) {
+                    if (data.items.len == 0 && result_type->kind == TypeKind::Placeholder) {
                         bool has_construct_bound = false;
                         for (auto t : result_type->data.placeholder.traits) {
                             if (!t || t->kind != TypeKind::Struct ||
@@ -1897,10 +1930,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                 continue;
                             auto *new_member = t->data.struct_.find_member("new");
                             if (new_member && new_member->node &&
-                                new_member->node->data.fn_def.fn_kind ==
-                                    ast::FnKind::Constructor &&
-                                new_member->node->data.fn_def.fn_proto->data.fn_proto.params
-                                        .len == 0) {
+                                new_member->node->data.fn_def.fn_kind == ast::FnKind::Constructor &&
+                                new_member->node->data.fn_def.fn_proto->data.fn_proto.params.len ==
+                                    0) {
                                 has_construct_bound = true;
                                 break;
                             }
@@ -1936,8 +1968,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 constructor->node->type == NodeType::FnDef) {
                 auto &fn_def = scope.parent_fn_node->data.fn_def;
                 auto *ctor_proto = &constructor->node->data.fn_def.fn_proto->data.fn_proto;
-                for (size_t i = 0; i < ctor_proto->resolved_param_lifetimes.len &&
-                                   i < data.items.len; i++) {
+                for (size_t i = 0;
+                     i < ctor_proto->resolved_param_lifetimes.len && i < data.items.len; i++) {
                     if (ctor_proto->resolved_param_lifetimes[i]) {
                         add_borrow_source_edges(fn_def, data.items[i], node, true);
                     }
@@ -1951,8 +1983,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (!t || t->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(t))
                     continue;
                 auto *nm = t->data.struct_.find_member("new");
-                if (nm && nm->node &&
-                    nm->node->data.fn_def.fn_kind == ast::FnKind::Constructor) {
+                if (nm && nm->node && nm->node->data.fn_def.fn_kind == ast::FnKind::Constructor) {
                     iface_new = nm;
                     break;
                 }
@@ -1996,8 +2027,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.resolved_field = field_member;
             check_assignment(data.value, init_value_type, field_member->resolved_type);
 
-            if (scope.parent_fn_node && !scope.is_unsafe_block &&
-                init_value_type && is_borrowing_type(init_value_type)) {
+            if (scope.parent_fn_node && !scope.is_unsafe_block && init_value_type &&
+                is_borrowing_type(init_value_type)) {
                 auto outlet = scope.move_outlet ? scope.move_outlet : node;
                 auto &fn_def = scope.parent_fn_node->data.fn_def;
                 fn_def.add_ref_edge(outlet, field_init);
@@ -2031,8 +2062,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Unsafe functions cannot be called in safe mode (unless inside an unsafe block)
         if (fn_decl && fn_decl->type == NodeType::FnDef &&
             fn_decl->data.fn_def.decl_spec->is_unsafe() &&
-            has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) &&
-            !scope.is_unsafe_block) {
+            has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) && !scope.is_unsafe_block) {
             error(node, errors::UNSAFE_CALL_IN_SAFE_MODE, fn_decl->name);
         }
 
@@ -2040,9 +2070,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Annotation-driven edge creation: for method calls where a param has
         // 'this lifetime, create edge from receiver to that arg in the caller's graph.
-        if (scope.parent_fn_node &&
-            data.fn_ref_expr->type == NodeType::DotExpr &&
-            fn_decl && fn_decl->type == NodeType::FnDef) {
+        if (scope.parent_fn_node && data.fn_ref_expr->type == NodeType::DotExpr && fn_decl &&
+            fn_decl->type == NodeType::FnDef) {
             auto *callee_proto = fn_decl->data.fn_def.fn_proto;
             if (callee_proto) {
                 auto &callee_params = callee_proto->data.fn_proto.params;
@@ -2052,8 +2081,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     for (size_t i = 0; i < callee_params.len && i < data.args.len; i++) {
                         auto *pt = callee_params[i]->resolved_type;
-                        if (pt && pt->is_reference() &&
-                            pt->data.pointer.lifetimes.len > 0) {
+                        if (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0) {
                             auto *arg_decl = find_root_decl(data.args[i]);
                             if (arg_decl) {
                                 fn_def.add_ref_edge(receiver_decl, arg_decl);
@@ -2112,6 +2140,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.block;
         auto child_scope = scope.set_block(&data);
         if (data.is_unsafe) {
+            if (has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
+                error(node, "'unsafe' blocks are not allowed in managed mode");
+                return get_system_types()->void_;
+            }
             child_scope = child_scope.set_is_unsafe_block(true);
         }
         for (auto stmt : data.statements) {
@@ -2331,18 +2363,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             for (auto member : data.members) {
-                if (member->type != NodeType::ImplementBlock) continue;
+                if (member->type != NodeType::ImplementBlock)
+                    continue;
                 auto &impl_data = member->data.implement_block;
 
                 // Skip where-blocks (handled below)
-                if (!impl_data.interface_type) continue;
+                if (!impl_data.interface_type)
+                    continue;
 
                 auto impl_trait = resolve_value(impl_data.interface_type, scope);
-                if (!impl_trait) continue;
+                if (!impl_trait)
+                    continue;
                 auto trait_struct = resolve_struct_type(impl_trait);
                 if (!trait_struct || !ChiTypeStruct::is_interface(trait_struct)) {
-                    error(impl_data.interface_type, errors::NON_INTERFACE_IMPL_TYPE, format_type(impl_trait));
-                    if (!trait_struct) continue;
+                    error(impl_data.interface_type, errors::NON_INTERFACE_IMPL_TYPE,
+                          format_type(impl_trait));
+                    if (!trait_struct)
+                        continue;
                 }
 
                 resolve_vtable(impl_trait, struct_type, impl_data.interface_type);
@@ -2363,9 +2400,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             // Resolve where-blocks: tag members with where conditions
             for (auto member : data.members) {
-                if (member->type != NodeType::ImplementBlock) continue;
+                if (member->type != NodeType::ImplementBlock)
+                    continue;
                 auto &impl_data = member->data.implement_block;
-                if (impl_data.interface_type || impl_data.where_clauses.len == 0) continue;
+                if (impl_data.interface_type || impl_data.where_clauses.len == 0)
+                    continue;
 
                 auto *cond = get_allocator()->create_where_condition();
 
@@ -2385,16 +2424,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
 
                     auto trait_type = resolve_value(clause.bound_type, scope);
-                    if (!trait_type) continue;
+                    if (!trait_type)
+                        continue;
 
                     cond->bounds.add({param_index, trait_type});
                 }
 
                 for (auto impl_member : impl_data.members) {
                     auto *sm = struct_->find_member(impl_member->name);
-                    if (sm) sm->where_condition = cond;
+                    if (sm)
+                        sm->where_condition = cond;
                     auto *ssm = struct_->find_static_member(impl_member->name);
-                    if (ssm) ssm->where_condition = cond;
+                    if (ssm)
+                        ssm->where_condition = cond;
                 }
             }
 
@@ -2407,10 +2449,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         } else {
             // fourth pass - resolve method bodies
             auto resolve_fn_body = [&](ast::Node *fn_member) {
-                if (fn_member->type != NodeType::FnDef) return;
+                if (fn_member->type != NodeType::FnDef)
+                    return;
                 auto fn_type = node_get_type(fn_member);
                 auto fn_scope = struct_scope.set_parent_fn(fn_type).set_parent_fn_node(fn_member);
-                if (fn_member->data.fn_def.decl_spec && fn_member->data.fn_def.decl_spec->is_unsafe()) {
+                if (fn_member->data.fn_def.decl_spec &&
+                    fn_member->data.fn_def.decl_spec->is_unsafe()) {
                     fn_scope = fn_scope.set_is_unsafe_block(true);
                 }
                 if (auto body = fn_member->data.fn_def.body) {
@@ -2432,7 +2476,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                 auto ph = to_value_type(tp);
                                 if (ph->kind == TypeKind::Placeholder && ph->name == param_name) {
                                     saved_traits.add({ph, ph->data.placeholder.traits});
-                                    ph->data.placeholder.traits.add(resolve_value(clause.bound_type, scope));
+                                    ph->data.placeholder.traits.add(
+                                        resolve_value(clause.bound_type, scope));
                                     break;
                                 }
                             }
@@ -2532,9 +2577,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Validate trait bounds on type arguments
         for (size_t i = 0; i < args.len && i < params.len; i++) {
             auto param_type = to_value_type(params[i]);
-            if (!param_type || param_type->data.placeholder.traits.len == 0) continue;
+            if (!param_type || param_type->data.placeholder.traits.len == 0)
+                continue;
             auto type_arg = args[i];
-            if (!type_arg || type_arg->is_placeholder) continue;
+            if (!type_arg || type_arg->is_placeholder)
+                continue;
             for (auto trait : param_type->data.placeholder.traits) {
                 if (!check_trait_bound(type_arg, trait)) {
                     error(node, "Type '{}' does not satisfy trait bound '{}'",
@@ -2676,8 +2723,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (data.condition->type == NodeType::BinOpExpr) {
                     auto &cond_data = data.condition->data.bin_op_expr;
                     auto op = cond_data.op_type;
-                    if (op == TokenType::LT || op == TokenType::LE ||
-                        op == TokenType::GT || op == TokenType::GE) {
+                    if (op == TokenType::LT || op == TokenType::LE || op == TokenType::GT ||
+                        op == TokenType::GE) {
                         // Check if op1 is the loop variable
                         if (cond_data.op1->type == NodeType::Identifier &&
                             cond_data.op1->name == data.init->name) {
@@ -2757,8 +2804,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             for (auto t : phty->data.placeholder.traits) {
                 if (t && t->kind == TypeKind::Struct && t->data.struct_.node) {
                     auto sym = resolve_intrinsic_symbol(t->data.struct_.node);
-                    if (sym == IntrinsicSymbol::AllowUnsized) has_allow_unsized = true;
-                    if (sym == IntrinsicSymbol::Sized) has_sized = true;
+                    if (sym == IntrinsicSymbol::AllowUnsized)
+                        has_allow_unsized = true;
+                    if (sym == IntrinsicSymbol::Sized)
+                        has_sized = true;
                 }
             }
             if (has_allow_unsized) {
@@ -2766,7 +2815,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 array<ChiType *> filtered;
                 for (auto t : phty->data.placeholder.traits) {
                     if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
-                        resolve_intrinsic_symbol(t->data.struct_.node) == IntrinsicSymbol::AllowUnsized)
+                        resolve_intrinsic_symbol(t->data.struct_.node) ==
+                            IntrinsicSymbol::AllowUnsized)
                         continue;
                     filtered.add(t);
                 }
@@ -2802,6 +2852,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.prefix_expr;
         switch (data.prefix->type) {
         case TokenType::KW_DELETE: {
+            if (has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
+                error(node, "'delete' is not allowed in managed mode");
+                return nullptr;
+            }
             auto expr_type = resolve(data.expr, scope);
             if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MoveRef) {
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
@@ -2843,7 +2897,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.extern_decl;
         if (!node->resolved_type) {
             node->resolved_type = get_system_types()->void_;
-            auto* ctx = static_cast<CompilationContext*>(m_ctx->allocator);
+            auto *ctx = static_cast<CompilationContext *>(m_ctx->allocator);
 
             // Get include directories from package config
             std::vector<std::string> include_dirs;
@@ -2852,8 +2906,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 include_dirs = scope.module->package->config->c_interop->include_directories;
             }
 
-            // Helper to process C header imports/exports - extracts symbols and resolves header module
-            auto process_c_header_symbols = [&](std::string header_path, array<ast::Node*> symbols) {
+            // Helper to process C header imports/exports - extracts symbols and resolves header
+            // module
+            auto process_c_header_symbols = [&](std::string header_path,
+                                                array<ast::Node *> symbols) {
                 // Check if this is a C header (ends with .h)
                 if (header_path.size() > 2 && header_path.substr(header_path.size() - 2) == ".h") {
                     // Extract symbol patterns
@@ -2863,7 +2919,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
 
                     bool newly_created = false;
-                    auto* header_module = import_c_header_as_module(
+                    auto *header_module = import_c_header_as_module(
                         ctx, header_path, symbol_patterns, include_dirs, &newly_created);
 
                     // Always resolve - newly added symbols need their global_id set
@@ -2906,8 +2962,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = is_export ? node->data.export_decl : node->data.import_decl;
 
         // Check if this is a virtual module (e.g., from C interop)
-        ast::Module* module = nullptr;
-        auto* comp_ctx = static_cast<CompilationContext*>(m_ctx->allocator);
+        ast::Module *module = nullptr;
+        auto *comp_ctx = static_cast<CompilationContext *>(m_ctx->allocator);
 
         // For "C" module, first try module-scoped lookup (e.g., "main.C")
         // This allows each module to have its own virtual "C" module
@@ -2935,7 +2991,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
 
-            auto target_package = m_ctx->allocator->get_or_create_package(path_info->package_id_path);
+            auto target_package =
+                m_ctx->allocator->get_or_create_package(path_info->package_id_path);
             auto path = path_info->entry_path;
             auto src = io::Buffer::from_file(path);
             module = m_ctx->allocator->process_source(target_package, &src, path);
@@ -3033,7 +3090,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::BindIdentifier: {
         // Add to cleanup_vars if this bind variable needs destruction (for-range by value)
         auto bind_type = scope.value_type;
-        if (scope.parent_fn_node && scope.block && should_destroy(node, bind_type) && !node->escape.is_capture()) {
+        if (scope.parent_fn_node && scope.block && should_destroy(node, bind_type) &&
+            !node->escape.is_capture()) {
             scope.block->cleanup_vars.add(node);
             scope.parent_fn_def()->has_cleanup = true;
         }
@@ -3048,7 +3106,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (symbol_name.find('*') != std::string::npos) {
             // Wildcard import: match pattern against all module exports
             bool found_any = false;
-            ast::Node* first_match = nullptr;
+            ast::Node *first_match = nullptr;
 
             for (auto export_item : module->exports) {
                 if (matches_pattern(export_item->name, symbol_name)) {
@@ -3096,7 +3154,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *ret_type = scope.value_type;
         for (auto scase : data.cases) {
             // Skip null case expressions
-            if (!scase) continue;
+            if (!scase)
+                continue;
 
             auto case_type = resolve(scase, scope);
 
@@ -3166,7 +3225,8 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
 }
 
 ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags) {
-    if (!node) return nullptr;
+    if (!node)
+        return nullptr;
     auto cached = node_get_type(node);
     if (cached) {
         return cached;
@@ -3185,8 +3245,7 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
 
 string Resolver::resolve_global_id(ast::Node *node) {
     // For extern "C" functions, use C linkage (no module prefix)
-    if (node->type == ast::NodeType::FnDef &&
-        node->data.fn_def.decl_spec &&
+    if (node->type == ast::NodeType::FnDef && node->data.fn_def.decl_spec &&
         node->data.fn_def.decl_spec->is_extern()) {
         return node->name;
     }
@@ -3400,14 +3459,12 @@ void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *t
 
     // Check for negative literal being assigned to unsigned type
     if (!is_explicit && to_type->kind == TypeKind::Int && to_type->data.int_.is_unsigned) {
-        if (value->type == ast::NodeType::LiteralExpr &&
-            value->token->type == TokenType::INT) {
+        if (value->type == ast::NodeType::LiteralExpr && value->token->type == TokenType::INT) {
             // Check if the literal is negative (preceded by unary minus)
             // Note: This is handled by UnaryOpExpr, not here
         } else if (value->type == ast::NodeType::UnaryOpExpr) {
             auto &unary = value->data.unary_op_expr;
-            if (unary.op_type == TokenType::SUB &&
-                unary.op1->type == ast::NodeType::LiteralExpr &&
+            if (unary.op_type == TokenType::SUB && unary.op1->type == ast::NodeType::LiteralExpr &&
                 unary.op1->token->type == TokenType::INT) {
                 error(value, "cannot convert negative literal to unsigned type {}",
                       format_type(to_type, true));
@@ -3425,7 +3482,8 @@ void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *t
                 return;
             }
         }
-        error(value, errors::CANNOT_CONVERT, format_type(from_type, true), format_type(to_type, true));
+        error(value, errors::CANNOT_CONVERT, format_type(from_type, true),
+              format_type(to_type, true));
     }
 }
 
@@ -3526,7 +3584,8 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         // Reference fields implicitly have 'this lifetime
         if (member->resolved_type && member->resolved_type->is_pointer_like()) {
             if (!struct_.this_lifetime) {
-                struct_.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
+                struct_.this_lifetime =
+                    new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
             }
         }
     } else if (node->type == NodeType::FnDef) {
@@ -3704,7 +3763,8 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
 }
 
 bool Resolver::is_borrowing_type(ChiType *type) {
-    if (!type) return false;
+    if (!type)
+        return false;
     switch (type->kind) {
     case TypeKind::Reference:
     case TypeKind::MutRef:
@@ -3714,8 +3774,7 @@ bool Resolver::is_borrowing_type(ChiType *type) {
     case TypeKind::Array:
         return is_borrowing_type(type->get_elem());
     case TypeKind::Result:
-        return is_borrowing_type(type->get_elem()) ||
-               is_borrowing_type(type->data.result.error);
+        return is_borrowing_type(type->get_elem()) || is_borrowing_type(type->data.result.error);
     case TypeKind::Subtype: {
         auto final_type = type->data.subtype.final_type;
         return final_type ? is_borrowing_type(final_type) : false;
@@ -3725,13 +3784,15 @@ bool Resolver::is_borrowing_type(ChiType *type) {
         // can hold a lambda with by-ref captures (type erasure hides the borrows)
         return true;
     case TypeKind::FnLambda: {
-        if (is_borrowing_type(type->data.fn_lambda.fn)) return true;
+        if (is_borrowing_type(type->data.fn_lambda.fn))
+            return true;
         // By-ref captures are stored as reference fields in the bind struct —
         // the lambda borrows from the captured variables' lifetimes
         auto *bs = type->data.fn_lambda.bind_struct;
         if (bs && bs->kind == TypeKind::Struct) {
             for (auto field : bs->data.struct_.fields) {
-                if (is_borrowing_type(field->resolved_type)) return true;
+                if (is_borrowing_type(field->resolved_type))
+                    return true;
             }
         }
         return false;
@@ -3742,12 +3803,14 @@ bool Resolver::is_borrowing_type(ChiType *type) {
             // CopyFrom handles the container's own data, but if any type parameter
             // is borrowing, the borrow propagates through copied elements
             for (auto tp : st.type_params) {
-                if (is_borrowing_type(tp)) return true;
+                if (is_borrowing_type(tp))
+                    return true;
             }
             return false;
         }
         for (auto field : st.fields) {
-            if (is_borrowing_type(field->resolved_type)) return true;
+            if (is_borrowing_type(field->resolved_type))
+                return true;
         }
         return false;
     }
@@ -3760,13 +3823,16 @@ bool Resolver::is_borrowing_type(ChiType *type) {
 
 // Check if a type needs destruction (has destructor or has fields that need destruction)
 bool Resolver::type_needs_destruction(ChiType *type) {
-    if (!type) return false;
+    if (!type)
+        return false;
 
     // Strings need destruction
-    if (type->kind == TypeKind::String) return true;
+    if (type->kind == TypeKind::String)
+        return true;
 
     // Interface types need vtable-based destruction
-    if (type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(type)) return true;
+    if (type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(type))
+        return true;
 
     // Lambdas may own type-erased captures that must be released.
     if (type->kind == TypeKind::FnLambda) {
@@ -3805,10 +3871,12 @@ bool Resolver::type_needs_destruction(ChiType *type) {
     }
 
     // Only structs can have destructors or fields needing destruction
-    if (type->kind != TypeKind::Struct) return false;
+    if (type->kind != TypeKind::Struct)
+        return false;
 
     // Has custom destructor
-    if (get_struct_member(type, "delete")) return true;
+    if (get_struct_member(type, "delete"))
+        return true;
 
     // Check if any field needs destruction
     auto &fields = type->data.struct_.fields;
@@ -3857,7 +3925,8 @@ template <typename PlaceholderHandler, typename RecursiveCallHandler>
 ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
                                           PlaceholderHandler handle_placeholder,
                                           RecursiveCallHandler make_recursive_call) {
-    if (!type) return nullptr;
+    if (!type)
+        return nullptr;
     switch (type->kind) {
     case TypeKind::Placeholder:
         return handle_placeholder(type, subs);
@@ -3905,8 +3974,8 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
             fn_type->data.fn.type_params.add(type_param);
         }
         fn_type->data.fn.is_variadic = data.is_variadic;
-        fn_type->data.fn.container_ref = data.container_ref
-            ? make_recursive_call(data.container_ref, subs) : nullptr;
+        fn_type->data.fn.container_ref =
+            data.container_ref ? make_recursive_call(data.container_ref, subs) : nullptr;
         fn_type->data.fn.is_extern = data.is_extern;
         fn_type->data.fn.is_static = data.is_static;
 
@@ -3950,7 +4019,8 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
             for (auto tp : data.type_params) {
                 auto subst = make_recursive_call(tp, subs);
                 subst_args.add(subst);
-                if (tp != subst) has_placeholder_param = true;
+                if (tp != subst)
+                    has_placeholder_param = true;
             }
             if (has_placeholder_param) {
                 // Find the base generic struct by looking up through subtypes
@@ -3974,7 +4044,8 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
 
         // For placeholder structs (e.g. lambda bind structs with generic fields),
         // create a new struct with substituted field types
-        if (!type->is_placeholder) return type;
+        if (!type->is_placeholder)
+            return type;
         auto new_struct = create_type(TypeKind::Struct);
         new_struct->display_name = type->display_name;
         auto &new_data = new_struct->data.struct_;
@@ -4011,13 +4082,15 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         // __CxLambda is not generic, so use it directly
         if (!internal) {
             auto rt_lambda = m_ctx->rt_lambda_type;
-            if (rt_lambda && rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
+            if (rt_lambda &&
+                rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
                 lambda_type->data.fn_lambda.internal = to_value_type(rt_lambda);
             }
         }
 
         // is_placeholder if fn is placeholder or internal couldn't be resolved
-        lambda_type->is_placeholder = (fn && fn->is_placeholder) || !lambda_type->data.fn_lambda.internal;
+        lambda_type->is_placeholder =
+            (fn && fn->is_placeholder) || !lambda_type->data.fn_lambda.internal;
         return lambda_type;
     }
 
@@ -4353,8 +4426,7 @@ bool Resolver::infer_from_return_type(ChiTypeFn *fn, ChiType *expected_type,
         }
     };
 
-    auto make_recursive_call = [this, fn, inferred_types](ChiType *param,
-                                                          ChiType *arg) -> bool {
+    auto make_recursive_call = [this, fn, inferred_types](ChiType *param, ChiType *arg) -> bool {
         return this->visit_type_recursive(
             param, arg,
             [fn, inferred_types](ChiType *placeholder, ChiType *concrete) -> bool {
@@ -4420,7 +4492,8 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
 }
 
 ChiType *Resolver::eval_struct_type(ChiType *type) {
-    if (!type) return nullptr;
+    if (!type)
+        return nullptr;
     auto sty = type;
     if (sty->kind == TypeKind::This) {
         sty = sty->get_elem();
@@ -4533,8 +4606,8 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
 }
 
 bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
-    if (a->kind == TypeKind::Array || b->kind == TypeKind::Array ||
-        a->kind == TypeKind::String || b->kind == TypeKind::String) {
+    if (a->kind == TypeKind::Array || b->kind == TypeKind::Array || a->kind == TypeKind::String ||
+        b->kind == TypeKind::String) {
         return b->kind == a->kind;
     }
     auto a_sty = resolve_struct_type(a);
@@ -4666,7 +4739,6 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
             auto arg_type = resolve(arg, arg_scope);
             arg_types.add(arg_type);
-
         }
 
         // If no explicit type args and no return type inference, try argument-based inference
@@ -4708,7 +4780,8 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 lookup_key = type_param->data.type_symbol.giving_type;
             }
 
-            if (lookup_key->kind != TypeKind::Placeholder) continue;
+            if (lookup_key->kind != TypeKind::Placeholder)
+                continue;
             auto type_arg = type_args[i];
 
             // In safe mode, reject borrowing types (references, structs with ref fields)
@@ -4723,8 +4796,8 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
 
             for (auto trait : lookup_key->data.placeholder.traits) {
                 if (!check_trait_bound(type_arg, trait)) {
-                    error(node, "Type '{}' does not satisfy trait bound '{}'", format_type(type_arg, true),
-                          format_type(trait, true));
+                    error(node, "Type '{}' does not satisfy trait bound '{}'",
+                          format_type(type_arg, true), format_type(trait, true));
                     return fn->return_type;
                 }
             }
@@ -4753,7 +4826,8 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             // Substitute Infer types in the argument's resolved_type so codegen sees concrete types
             // Check for FnLambda since it may contain Infer types even when is_placeholder is false
             if (arg_type->is_placeholder || arg_type->kind == TypeKind::FnLambda) {
-                args->at(i)->resolved_type = type_placeholders_sub_map(arg_type, &type_substitutions);
+                args->at(i)->resolved_type =
+                    type_placeholders_sub_map(arg_type, &type_substitutions);
             }
         }
 
@@ -4810,7 +4884,8 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     m_ctx->array_of[elem] = type;
     type->data.array.internal = nullptr;
     type->is_placeholder = elem->is_placeholder;
-    // Use to_string for element type since elem->global_id may be empty for anonymous types like lambdas
+    // Use to_string for element type since elem->global_id may be empty for anonymous types like
+    // lambdas
     auto elem_str = elem->global_id.empty() ? format_type(elem) : elem->global_id;
     type->global_id = fmt::format("runtime.Array<{}>", elem_str);
     return type;
@@ -4906,7 +4981,8 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
 
 // Helper to recursively finalize a single FnLambda type and its nested lambdas
 bool Resolver::finalize_lambda_type_recursive(ChiType *type) {
-    if (!type) return false;
+    if (!type)
+        return false;
 
     bool changed = false;
 
@@ -4915,7 +4991,8 @@ bool Resolver::finalize_lambda_type_recursive(ChiType *type) {
         // __CxLambda is not generic, so use it directly
         if (type->is_placeholder && !type->data.fn_lambda.internal) {
             auto rt_lambda = m_ctx->rt_lambda_type;
-            if (rt_lambda && rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
+            if (rt_lambda &&
+                rt_lambda->data.struct_.resolve_status >= ResolveStatus::MemberTypesKnown) {
                 type->data.fn_lambda.internal = to_value_type(rt_lambda);
                 type->is_placeholder = false;
                 changed = true;
@@ -4963,7 +5040,8 @@ void Resolver::finalize_placeholder_lambda_params(ChiType *fn_type) {
     }
 
     // If we finalized any placeholders, recompute the function's placeholder flag
-    // Don't just clear it - the function might still be placeholder due to type params or return type
+    // Don't just clear it - the function might still be placeholder due to type params or return
+    // type
     if (had_placeholder) {
         fn_type->is_placeholder = false;
         // Check if any function type parameter is still a placeholder
@@ -5026,7 +5104,8 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
             m_ctx->rt_empty_bind_type->data.struct_.kind = ContainerKind::Struct;
             m_ctx->rt_empty_bind_type->name = "EmptyLambdaBind";
             m_ctx->rt_empty_bind_type->global_id = "EmptyLambdaBind";
-            m_ctx->rt_empty_bind_type->data.struct_.resolve_status = ResolveStatus::MemberTypesKnown;
+            m_ctx->rt_empty_bind_type->data.struct_.resolve_status =
+                ResolveStatus::MemberTypesKnown;
         }
         bstruct = m_ctx->rt_empty_bind_type;
 
@@ -5438,7 +5517,8 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
             } else if (container->kind == TypeKind::Subtype) {
                 auto &container_data = container->data.subtype;
                 auto &container_base = container_data.generic->data.struct_;
-                for (size_t i = 0; i < container_base.type_params.len && i < container_data.args.len; i++) {
+                for (size_t i = 0;
+                     i < container_base.type_params.len && i < container_data.args.len; i++) {
                     subs[to_value_type(container_base.type_params[i])] = container_data.args[i];
                 }
             }
@@ -5508,7 +5588,8 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
         return data.final_type;
     }
 
-    if (!data.generic) return subtype;
+    if (!data.generic)
+        return subtype;
     auto &base = data.generic->data.struct_;
     auto sty = create_type(TypeKind::Struct);
     sty->name = format_type(subtype);
@@ -5521,8 +5602,10 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     auto base_symbol = resolve_intrinsic_symbol(base.node);
 
     for (auto member : base.members) {
-        if (!member->resolved_type) continue;
-        if (!check_where_condition(member->where_condition, &data)) continue;
+        if (!member->resolved_type)
+            continue;
+        if (!check_where_condition(member->where_condition, &data))
+            continue;
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
         if (member->is_method()) {
@@ -5569,8 +5652,10 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
 
     // Copy static members into the specialized struct
     for (auto member : base.static_members) {
-        if (!member->resolved_type) continue;
-        if (!check_where_condition(member->where_condition, &data)) continue;
+        if (!member->resolved_type)
+            continue;
+        if (!check_where_condition(member->where_condition, &data))
+            continue;
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
 
@@ -5645,7 +5730,8 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
     // Handle placeholder types with appropriate trait bounds
     if (!ok && type->kind == TypeKind::Placeholder && type->data.placeholder.traits.len > 0) {
         for (auto trait_type : type->data.placeholder.traits) {
-            if (ok) break;
+            if (ok)
+                break;
             if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
                 auto intrinsics = interface_get_intrinsics(trait_type);
                 IntrinsicSymbol required_symbol = get_operator_intrinsic_symbol(op_type);
@@ -5753,9 +5839,11 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
 
 void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     auto *fn_type_sym = fn_node->resolved_type;
-    if (!fn_type_sym) return;
+    if (!fn_type_sym)
+        return;
     auto *fn_type = to_value_type(fn_type_sym);
-    if (!fn_type || fn_type->kind != TypeKind::Fn) return;
+    if (!fn_type || fn_type->kind != TypeKind::Fn)
+        return;
     auto &fn = fn_type->data.fn;
 
     ast::FnProto *proto = nullptr;
@@ -5764,7 +5852,8 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     } else if (fn_node->type == NodeType::GeneratedFn) {
         proto = &fn_node->data.generated_fn.fn_proto->data.fn_proto;
     }
-    if (!proto) return;
+    if (!proto)
+        return;
 
     // Extract param lifetimes from resolved param types
     for (size_t i = 0; i < fn.params.len; i++) {
@@ -5780,7 +5869,8 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
             auto *param_node = (i < proto->params.len) ? proto->params[i] : nullptr;
             string name = param_node ? string(param_node->name) : "fn_param";
             lt = new ChiLifetime{name, LifetimeKind::Param, param_node, nullptr};
-            if (param_node) param_node->data.param_decl.borrow_lifetime = lt;
+            if (param_node)
+                param_node->data.param_decl.borrow_lifetime = lt;
         }
         proto->resolved_param_lifetimes.add(lt);
     }
@@ -5854,8 +5944,10 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
     } else {
         // Indirect call — extract lifetimes from the callee's function type
         auto *ct = to_value_type(call.fn_ref_expr->resolved_type);
-        if (ct && ct->kind == TypeKind::FnLambda) ct = to_value_type(ct->data.fn_lambda.fn);
-        if (!ct || ct->kind != TypeKind::Fn) return;
+        if (ct && ct->kind == TypeKind::FnLambda)
+            ct = to_value_type(ct->data.fn_lambda.fn);
+        if (!ct || ct->kind != TypeKind::Fn)
+            return;
         auto &fn = ct->data.fn;
         auto *ret = fn.return_type;
         if (ret && ret->is_reference() && ret->data.pointer.lifetimes.len > 0) {
@@ -5871,7 +5963,8 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
         }
     }
 
-    if (!ret_lt && !conservative) return;
+    if (!ret_lt && !conservative)
+        return;
 
     for (size_t i = 0; i < param_lts.len && i < call.args.len; i++) {
         if (param_lts[i] && ret_lt && lifetime_outlives(param_lts[i], ret_lt)) {
@@ -5884,8 +5977,9 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
 }
 
 void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
-                                        bool is_ref) {
-    if (!expr) return;
+                                       bool is_ref) {
+    if (!expr)
+        return;
     // If the expression traces to a root declaration (variable, field, index, etc.):
     // - is_ref=true (reference): add_ref_edge — target depends on root's own lifetime
     // - is_ref=false (by-value): copy_ref_edges — target inherits root's dependencies
@@ -5934,7 +6028,8 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
 
 void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiType *expr_type,
                                ast::Node *dest, ChiType *dest_type) {
-    if (!parent_fn_node) return;
+    if (!parent_fn_node)
+        return;
 
     auto &fn_def = parent_fn_node->data.fn_def;
     ast::Node *moved_src = nullptr;
@@ -5964,14 +6059,16 @@ static string node_label(ast::Node *n) {
     std::ostringstream type_ss;
     type_ss << n->type;
     auto type_str = type_ss.str();
-    if (n->name.empty()) return type_str;
+    if (n->name.empty())
+        return type_str;
     return fmt::format("{} ({})", n->name, type_str);
 }
 
 // Check if a leaf node satisfies a lifetime constraint relative to a terminal.
 // Only called on base cases (VarDecl, ParamDecl) — graph construction
 // via copy_ref_edges already flattens intermediate nodes to leaves.
-static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *terminal, ast::Node *leaf) {
+static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *terminal,
+                                          ast::Node *leaf) {
     if (leaf->type == ast::NodeType::VarDecl) {
         // Intra-function: leaf declared before terminal → leaf outlives terminal (LIFO)
         if (terminal->decl_order >= 0 && leaf->decl_order >= 0) {
@@ -6000,18 +6097,22 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
         }
 
         // Has lifetime → check against required (null required = always OK)
-        if (!required) return true;
+        if (!required)
+            return true;
         return lifetime_outlives(param_lt, required);
     }
 
     if (leaf->type == ast::NodeType::Identifier &&
         leaf->data.identifier.kind == ast::IdentifierKind::This) {
-        if (!required) return true;
+        if (!required)
+            return true;
         auto *leaf_type = leaf->resolved_type;
-        if (!leaf_type) return false;
+        if (!leaf_type)
+            return false;
         auto &lifetimes = leaf_type->data.pointer.lifetimes;
         for (size_t i = 0; i < lifetimes.len; i++) {
-            if (lifetime_outlives(lifetimes[i], required)) return true;
+            if (lifetime_outlives(lifetimes[i], required))
+                return true;
         }
         return false;
     }
@@ -6030,7 +6131,8 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
         }
     }
 
-    if (fn_def->terminals.len == 0 && fn_def->ref_edges.data.size() == 0) return;
+    if (fn_def->terminals.len == 0 && fn_def->ref_edges.data.size() == 0)
+        return;
     bool is_safe = has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE);
     bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE);
 
@@ -6060,15 +6162,16 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
             if (fn_def->fn_proto && fn_def->fn_proto->resolved_type &&
                 fn_def->fn_proto->resolved_type->kind == TypeKind::Fn) {
                 auto *ret_type = fn_def->fn_proto->resolved_type->data.fn.return_type;
-                if (ret_type && ret_type->is_reference() && ret_type->data.pointer.lifetimes.len > 0) {
+                if (ret_type && ret_type->is_reference() &&
+                    ret_type->data.pointer.lifetimes.len > 0) {
                     required = ret_type->data.pointer.lifetimes[0];
                 }
             }
             // Also check resolved_return_lifetime for borrowing value returns (func(), structs)
             if (!required && fn_def->fn_proto) {
                 auto *proto = fn_def->fn_proto->type == ast::NodeType::FnProto
-                    ? &fn_def->fn_proto->data.fn_proto
-                    : nullptr;
+                                  ? &fn_def->fn_proto->data.fn_proto
+                                  : nullptr;
                 if (proto && proto->resolved_return_lifetime) {
                     required = proto->resolved_return_lifetime;
                 }
@@ -6078,47 +6181,52 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
             auto *term_type = terminal->resolved_type;
             if (term_type && term_type->kind != TypeKind::Struct) {
                 auto *st = resolve_struct_type(term_type);
-                if (st) required = st->this_lifetime;
+                if (st)
+                    required = st->this_lifetime;
             }
         }
 
         if (verbose) {
-            fmt::print("[lifetime] checking terminal: {} (required: {})\n",
-                       node_label(terminal), required ? "'" + required->name : "'fn");
+            fmt::print("[lifetime] checking terminal: {} (required: {})\n", node_label(terminal),
+                       required ? "'" + required->name : "'fn");
         }
 
         auto *deps = fn_def->ref_edges.get(terminal);
-        if (!deps) continue;
+        if (!deps)
+            continue;
 
         array<ast::Node *> stack;
         map<ast::Node *, bool> visited;
-        for (size_t i = 0; i < deps->len; i++) stack.add(deps->items[i]);
+        for (size_t i = 0; i < deps->len; i++)
+            stack.add(deps->items[i]);
 
         while (stack.len > 0) {
             auto *node = stack.last();
             stack.len--;
-            if (visited.has_key(node)) continue;
+            if (visited.has_key(node))
+                continue;
             visited[node] = true;
 
             bool satisfied = satisfies_lifetime_constraint(required, terminal, node);
             if (verbose) {
-                fmt::print("[lifetime]   leaf {} -> {}\n",
-                           node_label(node), satisfied ? "OK" : "VIOLATION");
+                fmt::print("[lifetime]   leaf {} -> {}\n", node_label(node),
+                           satisfied ? "OK" : "VIOLATION");
             }
 
             if (!satisfied) {
                 if (is_safe) {
                     array<Note> notes;
                     notes.add({"referenced here", terminal->token->pos});
-                    error_with_notes(node, std::move(notes),
-                                     "'{}' does not live long enough", node->name);
+                    error_with_notes(node, std::move(notes), "'{}' does not live long enough",
+                                     node->name);
                 } else {
                     node->escape.escaped = true;
                 }
             }
 
             if (auto *next = fn_def->ref_edges.get(node)) {
-                for (size_t i = 0; i < next->len; i++) stack.add(next->items[i]);
+                for (size_t i = 0; i < next->len; i++)
+                    stack.add(next->items[i]);
             }
         }
     }
@@ -6133,9 +6241,11 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
             auto *terminal = fn_def->terminals[t];
             // Skip terminals that were themselves sunk — the direct use-after-delete
             // check at Identifier resolution handles that case
-            if (fn_def->is_sunk(terminal)) continue;
+            if (fn_def->is_sunk(terminal))
+                continue;
             auto *deps = fn_def->ref_edges.get(terminal);
-            if (!deps) continue;
+            if (!deps)
+                continue;
             size_t offset = fn_def->current_edge_offset(terminal);
             auto *last_use = fn_def->terminal_last_use.get(terminal);
             for (size_t i = offset; i < deps->len; i++) {
@@ -6144,22 +6254,24 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
                     auto *sink_target = fn_def->sink_edges[node];
                     // Move ownership: if the sunk node was moved INTO this terminal, skip
                     // (e.g. var b = move a; — b owns the data, a is sunk with dest=b)
-                    if (sink_target == terminal) continue;
+                    if (sink_target == terminal)
+                        continue;
                     // NLL: if terminal's last use is before the sink point, skip
                     if (last_use && sink_target && sink_target->token) {
-                        if (*last_use < sink_target->token->pos.offset) continue;
+                        if (*last_use < sink_target->token->pos.offset)
+                            continue;
                     }
-                    bool is_delete = sink_target && sink_target->type == NodeType::PrefixExpr &&
-                                     sink_target->data.prefix_expr.prefix->type == TokenType::KW_DELETE;
+                    bool is_delete =
+                        sink_target && sink_target->type == NodeType::PrefixExpr &&
+                        sink_target->data.prefix_expr.prefix->type == TokenType::KW_DELETE;
                     array<Note> notes;
                     if (sink_target && sink_target->token) {
-                        notes.add({is_delete ? "deleted here" : "moved here",
-                                   sink_target->token->pos});
+                        notes.add(
+                            {is_delete ? "deleted here" : "moved here", sink_target->token->pos});
                     }
                     notes.add({"referenced here", terminal->token->pos});
-                    error_with_notes(terminal, std::move(notes),
-                                     "'{}' used after {}", terminal->name,
-                                     is_delete ? "delete" : "move");
+                    error_with_notes(terminal, std::move(notes), "'{}' used after {}",
+                                     terminal->name, is_delete ? "delete" : "move");
                 }
             }
         }
@@ -6313,9 +6425,11 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
     }
 
     // Try placeholder type with trait bounds
-    if (!method_member && t1->kind == TypeKind::Placeholder && t1->data.placeholder.traits.len > 0) {
+    if (!method_member && t1->kind == TypeKind::Placeholder &&
+        t1->data.placeholder.traits.len > 0) {
         for (auto trait_type : t1->data.placeholder.traits) {
-            if (method_member) break;
+            if (method_member)
+                break;
             if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
                 auto member_p = trait_type->data.struct_.member_intrinsics.get(symbol);
                 if (member_p && (*member_p)->is_method()) {
@@ -6437,13 +6551,15 @@ bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface
     auto &iface_struct = iface_type->data.struct_;
 
     // Must be a pure constructor interface: only new(), no other methods, no embeds
-    if (iface_struct.embeds.len > 0) return false;
+    if (iface_struct.embeds.len > 0)
+        return false;
 
     ChiStructMember *iface_new = nullptr;
     for (size_t i = 0; i < iface_struct.members.len; i++) {
         auto m = iface_struct.members[i];
         if (m->is_method()) {
-            if (iface_new) return false; // more than one method
+            if (iface_new)
+                return false; // more than one method
             iface_new = m;
         }
     }
@@ -6485,12 +6601,14 @@ bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface
     if (iface_params.len > 0) {
         auto *iface_fn_type = iface_new->resolved_type;
         auto *ctor_fn_type = ctor->resolved_type;
-        if (!iface_fn_type || !ctor_fn_type) return false;
+        if (!iface_fn_type || !ctor_fn_type)
+            return false;
 
         for (size_t i = 0; i < iface_params.len; i++) {
             auto iface_param = iface_fn_type->data.fn.get_param_at(i);
             auto ctor_param = ctor_fn_type->data.fn.get_param_at(i);
-            if (iface_param != ctor_param) return false;
+            if (iface_param != ctor_param)
+                return false;
         }
     }
 
@@ -6524,7 +6642,8 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         // Built-in types: check intrinsics
         auto required = interface_get_intrinsics(trait_type);
         for (auto &intrinsic : required) {
-            if (intrinsic == IntrinsicSymbol::Sized) return true;
+            if (intrinsic == IntrinsicSymbol::Sized)
+                return true;
             if (intrinsic == IntrinsicSymbol::Add) {
                 if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
                     type_arg->kind == TypeKind::String) {
@@ -6540,7 +6659,8 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
 }
 
 bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data) {
-    if (!cond) return true; // No condition = always included
+    if (!cond)
+        return true; // No condition = always included
 
     for (auto &bound : cond->bounds) {
         if (bound.param_index < 0 || bound.param_index >= (long)subtype_data->args.len) {
@@ -6550,9 +6670,11 @@ bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subty
         auto type_arg = subtype_data->args[bound.param_index];
 
         // If type arg is still a placeholder (partially specialized), keep the member
-        if (type_arg->is_placeholder) continue;
+        if (type_arg->is_placeholder)
+            continue;
 
-        if (!check_trait_bound(type_arg, bound.trait)) return false;
+        if (!check_trait_bound(type_arg, bound.trait))
+            return false;
     }
 
     return true;
@@ -6563,7 +6685,7 @@ bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subty
 // ============================================================================
 
 void GenericResolver::record_fn(const string &id, const string &name, ast::Node *node,
-                         ChiType *generic_fn, map<ChiType *, ChiType *> subs) {
+                                ChiType *generic_fn, map<ChiType *, ChiType *> subs) {
     if (fn_envs.get(id)) {
         return; // Already recorded
     }
@@ -6576,7 +6698,7 @@ void GenericResolver::record_fn(const string &id, const string &name, ast::Node 
 }
 
 void GenericResolver::record_struct(const string &id, const string &name, ChiType *generic,
-                             map<ChiType *, ChiType *> subs) {
+                                    map<ChiType *, ChiType *> subs) {
     if (struct_envs.get(id)) {
         return; // Already recorded
     }
@@ -6600,8 +6722,7 @@ void GenericResolver::dump(Resolver *resolver) {
         if (entry.subs.size() > 0) {
             print("    TypeEnv:\n");
             for (auto &sub_pair : entry.subs.get()) {
-                print("      {} → {}\n",
-                      resolver->format_type(sub_pair.first),
+                print("      {} → {}\n", resolver->format_type(sub_pair.first),
                       resolver->format_type(sub_pair.second));
             }
         }
@@ -6616,8 +6737,7 @@ void GenericResolver::dump(Resolver *resolver) {
         if (entry.subs.size() > 0) {
             print("    TypeEnv:\n");
             for (auto &sub_pair : entry.subs.get()) {
-                print("      {} → {}\n",
-                      resolver->format_type(sub_pair.first),
+                print("      {} → {}\n", resolver->format_type(sub_pair.first),
                       resolver->format_type(sub_pair.second));
             }
         }
