@@ -170,7 +170,7 @@ struct IntBoxDefault {
 
 struct IntHolder<T: IntConstruct> {
     func make(v: int) T {
-        return T{v};
+        return {v};
     }
 }
 
