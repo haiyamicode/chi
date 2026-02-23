@@ -406,7 +406,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
             return is_safe_int_conversion(from_type, to_type);
         }
         if (from_type->kind == TypeKind::Int) {
-            return is_safe_int_conversion(from_type, to_type);
+            // Implicit: only widening. Explicit: narrowing allowed too.
+            return is_safe_int_conversion(from_type, to_type) || is_explicit;
         }
         // Float to int requires explicit conversion
         if (from_type->kind == TypeKind::Float) {
@@ -419,9 +420,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         if (from_type->is_int_like()) {
             return true;
         }
-        // Allow implicit conversion from float32 to float64
+        // Implicit: only widening. Explicit: narrowing allowed too.
         if (from_type->kind == TypeKind::Float) {
-            return to_type->data.float_.bit_count >= from_type->data.float_.bit_count;
+            return to_type->data.float_.bit_count >= from_type->data.float_.bit_count || is_explicit;
         }
         return false;
     }

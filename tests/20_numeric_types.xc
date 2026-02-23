@@ -38,6 +38,12 @@ func test_type_conversions() {
     printf("float to int32: {} -> {}\n", f, f as int32);
     printf("int32 to int64: {} -> {}\n", i, i as int64);
     printf("float to float64: {} -> {}\n", f, f as float64);
+
+    // Narrowing casts (explicit)
+    var big: int64 = 100000;
+    printf("int64 to int32: {} -> {}\n", big, big as int32);
+    var f64: float64 = 2.718281828;
+    printf("float64 to float: {} -> {}\n", f64, f64 as float);
 }
 
 func test_mixed_operations() {

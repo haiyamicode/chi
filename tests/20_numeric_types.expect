@@ -21,6 +21,8 @@ int32 to float: 42 -> 42
 float to int32: 3.14 -> 3
 int32 to int64: 42 -> 42
 float to float64: 3.14 -> 3.140000104904175
+int64 to int32: 100000 -> 100000
+float64 to float: 2.7182817459106445 -> 2.7182817
 
 Mixed operations (implicit conversions):
 int32 + float: 100 + 2.5 = 102.5

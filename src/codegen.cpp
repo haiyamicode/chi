@@ -1807,7 +1807,9 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         }
     }
 
-    panic("number conversion not implemented");
+    panic("number conversion not implemented: {} -> {}",
+          get_resolver()->format_type_display(from_type),
+          get_resolver()->format_type_display(to_type));
     return nullptr;
 }
 
