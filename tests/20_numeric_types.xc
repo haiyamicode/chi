@@ -105,6 +105,31 @@ func test_implicit_conversions() {
     printf("float + float64 = float64: {} + {} = {}\n", f32, f64, result_f64);
 }
 
+func test_float_comparisons() {
+    var a: float = 3.5;
+    var b: float = 1.5;
+    var c: float = 3.5;
+    printf("\nFloat comparisons:\n");
+    printf("{} < {} = {}\n", a, b, a < b);
+    printf("{} > {} = {}\n", a, b, a > b);
+    printf("{} <= {} = {}\n", a, c, a <= c);
+    printf("{} >= {} = {}\n", a, c, a >= c);
+    printf("{} == {} = {}\n", a, c, a == c);
+    printf("{} != {} = {}\n", a, b, a != b);
+    printf("{} == {} = {}\n", a, b, a == b);
+    printf("{} != {} = {}\n", a, c, a != c);
+}
+
+func test_float_modulo() {
+    var a: float = 7.5;
+    var b: float = 2.5;
+    printf("\nFloat modulo:\n");
+    printf("{} % {} = {}\n", a, b, a % b);
+    var c: float = 10.3;
+    var d: float = 3.0;
+    printf("{} % {} = {}\n", c, d, c % d);
+}
+
 func main() {
     test_basic_types();
     test_arithmetic();
@@ -113,6 +138,8 @@ func main() {
     test_unary_operations();
     test_edge_cases();
     test_implicit_conversions();
+    test_float_comparisons();
+    test_float_modulo();
     printf("All numeric type tests completed!\n");
 }
 

@@ -5730,8 +5730,21 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
     case TokenType::ADD:
         ok = type->is_int_like() || type->kind == TypeKind::Float || type->kind == TypeKind::String;
         break;
-    default:
+    case TokenType::SUB:
+    case TokenType::MUL:
+    case TokenType::DIV:
+    case TokenType::MOD:
+    case TokenType::LT:
+    case TokenType::GT:
+    case TokenType::LE:
+    case TokenType::GE:
+    case TokenType::EQ:
+    case TokenType::NE:
         ok = type->is_int_like() || type->kind == TypeKind::Float;
+        break;
+    default:
+        // Bitwise and shift operators: integers only
+        ok = type->is_int_like();
         break;
     }
 

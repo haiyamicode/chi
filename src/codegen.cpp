@@ -1970,6 +1970,24 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
 }
 
 static llvm::CmpInst::Predicate get_cmpop(TokenType op, ChiType *type) {
+    if (type->kind == TypeKind::Float) {
+        switch (op) {
+        case TokenType::LT:
+            return llvm::CmpInst::Predicate::FCMP_OLT;
+        case TokenType::GT:
+            return llvm::CmpInst::Predicate::FCMP_OGT;
+        case TokenType::LE:
+            return llvm::CmpInst::Predicate::FCMP_OLE;
+        case TokenType::GE:
+            return llvm::CmpInst::Predicate::FCMP_OGE;
+        case TokenType::EQ:
+            return llvm::CmpInst::Predicate::FCMP_OEQ;
+        case TokenType::NE:
+            return llvm::CmpInst::Predicate::FCMP_ONE;
+        default:
+            panic("not implemented: {}", PRINT_ENUM(op));
+        }
+    }
     auto is_unsigned = type->kind == TypeKind::Int && type->data.int_.is_unsigned;
     switch (op) {
     case TokenType::LT:
@@ -2005,6 +2023,8 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op, ChiType *type) {
             return llvm::BinaryOperator::BinaryOps::FMul;
         case TokenType::DIV:
             return llvm::BinaryOperator::BinaryOps::FDiv;
+        case TokenType::MOD:
+            return llvm::BinaryOperator::BinaryOps::FRem;
         default:
             panic("not implemented: {}", PRINT_ENUM(op));
         }
@@ -2211,7 +2231,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::NE: {
             auto lhs = compile_comparator(fn, data.op1);
             auto rhs = compile_comparator(fn, data.op2);
-            auto cmpop = get_cmpop(data.op_type, get_chitype(expr));
+            auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));
             return builder.CreateCmp(cmpop, lhs, rhs);
         }
         case TokenType::ASS: {

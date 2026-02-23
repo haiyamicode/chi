@@ -51,4 +51,18 @@ float to float64: 3.14 -> 3.140000104904175
 int8 + int16 = int32: 127 + 32767 = -32642
 int32 + float = float: 127 + 3.14 = 130.14
 float + float64 = float64: 3.14 + 3.140000104904175 = 6.28000020980835
+
+Float comparisons:
+3.5 < 1.5 = false
+3.5 > 1.5 = true
+3.5 <= 3.5 = true
+3.5 >= 3.5 = true
+3.5 == 3.5 = true
+3.5 != 1.5 = true
+3.5 == 1.5 = false
+3.5 != 3.5 = false
+
+Float modulo:
+7.5 % 2.5 = 0
+10.3 % 3 = 1.3000002
 All numeric type tests completed!
