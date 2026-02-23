@@ -1,4 +1,5 @@
 import "std/mem" as mem;
+import "std/ops" as ops;
 
 struct GenericBox<T> {
     value: int = 0;
@@ -113,7 +114,7 @@ func double_wrap_generic<T>(v: T) T {
     return wrap_generic<T>(v);
 }
 
-struct GenericCaller<T> {
+struct GenericCaller<T: ops.Construct> {
     val: T = {};
 
     func call_free_fn() T {

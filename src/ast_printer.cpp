@@ -209,9 +209,12 @@ void AstPrinter::print_node(Node *node) {
         emit("{}", node->name);
         if (!data.lifetime_bound.empty()) {
             emit(": '{}", data.lifetime_bound);
-        } else if (data.type_bound) {
+        } else if (data.type_bounds.len > 0) {
             emit(": ");
-            print_node(data.type_bound);
+            for (size_t i = 0; i < data.type_bounds.len; i++) {
+                if (i > 0) emit(" + ");
+                print_node(data.type_bounds[i]);
+            }
         }
         if (data.default_type) {
             emit(" = ");

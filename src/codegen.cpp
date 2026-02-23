@@ -2957,25 +2957,34 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto constructor_type = get_chitype(constructor_node);
             auto id = get_resolver()->resolve_global_id(constructor_node);
             auto entry = m_ctx->function_table.get(id);
-            if (!entry) {
-                // Constructor not compiled yet - skip calling it
-                // This can happen for field defaults in generic contexts
-            } else {
-                auto constructor_fn = *entry;
-                auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
-                auto args = std::vector<llvm::Value *>{dest};
-                // Track temporaries created for constructor arguments
-                std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
-                auto remaining_args = compile_fn_args(fn, constructor_fn,
-                                                      expr->data.construct_expr.items, expr,
-                                                      &arg_temporaries);
-                args.insert(args.end(), remaining_args.begin(), remaining_args.end());
-                builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
-                emit_dbg_location(expr);
-                // Destroy temporaries after the constructor call completes
-                for (auto &[temp_ptr, temp_node] : arg_temporaries) {
-                    compile_destruction(fn, temp_ptr, temp_node);
+            assert(entry && "constructor not compiled");
+            auto constructor_fn = *entry;
+            auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
+            auto args = std::vector<llvm::Value *>{dest};
+            // Track temporaries created for constructor arguments
+            std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
+            auto remaining_args = compile_fn_args(fn, constructor_fn,
+                                                  expr->data.construct_expr.items, expr,
+                                                  &arg_temporaries);
+            args.insert(args.end(), remaining_args.begin(), remaining_args.end());
+
+            // Compile default args for missing params (e.g. = {} on generic field)
+            if (constructor_node->type == ast::NodeType::FnDef) {
+                auto &proto = constructor_node->data.fn_def.fn_proto->data.fn_proto;
+                for (size_t i = expr->data.construct_expr.items.len;
+                     i < proto.params.len; i++) {
+                    auto default_val = proto.params[i]->data.param_decl.default_value;
+                    if (!default_val) break;
+                    auto param_type = constructor_fn->fn_type->data.fn.get_param_at(i);
+                    auto val = compile_assignment_to_type(fn, default_val, param_type);
+                    args.push_back(val);
                 }
+            }
+            builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
+            emit_dbg_location(expr);
+            // Destroy temporaries after the constructor call completes
+            for (auto &[temp_ptr, temp_node] : arg_temporaries) {
+                compile_destruction(fn, temp_ptr, temp_node);
             }
         }
 
@@ -3722,6 +3731,17 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             args.push_back(compile_expr(fn, arg));
         }
     }
+    // Compile default values for missing arguments
+    if (fn_decl->type == ast::NodeType::FnDef) {
+        auto &proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
+        for (size_t i = data.args.len; i < proto.params.len; i++) {
+            auto default_val = proto.params[i]->data.param_decl.default_value;
+            if (!default_val) break;
+            auto param_type = fn_spec.get_param_at(i);
+            args.push_back(compile_assignment_to_type(fn, default_val, param_type));
+        }
+    }
+
     if (va_ptr) {
         args.push_back(builder.CreateLoad(compile_type(fn_spec.params.last()), va_ptr));
         fn->vararg_pointers.add(va_ptr);

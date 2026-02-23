@@ -25,6 +25,8 @@ interface Sized {}
 
 interface AllowUnsized {}
 
+interface Construct {}
+
 // interface Sub<T> {
 //   func sub(rhs: T) T;
 // }

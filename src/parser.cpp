@@ -910,8 +910,10 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
                         param_node->data.type_param.lifetime_bound = get()->str;
                         consume();
                     } else {
-                        // T: Trait — trait bound
-                        param_node->data.type_param.type_bound = parse_type_expr(true);
+                        // T: Trait1 + Trait2 + ...
+                        do {
+                            param_node->data.type_param.type_bounds.add(parse_type_expr(true));
+                        } while (next_is(TokenType::ADD) && (consume(), true));
                     }
                 }
 
@@ -2084,10 +2086,12 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
             auto param_iden = expect(TokenType::IDEN);
             auto param_node = create_node(NodeType::TypeParam, param_iden);
 
-            // Check for colon syntax for type bounds: T: SomeInterface
+            // Check for colon syntax for type bounds: T: Trait1 + Trait2 + ...
             if (next_is(TokenType::COLON)) {
                 consume(); // consume the colon
-                param_node->data.type_param.type_bound = parse_type_expr(true);
+                do {
+                    param_node->data.type_param.type_bounds.add(parse_type_expr(true));
+                } while (next_is(TokenType::ADD) && (consume(), true));
             }
 
             // Check for = syntax for default type: T = int

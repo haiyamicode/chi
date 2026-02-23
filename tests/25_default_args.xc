@@ -23,6 +23,26 @@ struct Greeter {
     }
 }
 
+import "std/ops" as ops;
+
+struct Configurable {
+    x: int;
+    y: int;
+
+    func new(x: int = 10, y: int = 20) {
+        this.x = x;
+        this.y = y;
+    }
+}
+
+struct GenericHolder<T: ops.Construct> {
+    item: T = {};
+
+    func get_item() T {
+        return this.item;
+    }
+}
+
 func main() {
     greet("Alice");
     greet("Bob", "Hi");
@@ -36,5 +56,20 @@ func main() {
     g1.say("World", "?");
     var g2 = Greeter{"Hello"};
     g2.say("Chi");
+
+    // Default args through generic wrapper
+    printf("\n-- Generic default args --\n");
+    var gh1 = GenericHolder<Greeter>{};
+    gh1.get_item().say("Generic");
+    var gh2 = GenericHolder<Configurable>{};
+    printf("config: ({}, {})\n", gh2.get_item().x, gh2.get_item().y);
+    // Explicit override still works
+    var gh3 = GenericHolder<Configurable>{item: Configurable{x: 1, y: 2}};
+    printf("explicit: ({}, {})\n", gh3.get_item().x, gh3.get_item().y);
+    // Multi-default-arg struct constructed directly
+    var c = Configurable{};
+    printf("direct: ({}, {})\n", c.x, c.y);
+    var c2 = Configurable{x: 5};
+    printf("partial: ({}, {})\n", c2.x, c2.y);
 }
 

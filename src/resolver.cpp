@@ -147,6 +147,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
     m_ctx->intrinsic_symbols["std.ops.Sized"] = IntrinsicSymbol::Sized;
     m_ctx->intrinsic_symbols["std.ops.AllowUnsized"] = IntrinsicSymbol::AllowUnsized;
+    m_ctx->intrinsic_symbols["std.ops.Construct"] = IntrinsicSymbol::Construct;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -1711,18 +1712,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (expr_type->is_pointer_like()) {
             check_type = expr_type->get_elem();
         }
-        if (check_type->kind == TypeKind::Placeholder && check_type->data.placeholder.trait) {
-            auto trait_type = check_type->data.placeholder.trait;
-            if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
-                auto trait_struct = &trait_type->data.struct_;
-                auto member = trait_struct->find_member(field_name);
-                if (member && member->is_method()) {
-                    data.resolved_struct_member = member;
-                    data.resolved_decl = member->node;
-                    data.field->node = member->node;
-                    data.resolved_dot_kind = DotKind::TypeTrait;
-                    // Substitute ThisType with the concrete placeholder type
-                    return substitute_this_type(member->resolved_type, expr_type);
+        if (check_type->kind == TypeKind::Placeholder && check_type->data.placeholder.traits.len > 0) {
+            for (auto trait_type : check_type->data.placeholder.traits) {
+                if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
+                    auto trait_struct = &trait_type->data.struct_;
+                    auto member = trait_struct->find_member(field_name);
+                    if (member && member->is_method()) {
+                        data.resolved_struct_member = member;
+                        data.resolved_decl = member->node;
+                        data.field->node = member->node;
+                        data.resolved_dot_kind = DotKind::TypeTrait;
+                        // Substitute ThisType with the concrete placeholder type
+                        return substitute_this_type(member->resolved_type, expr_type);
+                    }
                 }
             }
             error(node, errors::MEMBER_NOT_FOUND, field_name, format_type(expr_type, true));
@@ -1869,6 +1871,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 result_type = scope.value_type;
                 if (!data.is_new) {
+                    // Empty construct on placeholder (= {}) requires Construct bound
+                    if (data.items.len == 0 &&
+                        result_type->kind == TypeKind::Placeholder &&
+                        m_ctx->rt_construct_interface &&
+                        !type_has_trait(result_type, IntrinsicSymbol::Construct)) {
+                        error(node,
+                              "cannot default-construct '{}': type parameter requires "
+                              "'Construct' bound",
+                              format_type(result_type, true));
+                        return nullptr;
+                    }
                     // Construct expressions can only create struct/optional/array values
                     bool constructible = result_type->is_placeholder ||
                                          result_type->kind == TypeKind::Struct ||
@@ -2241,6 +2254,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_sized_interface = struct_type;
                 } else if (node->name == "AllowUnsized") {
                     m_ctx->rt_allow_unsized_interface = struct_type;
+                } else if (node->name == "Construct") {
+                    m_ctx->rt_construct_interface = struct_type;
                 }
             }
             node->resolved_type = type_sym;
@@ -2348,6 +2363,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 struct_->add_interface(get_allocator(), m_ctx->rt_sized_interface, struct_type);
             }
 
+            // Auto-implement ops.Construct for default-constructible structs
+            if (m_ctx->rt_construct_interface && !ChiTypeStruct::is_interface(struct_type)) {
+                auto *ctor_member = struct_->get_constructor();
+                bool constructible = true;
+                if (ctor_member && ctor_member->node &&
+                    ctor_member->node->type == ast::NodeType::FnDef) {
+                    auto *proto = ctor_member->node->data.fn_def.fn_proto;
+                    for (auto param : proto->data.fn_proto.params) {
+                        if (!param->data.param_decl.default_value &&
+                            !param->data.param_decl.is_variadic) {
+                            constructible = false;
+                            break;
+                        }
+                    }
+                }
+                if (constructible) {
+                    struct_->add_interface(get_allocator(), m_ctx->rt_construct_interface,
+                                           struct_type);
+                }
+            }
+
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
         } else {
             // fourth pass - resolve method bodies
@@ -2369,15 +2405,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
                     // For where-blocks, temporarily set placeholder traits so method
                     // bodies can access trait methods on the constrained type params
-                    array<std::pair<ChiType *, ChiType *>> saved_traits;
+                    array<std::pair<ChiType *, array<ChiType *>>> saved_traits;
                     if (!impl_data.interface_type && impl_data.where_clauses.len > 0) {
                         for (auto &clause : impl_data.where_clauses) {
                             auto param_name = clause.param_name->str;
                             for (auto tp : struct_->type_params) {
                                 auto ph = to_value_type(tp);
                                 if (ph->kind == TypeKind::Placeholder && ph->name == param_name) {
-                                    saved_traits.add({ph, ph->data.placeholder.trait});
-                                    ph->data.placeholder.trait = resolve_value(clause.bound_type, scope);
+                                    saved_traits.add({ph, ph->data.placeholder.traits});
+                                    ph->data.placeholder.traits.add(resolve_value(clause.bound_type, scope));
                                     break;
                                 }
                             }
@@ -2389,8 +2425,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
 
                     // Restore original placeholder traits
-                    for (auto &[ph, old_trait] : saved_traits) {
-                        ph->data.placeholder.trait = old_trait;
+                    for (auto &[ph, old_traits] : saved_traits) {
+                        ph->data.placeholder.traits = old_traits;
                     }
                 } else {
                     resolve_fn_body(member);
@@ -2477,13 +2513,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Validate trait bounds on type arguments
         for (size_t i = 0; i < args.len && i < params.len; i++) {
             auto param_type = to_value_type(params[i]);
-            if (!param_type || !param_type->data.placeholder.trait) continue;
+            if (!param_type || param_type->data.placeholder.traits.len == 0) continue;
             auto type_arg = args[i];
             if (!type_arg || type_arg->is_placeholder) continue;
-            if (!check_trait_bound(type_arg, param_type->data.placeholder.trait)) {
-                error(node, "Type '{}' does not satisfy trait bound '{}'",
-                      format_type(type_arg, true), format_type(param_type->data.placeholder.trait, true));
-                return nullptr;
+            for (auto trait : param_type->data.placeholder.traits) {
+                if (!check_trait_bound(type_arg, trait)) {
+                    error(node, "Type '{}' does not satisfy trait bound '{}'",
+                          format_type(type_arg, true), format_type(trait, true));
+                    return nullptr;
+                }
             }
         }
 
@@ -2689,25 +2727,35 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto phty = create_type(TypeKind::Placeholder);
         phty->name = node->name;
 
-        if (data.type_bound) {
-            phty->data.placeholder.trait = to_value_type(resolve(data.type_bound, scope));
+        for (auto bound : data.type_bounds) {
+            phty->data.placeholder.traits.add(to_value_type(resolve(bound, scope)));
         }
 
         // Implicit Sized bound: all type params get Sized unless AllowUnsized
         if (m_ctx->rt_sized_interface) {
-            auto trait = phty->data.placeholder.trait;
-            bool is_allow_unsized = trait && trait->kind == TypeKind::Struct &&
-                                    trait->data.struct_.node &&
-                                    resolve_intrinsic_symbol(trait->data.struct_.node) == IntrinsicSymbol::AllowUnsized;
-            if (is_allow_unsized) {
-                // AllowUnsized: no constraint
-                phty->data.placeholder.trait = nullptr;
-            } else if (!trait) {
-                // No explicit bound: add implicit Sized
-                phty->data.placeholder.trait = m_ctx->rt_sized_interface;
+            bool has_allow_unsized = false;
+            bool has_sized = false;
+            for (auto t : phty->data.placeholder.traits) {
+                if (t && t->kind == TypeKind::Struct && t->data.struct_.node) {
+                    auto sym = resolve_intrinsic_symbol(t->data.struct_.node);
+                    if (sym == IntrinsicSymbol::AllowUnsized) has_allow_unsized = true;
+                    if (sym == IntrinsicSymbol::Sized) has_sized = true;
+                }
             }
-            // Otherwise keep the explicit bound (e.g. Show) — any type satisfying
-            // a user trait is necessarily Sized (interfaces auto-implement Sized)
+            if (has_allow_unsized) {
+                // Remove AllowUnsized from the list — it's an opt-out, not a real bound
+                array<ChiType *> filtered;
+                for (auto t : phty->data.placeholder.traits) {
+                    if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
+                        resolve_intrinsic_symbol(t->data.struct_.node) == IntrinsicSymbol::AllowUnsized)
+                        continue;
+                    filtered.add(t);
+                }
+                phty->data.placeholder.traits = filtered;
+            } else if (!has_sized) {
+                // No AllowUnsized and no explicit Sized: add implicit Sized
+                phty->data.placeholder.traits.add(m_ctx->rt_sized_interface);
+            }
         }
 
         // Resolve lifetime bound: T: 'a
@@ -4510,15 +4558,9 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         return fn->return_type;
     }
 
-    // Inject default values for missing arguments
-    if (fn_decl && fn_decl->type == ast::NodeType::FnDef && n_args < max_args) {
-        auto &fn_proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
-        for (size_t i = n_args; i < max_args; i++) {
-            auto param = fn_proto.params[i];
-            assert(param->data.param_decl.default_value);
-            args->add(param->data.param_decl.default_value);
-        }
-    }
+    // Default values for missing arguments are handled by codegen
+    // (compile_construction and compile_fn_args inject them at compile time).
+    // We do NOT mutate the AST args list here.
 
     // Check if this is a generic function call that needs explicit type parameters
     if (fn->is_generic()) {
@@ -4656,10 +4698,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 return fn->return_type;
             }
 
-            if (lookup_key->data.placeholder.trait) {
-                if (!check_trait_bound(type_arg, lookup_key->data.placeholder.trait)) {
+            for (auto trait : lookup_key->data.placeholder.traits) {
+                if (!check_trait_bound(type_arg, trait)) {
                     error(node, "Type '{}' does not satisfy trait bound '{}'", format_type(type_arg, true),
-                          format_type(lookup_key->data.placeholder.trait, true));
+                          format_type(trait, true));
                     return fn->return_type;
                 }
             }
@@ -5578,21 +5620,18 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
     }
 
     // Handle placeholder types with appropriate trait bounds
-    if (!ok && type->kind == TypeKind::Placeholder && type->data.placeholder.trait) {
-        auto trait_type = type->data.placeholder.trait;
-        if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
-            // Get all intrinsics supported by this interface
-            auto intrinsics = interface_get_intrinsics(trait_type);
-
-            // Map operator to required intrinsic symbol
-            IntrinsicSymbol required_symbol = get_operator_intrinsic_symbol(op_type);
-
-            // Check if the interface supports the required intrinsic
-            if (required_symbol != IntrinsicSymbol::None) {
-                for (auto &intrinsic : intrinsics) {
-                    if (intrinsic == required_symbol) {
-                        ok = true;
-                        break;
+    if (!ok && type->kind == TypeKind::Placeholder && type->data.placeholder.traits.len > 0) {
+        for (auto trait_type : type->data.placeholder.traits) {
+            if (ok) break;
+            if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
+                auto intrinsics = interface_get_intrinsics(trait_type);
+                IntrinsicSymbol required_symbol = get_operator_intrinsic_symbol(op_type);
+                if (required_symbol != IntrinsicSymbol::None) {
+                    for (auto &intrinsic : intrinsics) {
+                        if (intrinsic == required_symbol) {
+                            ok = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -6251,17 +6290,19 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
     }
 
     // Try placeholder type with trait bounds
-    if (!method_member && t1->kind == TypeKind::Placeholder && t1->data.placeholder.trait) {
-        auto trait_type = t1->data.placeholder.trait;
-        if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
-            auto member_p = trait_type->data.struct_.member_intrinsics.get(symbol);
-            if (member_p && (*member_p)->is_method()) {
-                method_member = *member_p;
-                auto method_type = method_member->resolved_type;
-                if (method_type && method_type->kind == TypeKind::Fn) {
-                    auto &fn_data = method_type->data.fn;
-                    if (fn_data.params.len == 1) {
-                        return_type = t1; // Return placeholder type for trait bounds
+    if (!method_member && t1->kind == TypeKind::Placeholder && t1->data.placeholder.traits.len > 0) {
+        for (auto trait_type : t1->data.placeholder.traits) {
+            if (method_member) break;
+            if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
+                auto member_p = trait_type->data.struct_.member_intrinsics.get(symbol);
+                if (member_p && (*member_p)->is_method()) {
+                    method_member = *member_p;
+                    auto method_type = method_member->resolved_type;
+                    if (method_type && method_type->kind == TypeKind::Fn) {
+                        auto &fn_data = method_type->data.fn;
+                        if (fn_data.params.len == 1) {
+                            return_type = t1;
+                        }
                     }
                 }
             }
@@ -6390,6 +6431,7 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         auto required = interface_get_intrinsics(trait_type);
         for (auto &intrinsic : required) {
             if (intrinsic == IntrinsicSymbol::Sized) return true;
+            if (intrinsic == IntrinsicSymbol::Construct) return true;
             if (intrinsic == IntrinsicSymbol::Add) {
                 if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
                     type_arg->kind == TypeKind::String) {
@@ -6397,6 +6439,35 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
                 }
             }
         }
+    }
+    return false;
+}
+
+bool Resolver::type_has_trait(ChiType *type, IntrinsicSymbol intrinsic) {
+    if (type->kind == TypeKind::Placeholder) {
+        for (auto t : type->data.placeholder.traits) {
+            if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
+                resolve_intrinsic_symbol(t->data.struct_.node) == intrinsic) {
+                return true;
+            }
+        }
+        return false;
+    }
+    // For concrete types, check struct interfaces or built-in intrinsics
+    auto check = type;
+    if (check->kind == TypeKind::Subtype) check = resolve_subtype(check);
+    if (check->kind == TypeKind::Struct) {
+        for (auto &impl : check->data.struct_.interfaces) {
+            auto iface = impl->interface_type;
+            if (iface->kind == TypeKind::Struct && iface->data.struct_.node &&
+                resolve_intrinsic_symbol(iface->data.struct_.node) == intrinsic) {
+                return true;
+            }
+        }
+    } else {
+        // Built-in types: Sized and Construct are always true
+        if (intrinsic == IntrinsicSymbol::Sized || intrinsic == IntrinsicSymbol::Construct)
+            return true;
     }
     return false;
 }

@@ -63,7 +63,7 @@ struct Color {
     }
 }
 
-struct Wrapper<T> {
+struct Wrapper<T: ops.Construct> {
     value: T = {};
 
     static func create(v: T) This {

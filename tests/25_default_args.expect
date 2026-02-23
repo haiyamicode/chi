@@ -8,3 +8,10 @@ add_offset(5, 100) = 105
 Hey World!
 Hey World?
 Hello Chi!
+
+-- Generic default args --
+Hey Generic!
+config: (10, 20)
+explicit: (1, 2)
+direct: (10, 20)
+partial: (5, 20)

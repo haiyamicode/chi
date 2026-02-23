@@ -29,7 +29,7 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
-MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display, Add, Sized, AllowUnsized)
+MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display, Add, Sized, AllowUnsized, Construct)
 
 MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait);
 
@@ -236,7 +236,7 @@ struct ChiTypeEnumValue {
 };
 
 struct ChiTypePlaceholder {
-    ChiType *trait = nullptr;
+    array<ChiType *> traits = {};
     long index = 0;
     // Source information to disambiguate placeholders
     ast::Node *source_decl =

@@ -1,3 +1,5 @@
+import "std/ops" as ops;
+
 interface Show {
     func show() string;
 }
@@ -31,7 +33,7 @@ func print_ref<T: Show>(t: &T) {
     printf("Reference result: {}\n", t.show());
 }
 
-struct Container<T: Show> {
+struct Container<T: Show + ops.Construct> {
     item: T = {};
     name: string = "";
 
@@ -44,7 +46,7 @@ struct Container<T: Show> {
     }
 }
 
-struct Pair<T: Show, U: Show> {
+struct Pair<T: Show + ops.Construct, U: Show + ops.Construct> {
     first: T = {};
     second: U = {};
 
@@ -53,7 +55,7 @@ struct Pair<T: Show, U: Show> {
     }
 }
 
-struct ShowBox<T> {
+struct ShowBox<T: ops.Construct> {
     item: T = {};
 
     impl where T: Show {
@@ -67,7 +69,7 @@ struct ShowBox<T> {
     }
 }
 
-struct WherePair<T, U> {
+struct WherePair<T: ops.Construct, U: ops.Construct> {
     first: T = {};
     second: U = {};
 
@@ -82,7 +84,7 @@ struct WherePair<T, U> {
     }
 }
 
-struct ImplWhereBox<T> {
+struct ImplWhereBox<T: ops.Construct> {
     item: T = {};
 
     impl where T: Show {
@@ -104,11 +106,43 @@ func sized_identity<T>(v: T) T {
     return v;
 }
 
-struct SizedBox<T> {
+struct SizedBox<T: ops.Construct> {
     value: T = {};
 
     func get() T {
         return this.value;
+    }
+}
+
+// Struct with all-default-param constructor — implements Construct
+struct DefaultCtor {
+    x: int;
+
+    func new(x: int = 42) {
+        this.x = x;
+    }
+}
+
+// Struct with no constructor — all field defaults — implements Construct
+struct NoCtor {
+    x: int = 99;
+}
+
+// Generic wrapper that requires Construct, uses default construction
+struct ConstructBox<T: ops.Construct> {
+    item: T = {};
+
+    func get() T {
+        return this.item;
+    }
+}
+
+// Multiple bounds: Show + Construct
+struct ShowConstruct<T: Show + ops.Construct> {
+    item: T = {};
+
+    func display() string {
+        return this.item.show();
     }
 }
 
@@ -159,6 +193,36 @@ func main() {
     printf("struct: ({}, {})\n", sp.x, sp.y);
     var sb = SizedBox<int>{value: 99};
     printf("SizedBox<int>: {}\n", sb.get());
+
+    printf("\n-- Construct trait --\n");
+
+    // Struct with all-default constructor params — satisfies Construct
+    var cb1 = ConstructBox<DefaultCtor>{};
+    printf("default ctor: {}\n", cb1.get().x);
+
+    // Struct with no constructor (field defaults only) — satisfies Construct
+    var cb2 = ConstructBox<NoCtor>{};
+    printf("no ctor: {}\n", cb2.get().x);
+
+    // Built-in types satisfy Construct
+    var cb3 = ConstructBox<int>{};
+    printf("int construct: {}\n", cb3.get());
+    var cb4 = ConstructBox<string>{};
+    printf("string construct: {}\n", cb4.get());
+    var cb5 = ConstructBox<bool>{};
+    printf("bool construct: {}\n", cb5.get());
+
+    // Multiple bounds: Show + Construct
+    var sc = ShowConstruct<Point>{};
+    printf("show+construct: {}\n", sc.display());
+
+    // Default ctor args injected through generic wrapper
+    var cb6 = ConstructBox<DefaultCtor>{};
+    printf("default ctor via generic: {}\n", cb6.get().x);
+
+    // Explicit args still work alongside Construct bound
+    var cb7 = ConstructBox<DefaultCtor>{item: DefaultCtor{x: 100}};
+    printf("explicit ctor: {}\n", cb7.get().x);
 
     printf("\n=== All trait bound tests passed! ===\n");
 }

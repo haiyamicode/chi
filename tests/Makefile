@@ -54,6 +54,36 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	fi; \
        	rm -f $*.output
 
+# Special rule for trait bounds test — also tests rejection cases
+21_trait_bounds.test: 21_trait_bounds.expect
+	echo Test: 21_trait_bounds...
+	@$(CHI) -o $(TMP).21_trait_bounds -c 21_trait_bounds.xc && $(TMP).21_trait_bounds 2>&1 >21_trait_bounds.output
+	@if [ "x`diff -qbu 21_trait_bounds.expect 21_trait_bounds.output`" != "x" ]; \
+	then \
+		echo "error in test 21_trait_bounds (output mismatch)"; \
+		diff -u 21_trait_bounds.expect 21_trait_bounds.output; \
+		rm -f 21_trait_bounds.output; \
+		exit 1; \
+	fi; \
+	rm -f 21_trait_bounds.output
+	@failed=0; \
+	for f in testdata/21_trait_bound_errors/*.xc; do \
+		name=$$(basename $$f); \
+		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_trait 2>&1); \
+		if [ $$? -eq 0 ]; then \
+			echo "error: $$name should have been rejected but compiled successfully"; \
+			failed=1; \
+		else \
+			expected=$$(grep '// expect-error:' $$f | head -1 | sed 's/.*expect-error: *//'); \
+			if [ -n "$$expected" ] && ! echo "$$errmsg" | grep -q "$$expected"; then \
+				echo "error: $$name wrong error (expected '$$expected')"; \
+				echo "  got: $$(echo "$$errmsg" | head -1)"; \
+				failed=1; \
+			fi; \
+		fi; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
+
 # Special rule for safe lifetime test — needs -s flag.
 # Also tests error cases: each file in testdata/30_safe_errors/ must fail to compile.
 30_safe_lifetime.test: 30_safe_lifetime.expect

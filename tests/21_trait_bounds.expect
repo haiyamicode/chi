@@ -31,4 +31,14 @@ float: 3.14
 struct: (5, 10)
 SizedBox<int>: 99
 
+-- Construct trait --
+default ctor: 42
+no ctor: 99
+int construct: 0
+string construct:
+bool construct: false
+show+construct: (0, 0)
+default ctor via generic: 42
+explicit ctor: 100
+
 === All trait bound tests passed! ===
