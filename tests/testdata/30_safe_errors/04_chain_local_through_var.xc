@@ -18,4 +18,7 @@ func bad() Holder {
     var h = Holder{r};
     return h;
 }
-func main() {}
+
+func main() {
+}
+

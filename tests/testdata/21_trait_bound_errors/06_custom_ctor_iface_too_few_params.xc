@@ -10,10 +10,11 @@ struct NoCtor {
 
 struct Holder<T: IntConstruct> {
     func make(v: int) T {
-        return T{v};
+        return {v};
     }
 }
 
 func main() {
     var h = Holder<NoCtor>{};
 }
+

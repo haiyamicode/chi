@@ -4405,6 +4405,8 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block) {
     for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
         auto var = block->cleanup_vars[i];
         if (fn_def->is_sunk(var)) continue;
+        // Skip variables not yet compiled (e.g. early return before var decl)
+        if (!m_ctx->var_table.has_key(var)) continue;
         compile_destruction(fn, get_var(var), var);
     }
 }

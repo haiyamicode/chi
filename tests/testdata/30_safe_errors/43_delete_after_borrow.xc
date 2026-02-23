@@ -11,3 +11,4 @@ func main() {
     delete x;
     printf("{}\n", r.value);
 }
+

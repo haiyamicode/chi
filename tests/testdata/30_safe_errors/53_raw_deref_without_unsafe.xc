@@ -8,3 +8,4 @@ func main() {
     var p: *int = &x;
     var v = p!;
 }
+

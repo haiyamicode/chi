@@ -5,3 +5,4 @@ func main() {
     var x: int = 42;
     var p = &x as *int;
 }
+

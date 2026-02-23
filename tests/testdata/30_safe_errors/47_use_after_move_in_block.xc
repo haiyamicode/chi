@@ -10,5 +10,6 @@ func main() {
     {
         var b = move a;
     }
-    printf("{}\n", a.value);    // error: 'a' used after move
+    printf("{}\n", a.value); // error: 'a' used after move
 }
+

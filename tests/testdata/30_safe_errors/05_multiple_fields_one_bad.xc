@@ -23,4 +23,7 @@ func bad(good_ref: &int) MultiRef {
     var m = MultiRef{good_ref, &local};
     return m;
 }
-func main() {}
+
+func main() {
+}
+

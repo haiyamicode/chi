@@ -17,7 +17,7 @@ func identity(r: &int) &int {
 
 func make_pair(x: &int) Pair {
     var local = 999;
-    return Pair{x, identity(&local)};
+    return {x, identity(&local)};
 }
 
 func main() {
@@ -25,3 +25,4 @@ func main() {
     var p = make_pair(&safe);
     printf("a={}, b={}\n", p.a!, p.b!);
 }
+

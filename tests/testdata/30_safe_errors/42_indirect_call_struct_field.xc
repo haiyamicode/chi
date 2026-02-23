@@ -2,7 +2,9 @@
 // expect-error: does not live long enough
 
 struct CallbackHolder {
-    f: func(r: &int) &int = func(r: &int) &int { return r; };
+    f: func (r: &int) &int = func (r: &int) &int {
+        return r;
+    };
 }
 
 func dangle() &int {
@@ -15,3 +17,4 @@ func main() {
     var r = dangle();
     printf("{}\n", r!);
 }
+

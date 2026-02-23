@@ -26,12 +26,7 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(
-        type_info: *void,
-        data_ptr: *void,
-        vtable_ptr: *void,
-        type_id: uint32
-    );
+    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -113,7 +108,9 @@ struct Shared<T> {
             var rc = this.data.ref_count - 1;
             this.data.ref_count = rc;
             if rc == 0 {
-                unsafe { delete this.data; }
+                unsafe {
+                    delete this.data;
+                }
             }
         }
     }
@@ -156,7 +153,9 @@ struct Box<T: ops.AllowUnsized> {
     private _ptr: *T = null;
 
     func new(ptr: &move T) {
-        unsafe { this._ptr = ptr as *T; }
+        unsafe {
+            this._ptr = ptr as *T;
+        }
     }
 
     func from_ptr(ptr: *T) {
@@ -192,7 +191,7 @@ struct Box<T: ops.AllowUnsized> {
 
     impl where T: ops.Sized {
         static func from_value(val: T) Box<T> {
-            return Box<T>{mem.copy_from<T>(&val)};
+            return {mem.copy_from<T>(&val)};
         }
     }
 
@@ -291,13 +290,7 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(
-                string.format(
-                    "expected {}, got {}",
-                    json_kind_display(kind),
-                    json_kind_display(this.kind)
-                )
-            );
+            panic(string.format("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
         }
     }
 
@@ -500,8 +493,7 @@ struct Array<T> {
         return result;
     }
 
-    impl ops.Index<uint32, T> {
-    }
+    impl ops.Index<uint32, T> {}
 
     impl ops.IndexIterable<uint32, T> {
         func index(index: uint32) &mut T {
@@ -552,7 +544,9 @@ struct CString {
 
     mut func delete() {
         if this.data != null {
-            unsafe { delete this.data; }
+            unsafe {
+                delete this.data;
+            }
             this.data = null;
         }
     }
@@ -777,12 +771,10 @@ func promise<T>(executor: func (resolve: func (value: T))) Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return promise(
-        func (resolve) {
-            timeout(ms, func [resolve] () {
-                resolve({});
-            });
-        }
-    );
+    return promise(func (resolve) {
+        timeout(ms, func [resolve] () {
+            resolve({});
+        });
+    });
 }
 

@@ -8,5 +8,6 @@ struct Obj {
 func main() {
     var a = Obj{value: 1};
     var b = move a;
-    var r: &Obj = &a;   // error: 'a' used after move
+    var r: &Obj = &a; // error: 'a' used after move
 }
+

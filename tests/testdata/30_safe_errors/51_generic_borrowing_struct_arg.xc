@@ -9,10 +9,13 @@ struct Wrapper {
     }
 }
 
-func identity<T>(val: T) T { return val; }
+func identity<T>(val: T) T {
+    return val;
+}
 
 func main() {
     var x = 42;
     var w = Wrapper{&x};
     var w2 = identity<Wrapper>(w);
 }
+

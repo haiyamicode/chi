@@ -5,12 +5,15 @@ struct Wrapper {
     val: int = 0;
 }
 
-func exploit() func() int {
+func exploit() func () int {
     var w = Wrapper{val: 42};
-    var f = func() int { return w.val; };
+    var f = func () int {
+        return w.val;
+    };
     return f;
 }
 
 func main() {
     printf("{}\n", exploit()());
 }
+

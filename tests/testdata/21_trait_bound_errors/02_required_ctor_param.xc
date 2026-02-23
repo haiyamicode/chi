@@ -17,3 +17,4 @@ struct Wrapper<T: ops.Construct> {
 func main() {
     var w = Wrapper<RequiredParam>{};
 }
+

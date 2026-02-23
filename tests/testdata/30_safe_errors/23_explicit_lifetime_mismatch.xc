@@ -11,3 +11,4 @@ func main() {
     var y = 20;
     var r = bad(&x, &y);
 }
+

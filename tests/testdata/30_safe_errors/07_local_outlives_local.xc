@@ -18,4 +18,7 @@ func bad() {
     var local = 42;
     h.store(&local);
 }
-func main() {}
+
+func main() {
+}
+

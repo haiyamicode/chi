@@ -2,19 +2,24 @@
 // expect-error: does not live long enough
 
 struct Holder {
-    f: func() int = func() int { return 0; };
+    f: func () int = func () int {
+        return 0;
+    };
 }
 
-func wrap(f: func() int) Holder {
-    return Holder{f: f};
+func wrap(f: func () int) Holder {
+    return {f: f};
 }
 
 func exploit() Holder {
     var x = 42;
-    return wrap(func() int { return x; });
+    return wrap(func () int {
+        return x;
+    });
 }
 
 func main() {
     var h = exploit();
     printf("{}\n", h.f());
 }
+

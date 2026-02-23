@@ -4,4 +4,7 @@ func bad() &int {
     var local = 42;
     return &local;
 }
-func main() {}
+
+func main() {
+}
+

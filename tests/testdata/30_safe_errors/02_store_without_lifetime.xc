@@ -11,4 +11,7 @@ struct Holder {
         this.ref = r;
     }
 }
-func main() {}
+
+func main() {
+}
+

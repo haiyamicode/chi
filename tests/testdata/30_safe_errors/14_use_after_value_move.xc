@@ -6,6 +6,7 @@ struct Obj {
 
 func main() {
     var a = Obj{value: 1};
-    var b = move a;     // value move, a is sunk
-    println(a.value);   // error: 'a' used after move
+    var b = move a; // value move, a is sunk
+    println(a.value); // error: 'a' used after move
 }
+

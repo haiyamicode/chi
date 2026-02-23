@@ -10,6 +10,7 @@ func consume(o: Obj) {
 
 func main() {
     var a = Obj{value: 1};
-    consume(move a);    // value move into function arg
-    println(a.value);   // error: 'a' used after move
+    consume(move a); // value move into function arg
+    println(a.value); // error: 'a' used after move
 }
+

@@ -19,3 +19,4 @@ func main() {
     var h = RefHolder{&x};
     store_into(&mut h, &x);
 }
+

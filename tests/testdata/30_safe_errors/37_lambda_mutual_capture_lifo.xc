@@ -3,9 +3,16 @@
 // expect-error: does not live long enough
 
 func main() {
-    var f1: func() int = func() int { return 0; };
+    var f1: func () int = func () int {
+        return 0;
+    };
     var val = 100;
-    var f2 = func() int { return val; };
-    f1 = func() int { return f2(); };
+    var f2 = func () int {
+        return val;
+    };
+    f1 = func () int {
+        return f2();
+    };
     printf("{}\n", f1());
 }
+

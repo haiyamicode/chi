@@ -175,7 +175,7 @@ struct IntHolder<T: IntConstruct> {
 }
 
 func make_default<T: ops.Construct>() T {
-    return T{};
+    return {};
 }
 
 func main() {

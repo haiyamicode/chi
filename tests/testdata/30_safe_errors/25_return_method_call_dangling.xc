@@ -11,10 +11,11 @@ struct Container {
 }
 
 func get_dangling() &int {
-    var c = Container { value: 99 };
+    var c = Container{value: 99};
     return c.get_ref();
 }
 
 func main() {
     printf("{}\n", get_dangling()!);
 }
+

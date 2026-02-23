@@ -27,3 +27,4 @@ struct Holder<T: Show + ops.Construct> {
 func main() {
     var h = Holder<Showable>{};
 }
+

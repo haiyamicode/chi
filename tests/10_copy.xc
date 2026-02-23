@@ -34,7 +34,9 @@ struct Foo {
 
 func return_local() Foo {
     var a = Foo{"local"};
-    unsafe { a.p! = 42; }
+    unsafe {
+        a.p! = 42;
+    }
     var b = a;
     b.id = "local_b";
     println("return_local() done");
@@ -49,7 +51,9 @@ func return_construct() Foo {
 func main() {
     println("=== Test 1: Return local variable ===");
     var foo = return_local();
-    unsafe { printf("result: {}\n", foo.p!); }
+    unsafe {
+        printf("result: {}\n", foo.p!);
+    }
     println("=== Test 2: RVO - return ConstructExpr ===");
     var bar = return_construct();
     unsafe {

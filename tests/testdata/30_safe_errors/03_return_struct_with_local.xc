@@ -17,4 +17,7 @@ func bad() Holder {
     var h = Holder{&local};
     return h;
 }
-func main() {}
+
+func main() {
+}
+

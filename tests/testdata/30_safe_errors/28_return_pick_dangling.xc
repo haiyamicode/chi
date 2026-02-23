@@ -17,3 +17,4 @@ func main() {
     var safe = 1;
     printf("{}\n", get_dangling(&safe)!);
 }
+

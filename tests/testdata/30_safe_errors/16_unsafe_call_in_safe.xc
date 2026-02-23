@@ -5,5 +5,6 @@ unsafe func dangerous() int {
 }
 
 func main() {
-    var x = dangerous();  // error: call to unsafe function
+    var x = dangerous(); // error: call to unsafe function
 }
+

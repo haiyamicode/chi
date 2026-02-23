@@ -1,10 +1,10 @@
 import "std/ops" as ops;
 
-private unsafe extern "C" {
-    func cx_malloc(size: uint32, ignored: *void) *void;
-    func cx_free(address: *void);
-    func cx_memset(address: *void, v: uint8, n: uint32);
-    func __copy_from(dest: *void, src: *void, destruct_old: bool);
+extern "C" {
+    private unsafe func cx_malloc(size: uint32, ignored: *void) *void;
+    private unsafe func cx_free(address: *void);
+    private unsafe func cx_memset(address: *void, v: uint8, n: uint32);
+    private unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
 }
 
 unsafe func malloc(size: uint32) *void {
@@ -30,3 +30,4 @@ unsafe func free(address: *void) {
 unsafe func memset(address: *void, v: uint8, n: uint32) {
     cx_memset(address, v, n);
 }
+

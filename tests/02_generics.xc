@@ -60,7 +60,9 @@ struct RefHolder<T> {
     }
 
     func delete() {
-        unsafe { delete this.data; }
+        unsafe {
+            delete this.data;
+        }
     }
 }
 
@@ -92,7 +94,9 @@ struct Arr<T> {
     }
 
     func delete() {
-        unsafe { delete this.data; }
+        unsafe {
+            delete this.data;
+        }
     }
 
     func get(index: uint32) T {

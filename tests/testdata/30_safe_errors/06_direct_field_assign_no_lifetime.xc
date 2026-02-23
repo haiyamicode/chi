@@ -11,4 +11,7 @@ struct Container {
         this.val = v;
     }
 }
-func main() {}
+
+func main() {
+}
+

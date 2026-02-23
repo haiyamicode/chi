@@ -2,8 +2,13 @@
 // expect-error: does not live long enough
 
 func main() {
-    var f: func() int = func() int { return 0; };
+    var f: func () int = func () int {
+        return 0;
+    };
     var local = 42;
-    f = func() int { return local; };
+    f = func () int {
+        return local;
+    };
     printf("{}\n", f());
 }
+
