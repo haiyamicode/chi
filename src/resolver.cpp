@@ -1871,26 +1871,32 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 result_type = scope.value_type;
                 if (!data.is_new) {
-                    // Empty construct on placeholder (= {}) requires Construct bound
+                    // Empty construct on placeholder (= {}) requires a constructor
+                    // interface bound whose new() has zero params
                     if (data.items.len == 0 &&
-                        result_type->kind == TypeKind::Placeholder &&
-                        m_ctx->rt_construct_interface &&
-                        !type_has_trait(result_type, IntrinsicSymbol::Construct)) {
-                        error(node,
-                              "cannot default-construct '{}': type parameter requires "
-                              "'Construct' bound",
-                              format_type(result_type, true));
-                        return nullptr;
-                    }
-                    // Construct expressions can only create struct/optional/array values
-                    bool constructible = result_type->is_placeholder ||
-                                         result_type->kind == TypeKind::Struct ||
-                                         result_type->kind == TypeKind::Subtype ||
-                                         result_type->kind == TypeKind::Optional ||
-                                         result_type->kind == TypeKind::Array;
-                    if (!constructible) {
-                        error(node, "cannot construct type '{}'", format_type(result_type, true));
-                        return nullptr;
+                        result_type->kind == TypeKind::Placeholder) {
+                        bool has_construct_bound = false;
+                        for (auto t : result_type->data.placeholder.traits) {
+                            if (!t || t->kind != TypeKind::Struct ||
+                                !ChiTypeStruct::is_interface(t))
+                                continue;
+                            auto *new_member = t->data.struct_.find_member("new");
+                            if (new_member && new_member->node &&
+                                new_member->node->data.fn_def.fn_kind ==
+                                    ast::FnKind::Constructor &&
+                                new_member->node->data.fn_def.fn_proto->data.fn_proto.params
+                                        .len == 0) {
+                                has_construct_bound = true;
+                                break;
+                            }
+                        }
+                        if (!has_construct_bound) {
+                            error(node,
+                                  "cannot default-construct '{}': type parameter requires "
+                                  "'Construct' bound",
+                                  format_type(result_type, true));
+                            return nullptr;
+                        }
                     }
                 }
                 bool is_heap_type = result_type->is_raw_pointer() ||
@@ -1921,6 +1927,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         add_borrow_source_edges(fn_def, data.items[i], node, true);
                     }
                 }
+            }
+        } else if (value_type->kind == TypeKind::Placeholder && data.items.len > 0) {
+            // Placeholder type with positional args: resolve args against
+            // a matching constructor interface bound's new() signature
+            ChiStructMember *iface_new = nullptr;
+            for (auto t : value_type->data.placeholder.traits) {
+                if (!t || t->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(t))
+                    continue;
+                auto *nm = t->data.struct_.find_member("new");
+                if (nm && nm->node &&
+                    nm->node->data.fn_def.fn_kind == ast::FnKind::Constructor) {
+                    iface_new = nm;
+                    break;
+                }
+            }
+            if (iface_new && iface_new->resolved_type) {
+                auto &fn_type = iface_new->resolved_type->data.fn;
+                resolve_fn_call(node, scope, &fn_type, &data.items, iface_new->node);
+            } else {
+                error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.len);
+                return nullptr;
             }
         } else {
             if (result_type->kind == TypeKind::Optional) {
@@ -2254,8 +2281,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_sized_interface = struct_type;
                 } else if (node->name == "AllowUnsized") {
                     m_ctx->rt_allow_unsized_interface = struct_type;
-                } else if (node->name == "Construct") {
-                    m_ctx->rt_construct_interface = struct_type;
                 }
             }
             node->resolved_type = type_sym;
@@ -2361,27 +2386,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Auto-implement ops.Sized for all non-interface types
             if (m_ctx->rt_sized_interface && !ChiTypeStruct::is_interface(struct_type)) {
                 struct_->add_interface(get_allocator(), m_ctx->rt_sized_interface, struct_type);
-            }
-
-            // Auto-implement ops.Construct for default-constructible structs
-            if (m_ctx->rt_construct_interface && !ChiTypeStruct::is_interface(struct_type)) {
-                auto *ctor_member = struct_->get_constructor();
-                bool constructible = true;
-                if (ctor_member && ctor_member->node &&
-                    ctor_member->node->type == ast::NodeType::FnDef) {
-                    auto *proto = ctor_member->node->data.fn_def.fn_proto;
-                    for (auto param : proto->data.fn_proto.params) {
-                        if (!param->data.param_decl.default_value &&
-                            !param->data.param_decl.is_variadic) {
-                            constructible = false;
-                            break;
-                        }
-                    }
-                }
-                if (constructible) {
-                    struct_->add_interface(get_allocator(), m_ctx->rt_construct_interface,
-                                           struct_type);
-                }
             }
 
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
@@ -6406,6 +6410,74 @@ bool Resolver::interface_satisfies_trait(ChiType *interface_type, ChiType *requi
     return false;
 }
 
+bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface_type) {
+    if (!iface_type || iface_type->kind != TypeKind::Struct ||
+        !ChiTypeStruct::is_interface(iface_type))
+        return false;
+
+    auto &iface_struct = iface_type->data.struct_;
+
+    // Must be a pure constructor interface: only new(), no other methods, no embeds
+    if (iface_struct.embeds.len > 0) return false;
+
+    ChiStructMember *iface_new = nullptr;
+    for (size_t i = 0; i < iface_struct.members.len; i++) {
+        auto m = iface_struct.members[i];
+        if (m->is_method()) {
+            if (iface_new) return false; // more than one method
+            iface_new = m;
+        }
+    }
+    if (!iface_new || !iface_new->node ||
+        iface_new->node->data.fn_def.fn_kind != ast::FnKind::Constructor)
+        return false;
+
+    auto *iface_proto = iface_new->node->data.fn_def.fn_proto;
+    auto &iface_params = iface_proto->data.fn_proto.params;
+
+    // For non-struct types (built-ins): only zero-arg constructible
+    if (!type || type->kind != TypeKind::Struct) {
+        return iface_params.len == 0;
+    }
+
+    auto *ctor = type->data.struct_.get_constructor();
+    if (!ctor || !ctor->node) {
+        // No constructor: zero-arg constructible only
+        return iface_params.len == 0;
+    }
+
+    auto *ctor_proto = ctor->node->data.fn_def.fn_proto;
+    auto &ctor_params = ctor_proto->data.fn_proto.params;
+
+    // Count required ctor params (those without defaults)
+    size_t required_ctor = 0;
+    for (size_t i = 0; i < ctor_params.len; i++) {
+        if (!ctor_params[i]->data.param_decl.default_value &&
+            !ctor_params[i]->data.param_decl.is_variadic)
+            required_ctor++;
+    }
+
+    // Interface provides iface_params.len args — must cover required, not exceed total
+    if (iface_params.len < required_ctor || iface_params.len > ctor_params.len)
+        return false;
+
+    // Check parameter types match (use resolved fn types)
+    // Note: 'this' is stored as container_ref, not in params[], so index 0 = first explicit param
+    if (iface_params.len > 0) {
+        auto *iface_fn_type = iface_new->resolved_type;
+        auto *ctor_fn_type = ctor->resolved_type;
+        if (!iface_fn_type || !ctor_fn_type) return false;
+
+        for (size_t i = 0; i < iface_params.len; i++) {
+            auto iface_param = iface_fn_type->data.fn.get_param_at(i);
+            auto ctor_param = ctor_fn_type->data.fn.get_param_at(i);
+            if (iface_param != ctor_param) return false;
+        }
+    }
+
+    return true;
+}
+
 bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
     auto check_arg = type_arg;
     if (check_arg->kind == TypeKind::Subtype) {
@@ -6426,12 +6498,14 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
                 return true;
             }
         }
+        // Constructor interface: check ctor compatibility
+        if (is_constructor_interface_compatible(check_arg, trait_type))
+            return true;
     } else {
         // Built-in types: check intrinsics
         auto required = interface_get_intrinsics(trait_type);
         for (auto &intrinsic : required) {
             if (intrinsic == IntrinsicSymbol::Sized) return true;
-            if (intrinsic == IntrinsicSymbol::Construct) return true;
             if (intrinsic == IntrinsicSymbol::Add) {
                 if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
                     type_arg->kind == TypeKind::String) {
@@ -6439,34 +6513,8 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
                 }
             }
         }
-    }
-    return false;
-}
-
-bool Resolver::type_has_trait(ChiType *type, IntrinsicSymbol intrinsic) {
-    if (type->kind == TypeKind::Placeholder) {
-        for (auto t : type->data.placeholder.traits) {
-            if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
-                resolve_intrinsic_symbol(t->data.struct_.node) == intrinsic) {
-                return true;
-            }
-        }
-        return false;
-    }
-    // For concrete types, check struct interfaces or built-in intrinsics
-    auto check = type;
-    if (check->kind == TypeKind::Subtype) check = resolve_subtype(check);
-    if (check->kind == TypeKind::Struct) {
-        for (auto &impl : check->data.struct_.interfaces) {
-            auto iface = impl->interface_type;
-            if (iface->kind == TypeKind::Struct && iface->data.struct_.node &&
-                resolve_intrinsic_symbol(iface->data.struct_.node) == intrinsic) {
-                return true;
-            }
-        }
-    } else {
-        // Built-in types: Sized and Construct are always true
-        if (intrinsic == IntrinsicSymbol::Sized || intrinsic == IntrinsicSymbol::Construct)
+        // Constructor interface: built-in types are zero-arg constructible
+        if (is_constructor_interface_compatible(check_arg, trait_type))
             return true;
     }
     return false;

@@ -37,8 +37,18 @@ no ctor: 99
 int construct: 0
 string construct:
 bool construct: false
+float construct: 0
+char construct: 0
+make_default int: 0
+make_default float: 0
+make_default bool: false
+make_default string: ''
 show+construct: (0, 0)
 default ctor via generic: 42
 explicit ctor: 100
+
+-- Custom constructor interface --
+int_construct: 55
+int_construct_default: 33
 
 === All trait bound tests passed! ===

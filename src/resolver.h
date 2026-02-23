@@ -115,7 +115,6 @@ struct ResolveContext {
     ast::Node *rt_enum_base = nullptr;
     ChiType *rt_sized_interface = nullptr;
     ChiType *rt_allow_unsized_interface = nullptr;
-    ChiType *rt_construct_interface = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
@@ -234,7 +233,7 @@ class Resolver {
 
     bool interface_satisfies_trait(ChiType *interface_type, ChiType *required_trait);
     bool check_trait_bound(ChiType *type_arg, ChiType *trait_type);
-    bool type_has_trait(ChiType *type, IntrinsicSymbol intrinsic);
+    bool is_constructor_interface_compatible(ChiType *type, ChiType *iface_type);
     bool check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data);
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);

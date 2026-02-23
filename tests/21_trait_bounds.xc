@@ -146,6 +146,38 @@ struct ShowConstruct<T: Show + ops.Construct> {
     }
 }
 
+// User-defined constructor interface: requires new(x: int)
+interface IntConstruct {
+    func new(x: int);
+}
+
+struct IntBox {
+    x: int;
+
+    func new(x: int) {
+        this.x = x;
+    }
+}
+
+// Struct with default that also satisfies IntConstruct
+struct IntBoxDefault {
+    x: int;
+
+    func new(x: int = 77) {
+        this.x = x;
+    }
+}
+
+struct IntHolder<T: IntConstruct> {
+    func make(v: int) T {
+        return T{v};
+    }
+}
+
+func make_default<T: ops.Construct>() T {
+    return T{};
+}
+
 func main() {
     printf("=== Type Parameter Trait Bounds Test ===\n");
     printf("\n-- Function trait bounds --\n");
@@ -211,6 +243,16 @@ func main() {
     printf("string construct: {}\n", cb4.get());
     var cb5 = ConstructBox<bool>{};
     printf("bool construct: {}\n", cb5.get());
+    var cbf = ConstructBox<float>{};
+    printf("float construct: {}\n", cbf.get());
+    var cbc = ConstructBox<char>{};
+    printf("char construct: {}\n", cbc.get());
+
+    // Generic function with Construct bound
+    printf("make_default int: {}\n", make_default<int>());
+    printf("make_default float: {}\n", make_default<float>());
+    printf("make_default bool: {}\n", make_default<bool>());
+    printf("make_default string: '{}'\n", make_default<string>());
 
     // Multiple bounds: Show + Construct
     var sc = ShowConstruct<Point>{};
@@ -223,6 +265,16 @@ func main() {
     // Explicit args still work alongside Construct bound
     var cb7 = ConstructBox<DefaultCtor>{item: DefaultCtor{x: 100}};
     printf("explicit ctor: {}\n", cb7.get().x);
+
+    printf("\n-- Custom constructor interface --\n");
+
+    // User-defined IntConstruct: requires new(x: int)
+    var ih1 = IntHolder<IntBox>{};
+    printf("int_construct: {}\n", ih1.make(55).x);
+
+    // IntBoxDefault has new(x: int = 77) — satisfies IntConstruct
+    var ih2 = IntHolder<IntBoxDefault>{};
+    printf("int_construct_default: {}\n", ih2.make(33).x);
 
     printf("\n=== All trait bound tests passed! ===\n");
 }
