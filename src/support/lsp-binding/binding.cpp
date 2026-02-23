@@ -182,7 +182,7 @@ static std::string get_symbol_kind(cx::ast::Node *node) {
 static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolver) {
     auto type = decl->resolved_type;
     if (!type || type->kind != cx::TypeKind::Fn) {
-        return type ? resolver.format_type(type, true) : "unknown";
+        return type ? resolver.format_type_display(type) : "unknown";
     }
     auto &fn = type->data.fn;
     auto *proto = decl->data.fn_def.fn_proto;
@@ -197,14 +197,14 @@ static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolv
         if (i < proto_params.len && !proto_params[i]->name.empty()) {
             ss << proto_params[i]->name << ": ";
         }
-        ss << resolver.format_type(fn.params[i], true);
+        ss << resolver.format_type_display(fn.params[i]);
         if (i < fn.params.len - 1) {
             ss << ", ";
         }
     }
     ss << ")";
     if (fn.return_type && fn.return_type->kind != cx::TypeKind::Void) {
-        ss << " " << resolver.format_type(fn.return_type, true);
+        ss << " " << resolver.format_type_display(fn.return_type);
     }
     return ss.str();
 }
@@ -220,7 +220,7 @@ static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) 
     }
     auto type = decl->resolved_type;
     return fmt::format("({}) {}: {}", kind, name,
-                       type ? resolver.format_type(type, true) : "unknown");
+                       type ? resolver.format_type_display(type) : "unknown");
 }
 
 // ============================================================================
@@ -265,7 +265,7 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
         if (i < proto_params.len && !proto_params[i]->name.empty()) {
             label += proto_params[i]->name + ": ";
         }
-        label += resolver.format_type(fn.params[i], true);
+        label += resolver.format_type_display(fn.params[i]);
         auto param_end = label.size();
 
         boost::json::object param;
@@ -278,7 +278,7 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
     }
     label += ")";
     if (fn.return_type && fn.return_type->kind != cx::TypeKind::Void) {
-        label += " " + resolver.format_type(fn.return_type, true);
+        label += " " + resolver.format_type_display(fn.return_type);
     }
 
     boost::json::object sig;
@@ -331,7 +331,7 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
         completion["label"] = member->get_name();
         completion["kind"] = member->is_method() ? "Method" : "Field";
         if (member->resolved_type) {
-            completion["detail"] = resolver.format_type(member->resolved_type, true);
+            completion["detail"] = resolver.format_type_display(member->resolved_type);
         }
         completions.push_back(completion);
     }
@@ -594,7 +594,7 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
                     completion["label"] = symbol->name;
                     completion["kind"] = get_symbol_kind(symbol);
                     if (symbol->resolved_type) {
-                        completion["detail"] = resolver.format_type(symbol->resolved_type, true);
+                        completion["detail"] = resolver.format_type_display(symbol->resolved_type);
                     }
                     completion["data"] = index;
                     completions.push_back(completion);

@@ -519,7 +519,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
                 cu = *p;
             }
         }
-        auto name = m_ctx->resolver.format_type(type, true);
+        auto name = m_ctx->resolver.format_type_display(type);
         auto file = llvm_db.createFile(cu->getFilename(), cu->getDirectory());
         auto line_no = 0;
         if (data.node) {
@@ -542,7 +542,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     default:
         auto size = llvm_type_size(compile_type(type));
-        return llvm_db.createBasicType(m_ctx->resolver.format_type(type, true), size,
+        return llvm_db.createBasicType(m_ctx->resolver.format_type_display(type), size,
                                        llvm::dwarf::DW_ATE_unsigned);
     }
 }
@@ -919,7 +919,7 @@ void Compiler::compile_struct_vtables(ChiType *type) {
     auto vtable_data_l = llvm::ConstantArray::get(vtable_type_l, methods);
     auto global = new llvm::GlobalVariable(*m_ctx->llvm_module, vtable_type_l, true,
                                            llvm::GlobalValue::PrivateLinkage, vtable_data_l,
-                                           "vtables." + get_resolver()->format_type(type, true));
+                                           "vtables." + get_resolver()->format_type_display(type));
 
     for (auto &vtable : vtables) {
         m_ctx->impl_table[vtable.impl] = global + vtable.offset;
@@ -1006,7 +1006,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
 
     auto info_global =
         new llvm::GlobalVariable(llvm_module, ti_type_l, true, llvm::GlobalValue::PrivateLinkage,
-                                 info_l, "typeinfo." + get_resolver()->format_type(type, true));
+                                 info_l, "typeinfo." + get_resolver()->format_type_display(type));
     return info_global;
 }
 
@@ -4611,7 +4611,7 @@ llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) 
     auto &struct_data = container_type->data.struct_;
 
     // Find a fat pointer field (*T or &T) where T is the interface type
-    auto iface_key = get_resolver()->format_type(iface_type);
+    auto iface_key = get_resolver()->format_type_id(iface_type);
     ChiStructMember *target_field = nullptr;
     ChiType *field_type = nullptr;
     for (auto field : struct_data.fields) {
@@ -4619,7 +4619,7 @@ llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) 
         if (ftype->is_pointer_like()) {
             auto elem = ftype->get_elem();
             if (elem && ChiTypeStruct::is_interface(elem) &&
-                get_resolver()->format_type(elem) == iface_key) {
+                get_resolver()->format_type_id(elem) == iface_key) {
                 target_field = field;
                 field_type = ftype;
                 break;
@@ -4642,8 +4642,8 @@ llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) 
             auto param_elem = param_type->get_elem();
             if (!param_elem) continue;
             param_elem = eval_type(param_elem);
-            if (get_resolver()->format_type(param_elem) !=
-                get_resolver()->format_type(container_type)) continue;
+            if (get_resolver()->format_type_id(param_elem) !=
+                get_resolver()->format_type_id(container_type)) continue;
 
             // This param references the same container struct — use its fat pointer field
             auto param_node = proto_node->data.fn_proto.params[param_info.user_param_index];
@@ -4716,7 +4716,7 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
     // Generate unique name for the destructor
-    auto type_name = get_resolver()->format_type(type, true);
+    auto type_name = get_resolver()->format_type_display(type);
     auto fn_name = fmt::format("{}.__delete", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -4848,7 +4848,7 @@ Function *Compiler::generate_copier(ChiType *type) {
     auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
 
     // Generate unique name for the copier
-    auto type_name = get_resolver()->format_type(type, true);
+    auto type_name = get_resolver()->format_type_display(type);
     auto fn_name = fmt::format("{}.__copy", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -4900,7 +4900,7 @@ Function *Compiler::generate_destructor_optional(ChiType *type, ChiType *resolve
     auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
 
     // Generate unique name for the destructor
-    auto type_name = get_resolver()->format_type(type, true);
+    auto type_name = get_resolver()->format_type_display(type);
     auto fn_name = fmt::format("{}.__delete", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -5060,7 +5060,7 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
     auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
     // Generate unique name for the constructor
-    auto type_name = get_resolver()->format_type(struct_type, true);
+    auto type_name = get_resolver()->format_type_display(struct_type);
     auto fn_name = fmt::format("{}.__new", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -5181,7 +5181,7 @@ Function *Compiler::get_fn(ast::Node *node) {
             auto container = fn_type->data.fn.container_ref->get_elem();
             // Build ID using the container's global_id (includes module prefix)
             auto container_id = container->global_id.empty()
-                ? get_resolver()->format_type(container, false)
+                ? get_resolver()->format_type_id(container)
                 : container->global_id;
             auto subst_id = fmt::format("{}.{}.{}",
                 node->module->global_id(),
@@ -5239,7 +5239,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
         }
         name += ".<";
         for (auto arg : subtype_data.args) {
-            name += get_resolver()->format_type(arg, false) + ",";
+            name += get_resolver()->format_type_id(arg) + ",";
         }
         name += ">";
 
@@ -5382,12 +5382,12 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
     }
 
     type = eval_type(type);
-    auto key = get_resolver()->format_type(type);
+    auto key = get_resolver()->format_type_id(type);
     // *Interface, &Interface, Mut<Interface>, and bare Interface are all the same fat pointer type
     if ((type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
          type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef) &&
         type->data.pointer.elem && ChiTypeStruct::is_interface(type->data.pointer.elem)) {
-        key = "FatIFacePointer<" + get_resolver()->format_type(type->data.pointer.elem) + ">";
+        key = "FatIFacePointer<" + get_resolver()->format_type_id(type->data.pointer.elem) + ">";
     }
     auto it = m_ctx->type_table.get(key);
     if (it) {
@@ -5477,7 +5477,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             members.push_back(get_llvm_ptr_type()); // [1] vtable
             return llvm::StructType::create(
                 members,
-                "FatIFacePointer<" + get_resolver()->format_type(data.elem, true) + ">");
+                "FatIFacePointer<" + get_resolver()->format_type_display(data.elem) + ">");
         }
         return get_llvm_ptr_type();
     }
@@ -5487,7 +5487,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt1Ty(llvm_ctx)); // bool has_value
         members.push_back(elem_type_l);                     // elem
-        return llvm::StructType::create(members, get_resolver()->format_type(type, true));
+        return llvm::StructType::create(members, get_resolver()->format_type_display(type));
     }
     case TypeKind::Array: {
         return compile_type(type->data.array.internal);
@@ -5504,21 +5504,21 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return compile_type(data.internal);
     }
     case TypeKind::Struct: {
-        auto key = get_resolver()->format_type(type);
+        auto key = get_resolver()->format_type_id(type);
         auto &data = type->data.struct_;
         if (!data.fields.len) {
             // Empty structs need a placeholder byte for LLVM allocations
             // (void type cannot be allocated)
             std::vector<llvm::Type *> members;
             members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
-            return llvm::StructType::create(members, get_resolver()->format_type(type, true));
+            return llvm::StructType::create(members, get_resolver()->format_type_display(type));
         }
 
         std::vector<llvm::Type *> members;
         for (auto &member : data.fields) {
             members.push_back(compile_type(member->resolved_type));
         }
-        return llvm::StructType::create(members, get_resolver()->format_type(type, true));
+        return llvm::StructType::create(members, get_resolver()->format_type_display(type));
     }
     // Promise is now a Chi-native struct (TypeKind::Subtype), no special handling needed
     case TypeKind::Subtype: {
@@ -5567,7 +5567,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         // variant data field
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx),
                                                std::max(enum_->compiled_data_size, 1)));
-        return llvm::StructType::create(members, get_resolver()->format_type(type, true));
+        return llvm::StructType::create(members, get_resolver()->format_type_display(type));
     }
     case TypeKind::Undefined: {
         return get_llvm_ptr_type();

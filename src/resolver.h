@@ -296,9 +296,9 @@ class Resolver {
     string format_type(ChiType *type, bool for_display = false);
     string format_type_list(TypeList *types, bool for_display = false);
 
-    // Convenience wrappers for common use cases
-    string to_display_string(ChiType *type) { return format_type(type, true); }
-    string to_unique_id(ChiType *type) { return format_type(type, false); }
+    // Convenience wrappers: display = human-readable for errors, id = unique internal key
+    string format_type_display(ChiType *type) { return format_type(type, true); }
+    string format_type_id(ChiType *type) { return format_type(type, false); }
 
     string format_type_data(TypeKind kind, ChiType::Data *data, bool for_display = false);
 
