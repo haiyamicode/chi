@@ -2288,6 +2288,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::StructDecl: {
         auto &data = node->data.struct_decl;
+
+        if (data.kind == ContainerKind::Union &&
+            (has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) ||
+             has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED))) {
+            error(node, "'union' types are not allowed in safe mode");
+            return create_type(TypeKind::Unknown);
+        }
+
         ChiType *type_sym;
         ChiType *struct_type;
         ChiTypeStruct *struct_;
