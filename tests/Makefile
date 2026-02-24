@@ -30,7 +30,8 @@ TESTS_LIST = 00_fib.test \
 		26_lambda_inference.test \
 		28_global_let.test \
 		29_error_handling.test \
-		30_safe_lifetime.test
+		30_safe_lifetime.test \
+		31_pointer_arithmetic.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

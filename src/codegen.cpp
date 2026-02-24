@@ -1963,6 +1963,10 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             }
             return builder.CreateLoad(iface_type_l, vp);
         }
+        // Int to pointer
+        if (from_type->is_int_like()) {
+            return m_ctx->llvm_builder->CreateIntToPtr(value, compile_type(to_type));
+        }
         return value;
     }
     case TypeKind::Struct: {
@@ -1993,7 +1997,8 @@ static llvm::CmpInst::Predicate get_cmpop(TokenType op, ChiType *type) {
             panic("not implemented: {}", PRINT_ENUM(op));
         }
     }
-    auto is_unsigned = type->kind == TypeKind::Int && type->data.int_.is_unsigned;
+    auto is_unsigned = (type->kind == TypeKind::Int && type->data.int_.is_unsigned) ||
+                       type->kind == TypeKind::Pointer;
     switch (op) {
     case TokenType::LT:
         return is_unsigned ? llvm::CmpInst::Predicate::ICMP_ULT
@@ -2200,8 +2205,18 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::INC:
         case TokenType::DEC: {
+            auto op_type = get_chitype(data.op1);
             auto ref = compile_expr_ref(fn, data.op1);
-            auto value = builder.CreateLoad(compile_type(get_chitype(data.op1)), ref.address);
+            auto value = builder.CreateLoad(compile_type(op_type), ref.address);
+            if (op_type->kind == TypeKind::Pointer) {
+                auto elem_type_l = compile_type(op_type->get_elem());
+                auto offset = data.op_type == TokenType::INC
+                                  ? llvm::ConstantInt::get(builder.getInt64Ty(), 1)
+                                  : llvm::ConstantInt::get(builder.getInt64Ty(), -1ULL);
+                auto after = builder.CreateGEP(elem_type_l, value, {offset});
+                builder.CreateStore(after, ref.address);
+                return data.is_suffix ? value : after;
+            }
             auto one = llvm::ConstantInt::get(value->getType(), 1);
             auto after = data.op_type == TokenType::INC ? builder.CreateAdd(value, one)
                                                         : builder.CreateSub(value, one);
@@ -2298,6 +2313,39 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto target_type = get_chitype(expr);
             auto lhs_type = get_chitype(data.op1);
             auto rhs_type = get_chitype(data.op2);
+
+            // Pointer arithmetic
+            if (lhs_type->kind == TypeKind::Pointer || rhs_type->kind == TypeKind::Pointer) {
+                auto lhs = compile_expr(fn, data.op1);
+                auto rhs = compile_expr(fn, data.op2);
+
+                if (lhs_type->kind == TypeKind::Pointer && rhs_type->is_int_like()) {
+                    // ptr + n / ptr - n
+                    auto elem_type_l = compile_type(lhs_type->get_elem());
+                    auto index = rhs;
+                    if (data.op_type == TokenType::SUB) {
+                        index = builder.CreateNeg(index);
+                    }
+                    return builder.CreateGEP(elem_type_l, lhs, {index});
+                }
+                if (lhs_type->is_int_like() && rhs_type->kind == TypeKind::Pointer) {
+                    // n + ptr
+                    auto elem_type_l = compile_type(rhs_type->get_elem());
+                    return builder.CreateGEP(elem_type_l, rhs, {lhs});
+                }
+                if (lhs_type->kind == TypeKind::Pointer &&
+                    rhs_type->kind == TypeKind::Pointer) {
+                    // ptr - ptr → ptrdiff
+                    auto elem_type_l = compile_type(lhs_type->get_elem());
+                    auto lhs_int = builder.CreatePtrToInt(lhs, builder.getInt64Ty());
+                    auto rhs_int = builder.CreatePtrToInt(rhs, builder.getInt64Ty());
+                    auto diff_bytes = builder.CreateSub(lhs_int, rhs_int);
+                    auto elem_size = llvm::ConstantInt::get(builder.getInt64Ty(),
+                                                            llvm_type_size(elem_type_l));
+                    return builder.CreateSDiv(diff_bytes, elem_size);
+                }
+            }
+
             auto struct_type = get_resolver()->eval_struct_type(target_type);
 
             // For specialized generic functions, check if we need operator method calls

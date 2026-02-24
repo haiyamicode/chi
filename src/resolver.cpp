@@ -415,6 +415,10 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         if (from_type->kind == TypeKind::Float) {
             return is_explicit;
         }
+        // Pointer to int requires explicit conversion
+        if (from_type->kind == TypeKind::Pointer) {
+            return is_explicit;
+        }
         return false;
     }
     case TypeKind::Float: {
@@ -1284,9 +1288,57 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::LT:
         case TokenType::LE:
         case TokenType::GT:
-        case TokenType::GE:
+        case TokenType::GE: {
+            // Pointer ordering comparisons require unsafe
+            if ((t1->kind == TypeKind::Pointer || t2->kind == TypeKind::Pointer) &&
+                data.op_type != TokenType::EQ && data.op_type != TokenType::NE) {
+                if (!scope.is_unsafe_block) {
+                    error(node, "pointer comparison requires unsafe block");
+                    return nullptr;
+                }
+            }
             return get_system_types()->bool_;
+        }
         default: {
+            // Pointer arithmetic (requires unsafe)
+            if (data.op_type == TokenType::ADD || data.op_type == TokenType::SUB) {
+                bool lhs_ptr = t1->kind == TypeKind::Pointer;
+                bool rhs_ptr = t2->kind == TypeKind::Pointer;
+                bool lhs_int = t1->is_int_like();
+                bool rhs_int = t2->is_int_like();
+
+                // ptr + int, ptr - int
+                if (lhs_ptr && rhs_int) {
+                    if (!scope.is_unsafe_block) {
+                        error(node, "pointer arithmetic requires unsafe block");
+                        return nullptr;
+                    }
+                    return t1;
+                }
+                // int + ptr
+                if (lhs_int && rhs_ptr && data.op_type == TokenType::ADD) {
+                    if (!scope.is_unsafe_block) {
+                        error(node, "pointer arithmetic requires unsafe block");
+                        return nullptr;
+                    }
+                    return t2;
+                }
+                // ptr - ptr (same element type)
+                if (lhs_ptr && rhs_ptr && data.op_type == TokenType::SUB) {
+                    if (!scope.is_unsafe_block) {
+                        error(node, "pointer arithmetic requires unsafe block");
+                        return nullptr;
+                    }
+                    if (!is_same_type(t1->get_elem(), t2->get_elem())) {
+                        error(node,
+                              "pointer subtraction requires same element type, got {} and {}",
+                              format_type_display(t1), format_type_display(t2));
+                        return nullptr;
+                    }
+                    return get_system_types()->int64;
+                }
+            }
+
             // First, check if left operand has interface method for this operator
             IntrinsicSymbol intrinsic_symbol = get_operator_intrinsic_symbol(data.op_type);
 
@@ -1356,6 +1408,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::ADD:
         case TokenType::INC:
         case TokenType::DEC:
+            if (t->kind == TypeKind::Pointer &&
+                (tt == TokenType::INC || tt == TokenType::DEC)) {
+                if (!scope.is_unsafe_block) {
+                    error(node, "pointer arithmetic requires unsafe block");
+                    return nullptr;
+                }
+                return t;
+            }
             check_assignment(data.op1, t,
                              t->kind == TypeKind::Float ? t : get_system_types()->int_);
             return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;

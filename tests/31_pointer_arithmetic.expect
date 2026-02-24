@@ -1,0 +1,30 @@
+=== Test: ptr + n, ptr - n ===
+*p=10
+*(p+2)=30
+*(p+2-1)=20
+*(3+p)=40
+=== Test: ptr - ptr ===
+diff=3
+p3-p1=2
+=== Test: ptr++, ptr-- ===
+*p=100
+after p++: *p=200
+after p++: *p=300
+after p--: *p=200
+=== Test: ++ptr, --ptr ===
+*++p=20
+*--p=10
+=== Test: ptr comparisons ===
+p0 < p2: true
+p2 > p0: true
+p0 >= p0: true
+p0 <= p2: true
+p0 == p0: true
+p0 != p2: true
+=== Test: int<->ptr casts ===
+*p2=42
+roundtrip: true
+=== Test: malloc + ptr arith ===
+0 10 20 30 40
+=== Test: ptr[i] ===
+p[0]=5, p[2]=15, p[3]=20
