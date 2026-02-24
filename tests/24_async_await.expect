@@ -51,7 +51,7 @@ sleep scheduled
 === Test 10: By-value capture with sleep ===
 original counter after mutate: 999
 
-=== Test 11: promise<T>() helper ===
+=== Test 11: Promise.make() ===
 executor called
 promise resolved with: 123
 

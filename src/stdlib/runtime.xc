@@ -26,7 +26,12 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    private unsafe func cx_throw(
+        type_info: *void,
+        data_ptr: *void,
+        vtable_ptr: *void,
+        type_id: uint32
+    );
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -312,7 +317,13 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(string.format("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
+            panic(
+                string.format(
+                    "expected {}, got {}",
+                    json_kind_display(kind),
+                    json_kind_display(this.kind)
+                )
+            );
         }
     }
 
@@ -738,6 +749,14 @@ struct Promise<T> {
         this.data = {{}};
     }
 
+    static func make(executor: func (resolve: func (value: T))) Promise<T> {
+        var p = Promise<T>{};
+        executor(func [p] (value) {
+            p.resolve(value);
+        });
+        return p;
+    }
+
     func delete() {
         this.data.delete();
     }
@@ -784,19 +803,13 @@ struct Promise<T> {
     }
 }
 
-func promise<T>(executor: func (resolve: func (value: T))) Promise<T> {
-    var p = Promise<T>{};
-    executor(func [p] (value) {
-        p.resolve(value);
-    });
-    return p;
-}
-
 func sleep(ms: uint64) Promise<Unit> {
-    return promise(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
+    return Promise<Unit>.make(
+        func (resolve) {
+            timeout(ms, func [resolve] () {
+                resolve({});
+            });
+        }
+    );
 }
 
