@@ -2833,6 +2833,24 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         // For Optional with trivially-copyable inner type, fall through to default
     }
 
+    // EnumValue: delegate to generated copier (switch on discriminator, deep-copy variant fields)
+    if (type->kind == TypeKind::EnumValue) {
+        auto copier = generate_copier_enum(type);
+        if (copier) {
+            if (destruct_old) {
+                compile_destruction_for_type(fn, dest, type);
+            }
+            auto from_address = src.address;
+            if (!from_address) {
+                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_enum_copy_src");
+                builder.CreateStore(ensure_value(), from_address);
+            }
+            builder.CreateCall(copier->llvm_fn, {dest, from_address});
+            return;
+        }
+        // No copier needed — fall through to default bitwise store
+    }
+
     switch (type->kind) {
     case TypeKind::String: {
         auto from_address = src.address ? src.address : nullptr;
@@ -4759,9 +4777,9 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
-    // Handle optionals, structs, and results via generated __delete
+    // Handle optionals, structs, results, and enum values via generated __delete
     if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct &&
-        type->kind != TypeKind::Result) {
+        type->kind != TypeKind::Result && type->kind != TypeKind::EnumValue) {
         return;
     }
 
@@ -4988,6 +5006,11 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     // Handle Result types — owns the error object's heap allocation
     if (resolved_type->kind == TypeKind::Result) {
         return generate_destructor_result(type, resolved_type);
+    }
+
+    // Handle EnumValue types — switch on discriminator to destroy variant fields
+    if (resolved_type->kind == TypeKind::EnumValue) {
+        return generate_destructor_enum(type, resolved_type);
     }
 
     if (resolved_type->kind != TypeKind::Struct) {
@@ -5317,6 +5340,321 @@ Function *Compiler::generate_destructor_result(ChiType *type, ChiType *resolved_
     // TODO: implement once TypeInfo destructor is in place
     m_ctx->destructor_table[type] = nullptr;
     return nullptr;
+}
+
+Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    auto enum_ = resolved_type->data.enum_value.parent_enum();
+    auto bvs = enum_->base_value_type->data.enum_value.resolved_struct;
+
+    // Check if anything actually needs destruction
+    if (!get_resolver()->type_needs_destruction(resolved_type)) {
+        m_ctx->destructor_table[type] = nullptr;
+        return nullptr;
+    }
+
+    // Create function type: void __delete(T*)
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__delete", type_name);
+
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->destructor_table[type] = fn;
+
+    // Save current insert point and debug location
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+    auto saved_dbg = builder.getCurrentDebugLocation();
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+    builder.SetCurrentDebugLocation(llvm::DebugLoc());
+
+    auto this_ptr = llvm_fn->getArg(0);
+    auto enum_type_l = compile_type(resolved_type);
+
+    // 1. Destroy base_value_struct fields that need it (in reverse)
+    if (bvs) {
+        auto &fields = bvs->data.struct_.fields;
+        for (int i = fields.len - 1; i >= 0; i--) {
+            auto field = fields[i];
+            if (!get_resolver()->type_needs_destruction(field->resolved_type))
+                continue;
+            auto field_gep = builder.CreateStructGEP(enum_type_l, this_ptr, field->field_index);
+            compile_destruction_for_type(fn, field_gep, field->resolved_type);
+        }
+    }
+
+    // 2. Check if any variant has destructible fields
+    bool any_variant_needs = false;
+    for (auto variant : enum_->variants) {
+        if (auto vs = variant->resolved_type->data.enum_value.variant_struct) {
+            for (auto field : vs->data.struct_.fields) {
+                if (get_resolver()->type_needs_destruction(field->resolved_type)) {
+                    any_variant_needs = true;
+                    break;
+                }
+            }
+        }
+        if (any_variant_needs) break;
+    }
+
+    if (any_variant_needs) {
+        // 3. Load discriminator from field 0
+        auto disc_gep = builder.CreateStructGEP(enum_type_l, this_ptr, 0);
+        auto disc = builder.CreateLoad(compile_type(enum_->discriminator), disc_gep, "disc");
+
+        // 4. Variant data index matches __data field_index used by compile_dot_access
+        auto variant_data_idx = bvs ? (unsigned)bvs->data.struct_.fields.len : 0u;
+
+        auto bb_done = fn->new_label("enum_dtor_done");
+        auto sw = builder.CreateSwitch(disc, bb_done, enum_->variants.len);
+
+        for (auto variant : enum_->variants) {
+            auto vs = variant->resolved_type->data.enum_value.variant_struct;
+            if (!vs) continue;
+
+            bool variant_needs = false;
+            for (auto field : vs->data.struct_.fields) {
+                if (get_resolver()->type_needs_destruction(field->resolved_type)) {
+                    variant_needs = true;
+                    break;
+                }
+            }
+            if (!variant_needs) continue;
+
+            auto bb = fn->new_label(fmt::format("enum_dtor_{}", variant->name));
+            sw->addCase(
+                llvm::ConstantInt::get((llvm::IntegerType *)compile_type(enum_->discriminator),
+                                       variant->node->data.enum_variant.resolved_value),
+                bb);
+            fn->use_label(bb);
+
+            auto data_gep = builder.CreateStructGEP(enum_type_l, this_ptr, variant_data_idx);
+            auto vs_type_l = compile_type(vs);
+
+            // Destroy variant fields in reverse
+            auto &vfields = vs->data.struct_.fields;
+            for (int i = vfields.len - 1; i >= 0; i--) {
+                auto field = vfields[i];
+                if (!get_resolver()->type_needs_destruction(field->resolved_type))
+                    continue;
+                auto field_gep = builder.CreateStructGEP(vs_type_l, data_gep, field->field_index);
+                compile_destruction_for_type(fn, field_gep, field->resolved_type);
+            }
+            builder.CreateBr(bb_done);
+        }
+        fn->use_label(bb_done);
+    }
+
+    builder.CreateRetVoid();
+
+    // Restore insert point and debug location
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    builder.SetCurrentDebugLocation(saved_dbg);
+
+    return fn;
+}
+
+Function *Compiler::generate_copier_enum(ChiType *type) {
+    // Don't generate copiers for placeholder types
+    if (type->is_placeholder)
+        return nullptr;
+
+    // Check if already generated
+    auto existing = m_ctx->copier_table.get(type);
+    if (existing)
+        return *existing;
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Resolve to the EnumValue type
+    auto resolved_type = type;
+    while (resolved_type && resolved_type->kind == TypeKind::Subtype) {
+        auto final_type = resolved_type->data.subtype.final_type;
+        if (final_type)
+            resolved_type = final_type;
+        else
+            break;
+    }
+
+    if (!resolved_type || resolved_type->kind != TypeKind::EnumValue) {
+        return nullptr;
+    }
+
+    auto enum_ = resolved_type->data.enum_value.parent_enum();
+    auto bvs = enum_->base_value_type->data.enum_value.resolved_struct;
+
+    // Check if any field needs deep copy (destructor OR CopyFrom)
+    bool needs_copier = get_resolver()->type_needs_destruction(resolved_type);
+    if (!needs_copier) {
+        // Also check if any field has CopyFrom (copy semantics without destructor)
+        auto check_field_copier = [&](ChiType *field_type) -> bool {
+            auto sty = get_resolver()->resolve_struct_type(eval_type(field_type));
+            return sty && sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+        };
+        if (bvs) {
+            for (auto field : bvs->data.struct_.fields) {
+                if (check_field_copier(field->resolved_type)) { needs_copier = true; break; }
+            }
+        }
+        if (!needs_copier) {
+            for (auto variant : enum_->variants) {
+                if (auto vs = variant->resolved_type->data.enum_value.variant_struct) {
+                    for (auto field : vs->data.struct_.fields) {
+                        if (check_field_copier(field->resolved_type)) { needs_copier = true; break; }
+                    }
+                }
+                if (needs_copier) break;
+            }
+        }
+    }
+    if (!needs_copier) {
+        m_ctx->copier_table[type] = nullptr;
+        return nullptr;
+    }
+
+    // Create function type: void __copy(T* dest, T* src)
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx),
+                                              {ptr_type, ptr_type}, false);
+
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__copy", type_name);
+
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->copier_table[type] = fn;
+
+    // Save current insert point and debug location
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+    auto saved_dbg = builder.getCurrentDebugLocation();
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+    builder.SetCurrentDebugLocation(llvm::DebugLoc());
+
+    auto dest_ptr = llvm_fn->getArg(0);
+    auto src_ptr = llvm_fn->getArg(1);
+    auto enum_type_l = compile_type(resolved_type);
+    auto full_size = llvm_type_size(enum_type_l);
+
+    // 1. memset dest to 0
+    auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0);
+    builder.CreateMemSet(dest_ptr, zero, full_size, {});
+
+    // 2. Copy base_value_struct fields (header + base shared fields)
+    if (bvs) {
+        for (auto field : bvs->data.struct_.fields) {
+            auto src_gep = builder.CreateStructGEP(enum_type_l, src_ptr, field->field_index);
+            auto dst_gep = builder.CreateStructGEP(enum_type_l, dest_ptr, field->field_index);
+            auto field_type_l = compile_type(field->resolved_type);
+            auto fval = builder.CreateLoad(field_type_l, src_gep);
+            compile_copy(fn, fval, dst_gep, field->resolved_type, nullptr);
+        }
+    }
+
+    // Helper: check if a field type needs deep copy (destructor or CopyFrom)
+    auto field_needs_deep_copy = [&](ChiType *field_type) -> bool {
+        if (get_resolver()->type_needs_destruction(field_type))
+            return true;
+        auto sty = get_resolver()->resolve_struct_type(eval_type(field_type));
+        return sty && sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+    };
+
+    // 3. Check if any variant has fields needing deep copy
+    bool any_variant_needs = false;
+    for (auto variant : enum_->variants) {
+        if (auto vs = variant->resolved_type->data.enum_value.variant_struct) {
+            for (auto field : vs->data.struct_.fields) {
+                if (field_needs_deep_copy(field->resolved_type)) {
+                    any_variant_needs = true;
+                    break;
+                }
+            }
+        }
+        if (any_variant_needs) break;
+    }
+
+    if (any_variant_needs) {
+        // Load discriminator from src, switch for variant fields
+        auto disc_gep = builder.CreateStructGEP(enum_type_l, src_ptr, 0);
+        auto disc = builder.CreateLoad(compile_type(enum_->discriminator), disc_gep, "disc");
+
+        // Variant data index matches __data field_index used by compile_dot_access
+        auto variant_data_idx = bvs ? (unsigned)bvs->data.struct_.fields.len : 0u;
+
+        auto bb_done = fn->new_label("enum_copy_done");
+        auto sw = builder.CreateSwitch(disc, bb_done, enum_->variants.len);
+
+        for (auto variant : enum_->variants) {
+            auto vs = variant->resolved_type->data.enum_value.variant_struct;
+            if (!vs) continue;
+
+            // For variants with only trivial fields, copy the byte array via memcpy
+            bool variant_has_nontrivial = false;
+            for (auto field : vs->data.struct_.fields) {
+                if (field_needs_deep_copy(field->resolved_type)) {
+                    variant_has_nontrivial = true;
+                    break;
+                }
+            }
+
+            auto bb = fn->new_label(fmt::format("enum_copy_{}", variant->name));
+            sw->addCase(
+                llvm::ConstantInt::get((llvm::IntegerType *)compile_type(enum_->discriminator),
+                                       variant->node->data.enum_variant.resolved_value),
+                bb);
+            fn->use_label(bb);
+
+            auto src_data = builder.CreateStructGEP(enum_type_l, src_ptr, variant_data_idx);
+            auto dst_data = builder.CreateStructGEP(enum_type_l, dest_ptr, variant_data_idx);
+            auto vs_type_l = compile_type(vs);
+
+            if (!variant_has_nontrivial) {
+                // All trivial — memcpy the variant data
+                auto vs_size = llvm_type_size(vs_type_l);
+                builder.CreateMemCpy(dst_data, {}, src_data, {}, vs_size);
+            } else {
+                // Deep copy each variant field
+                for (auto field : vs->data.struct_.fields) {
+                    auto sf = builder.CreateStructGEP(vs_type_l, src_data, field->field_index);
+                    auto df = builder.CreateStructGEP(vs_type_l, dst_data, field->field_index);
+                    auto fval = builder.CreateLoad(compile_type(field->resolved_type), sf);
+                    compile_copy(fn, fval, df, field->resolved_type, nullptr);
+                }
+            }
+            builder.CreateBr(bb_done);
+        }
+        fn->use_label(bb_done);
+    }
+
+    builder.CreateRetVoid();
+
+    // Restore insert point and debug location
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    builder.SetCurrentDebugLocation(saved_dbg);
+
+    return fn;
 }
 
 Function *Compiler::generate_destructor_continuation(llvm::StructType *capture_struct_type,

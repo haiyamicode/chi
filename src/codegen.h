@@ -335,6 +335,8 @@ class Compiler {
     Function *generate_any_destructor(ChiType *type);
     Function *generate_any_copier(ChiType *type);
     Function *generate_destructor_optional(ChiType *type, ChiType *resolved_type);
+    Function *generate_destructor_enum(ChiType *type, ChiType *resolved_type);
+    Function *generate_copier_enum(ChiType *type);
     Function *generate_destructor_result(ChiType *type, ChiType *resolved_type);
     Function *generate_destructor_continuation(llvm::StructType *capture_struct_type,
                                                ChiType *promise_type,

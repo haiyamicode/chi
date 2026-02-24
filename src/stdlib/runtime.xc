@@ -203,13 +203,17 @@ struct Box<T: ops.AllowUnsized> {
 
     impl ops.Unwrap<T> {
         func unwrap() &T {
-            unsafe { return this._ptr as &T; }
+            unsafe {
+                return this._ptr as &T;
+            }
         }
     }
 
     impl ops.UnwrapMut<T> {
         mut func unwrap_mut() &mut T {
-            unsafe { return this._ptr as &mut T; }
+            unsafe {
+                return this._ptr as &mut T;
+            }
         }
     }
 

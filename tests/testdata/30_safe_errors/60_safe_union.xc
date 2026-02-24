@@ -9,3 +9,4 @@ union Data {
 func main() {
     var d = Data{i: 42};
 }
+

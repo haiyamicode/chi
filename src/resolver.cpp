@@ -3906,6 +3906,27 @@ bool Resolver::type_needs_destruction(ChiType *type) {
         return false;
     }
 
+    // EnumValue: check if base struct or any variant has destructible fields
+    if (type->kind == TypeKind::EnumValue) {
+        auto enum_ = type->data.enum_value.parent_enum();
+        auto bvs = enum_->base_value_type->data.enum_value.resolved_struct;
+        if (bvs) {
+            for (auto field : bvs->data.struct_.fields) {
+                if (type_needs_destruction(field->resolved_type))
+                    return true;
+            }
+        }
+        for (auto variant : enum_->variants) {
+            if (auto vs = variant->resolved_type->data.enum_value.variant_struct) {
+                for (auto field : vs->data.struct_.fields) {
+                    if (type_needs_destruction(field->resolved_type))
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
     // Only structs can have destructors or fields needing destruction
     if (type->kind != TypeKind::Struct)
         return false;

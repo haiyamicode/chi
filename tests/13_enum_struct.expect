@@ -6,3 +6,34 @@ greeting: hello, f
 discriminator value: 1
 is_callable: true
 type_name: Node.FnDef
+=== Test: Enum string copy ===
+s.label=name_42
+t.label=name_42
+s.label=name_99, t.label=name_42
+--- scope exit ---
+=== Test: Enum traced copy ===
+Traced(10) created
+a.trace.id=10
+Traced(10) copied
+b.trace.id=10
+--- scope exit ---
+Traced(10) destroyed
+Traced(10) destroyed
+=== Test: Enum traced reassign ===
+Traced(10) created
+Traced(10) destroyed
+Traced(20) created
+a.trace.id=20
+--- scope exit ---
+Traced(20) destroyed
+=== Test: Enum trivial variant copy ===
+a.id=5, b.id=5
+--- scope exit ---
+=== Test: Enum string reassign ===
+a.label=name_55
+a.label=name_77
+--- scope exit ---
+=== Test: Node copy ===
+copy.ret=int
+copy.name=f
+--- scope exit ---
