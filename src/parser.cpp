@@ -1225,7 +1225,7 @@ Node *Parser::parse_expr() {
     auto node = create_node(NodeType::BinOpExpr, token);
     node->data.bin_op_expr.op1 = lhs;
     node->data.bin_op_expr.op_type = token->type;
-    node->data.bin_op_expr.op2 = parse_expr_clause(false);
+    node->data.bin_op_expr.op2 = parse_child_expr_construct(false, node);
     return node;
 }
 

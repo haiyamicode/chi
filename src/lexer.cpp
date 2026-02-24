@@ -119,6 +119,14 @@ l0:
         return;
     }
 
+    // Non-ASCII bytes outside of strings/comments/char-literals
+    if ((unsigned char)c >= 0x80) {
+        // Consume the full UTF-8 sequence so we don't leave stray continuation bytes
+        read_utf8_codepoint(c);
+        error("unexpected non-ASCII character outside of string or character literal", pos());
+        return;
+    }
+
     char c1 = 0;
 
     if (m_eof) {
@@ -331,21 +339,91 @@ TokenType Lexer::read_rep(char expect, TokenType t_if, TokenType t_else) {
 }
 
 void Lexer::read_rune() {
-    char c;
-    bool ok = read_char('\'', &c);
-    if (!ok) {
-        error("empty character literal or unescaped ' in character literal", pos());
-        c = '\'';
+    auto c = read();
+    uint32_t codepoint = 0;
+
+    if (m_eof || c == '\'') {
+        error("empty character literal", pos());
+        m_tok.type = TokenType::CHAR;
+        m_tok.val.i = 0;
+        return;
+    }
+
+    if (c == '\\') {
+        // Escape sequence
+        c = read();
+        switch (c) {
+        case 'x':
+            codepoint = read_hex_char(2);
+            break;
+        case 'u':
+            codepoint = read_unicode_char(4);
+            break;
+        case 'U':
+            codepoint = read_unicode_char(8);
+            break;
+        case 'a':
+            codepoint = '\a';
+            break;
+        case 'b':
+            codepoint = '\b';
+            break;
+        case 'f':
+            codepoint = '\f';
+            break;
+        case 'n':
+            codepoint = '\n';
+            break;
+        case 'r':
+            codepoint = '\r';
+            break;
+        case 't':
+            codepoint = '\t';
+            break;
+        case 'v':
+            codepoint = '\v';
+            break;
+        case '\\':
+            codepoint = '\\';
+            break;
+        case '\'':
+            codepoint = '\'';
+            break;
+        default:
+            if (c >= '0' && c <= '7') {
+                auto x = c - '0';
+                for (int i = 2; i > 0; i--) {
+                    c = read();
+                    if (c >= '0' && c <= '7') {
+                        x = x * 8 + c - '0';
+                    } else {
+                        error(fmt::format("non-octal character in escape sequence: '{}'", c), pos());
+                        unread();
+                        break;
+                    }
+                }
+                codepoint = x;
+            } else {
+                error(fmt::format("unknown escape sequence: \\{}", c), pos());
+                codepoint = c;
+            }
+        }
+    } else if ((unsigned char)c >= 0x80) {
+        // Multi-byte UTF-8 character
+        codepoint = read_utf8_codepoint(c);
+    } else {
+        // ASCII character
+        codepoint = (unsigned char)c;
     }
 
     auto c1 = read();
     if (c1 != '\'') {
-        error("missing '", pos());
+        error("missing closing '", pos());
         unread();
     }
 
     m_tok.type = TokenType::CHAR;
-    m_tok.val.i = c;
+    m_tok.val.i = (int64_t)codepoint;
 }
 
 void Lexer::read_lifetime() {
@@ -753,7 +831,9 @@ char Lexer::read() {
     if (ch == '\n') {
         p.line++;
         p.col = 0;
-    } else {
+    } else if ((ch & 0xC0) != 0x80) {
+        // Only increment col for ASCII bytes and UTF-8 start bytes,
+        // not continuation bytes (10xxxxxx). This counts codepoints.
         p.col++;
     }
     p.offset++;
@@ -763,6 +843,55 @@ char Lexer::read() {
     m_pbuf[m_bufi] = p;
 
     return ch;
+}
+
+uint32_t Lexer::read_utf8_codepoint(char first_byte) {
+    auto fb = (unsigned char)first_byte;
+    uint32_t codepoint;
+    int remaining;
+
+    if (fb < 0x80) {
+        return fb;
+    } else if ((fb & 0xE0) == 0xC0) {
+        codepoint = fb & 0x1F;
+        remaining = 1;
+    } else if ((fb & 0xF0) == 0xE0) {
+        codepoint = fb & 0x0F;
+        remaining = 2;
+    } else if ((fb & 0xF8) == 0xF0) {
+        codepoint = fb & 0x07;
+        remaining = 3;
+    } else {
+        error(fmt::format("invalid UTF-8 start byte: {:#x}", fb), pos());
+        return 0;
+    }
+
+    for (int i = 0; i < remaining; i++) {
+        auto c = read();
+        auto uc = (unsigned char)c;
+        if ((uc & 0xC0) != 0x80) {
+            error("invalid UTF-8 continuation byte", pos());
+            unread();
+            return 0;
+        }
+        codepoint = (codepoint << 6) | (uc & 0x3F);
+    }
+
+    // Reject surrogate halves and out-of-range codepoints
+    if (codepoint > UTF8_MAX || (0xD800 <= codepoint && codepoint < 0xE000)) {
+        error(fmt::format("invalid Unicode codepoint: {:#x}", codepoint), pos());
+        return 0;
+    }
+
+    // Reject overlong encodings (codepoint must require the number of bytes used)
+    if ((remaining == 1 && codepoint < 0x80) ||
+        (remaining == 2 && codepoint < 0x800) ||
+        (remaining == 3 && codepoint < 0x10000)) {
+        error(fmt::format("overlong UTF-8 encoding for codepoint: {:#x}", codepoint), pos());
+        return 0;
+    }
+
+    return codepoint;
 }
 
 void Lexer::unread() {

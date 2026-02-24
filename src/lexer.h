@@ -181,6 +181,15 @@ typedef map<string, TokenType> KeywordMap;
 const long BUF_LEN = 4;
 const uint32_t UTF8_MAX = U'\U0010FFFF';
 
+// Count UTF-8 codepoints in a string (as opposed to byte length).
+inline size_t utf8_length(const string &s) {
+    size_t count = 0;
+    for (unsigned char c : s) {
+        if ((c & 0xC0) != 0x80) count++; // count non-continuation bytes
+    }
+    return count;
+}
+
 struct Note {
     string message;
     Pos pos;
@@ -193,7 +202,7 @@ struct Error {
     array<Note> notes = {};
 
     Error(string message, Token token) : message(message), pos(token.pos) {
-        range = token.to_string().size();
+        range = utf8_length(token.to_string());
     }
     Error(string message, Pos pos) : message(message), pos(pos) { range = 1; }
 };
@@ -224,6 +233,10 @@ class Lexer {
     string &new_buf(size_t reserve = 5);
 
     char read();
+
+    // Read a complete UTF-8 codepoint given the first byte.
+    // Returns the decoded codepoint, or 0 on error (with error reported).
+    uint32_t read_utf8_codepoint(char first_byte);
 
     void unread();
 

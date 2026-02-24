@@ -1,3 +1,7 @@
+before: 10
+delete bar 10
+after: 20
+delete bar 20
 delete foo 3
 delete bar 32
 delete bar 31

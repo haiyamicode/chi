@@ -320,6 +320,7 @@ struct BinOpExpr {
     Node *op1 = nullptr;
     Node *op2 = nullptr;
     Node *resolved_call = nullptr;
+    bool is_initializing = false; // true when this assignment is the first write to the target
 };
 
 struct UnaryOpExpr {
@@ -799,7 +800,7 @@ struct Node {
         case NodeType::FnDef:
             return this;
         case NodeType::UnaryOpExpr:
-            return data.unary_op_expr.op1;
+            return data.unary_op_expr.op1->get_decl();
         default:
             break;
         }

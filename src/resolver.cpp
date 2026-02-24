@@ -1237,10 +1237,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     error(node, errors::ASSIGNMENT_TO_CONST, var->name);
                 }
             }
-            if (var && var->type == NodeType::VarDecl && !var->data.var_decl.initialized_at) {
-                if (!var->data.var_decl.is_field ||
-                    scope.parent_fn->name != "new" && data.op_type == TokenType::ASS) {
-                    var->data.var_decl.initialized_at = node;
+            if (var && var->type == NodeType::VarDecl) {
+                auto &vd = var->data.var_decl;
+                // First assignment: no previous initialization at all
+                bool is_first = !vd.initialized_at;
+                // Field with only a default value (parser sets initialized_at = var itself)
+                // being assigned for the first time in a constructor
+                if (!is_first && vd.is_field && vd.initialized_at == var &&
+                    scope.parent_fn && scope.parent_fn->name == "new") {
+                    is_first = true;
+                }
+                if (is_first) {
+                    data.is_initializing = true;
+                    vd.initialized_at = node;
                 }
             }
             auto var_scope = scope.set_value_type(t1).set_move_outlet(data.op1);

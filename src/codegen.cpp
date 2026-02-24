@@ -2241,6 +2241,27 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             assert(ref.address);
             auto dest_type = get_chitype(data.op1);
             auto src_type = get_chitype(data.op2);
+            bool destruct_old = !data.is_initializing;
+            // Fallback for cloned AST nodes (e.g. subtype variants):
+            // check if this is a field being initialized inside a constructor
+            if (destruct_old && fn->node) {
+                auto var = data.op1->get_decl();
+                if (var && var->type == ast::NodeType::VarDecl &&
+                    var->data.var_decl.is_field &&
+                    fn->node->type == ast::NodeType::FnDef &&
+                    fn->node->data.fn_def.fn_kind == ast::FnKind::Constructor) {
+                    auto init = var->data.var_decl.initialized_at;
+                    // Field whose initialized_at still points to the parser default
+                    // (the VarDecl itself) or to the original VarDecl before cloning
+                    if (!init || init->type == ast::NodeType::VarDecl) {
+                        destruct_old = false;
+                    }
+                }
+            }
+            // If RHS constructs in-place (move optimization), destruct old value first
+            if (data.op2->escape.moved && destruct_old) {
+                compile_destruction_for_type(fn, ref.address, dest_type);
+            }
             // Get RHS as ref to preserve source address for efficient copy
             // (avoids load + temp alloca when source already has an address, e.g. ptr!)
             auto src_ref = compile_expr_ref(fn, data.op2);
@@ -2256,7 +2277,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             if (!data.op2->escape.moved) {
                 compile_copy_with_ref(fn, src_ref, ref.address, dest_type, data.op2,
-                                      /*destruct_old=*/true);
+                                      destruct_old);
             }
             return src_ref.value;
         }
@@ -2896,6 +2917,9 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             }
 
             if (needs_field_copy) {
+                if (destruct_old) {
+                    compile_destruction_for_type(fn, dest, type);
+                }
                 auto from_address = src.address;
                 if (!from_address) {
                     from_address = builder.CreateAlloca(compile_type(type), nullptr, "_struct_copy_src");
@@ -2919,6 +2943,9 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         break;
     }
 
+    if (destruct_old) {
+        compile_destruction_for_type(fn, dest, type);
+    }
     auto size = llvm_type_size(compile_type(type));
     if (size > 0) {
         builder.CreateStore(ensure_value(), dest);

@@ -42,7 +42,16 @@ func test_foo() {
     println("finished");
 }
 
+func test_assign_construct() {
+    var p = new Bar{10};
+    printf("before: {}\n", p!.id);
+    p! = Bar{20};
+    printf("after: {}\n", p!.id);
+    delete p;
+}
+
 func main() {
+    test_assign_construct();
     test_foo();
 }
 

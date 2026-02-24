@@ -16,6 +16,121 @@
 namespace fs = std::filesystem;
 
 // ============================================================================
+// UTF-8 / UTF-16 offset conversion
+// ============================================================================
+
+// Convert a UTF-16 code unit offset (as used by JS/LSP) to a UTF-8 byte offset.
+static long utf16_to_byte_offset(const std::string &source, long utf16_offset) {
+    long utf16_pos = 0;
+    long byte_pos = 0;
+    while (byte_pos < (long)source.size() && utf16_pos < utf16_offset) {
+        auto c = (unsigned char)source[byte_pos];
+        int seq_len;
+        uint32_t codepoint;
+        if (c < 0x80) {
+            seq_len = 1;
+            codepoint = c;
+        } else if ((c & 0xE0) == 0xC0) {
+            seq_len = 2;
+            codepoint = c & 0x1F;
+        } else if ((c & 0xF0) == 0xE0) {
+            seq_len = 3;
+            codepoint = c & 0x0F;
+        } else if ((c & 0xF8) == 0xF0) {
+            seq_len = 4;
+            codepoint = c & 0x07;
+        } else {
+            byte_pos++;
+            utf16_pos++;
+            continue;
+        }
+        for (int i = 1; i < seq_len && byte_pos + i < (long)source.size(); i++) {
+            codepoint = (codepoint << 6) | ((unsigned char)source[byte_pos + i] & 0x3F);
+        }
+        byte_pos += seq_len;
+        utf16_pos += (codepoint >= 0x10000) ? 2 : 1;
+    }
+    return byte_pos;
+}
+
+// Convert a UTF-8 byte offset to a UTF-16 code unit offset.
+static long byte_to_utf16_offset(const std::string &source, long byte_offset) {
+    long utf16_pos = 0;
+    long byte_pos = 0;
+    while (byte_pos < byte_offset && byte_pos < (long)source.size()) {
+        auto c = (unsigned char)source[byte_pos];
+        int seq_len;
+        uint32_t codepoint;
+        if (c < 0x80) {
+            seq_len = 1;
+            codepoint = c;
+        } else if ((c & 0xE0) == 0xC0) {
+            seq_len = 2;
+            codepoint = c & 0x1F;
+        } else if ((c & 0xF0) == 0xE0) {
+            seq_len = 3;
+            codepoint = c & 0x0F;
+        } else if ((c & 0xF8) == 0xF0) {
+            seq_len = 4;
+            codepoint = c & 0x07;
+        } else {
+            byte_pos++;
+            utf16_pos++;
+            continue;
+        }
+        for (int i = 1; i < seq_len && byte_pos + i < (long)source.size(); i++) {
+            codepoint = (codepoint << 6) | ((unsigned char)source[byte_pos + i] & 0x3F);
+        }
+        byte_pos += seq_len;
+        utf16_pos += (codepoint >= 0x10000) ? 2 : 1;
+    }
+    return utf16_pos;
+}
+
+// Convert a codepoint-based column to a UTF-16 column, given the source line.
+static long col_to_utf16(const std::string &source, long line, long col) {
+    // Find the start of the given line
+    long line_start = 0;
+    for (long l = 0; l < line && line_start < (long)source.size(); line_start++) {
+        if (source[line_start] == '\n') l++;
+    }
+    // Walk codepoints and count UTF-16 code units
+    long utf16_col = 0;
+    long cp_count = 0;
+    long pos = line_start;
+    while (pos < (long)source.size() && cp_count < col) {
+        auto c = (unsigned char)source[pos];
+        int seq_len;
+        uint32_t codepoint;
+        if (c < 0x80) {
+            seq_len = 1;
+            codepoint = c;
+        } else if ((c & 0xE0) == 0xC0) {
+            seq_len = 2;
+            codepoint = c & 0x1F;
+        } else if ((c & 0xF0) == 0xE0) {
+            seq_len = 3;
+            codepoint = c & 0x0F;
+        } else if ((c & 0xF8) == 0xF0) {
+            seq_len = 4;
+            codepoint = c & 0x07;
+        } else {
+            pos++;
+            utf16_col++;
+            cp_count++;
+            continue;
+        }
+        for (int i = 1; i < seq_len && pos + i < (long)source.size(); i++) {
+            codepoint = (codepoint << 6) | ((unsigned char)source[pos + i] & 0x3F);
+        }
+        pos += seq_len;
+        utf16_col += (codepoint >= 0x10000) ? 2 : 1;
+        cp_count++;
+    }
+    return utf16_col;
+}
+
+// ============================================================================
 // Utilities
 // ============================================================================
 
@@ -144,13 +259,17 @@ static cx::ast::Module* process_source(cx::Analyzer &analyzer, const std::string
     return analyzer.process_source(pkg, src, input_file);
 }
 
-static boost::json::array collect_errors(cx::ast::Module *module) {
+static boost::json::array collect_errors(cx::ast::Module *module, const std::string &source = "") {
     boost::json::array errors;
     if (!module) return errors;
     for (auto &error : module->errors) {
         boost::json::object e;
         e["message"] = error.message;
-        e["offset"] = error.pos.offset;
+        if (!source.empty()) {
+            e["offset"] = byte_to_utf16_offset(source, error.pos.offset);
+        } else {
+            e["offset"] = error.pos.offset;
+        }
         e["range"] = error.range;
         errors.push_back(e);
     }
@@ -521,8 +640,8 @@ static boost::json::array generate_semantic_tokens(cx::ast::Module *module) {
 
         if (token_type < 0) continue;
 
-        auto len = tok->str.size();
-        if (len == 0) len = tok->to_string().size();
+        auto len = cx::utf8_length(tok->str);
+        if (len == 0) len = cx::utf8_length(tok->to_string());
         if (len == 0) continue;
 
         result.push_back(tok->pos.line);
@@ -550,11 +669,12 @@ static napi_value AnalyzeMethod(napi_env env, napi_callback_info info) {
     cx::Analyzer analyzer;
     std::string input_file;
     init_analyzer(analyzer, input, input_file);
-    auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+    auto source_str = std::string(input["source"].as_string().c_str());
+    auto src = cx::io::Buffer::from_string(source_str.c_str());
 
     auto module = process_source(analyzer, input_file, &src);
 
-    return napi_json_result(env, boost::json::object{{"errors", collect_errors(module)}});
+    return napi_json_result(env, boost::json::object{{"errors", collect_errors(module, source_str)}});
 }
 
 // scan: process source, run cursor scan, return operation-specific result
@@ -572,7 +692,9 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
 
     auto module = process_source(analyzer, input_file, &src);
 
-    auto offset = input["offset"].as_int64();
+    auto source_str = std::string(input["source"].as_string().c_str());
+    auto utf16_offset = input["offset"].as_int64();
+    auto offset = utf16_to_byte_offset(source_str, utf16_offset);
     auto operation = input["operation"].as_string();
     auto pos = cx::Pos::from_offset(offset);
     auto result = analyzer.scan(module, pos);
@@ -631,14 +753,15 @@ static napi_value FormatMethod(napi_env env, napi_callback_info info) {
     cx::Analyzer analyzer;
     std::string input_file;
     init_analyzer(analyzer, input, input_file);
-    auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
+    auto source_str = std::string(input["source"].as_string().c_str());
+    auto src = cx::io::Buffer::from_string(source_str.c_str());
 
     auto pkg = analyzer.get_context()->add_package(".");
     load_package_config(pkg, input_file);
     auto module = analyzer.format_source(pkg, &src, input_file);
 
     boost::json::object output;
-    output["errors"] = collect_errors(module);
+    output["errors"] = collect_errors(module, source_str);
     if (module && module->errors.len == 0 && module->root) {
         cx::AstPrinter printer(module->root, &module->comments);
         output["formatted"] = printer.format_to_string();
