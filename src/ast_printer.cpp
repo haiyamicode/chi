@@ -997,10 +997,10 @@ void AstPrinter::print_node(Node *node) {
                 flush_comments_before(ft->pos);
             print_indent(m_indent);
             print_node(variant);
-            // Variants with struct bodies use ';' separator
-            if (variant->data.enum_variant.struct_body) {
+            bool is_last = (i == data.variants.len - 1);
+            if (is_last && data.base_struct) {
                 emit(";");
-            } else if (i < data.variants.len - 1) {
+            } else if (!is_last) {
                 emit(",");
             }
             flush_trailing_comment(variant);
