@@ -566,7 +566,27 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.bin_op_expr;
         print_node(data.op1);
         emit(" {} ", get_token_symbol(data.op_type));
+        // Strip redundant type from construct in assignments (same pattern as ReturnStmt)
+        if (data.op_type == TokenType::ASS && data.op2 &&
+            data.op2->type == NodeType::ConstructExpr &&
+            data.op2->data.construct_expr.type &&
+            !data.op2->data.construct_expr.is_new &&
+            !data.op2->data.construct_expr.is_array_literal) {
+            auto *var = data.op1->get_decl();
+            Node *target_type = nullptr;
+            if (var && var->type == NodeType::VarDecl) {
+                target_type = var->data.var_decl.type;
+                if (!target_type && var->data.var_decl.expr &&
+                    var->data.var_decl.expr->type == NodeType::ConstructExpr)
+                    target_type = var->data.var_decl.expr->data.construct_expr.type;
+            }
+            if (target_type &&
+                types_match(target_type, data.op2->data.construct_expr.type)) {
+                m_suppress_construct_type = true;
+            }
+        }
         print_node(data.op2);
+        m_suppress_construct_type = false;
         break;
     }
     case NodeType::LiteralExpr: {
