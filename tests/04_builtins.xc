@@ -120,14 +120,7 @@ func test_box_helper() {
 
 func test_box() {
     println("testing box:");
-    var p: *int = null;
-    var pm: &move int;
-    unsafe {
-        p = mem.malloc(sizeof int) as *int;
-        *p = 42;
-        pm = p as &move int;
-    }
-    var b1 = Box<int>{pm};
+    var b1 = Box.wrap(42);
     printf("b1.as_ref()={}\n", b1.as_ref());
     var b2 = b1;
     printf("after copy: b1={}, b2={}\n", b1.as_ref(), b2.as_ref());

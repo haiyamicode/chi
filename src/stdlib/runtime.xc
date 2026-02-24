@@ -201,7 +201,7 @@ struct Box<T: ops.AllowUnsized> {
     }
 
     impl where T: ops.Sized {
-        static func from_value(val: T) Box<T> {
+        static func wrap(val: T) Box<T> {
             return {mem.copy_from<T>(&val)};
         }
     }
