@@ -23,6 +23,6 @@ func make_pair(x: &int) Pair {
 func main() {
     var safe = 1;
     var p = make_pair(&safe);
-    printf("a={}, b={}\n", p.a!, p.b!);
+    printf("a={}, b={}\n", *p.a, *p.b);
 }
 

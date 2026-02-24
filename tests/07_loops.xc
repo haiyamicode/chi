@@ -25,7 +25,7 @@ func for_in() {
     println("modify the list and print again");
 
     for &mut item in list {
-        item! = item! + 1;
+        *item = *item + 1;
     }
 
     for item in list {

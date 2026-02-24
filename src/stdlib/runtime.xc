@@ -69,7 +69,7 @@ struct __CxEnumBase<T> {
     impl ops.Display {
         func display() string {
             unsafe {
-                var s = this.__display_name!;
+                var s = *this.__display_name;
                 return string.format("{}", s);
             }
         }
@@ -198,7 +198,7 @@ struct Box<T: ops.AllowUnsized> {
     impl ops.Display {
         func display() string {
             unsafe {
-                return string.display(this._ptr!);
+                return string.display(*this._ptr);
             }
         }
     }
@@ -458,7 +458,7 @@ struct Array<T> {
     func add(item: T) {
         unsafe {
             var ptr = cx_array_add(this, sizeof T) as *T;
-            ptr! = item;
+            *ptr = item;
         }
     }
 

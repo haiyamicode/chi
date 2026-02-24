@@ -25,6 +25,6 @@ func main() {
         var h = Holder{&val};
         r = h.get();
     }
-    printf("{}\n", r!);
+    printf("{}\n", *r);
 }
 

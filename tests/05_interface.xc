@@ -150,9 +150,9 @@ func test_sizeof() {
     var r = Rect{w: 1, h: 1};
     var s: &Shape = &c;
     printf("sizeof &Shape: {}\n", sizeof s);
-    printf("sizeof Circle: {}\n", sizeof s!);
+    printf("sizeof Circle: {}\n", sizeof *s);
     s = &r;
-    printf("sizeof Rect: {}\n", sizeof s!);
+    printf("sizeof Rect: {}\n", sizeof *s);
 }
 
 func test_box() {

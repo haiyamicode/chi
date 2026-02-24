@@ -21,6 +21,6 @@ func main() {
         var x = 99;
         store_ref(&mut h, &x);
     }
-    printf("{}\n", h.val!);
+    printf("{}\n", *h.val);
 }
 

@@ -1358,24 +1358,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                              t->kind == TypeKind::Float ? t : get_system_types()->int_);
             return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
         case TokenType::MUL: {
-            error(data.op1, errors::C_STYLE_DEREFERENCE_DEPRECATED);
-            break;
+            if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
+                if (t->is_raw_pointer() && !scope.is_unsafe_block &&
+                    !has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
+                    error(node, "raw pointer dereference requires unsafe block");
+                    return nullptr;
+                }
+                if (scope.is_lhs && !ChiTypeStruct::is_mutable_pointer(t)) {
+                    error(data.op1, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, format_type_display(t),
+                          format_type_display(t));
+                    return nullptr;
+                }
+                return t->get_elem();
+            }
+            goto invalid;
         }
         case TokenType::LNOT: {
             if (data.is_suffix) {
-                if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
-                    if (t->is_raw_pointer() && !scope.is_unsafe_block &&
-                        !has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
-                        error(node, "raw pointer dereference requires unsafe block");
-                        return nullptr;
-                    }
-                    if (scope.is_lhs && !ChiTypeStruct::is_mutable_pointer(t)) {
-                        error(data.op1, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, format_type_display(t),
-                              format_type_display(t));
-                        return nullptr;
-                    }
-                    return t->get_elem();
-                } else if (t->kind == TypeKind::Optional) {
+                if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
                 } else if (t->kind == TypeKind::Result) {
                     return t->data.result.value;
@@ -3511,7 +3511,7 @@ bool Resolver::is_addressable(ast::Node *node) {
 
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
-        return data.is_suffix && data.op_type == TokenType::LNOT;
+        return data.op_type == TokenType::MUL;
     }
 
     default:

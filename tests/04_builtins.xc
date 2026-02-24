@@ -124,7 +124,7 @@ func test_box() {
     var pm: &move int;
     unsafe {
         p = mem.malloc(sizeof int) as *int;
-        p! = 42;
+        *p = 42;
         pm = p as &move int;
     }
     var b1 = Box<int>{pm};

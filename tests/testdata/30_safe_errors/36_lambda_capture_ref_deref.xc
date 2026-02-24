@@ -9,7 +9,7 @@ func main() {
     var local = 42;
     var r: &int = &local;
     f = func () int {
-        return r!;
+        return *r;
     };
     printf("{}\n", f());
 }

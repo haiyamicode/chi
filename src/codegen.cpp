@@ -2104,6 +2104,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::MUL: {
             auto ptr = compile_expr(fn, data.op1);
             auto elem_type = get_chitype(data.op1)->get_elem();
+            // Interface is abstract — deref returns the fat pointer value itself
+            if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
+                return ptr;
+            }
             auto elem_type_l = compile_type(elem_type);
             auto value = builder.CreateLoad(elem_type_l, ptr);
             return value;
@@ -2147,17 +2151,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto value_p = builder.CreateStructGEP(result_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
-
-                // unwrap pointer
-                auto ptr = compile_expr(fn, data.op1);
-                auto elem_type = get_chitype(data.op1)->get_elem();
-                // Interface is abstract — deref returns the fat pointer value itself
-                if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
-                    return ptr;
-                }
-                auto elem_type_l = compile_type(elem_type);
-                auto value = builder.CreateLoad(elem_type_l, ptr);
-                return value;
+                panic("unreachable: suffix ! on non-optional/result type");
             } else {
                 auto value = compile_assignment_to_type(fn, data.op1, get_system_types()->bool_);
                 return builder.CreateXor(
@@ -3249,8 +3243,17 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         auto &data = expr->data.unary_op_expr;
         auto &builder = *m_ctx->llvm_builder;
         switch (data.op_type) {
-        case TokenType::MUL:
+        case TokenType::MUL: {
+            // For pointer-to-interface deref, return the fat pointer variable's address
+            // so interface copy can update both data and vtable
+            auto op1_type = get_chitype(data.op1);
+            if (op1_type && op1_type->is_pointer_like() &&
+                op1_type->get_elem() && ChiTypeStruct::is_interface(op1_type->get_elem())) {
+                auto ref = compile_expr_ref(fn, data.op1);
+                return RefValue::from_address(ref.address);
+            }
             return RefValue::from_address(compile_expr(fn, data.op1));
+        }
         case TokenType::LNOT: {
             if (data.is_suffix) {
                 if (data.op1->resolved_type->kind == TypeKind::Optional) {
@@ -3264,15 +3267,6 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                                                            ref.address, 1);
                     return RefValue::from_address(value_p);
                 }
-                // For pointer-to-interface deref, return the fat pointer variable's address
-                // so interface copy can update both data and vtable
-                auto op1_type = get_chitype(data.op1);
-                if (op1_type && op1_type->is_pointer_like() &&
-                    op1_type->get_elem() && ChiTypeStruct::is_interface(op1_type->get_elem())) {
-                    auto ref = compile_expr_ref(fn, data.op1);
-                    return RefValue::from_address(ref.address);
-                }
-                return RefValue::from_address(compile_expr(fn, data.op1));
             }
             panic("unreachable");
             break;

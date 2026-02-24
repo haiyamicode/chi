@@ -21,6 +21,6 @@ func main() {
         var h = RefHolder{&x};
         r = get_ref(&h);
     }
-    printf("{}\n", r!);
+    printf("{}\n", *r);
 }
 

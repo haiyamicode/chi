@@ -25,8 +25,8 @@ struct Foo {
         mut func copy_from(b: &Foo) {
             this.new(string.format("{}_copy", b.id));
             unsafe {
-                this.p! = b.p!;
-                printf("copied {}, p = {}\n", this.id, b.p!);
+                *this.p = *b.p;
+                printf("copied {}, p = {}\n", this.id, *b.p);
             }
         }
     }
@@ -35,7 +35,7 @@ struct Foo {
 func return_local() Foo {
     var a = Foo{"local"};
     unsafe {
-        a.p! = 42;
+        *a.p = 42;
     }
     var b = a;
     b.id = "local_b";
@@ -52,13 +52,13 @@ func main() {
     println("=== Test 1: Return local variable ===");
     var foo = return_local();
     unsafe {
-        printf("result: {}\n", foo.p!);
+        printf("result: {}\n", *foo.p);
     }
     println("=== Test 2: RVO - return ConstructExpr ===");
     var bar = return_construct();
     unsafe {
-        bar.p! = 99;
-        printf("result: {}\n", bar.p!);
+        *bar.p = 99;
+        printf("result: {}\n", *bar.p);
     }
     println("done");
 }

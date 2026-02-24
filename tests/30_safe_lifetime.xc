@@ -52,7 +52,7 @@ func make_multi(x: &int, y: &int) MultiRef {
 // --- Passing references locally (no escape) ---
 
 func use_ref(r: &int) int {
-    return r! + 1;
+    return *r + 1;
 }
 
 func local_ref_use() int {
@@ -64,7 +64,7 @@ func local_ref_use() int {
 
 func chain_test(val: &int) int {
     var h = Holder{val};
-    return h.get()!;
+    return *h.get();
 }
 
 // --- Nested struct with references ---
@@ -87,7 +87,7 @@ struct Pair {
     }
 
     func sum() int {
-        return this.first! + this.second!;
+        return *this.first + *this.second;
     }
 }
 
@@ -107,7 +107,7 @@ func test_holder() {
     printf("=== holder ===\n");
     var val = 42;
     var h = make_holder(&val);
-    printf("h.ref = {}\n", h.get()!);
+    printf("h.ref = {}\n", *h.get());
 }
 
 func test_multi_ref() {
@@ -115,7 +115,7 @@ func test_multi_ref() {
     var a = 10;
     var b = 20;
     var m = make_multi(&a, &b);
-    printf("a = {}, b = {}\n", m.a!, m.b!);
+    printf("a = {}, b = {}\n", *m.a, *m.b);
 }
 
 func test_local_ref() {
@@ -141,7 +141,7 @@ func test_ref_to_param() {
     printf("=== ref to param ===\n");
     var val = 55;
     var r = ref_to_param(&val);
-    printf("ref = {}\n", r!);
+    printf("ref = {}\n", *r);
 }
 
 // --- Multiple stores to same field ---
@@ -151,9 +151,9 @@ func test_reassign() {
     var a = 1;
     var b = 2;
     var h = Holder{&a};
-    printf("first = {}\n", h.get()!);
+    printf("first = {}\n", *h.get());
     h.store(&b);
-    printf("second = {}\n", h.get()!);
+    printf("second = {}\n", *h.get());
 }
 
 // --- Struct with ref field, no method, direct init ---
@@ -162,7 +162,7 @@ func test_direct_init() {
     printf("=== direct init ===\n");
     var val = 77;
     var h = Holder{&val};
-    printf("direct = {}\n", h.ref!);
+    printf("direct = {}\n", *h.ref);
 }
 
 // --- Intra-function: local declared before holder (correct order) ---
@@ -171,7 +171,7 @@ func test_local_order() {
     printf("=== local order ===\n");
     var local = 88;
     var h = Holder{&local};
-    printf("order = {}\n", h.get()!);
+    printf("order = {}\n", *h.get());
 }
 
 // --- Move semantics: &move (ownership transfer) ---
@@ -289,8 +289,8 @@ func test_unsafe_block() {
         printf("result = {}\n", result);
 
         var p = mem.malloc(sizeof int) as *int;
-        p! = 42;
-        printf("p = {}\n", p!);
+        *p = 42;
+        printf("p = {}\n", *p);
         mem.free(p as *void);
     }
 }
@@ -323,7 +323,7 @@ func get_ref(h: &RefHolder) &int {
 
 // Multiple ref params returning either — shared lifetime allows both
 func bigger_ref<'a>(a: &'a int, b: &'a int) &'a int {
-    if a! > b! {
+    if *a > *b {
         return a;
     }
     return b;
@@ -334,7 +334,7 @@ func test_cross_fn_ref() {
     var x = 99;
     var h = RefHolder{&x};
     var r = get_ref(&h);
-    printf("get_ref = {}\n", r!);
+    printf("get_ref = {}\n", *r);
 }
 
 func test_bigger_ref() {
@@ -342,7 +342,7 @@ func test_bigger_ref() {
     var a = 10;
     var b = 20;
     var big = bigger_ref(&a, &b);
-    printf("bigger = {}\n", big!);
+    printf("bigger = {}\n", *big);
 }
 
 // Method returning reference (elision to 'this)
@@ -351,7 +351,7 @@ func test_method_ref_return() {
     var val = 42;
     var h = Holder{&val};
     var r = h.get();
-    printf("method ref = {}\n", r!);
+    printf("method ref = {}\n", *r);
 }
 
 // --- Block-based destruction ---
@@ -471,7 +471,7 @@ func test_generic_lifetime_bound() {
     printf("=== generic lifetime bound ===\n");
     var x = 42;
     var r = get_val_lt<&int>(&x);
-    printf("r = {}\n", r!);
+    printf("r = {}\n", *r);
 }
 
 func main() {

@@ -15,6 +15,6 @@ func dangle() &int {
 
 func main() {
     var r = dangle();
-    printf("{}\n", r!);
+    printf("{}\n", *r);
 }
 

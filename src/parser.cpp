@@ -2338,16 +2338,17 @@ Node *Parser::parse_prefix_expr() {
     consume();
     node->data.prefix_expr.prefix = tok;
     if (tok->type == TokenType::KW_SIZEOF) {
-        node->data.prefix_expr.expr = parse_type_expr(true);
-        // Allow suffix ! for sizeof on expressions like sizeof this._ptr!
-        if (next_is(TokenType::LNOT)) {
-            auto bang_tok = get();
+        // Handle prefix * dereference: sizeof *expr
+        if (next_is(TokenType::MUL)) {
+            auto star_tok = get();
             consume();
-            auto deref = create_node(NodeType::UnaryOpExpr, bang_tok);
-            deref->data.unary_op_expr.op_type = TokenType::LNOT;
-            deref->data.unary_op_expr.op1 = node->data.prefix_expr.expr;
-            deref->data.unary_op_expr.is_suffix = true;
+            auto inner = parse_type_expr(true);
+            auto deref = create_node(NodeType::UnaryOpExpr, star_tok);
+            deref->data.unary_op_expr.op_type = TokenType::MUL;
+            deref->data.unary_op_expr.op1 = inner;
             node->data.prefix_expr.expr = deref;
+        } else {
+            node->data.prefix_expr.expr = parse_type_expr(true);
         }
     } else {
         node->data.prefix_expr.expr = parse_expr();

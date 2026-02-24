@@ -44,9 +44,9 @@ func test_foo() {
 
 func test_assign_construct() {
     var p = new Bar{10};
-    printf("before: {}\n", p!.id);
-    p! = {20};
-    printf("after: {}\n", p!.id);
+    printf("before: {}\n", p.id);
+    *p = {20};
+    printf("after: {}\n", p.id);
     delete p;
 }
 

@@ -71,9 +71,9 @@ func test_references() {
     var ref: &mut int = &mut value;
 
     printf("value = {}\n", value);
-    printf("*ref = {}\n", ref!);
+    printf("*ref = {}\n", *ref);
 
-    ref! = 200;
+    *ref = 200;
     printf("After modification: value = {}\n", value);
 }
 
