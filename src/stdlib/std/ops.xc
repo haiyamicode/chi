@@ -29,6 +29,14 @@ interface Construct {
     func new();
 }
 
+interface Unwrap<T> {
+    func unwrap() &T;
+}
+
+interface UnwrapMut<T> {
+    mut func unwrap_mut() &mut T;
+}
+
 // interface Sub<T> {
 //   func sub(rhs: T) T;
 // }

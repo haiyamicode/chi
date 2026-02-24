@@ -29,7 +29,7 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, String, Struct
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
-MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display, Add, Sized, AllowUnsized, Construct)
+MAKE_ENUM(IntrinsicSymbol, None, Index, IndexInterable, CopyFrom, Display, Add, Sized, AllowUnsized, Construct, Unwrap, UnwrapMut)
 
 MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait);
 

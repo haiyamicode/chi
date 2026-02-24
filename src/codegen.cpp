@@ -2151,6 +2151,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto value_p = builder.CreateStructGEP(result_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
+                if (data.resolved_call) {
+                    auto ref_ptr = compile_fn_call(fn, data.resolved_call);
+                    auto elem = expr->resolved_type;
+                    if (ChiTypeStruct::is_interface(elem)) return ref_ptr;
+                    return builder.CreateLoad(compile_type(elem), ref_ptr);
+                }
                 panic("unreachable: suffix ! on non-optional/result type");
             } else {
                 auto value = compile_assignment_to_type(fn, data.op1, get_system_types()->bool_);
@@ -3267,6 +3273,10 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                                                            ref.address, 1);
                     return RefValue::from_address(value_p);
                 }
+                if (data.resolved_call) {
+                    auto ref_ptr = compile_fn_call(fn, data.resolved_call);
+                    return RefValue::from_address(ref_ptr);
+                }
             }
             panic("unreachable");
             break;
@@ -3319,6 +3329,8 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         return RefValue::from_address(var);
     }
     // Rvalue expressions - return value only (no meaningful address)
+    case ast::NodeType::ParenExpr:
+        return compile_expr_ref(fn, expr->data.child_expr);
     case ast::NodeType::SwitchExpr:
     case ast::NodeType::BinOpExpr:
     case ast::NodeType::ConstructExpr:

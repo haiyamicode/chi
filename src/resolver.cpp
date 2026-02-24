@@ -148,6 +148,8 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Sized"] = IntrinsicSymbol::Sized;
     m_ctx->intrinsic_symbols["std.ops.AllowUnsized"] = IntrinsicSymbol::AllowUnsized;
     m_ctx->intrinsic_symbols["std.ops.Construct"] = IntrinsicSymbol::Construct;
+    m_ctx->intrinsic_symbols["std.ops.Unwrap"] = IntrinsicSymbol::Unwrap;
+    m_ctx->intrinsic_symbols["std.ops.UnwrapMut"] = IntrinsicSymbol::UnwrapMut;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -1380,6 +1382,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 } else if (t->kind == TypeKind::Result) {
                     return t->data.result.value;
                 }
+                // Check for ops.Unwrap / ops.UnwrapMut
+                {
+                    auto symbol = scope.is_lhs ? IntrinsicSymbol::UnwrapMut : IntrinsicSymbol::Unwrap;
+                    auto method_call = try_resolve_operator_method(symbol, t, nullptr, data.op1, nullptr, node, scope);
+                    // Fallback: if only UnwrapMut is provided, use it for reads too
+                    if (!method_call && !scope.is_lhs) {
+                        method_call = try_resolve_operator_method(IntrinsicSymbol::UnwrapMut, t, nullptr, data.op1, nullptr, node, scope);
+                    }
+                    if (method_call) {
+                        data.resolved_call = method_call->call_node;
+                        auto ret = method_call->return_type;
+                        if (ret && ret->is_reference()) return ret->get_elem();
+                        return ret;
+                    }
+                }
                 goto invalid;
             } else {
                 check_assignment(data.op1, t, get_system_types()->bool_);
@@ -2452,11 +2469,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
 
-            // Auto-implement ops.Sized for all non-interface types
-            if (m_ctx->rt_sized_interface && !ChiTypeStruct::is_interface(struct_type)) {
-                struct_->add_interface(get_allocator(), m_ctx->rt_sized_interface, struct_type);
-            }
-
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
         } else {
             // fourth pass - resolve method bodies
@@ -3511,7 +3523,8 @@ bool Resolver::is_addressable(ast::Node *node) {
 
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
-        return data.op_type == TokenType::MUL;
+        return data.op_type == TokenType::MUL ||
+               (data.op_type == TokenType::LNOT && data.is_suffix && data.resolved_call);
     }
 
     default:
@@ -6442,7 +6455,11 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
             auto method_type = method_member->resolved_type;
             if (method_type && method_type->kind == TypeKind::Fn) {
                 auto &fn_data = method_type->data.fn;
-                if (fn_data.params.len == 1 && can_assign(t2, fn_data.params[0])) {
+                if (t2 == nullptr) {
+                    if (fn_data.params.len == 0) {
+                        return_type = fn_data.return_type;
+                    }
+                } else if (fn_data.params.len == 1 && can_assign(t2, fn_data.params[0])) {
                     return_type = fn_data.return_type;
                 }
             }
@@ -6462,7 +6479,7 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
                     auto method_type = method_member->resolved_type;
                     if (method_type && method_type->kind == TypeKind::Fn) {
                         auto &fn_data = method_type->data.fn;
-                        if (fn_data.params.len == 1) {
+                        if (t2 == nullptr ? fn_data.params.len == 0 : fn_data.params.len == 1) {
                             return_type = t1;
                         }
                     }
@@ -6488,7 +6505,7 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
         // populate generated call
         auto &call_data = call_node->data.fn_call_expr;
         call_data.fn_ref_expr = dot_node;
-        call_data.args = {op2};
+        call_data.args = op2 ? array<ast::Node *>{op2} : array<ast::Node *>{};
         resolve(call_node, scope);
 
         return OperatorMethodCall{call_node, return_type};
@@ -6646,14 +6663,13 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         check_arg = resolve_subtype(check_arg);
     }
 
+    // Sized is structural: everything is Sized except interfaces
+    if (trait_type->kind == TypeKind::Struct && trait_type->data.struct_.node &&
+        resolve_intrinsic_symbol(trait_type->data.struct_.node) == IntrinsicSymbol::Sized) {
+        return !(check_arg->kind == TypeKind::Struct && ChiTypeStruct::is_interface(check_arg));
+    }
+
     if (check_arg->kind == TypeKind::Struct) {
-        // If the struct hasn't finished resolving its interfaces yet (e.g. Sized
-        // auto-impl happens in the third pass), and it's not an interface type,
-        // assume it will satisfy the bound once fully resolved.
-        if (check_arg->data.struct_.resolve_status < ResolveStatus::EmbedsResolved &&
-            !ChiTypeStruct::is_interface(check_arg)) {
-            return true;
-        }
         for (auto &impl : check_arg->data.struct_.interfaces) {
             if (impl->interface_type == trait_type ||
                 interface_satisfies_trait(impl->interface_type, trait_type)) {
@@ -6667,8 +6683,6 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         // Built-in types: check intrinsics
         auto required = interface_get_intrinsics(trait_type);
         for (auto &intrinsic : required) {
-            if (intrinsic == IntrinsicSymbol::Sized)
-                return true;
             if (intrinsic == IntrinsicSymbol::Add) {
                 if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
                     type_arg->kind == TypeKind::String) {

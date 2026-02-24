@@ -142,6 +142,12 @@ struct Shared<T> {
         }
     }
 
+    impl ops.Unwrap<T> {
+        func unwrap() &T {
+            return &this.data.value;
+        }
+    }
+
     impl ops.Display {
         func display() string {
             return string.display(this.as_ref());
@@ -192,6 +198,18 @@ struct Box<T: ops.AllowUnsized> {
     impl where T: ops.Sized {
         static func from_value(val: T) Box<T> {
             return {mem.copy_from<T>(&val)};
+        }
+    }
+
+    impl ops.Unwrap<T> {
+        func unwrap() &T {
+            unsafe { return this._ptr as &T; }
+        }
+    }
+
+    impl ops.UnwrapMut<T> {
+        mut func unwrap_mut() &mut T {
+            unsafe { return this._ptr as &mut T; }
         }
     }
 

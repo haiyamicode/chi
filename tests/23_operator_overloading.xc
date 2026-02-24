@@ -36,6 +36,21 @@ func add<V: ops.Add>(a: V, b: V) V {
     return a + b;
 }
 
+// Custom wrapper with only UnwrapMut (compiler should use it for reads too)
+struct Wrapper {
+    private _data: Point;
+
+    func new(p: Point) {
+        this._data = p;
+    }
+
+    impl ops.UnwrapMut<Point> {
+        mut func unwrap_mut() &mut Point {
+            return &mut this._data;
+        }
+    }
+}
+
 func main() {
     let p1 = Point{0, 1};
     let p2 = Point{2, 3};
@@ -49,5 +64,28 @@ func main() {
     printf("MyInt: {} + {} = {}\n", i1.value, i2.value, result.value);
     var result2 = add<int>(10, 15);
     printf("int: 10 + 15 = {}\n", result2);
+
+    // Box Unwrap/UnwrapMut
+    var b = Box<Point>{new Point{7, 8}};
+    printf("box unwrap: {}\n", b!);
+    b!.x = 50;
+    b!.y = 60;
+    printf("box unwrap_mut: {}\n", b!);
+
+    // Shared Unwrap (read-only)
+    let sp = Point{3, 4};
+    var s = Shared<Point>{sp};
+    printf("shared unwrap: {}\n", s!);
+
+    // Wrapper: only UnwrapMut, compiler should use it for reads
+    let wp = Point{100, 200};
+    var w = Wrapper{wp};
+    printf("wrapper read: {}\n", w!);
+    w!.x = 300;
+    printf("wrapper write: {}\n", w!);
+
+    // Address-of unwrap: &(b!) should give &Point
+    let ref = &(b!);
+    printf("addr of unwrap: {}\n", *ref);
 }
 

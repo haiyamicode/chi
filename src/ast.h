@@ -327,6 +327,7 @@ struct UnaryOpExpr {
     TokenType op_type = TokenType::ERROR;
     Node *op1 = nullptr;
     bool is_suffix = false;
+    Node *resolved_call = nullptr; // for Unwrap/UnwrapMut operator methods
 };
 
 struct TryExpr {
