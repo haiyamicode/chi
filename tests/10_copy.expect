@@ -32,5 +32,35 @@ Traced(1) destroyed
 Traced(2) destroyed
 Traced(2) destroyed
 Traced(4) destroyed
+=== Test 7: Any box + destroy ===
+Traced(1) created
+Traced(1) copied
+--- scope exit ---
+Traced(1) destroyed
+=== Test 8: Any copy ===
+Traced(1) created
+Traced(1) copied
+Traced(1) copied
+--- scope exit ---
+Traced(1) destroyed
+Traced(1) destroyed
+=== Test 9: Any reassign ===
+Traced(1) created
+Traced(1) copied
+Traced(2) created
+Traced(2) copied
+Traced(1) destroyed
+--- scope exit ---
+Traced(2) destroyed
+=== Test 10: Any move T -> any ===
+Traced(3) created
+Traced(3) copied
+--- scope exit ---
+Traced(3) destroyed
+=== Test 11: Any with string ===
+s=hello world
+--- scope exit ---
+=== Test 12: Any with int (trivial) ===
+--- scope exit ---
 deleting direct
 deleting local_b_copy

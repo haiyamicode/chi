@@ -89,6 +89,49 @@ func test_optional_copy() {
     println("=== scope exit ===");
 }
 
+func test_any_box_and_destroy() {
+    println("=== Test 7: Any box + destroy ===");
+    var a: any = Traced{1};
+    println("--- scope exit ---");
+}
+
+func test_any_copy() {
+    println("=== Test 8: Any copy ===");
+    var a: any = Traced{1};
+    var b: any = a;
+    println("--- scope exit ---");
+}
+
+func test_any_reassign() {
+    println("=== Test 9: Any reassign ===");
+    var a: any = Traced{1};
+    a = Traced{2};
+    println("--- scope exit ---");
+}
+
+func test_any_move() {
+    println("=== Test 10: Any move T -> any ===");
+    var t = Traced{3};
+    var a: any = move t;
+    println("--- scope exit ---");
+}
+
+func test_any_string() {
+    println("=== Test 11: Any with string ===");
+    var s = string.format("hello {}", "world");
+    var a: any = s;
+    var b: any = a;
+    printf("s={}\n", s);
+    println("--- scope exit ---");
+}
+
+func test_any_int() {
+    println("=== Test 12: Any with int (trivial) ===");
+    var a: any = 42;
+    var b: any = a;
+    println("--- scope exit ---");
+}
+
 func main() {
     println("=== Test 1: Return local variable ===");
     var foo = return_local();
@@ -103,5 +146,11 @@ func main() {
     }
     println("done");
     test_optional_copy();
+    test_any_box_and_destroy();
+    test_any_copy();
+    test_any_reassign();
+    test_any_move();
+    test_any_string();
+    test_any_int();
 }
 

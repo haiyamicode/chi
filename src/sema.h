@@ -521,6 +521,8 @@ struct TypeInfo {
     int32_t kind = 0;
     int32_t size = 0;
     TypeInfoData data;
+    void *destructor = nullptr; // void(*)(void*) — null if no destruction needed
+    void *copier = nullptr;     // void(*)(void*, void*) — null = bitwise copy
     int32_t meta_table_len = 0;
     void *meta_table; // Dummy pointer, we store a variable amount of data for the
                       // meta table, starting at this field, each item is a TypeVtableEntry

@@ -3858,6 +3858,10 @@ bool Resolver::type_needs_destruction(ChiType *type) {
     if (!type)
         return false;
 
+    // Any may contain a destructible value
+    if (type->kind == TypeKind::Any)
+        return true;
+
     // Strings need destruction
     if (type->kind == TypeKind::String)
         return true;

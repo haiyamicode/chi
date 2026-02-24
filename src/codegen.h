@@ -332,6 +332,8 @@ class Compiler {
     llvm::ConstantPointerNull *get_null_ptr();
     Function *generate_destructor(ChiType *type, ChiType *container_type = nullptr);
     Function *generate_copier(ChiType *type);
+    Function *generate_any_destructor(ChiType *type);
+    Function *generate_any_copier(ChiType *type);
     Function *generate_destructor_optional(ChiType *type, ChiType *resolved_type);
     Function *generate_destructor_result(ChiType *type, ChiType *resolved_type);
     Function *generate_destructor_continuation(llvm::StructType *capture_struct_type,

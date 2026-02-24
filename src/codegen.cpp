@@ -974,8 +974,17 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
             llvm_ctx, llvm::ArrayRef<uint8_t>(typedata, sizeof(TypeInfoData)));
     }
 
+    auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
+
+    // Generate destructor/copier wrappers for any type-erasure
+    auto dtor_fn = generate_any_destructor(type);
+    llvm::Constant *dtor_ptr = dtor_fn ? (llvm::Constant *)dtor_fn->llvm_fn : get_null_ptr();
+    auto copy_fn = generate_any_copier(type);
+    llvm::Constant *copy_ptr = copy_fn ? (llvm::Constant *)copy_fn->llvm_fn : get_null_ptr();
+
     auto ti_type_l = llvm::StructType::create(
         {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
+         ptr_type_l, ptr_type_l,
          llvm::Type::getInt32Ty(llvm_ctx), ti_meta_table_type_l},
         "TypeInfo", true);
 
@@ -988,6 +997,10 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), (int32_t)typesize),
             /* data */
             typedata_l,
+            /* destructor */
+            dtor_ptr,
+            /* copier */
+            copy_ptr,
             /* vtable_len */
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), meta_table_len),
             /* vtable */
@@ -2993,6 +3006,103 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         }
         break;
     }
+    case TypeKind::Any: {
+        if (destruct_old) {
+            compile_destruction_for_type(fn, dest, type);
+        }
+
+        auto &llvm_ctx = *m_ctx->llvm_ctx;
+        auto any_type_l = compile_type(type);
+        auto ptr_type = get_llvm_ptr_type();
+        auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
+        auto i8_ty = llvm::Type::getInt8Ty(llvm_ctx);
+
+        // Ensure we have an address to work from
+        auto src_addr = src.address;
+        if (!src_addr) {
+            src_addr = builder.CreateAlloca(any_type_l, nullptr, "_any_copy_src");
+            builder.CreateStore(ensure_value(), src_addr);
+        }
+
+        // Copy TypeInfo pointer (field 0)
+        auto src_ti_gep = builder.CreateStructGEP(any_type_l, src_addr, 0);
+        auto ti_ptr = builder.CreateLoad(ptr_type, src_ti_gep, "src_any_ti");
+        auto dst_ti_gep = builder.CreateStructGEP(any_type_l, dest, 0);
+        builder.CreateStore(ti_ptr, dst_ti_gep);
+
+        // Copy inlined flag (field 1)
+        auto src_inlined_gep = builder.CreateStructGEP(any_type_l, src_addr, 1);
+        auto inlined = builder.CreateLoad(i8_ty, src_inlined_gep, "any_inlined");
+        auto dst_inlined_gep = builder.CreateStructGEP(any_type_l, dest, 1);
+        builder.CreateStore(inlined, dst_inlined_gep);
+
+        auto is_inlined = builder.CreateICmpNE(inlined, llvm::ConstantInt::get(i8_ty, 0));
+
+        // Load copier and size from TypeInfo
+        auto ti_header_l = llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type, ptr_type}, true);
+        auto size_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 1);
+        auto typesize = builder.CreateLoad(i32_ty, size_gep, "any_typesize");
+        auto copier_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 4);
+        auto copier_ptr = builder.CreateLoad(ptr_type, copier_gep, "any_copier");
+
+        auto src_data_gep = builder.CreateStructGEP(any_type_l, src_addr, 2);
+        auto dst_data_gep = builder.CreateStructGEP(any_type_l, dest, 2);
+
+        auto bb_inlined = fn->new_label("any_cp_inlined");
+        auto bb_heap = fn->new_label("any_cp_heap");
+        auto bb_done = fn->new_label("any_cp_done");
+        builder.CreateCondBr(is_inlined, bb_inlined, bb_heap);
+
+        // Inlined path: copy data in-place
+        fn->use_label(bb_inlined);
+        {
+            auto copier_is_null = builder.CreateICmpEQ(copier_ptr, get_null_ptr());
+            auto bb_memcpy = fn->new_label("any_cp_inl_memcpy");
+            auto bb_copier = fn->new_label("any_cp_inl_copier");
+            builder.CreateCondBr(copier_is_null, bb_memcpy, bb_copier);
+
+            fn->use_label(bb_memcpy);
+            builder.CreateMemCpy(dst_data_gep, {}, src_data_gep, {}, typesize);
+            builder.CreateBr(bb_done);
+
+            fn->use_label(bb_copier);
+            auto copier_fn_type = llvm::FunctionType::get(
+                llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+            builder.CreateCall(copier_fn_type, copier_ptr, {dst_data_gep, src_data_gep});
+            builder.CreateBr(bb_done);
+        }
+
+        // Heap path: malloc new buffer, copy into it, store pointer in dest.data
+        fn->use_label(bb_heap);
+        {
+            auto src_heap_ptr = builder.CreateLoad(ptr_type, src_data_gep, "src_heap_ptr");
+            auto malloc_fn = get_system_fn("cx_malloc");
+            auto new_buf = builder.CreateCall(malloc_fn->llvm_fn, {typesize, get_null_ptr()}, "new_heap_buf");
+
+            auto copier_is_null = builder.CreateICmpEQ(copier_ptr, get_null_ptr());
+            auto bb_h_memcpy = fn->new_label("any_cp_heap_memcpy");
+            auto bb_h_copier = fn->new_label("any_cp_heap_copier");
+            auto bb_h_done = fn->new_label("any_cp_heap_done");
+            builder.CreateCondBr(copier_is_null, bb_h_memcpy, bb_h_copier);
+
+            fn->use_label(bb_h_memcpy);
+            builder.CreateMemCpy(new_buf, {}, src_heap_ptr, {}, typesize);
+            builder.CreateBr(bb_h_done);
+
+            fn->use_label(bb_h_copier);
+            auto copier_fn_type = llvm::FunctionType::get(
+                llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+            builder.CreateCall(copier_fn_type, copier_ptr, {new_buf, src_heap_ptr});
+            builder.CreateBr(bb_h_done);
+
+            fn->use_label(bb_h_done);
+            builder.CreateStore(new_buf, dst_data_gep);
+            builder.CreateBr(bb_done);
+        }
+
+        fn->use_label(bb_done);
+        return;
+    }
     default:
         break;
     }
@@ -4547,6 +4657,78 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
 
     if (!type) return;
 
+    // Any: destroy inner value via TypeInfo destructor, free heap if not inlined
+    if (type->kind == TypeKind::Any) {
+        auto &llvm_ctx = *m_ctx->llvm_ctx;
+        auto any_type_l = compile_type(type);
+        auto ptr_type = get_llvm_ptr_type();
+        auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
+        auto i8_ty = llvm::Type::getInt8Ty(llvm_ctx);
+
+        // Load TypeInfo* from any.type (field 0)
+        auto ti_gep = builder.CreateStructGEP(any_type_l, address, 0);
+        auto ti_ptr = builder.CreateLoad(ptr_type, ti_gep, "any_ti");
+
+        // Null check TypeInfo — skip if null (uninitialized any)
+        auto ti_is_null = builder.CreateICmpEQ(ti_ptr, get_null_ptr());
+        auto bb_has_ti = fn->new_label("any_has_ti");
+        auto bb_done = fn->new_label("any_dtor_done");
+        builder.CreateCondBr(ti_is_null, bb_done, bb_has_ti);
+        fn->use_label(bb_has_ti);
+
+        // Load destructor from TypeInfo (field 3: kind, size, data, destructor, copier, ...)
+        auto ti_header_l = llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type}, true);
+        auto dtor_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 3);
+        auto dtor_ptr = builder.CreateLoad(ptr_type, dtor_gep, "any_dtor");
+
+        // Resolve data pointer: inlined → &any.data, not inlined → *(void**)&any.data
+        auto inlined_gep = builder.CreateStructGEP(any_type_l, address, 1);
+        auto inlined = builder.CreateLoad(i8_ty, inlined_gep, "any_inlined");
+        auto is_inlined = builder.CreateICmpNE(inlined, llvm::ConstantInt::get(i8_ty, 0));
+        auto data_gep = builder.CreateStructGEP(any_type_l, address, 2);
+
+        auto bb_inlined = fn->new_label("any_data_inlined");
+        auto bb_heap = fn->new_label("any_data_heap");
+        auto bb_have_data = fn->new_label("any_have_data");
+        builder.CreateCondBr(is_inlined, bb_inlined, bb_heap);
+
+        fn->use_label(bb_inlined);
+        auto inlined_data_ptr = (llvm::Value *)data_gep;
+        builder.CreateBr(bb_have_data);
+
+        fn->use_label(bb_heap);
+        auto heap_ptr = builder.CreateLoad(ptr_type, data_gep, "any_heap_ptr");
+        builder.CreateBr(bb_have_data);
+
+        fn->use_label(bb_have_data);
+        auto data_ptr = builder.CreatePHI(ptr_type, 2, "any_data_ptr");
+        data_ptr->addIncoming(inlined_data_ptr, bb_inlined);
+        data_ptr->addIncoming(heap_ptr, bb_heap);
+
+        // Call destructor if non-null
+        auto dtor_is_null = builder.CreateICmpEQ(dtor_ptr, get_null_ptr());
+        auto bb_call_dtor = fn->new_label("any_call_dtor");
+        auto bb_after_dtor = fn->new_label("any_after_dtor");
+        builder.CreateCondBr(dtor_is_null, bb_after_dtor, bb_call_dtor);
+
+        fn->use_label(bb_call_dtor);
+        auto dtor_fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+        builder.CreateCall(dtor_fn_type, dtor_ptr, {data_ptr});
+        builder.CreateBr(bb_after_dtor);
+
+        fn->use_label(bb_after_dtor);
+        // Free heap allocation if not inlined
+        auto bb_free_heap = fn->new_label("any_free_heap");
+        builder.CreateCondBr(is_inlined, bb_done, bb_free_heap);
+        fn->use_label(bb_free_heap);
+        auto free_fn = get_system_fn("cx_free");
+        builder.CreateCall(free_fn->llvm_fn, {data_ptr});
+        builder.CreateBr(bb_done);
+
+        fn->use_label(bb_done);
+        return;
+    }
+
     // &move T RAII: destroy pointee + free (same as delete)
     if (type->kind == TypeKind::MoveRef) {
         auto elem_type = type->get_elem();
@@ -4983,6 +5165,89 @@ Function *Compiler::generate_copier(ChiType *type) {
         builder.SetInsertPoint(saved_block, saved_point);
     }
 
+    return fn;
+}
+
+Function *Compiler::generate_any_destructor(ChiType *type) {
+    if (!get_resolver()->type_needs_destruction(type))
+        return nullptr;
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto ptr_type = get_llvm_ptr_type();
+
+    // void __any_dtor_T(void* ptr)
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__any_dtor", type_name);
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+    auto saved_dbg = builder.getCurrentDebugLocation();
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+    builder.SetCurrentDebugLocation(llvm::DebugLoc());
+
+    compile_destruction_for_type(fn, llvm_fn->getArg(0), type);
+    builder.CreateRetVoid();
+
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    builder.SetCurrentDebugLocation(saved_dbg);
+    return fn;
+}
+
+Function *Compiler::generate_any_copier(ChiType *type) {
+    // Check if type needs non-trivial copy (has destructor, CopyFrom, string, lambda, etc.)
+    bool needs_copier = get_resolver()->type_needs_destruction(type);
+    if (!needs_copier && type->kind == TypeKind::Struct) {
+        auto sty = get_resolver()->resolve_struct_type(eval_type(type));
+        if (sty && sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom))
+            needs_copier = true;
+    }
+    if (!needs_copier)
+        return nullptr;
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto ptr_type = get_llvm_ptr_type();
+
+    // void __any_copy_T(void* dest, void* src)
+    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__any_copy", type_name);
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+    auto saved_dbg = builder.getCurrentDebugLocation();
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+    builder.SetCurrentDebugLocation(llvm::DebugLoc());
+
+    auto dest_ptr = llvm_fn->getArg(0);
+    auto src_ptr = llvm_fn->getArg(1);
+    compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, type, nullptr, false);
+    builder.CreateRetVoid();
+
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    builder.SetCurrentDebugLocation(saved_dbg);
     return fn;
 }
 
