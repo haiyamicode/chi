@@ -1088,13 +1088,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.sigil_type;
         auto type = resolve_value(data.type, scope);
         auto kind = get_sigil_type_kind(data.sigil);
-        // Raw pointer types are forbidden in managed mode
-        if (kind == TypeKind::Pointer &&
-            has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
-            error(node, "raw pointer types are not allowed in managed mode, please use reference "
-                        "(&) instead");
-            return create_type(TypeKind::Unknown);
-        }
         ChiType *final_type;
         if (!data.lifetime.empty()) {
             // Lifetime-annotated ref: create fresh type (not cached) with resolved lifetime
@@ -1371,7 +1364,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::LNOT: {
             if (data.is_suffix) {
                 if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
-                    if (t->is_raw_pointer() && !scope.is_unsafe_block) {
+                    if (t->is_raw_pointer() && !scope.is_unsafe_block &&
+                        !has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
                         error(node, "raw pointer dereference requires unsafe block");
                         return nullptr;
                     }
