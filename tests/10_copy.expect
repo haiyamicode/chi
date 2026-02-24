@@ -13,5 +13,24 @@ return_construct() returning ConstructExpr
 creating direct
 result: 99
 done
+=== Test 3: Optional copy (T -> ?T direct) ===
+Traced(1) created
+a.id=1
+=== Test 4: Optional copy (T -> ?T from var) ===
+Traced(2) created
+Traced(2) copied
+t.id=2, b.id=2
+=== Test 5: Optional copy (?T -> ?T) ===
+Traced(1) copied
+a.id=1, c.id=1
+=== Test 6: Optional reassign ===
+Traced(4) created
+Traced(1) destroyed
+a.id=4
+=== scope exit ===
+Traced(1) destroyed
+Traced(2) destroyed
+Traced(2) destroyed
+Traced(4) destroyed
 deleting direct
 deleting local_b_copy

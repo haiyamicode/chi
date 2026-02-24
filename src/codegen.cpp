@@ -849,19 +849,9 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
         compile_construction(fn, dest, dest_type, expr);
         return;
     }
-    // move x — bitwise copy, skip copy_from (already handled in compile_expr)
-    if (expr->type == ast::NodeType::UnaryOpExpr &&
-        expr->data.unary_op_expr.op_type == TokenType::KW_MOVE) {
-        auto value = compile_expr(fn, expr);
-        if (value) {
-            auto &builder = *m_ctx->llvm_builder;
-            builder.CreateStore(value, dest);
-        }
-        return;
-    }
     auto value = compile_assignment_to_type(fn, expr, dest_type);
     if (value) {
-        compile_copy_with_ref(fn, RefValue::from_value(value), dest, dest_type, expr);
+        compile_store_or_copy(fn, value, dest, dest_type, expr);
     }
 }
 
@@ -2258,10 +2248,15 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     }
                 }
             }
-            // If RHS constructs in-place (move optimization), destruct old value first
-            if (data.op2->escape.moved && destruct_old) {
+            // Check if RHS constructs in-place at dest (resolved_outlet set)
+            bool in_place = data.op2->escape.moved &&
+                data.op2->type == ast::NodeType::ConstructExpr &&
+                data.op2->data.construct_expr.resolved_outlet;
+            // If in-place, destruct old BEFORE RHS overwrites dest
+            if (in_place && destruct_old) {
                 compile_destruction_for_type(fn, ref.address, dest_type);
             }
+
             // Get RHS as ref to preserve source address for efficient copy
             // (avoids load + temp alloca when source already has an address, e.g. ptr!)
             auto src_ref = compile_expr_ref(fn, data.op2);
@@ -2275,11 +2270,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 src_ref = {nullptr, compile_conversion(fn, src_ref.value, src_type, dest_type)};
             }
 
-            if (!data.op2->escape.moved) {
-                compile_copy_with_ref(fn, src_ref, ref.address, dest_type, data.op2,
-                                      destruct_old);
+            if (in_place) {
+                return src_ref.value; // Already written in-place
             }
-            return src_ref.value;
+
+            auto val = src_ref.value;
+            if (!val && src_ref.address)
+                val = builder.CreateLoad(compile_type(dest_type), src_ref.address);
+            compile_store_or_copy(fn, val, ref.address, dest_type, data.op2,
+                                  destruct_old);
+            return val;
         }
         default: {
             auto target_type = get_chitype(expr);
@@ -2753,6 +2753,20 @@ void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest,
     return compile_copy_with_ref(fn, RefValue::from_value(value), dest, type, expr);
 }
 
+void Compiler::compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Value *dest,
+                                     ChiType *type, ast::Node *expr, bool destruct_old) {
+    if (!value) return;
+    if (expr->escape.moved) {
+        // Moved temporary — destruct old if needed, then bitwise store
+        if (destruct_old)
+            compile_destruction_for_type(fn, dest, type);
+        m_ctx->llvm_builder->CreateStore(value, dest);
+    } else {
+        // Named value — deep copy via copy_from
+        compile_copy_with_ref(fn, RefValue::from_value(value), dest, type, expr, destruct_old);
+    }
+}
+
 void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
                                      ast::Node *expr, bool destruct_old) {
     auto &builder = *m_ctx->llvm_builder;
@@ -2765,6 +2779,46 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         }
         return src.value;
     };
+
+    // Result delegates to its internal struct type
+    if (type->kind == TypeKind::Result) {
+        compile_copy_with_ref(fn, src, dest, type->data.result.internal, expr, destruct_old);
+        return;
+    }
+
+    // Optional: copy has_value flag + deep-copy inner value
+    if (type->kind == TypeKind::Optional) {
+        auto elem_type = type->get_elem();
+        if (elem_type && get_resolver()->type_needs_destruction(elem_type)) {
+            if (destruct_old) {
+                compile_destruction_for_type(fn, dest, type);
+            }
+            auto opt_type_l = compile_type(type);
+            auto from_address = src.address;
+            if (!from_address) {
+                from_address = builder.CreateAlloca(opt_type_l, nullptr, "_opt_copy_src");
+                builder.CreateStore(ensure_value(), from_address);
+            }
+            // Copy has_value (field 0)
+            auto src_hv = builder.CreateStructGEP(opt_type_l, from_address, 0);
+            auto dst_hv = builder.CreateStructGEP(opt_type_l, dest, 0);
+            auto hv = builder.CreateLoad(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), src_hv);
+            builder.CreateStore(hv, dst_hv);
+            // Deep-copy inner value (field 1) only if has_value
+            auto bb_copy = fn->new_label("opt_copy_value");
+            auto bb_done = fn->new_label("opt_copy_done");
+            builder.CreateCondBr(hv, bb_copy, bb_done);
+            fn->use_label(bb_copy);
+            auto src_val = builder.CreateStructGEP(opt_type_l, from_address, 1);
+            auto dst_val = builder.CreateStructGEP(opt_type_l, dest, 1);
+            auto inner = builder.CreateLoad(compile_type(elem_type), src_val);
+            compile_copy(fn, inner, dst_val, elem_type, expr);
+            builder.CreateBr(bb_done);
+            fn->use_label(bb_done);
+            return;
+        }
+        // For Optional with trivially-copyable inner type, fall through to default
+    }
 
     switch (type->kind) {
     case TypeKind::String: {
@@ -4145,26 +4199,18 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 } else {
                     // Lambda calls - use original path
                     auto value = compile_assignment_to_type(fn, data.expr, var_type);
-                    if (value && !data.expr->escape.moved) {
-                        compile_copy(fn, value, var, var_type, data.expr);
-                    }
-                }
-            } else if (data.expr->type == ast::NodeType::UnaryOpExpr &&
-                       data.expr->data.unary_op_expr.op_type == TokenType::KW_MOVE) {
-                // move x — bitwise copy, skip copy_from
-                auto value = compile_expr(fn, data.expr);
-                if (value) {
-                    llvm_builder.CreateStore(value, var);
+                    if (value)
+                        compile_store_or_copy(fn, value, var, var_type, data.expr);
                 }
             } else {
                 // For all other expressions, use original path
                 auto value = compile_assignment_to_type(fn, data.expr, var_type);
-                if (value && !data.expr->escape.moved) {
-                    compile_copy(fn, value, var, var_type, data.expr);
+                if (value) {
+                    compile_store_or_copy(fn, value, var, var_type, data.expr);
                     // For lambda expressions with captures, compile_copy retains the captures
                     // but the temp value (from compile_lambda_alloc) already has refcount 1.
                     // Release the temp's captures to transfer ownership to the variable.
-                    if (var_type->kind == TypeKind::FnLambda && value) {
+                    if (!data.expr->escape.moved && var_type->kind == TypeKind::FnLambda) {
                         auto captures_ptr = llvm_builder.CreateExtractValue(value, {2});
                         auto release_fn = get_system_fn("cx_capture_release");
                         llvm_builder.CreateCall(release_fn->llvm_fn, {captures_ptr});

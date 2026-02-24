@@ -1,8 +1,8 @@
 // Borrow after value move — source is sunk.
-// expect-error: has not been initialized
+// expect-error: used after move
 
 struct Obj {
-    value: int;
+    value: int = 0;
 }
 
 func main() {

@@ -1,8 +1,8 @@
 // Value move in inner block, use after block.
-// expect-error: has not been initialized
+// expect-error: used after move
 
 struct Obj {
-    value: int;
+    value: int = 0;
 }
 
 func main() {

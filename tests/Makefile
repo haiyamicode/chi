@@ -84,11 +84,11 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	done; \
 	if [ "$$failed" = "1" ]; then exit 1; fi
 
-# Special rule for safe lifetime test — needs -s flag.
+# Special rule for safe lifetime test.
 # Also tests error cases: each file in testdata/30_safe_errors/ must fail to compile.
 30_safe_lifetime.test: 30_safe_lifetime.expect
 	echo Test: 30_safe_lifetime...
-	@$(CHI) -s -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xc && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
+	@$(CHI) -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xc && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
 	@if [ "x`diff -qbu 30_safe_lifetime.expect 30_safe_lifetime.output`" != "x" ]; \
 	then \
 		echo "error in test 30_safe_lifetime (output mismatch)"; \
@@ -98,9 +98,9 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	fi; \
 	rm -f 30_safe_lifetime.output
 	@failed=0; \
-	for f in testdata/30_safe_errors/*.xc; do \
+	for f in testdata/30_safe_errors/*.xc testdata/30_safe_errors/*.x; do \
 		name=$$(basename $$f); \
-		errmsg=$$($(CHI) -s -o /dev/null -c $$f -w /tmp/chitest_safe 2>&1); \
+		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_safe 2>&1); \
 		if [ $$? -eq 0 ]; then \
 			echo "error: $$name should have been rejected but compiled successfully"; \
 			failed=1; \

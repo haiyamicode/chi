@@ -1463,6 +1463,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     fn_def.add_sink_edge(src_decl, node);
                 }
             }
+            node->escape.moved = true;
             return t; // move produces the value type, not a reference
         }
         default:
@@ -1913,6 +1914,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
+        auto dest_type = scope.value_type;  // Save before resolve calls modify scope
         if (scope.move_outlet && !data.is_new) {
             data.resolved_outlet = scope.move_outlet;
             node->escape.moved = true;
@@ -2032,6 +2034,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     return nullptr;
                 }
             }
+        }
+
+        // Can't construct in-place if dest type differs from construct type
+        if (data.resolved_outlet && dest_type && dest_type != result_type) {
+            data.resolved_outlet = nullptr;
         }
 
         for (auto field_init : data.field_inits) {

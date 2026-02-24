@@ -48,6 +48,47 @@ func return_construct() Foo {
     return {"direct"};
 }
 
+struct Traced {
+    id: int = 0;
+
+    func new(id: int) {
+        this.id = id;
+        printf("Traced({}) created\n", id);
+    }
+
+    func delete() {
+        printf("Traced({}) destroyed\n", this.id);
+    }
+
+    impl ops.CopyFrom<Traced> {
+        func copy_from(source: &Traced) {
+            this.id = source.id;
+            printf("Traced({}) copied\n", source.id);
+        }
+    }
+}
+
+func test_optional_copy() {
+    println("=== Test 3: Optional copy (T -> ?T direct) ===");
+    var a: ?Traced = Traced{1};
+    printf("a.id={}\n", a!.id);
+
+    println("=== Test 4: Optional copy (T -> ?T from var) ===");
+    var t = Traced{2};
+    var b: ?Traced = t;
+    printf("t.id={}, b.id={}\n", t.id, b!.id);
+
+    println("=== Test 5: Optional copy (?T -> ?T) ===");
+    var c: ?Traced = a;
+    printf("a.id={}, c.id={}\n", a!.id, c!.id);
+
+    println("=== Test 6: Optional reassign ===");
+    a = Traced{4};
+    printf("a.id={}\n", a!.id);
+
+    println("=== scope exit ===");
+}
+
 func main() {
     println("=== Test 1: Return local variable ===");
     var foo = return_local();
@@ -61,5 +102,6 @@ func main() {
         printf("result: {}\n", *bar.p);
     }
     println("done");
+    test_optional_copy();
 }
 

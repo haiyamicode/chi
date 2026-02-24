@@ -368,6 +368,8 @@ class Compiler {
 
     void compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type,
                       ast::Node *expr = nullptr);
+    void compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Value *dest, ChiType *type,
+                               ast::Node *expr, bool destruct_old = false);
     void compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
                                ast::Node *expr = nullptr, bool destruct_old = false);
 
