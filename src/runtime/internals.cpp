@@ -194,6 +194,26 @@ static void *get_typemeta_display_method(TypeInfo *type) {
     return nullptr;
 }
 
+static std::string encode_utf8(uint32_t codepoint) {
+    std::string result;
+    if (codepoint <= 0x7F) {
+        result.push_back((char)codepoint);
+    } else if (codepoint <= 0x7FF) {
+        result.push_back((char)(0xC0 | (codepoint >> 6)));
+        result.push_back((char)(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0xFFFF) {
+        result.push_back((char)(0xE0 | (codepoint >> 12)));
+        result.push_back((char)(0x80 | ((codepoint >> 6) & 0x3F)));
+        result.push_back((char)(0x80 | (codepoint & 0x3F)));
+    } else if (codepoint <= 0x10FFFF) {
+        result.push_back((char)(0xF0 | (codepoint >> 18)));
+        result.push_back((char)(0x80 | ((codepoint >> 12) & 0x3F)));
+        result.push_back((char)(0x80 | ((codepoint >> 6) & 0x3F)));
+        result.push_back((char)(0x80 | (codepoint & 0x3F)));
+    }
+    return result;
+}
+
 static std::string get_value_display(const CxAny &v) {
     switch ((TypeKind)v.type->kind) {
     case TypeKind::String: {
@@ -210,6 +230,10 @@ static std::string get_value_display(const CxAny &v) {
             return fmt::format("'{}'", (char)char_value);
         }
         return fmt::format("{}", char_value);
+    }
+    case TypeKind::Rune: {
+        uint32_t rune_value = *(uint32_t *)&v.data;
+        return encode_utf8(rune_value);
     }
     case TypeKind::Int: {
         return istringf(v);

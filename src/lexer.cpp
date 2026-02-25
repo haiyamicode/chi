@@ -1063,8 +1063,29 @@ string Token::to_string() const {
         return str;
     case TokenType::LIFETIME:
         return fmt::format("'{}", str);
-    case TokenType::CHAR:
-        return fmt::format("'{}'", (char)val.i);
+    case TokenType::CHAR: {
+        uint32_t cp = (uint32_t)val.i;
+        if (cp >= 32 && cp <= 126) {
+            return fmt::format("'{}'", (char)cp);
+        }
+        std::string s;
+        if (cp <= 0x7F) {
+            s.push_back((char)cp);
+        } else if (cp <= 0x7FF) {
+            s.push_back((char)(0xC0 | (cp >> 6)));
+            s.push_back((char)(0x80 | (cp & 0x3F)));
+        } else if (cp <= 0xFFFF) {
+            s.push_back((char)(0xE0 | (cp >> 12)));
+            s.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+            s.push_back((char)(0x80 | (cp & 0x3F)));
+        } else {
+            s.push_back((char)(0xF0 | (cp >> 18)));
+            s.push_back((char)(0x80 | ((cp >> 12) & 0x3F)));
+            s.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+            s.push_back((char)(0x80 | (cp & 0x3F)));
+        }
+        return fmt::format("'{}'", s);
+    }
     case TokenType::STRING:
         return fmt::format("\"{}\"", get_strlit_repr(str));
     case TokenType::C_STRING:

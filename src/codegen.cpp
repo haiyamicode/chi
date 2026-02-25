@@ -474,6 +474,9 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     case TypeKind::Char: {
         return llvm_db.createBasicType("char", 8, llvm::dwarf::DW_ATE_unsigned_char);
     }
+    case TypeKind::Rune: {
+        return llvm_db.createBasicType("rune", 32, llvm::dwarf::DW_ATE_unsigned);
+    }
     case TypeKind::Int: {
         return llvm_db.createBasicType("int", type->data.int_.bit_count,
                                        llvm::dwarf::DW_ATE_signed);
@@ -1763,7 +1766,7 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         bool is_unsigned;
         if (from_type->kind == TypeKind::Bool) {
             is_unsigned = true;
-        } else if (from_type->kind == TypeKind::Char) {
+        } else if (from_type->kind == TypeKind::Char || from_type->kind == TypeKind::Rune) {
             is_unsigned = true;
         } else {
             is_unsigned = from_type->data.int_.is_unsigned;
@@ -1778,7 +1781,7 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
     } else if (from_type->kind == TypeKind::Float && to_int) {
         auto &builder = *m_ctx->llvm_builder;
         bool is_unsigned;
-        if (to_type->kind == TypeKind::Bool || to_type->kind == TypeKind::Char) {
+        if (to_type->kind == TypeKind::Bool || to_type->kind == TypeKind::Char || to_type->kind == TypeKind::Rune) {
             is_unsigned = true;
         } else {
             is_unsigned = to_type->data.int_.is_unsigned;
@@ -1795,7 +1798,7 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         auto from_type_l = compile_type(from_type);
         auto to_type_l = compile_type(to_type);
         bool is_signed;
-        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char) {
+        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char || from_type->kind == TypeKind::Rune) {
             is_signed = false;
         } else {
             is_signed = !from_type->data.int_.is_unsigned;
@@ -1904,6 +1907,10 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             return compile_number_conversion(fn, value, from_type, to_type);
         }
     }
+    case TypeKind::Char:
+    case TypeKind::Rune: {
+        return compile_number_conversion(fn, value, from_type, to_type);
+    }
     case TypeKind::Float: {
         return compile_number_conversion(fn, value, from_type, to_type);
     }
@@ -2005,7 +2012,8 @@ static llvm::CmpInst::Predicate get_cmpop(TokenType op, ChiType *type) {
         }
     }
     auto is_unsigned = (type->kind == TypeKind::Int && type->data.int_.is_unsigned) ||
-                       type->kind == TypeKind::Pointer;
+                       type->kind == TypeKind::Pointer ||
+                       type->kind == TypeKind::Char || type->kind == TypeKind::Rune;
     switch (op) {
     case TokenType::LT:
         return is_unsigned ? llvm::CmpInst::Predicate::ICMP_ULT
@@ -6270,6 +6278,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     }
     case TypeKind::Char: {
         return llvm::Type::getInt8Ty(llvm_ctx);
+    }
+    case TypeKind::Rune: {
+        return llvm::Type::getInt32Ty(llvm_ctx);
     }
     case TypeKind::Int: {
         return llvm::Type::getIntNTy(llvm_ctx, type->data.int_.bit_count);

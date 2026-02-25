@@ -1,0 +1,15 @@
+char: 'A'
+rune ascii: A
+rune unicode: 海
+rune escape: é
+char->rune: X
+literal->rune: B
+rune->char: 'Z'
+int->rune: A
+rune->int: 65
+A+1: B
+B-1: A
+A<B: true
+A==A: true
+A!=B: true
+switch: bravo

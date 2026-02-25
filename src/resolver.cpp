@@ -80,6 +80,7 @@ void Resolver::context_init_primitives() {
     auto &system_types = m_ctx->system_types;
     system_types.any = create_type(TypeKind::Any);
     system_types.char_ = create_type(TypeKind::Char);
+    system_types.rune_ = create_type(TypeKind::Rune);
     system_types.uint8 = create_int_type(8, true);
     system_types.int_ = create_int_type(32, false);
     system_types.int32 = create_int_type(32, false);
@@ -123,6 +124,7 @@ void Resolver::context_init_primitives() {
     add_primitive("int", system_types.int_);
     add_primitive("int64", system_types.int64);
     add_primitive("char", system_types.char_);
+    add_primitive("rune", system_types.rune_);
     add_primitive("float", system_types.float_);
     add_primitive("float64", system_types.float64);
     add_primitive("uint8", system_types.uint8);
@@ -249,6 +251,8 @@ static int get_int_type_size(ChiType *type) {
         return 1;
     case TypeKind::Char:
         return 8;
+    case TypeKind::Rune:
+        return 32;
     case TypeKind::Int:
         return type->data.int_.bit_count;
     default:
@@ -405,8 +409,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         return false;
     }
     case TypeKind::Int: {
-        // Allow implicit conversion from bool, char, and smaller int types
-        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char) {
+        // Allow implicit conversion from bool, char, rune, and smaller int types
+        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char ||
+            from_type->kind == TypeKind::Rune) {
             return is_safe_int_conversion(from_type, to_type);
         }
         if (from_type->kind == TypeKind::Int) {
@@ -435,7 +440,22 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         return false;
     }
     case TypeKind::Char:
+        if (from_type->kind == TypeKind::Rune) {
+            return is_explicit;
+        }
         return from_type->kind == TypeKind::Char || (is_explicit && from_type->is_int_like());
+    case TypeKind::Rune:
+        if (from_type->kind == TypeKind::Char) {
+            return true; // char -> rune: implicit (safe widening)
+        }
+        if (from_type->kind == TypeKind::Rune) {
+            return true;
+        }
+        // int -> rune: implicit if safe (same or smaller size), explicit otherwise
+        if (from_type->is_int_like()) {
+            return is_safe_int_conversion(from_type, get_system_types()->uint32) || is_explicit;
+        }
+        return false;
     case TypeKind::Any:
         return true;
     case TypeKind::Struct: {
@@ -1376,16 +1396,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             // For integer operations, use the larger type
             else if (t1->is_int_like() && t2->is_int_like()) {
-                int t1_size = get_int_type_size(t1);
-                int t2_size = get_int_type_size(t2);
+                // If either operand is rune, result is rune
+                if (t1->kind == TypeKind::Rune || t2->kind == TypeKind::Rune) {
+                    result_type = get_system_types()->rune_;
+                } else {
+                    int t1_size = get_int_type_size(t1);
+                    int t2_size = get_int_type_size(t2);
 
-                if (t2_size > t1_size) {
-                    result_type = t2;
-                } else if (t1_size == t2_size && t1->kind == TypeKind::Int &&
-                           t2->kind == TypeKind::Int) {
-                    // If same size, prefer unsigned if either is unsigned
-                    if (t2->data.int_.is_unsigned && !t1->data.int_.is_unsigned) {
+                    if (t2_size > t1_size) {
                         result_type = t2;
+                    } else if (t1_size == t2_size && t1->kind == TypeKind::Int &&
+                               t2->kind == TypeKind::Int) {
+                        // If same size, prefer unsigned if either is unsigned
+                        if (t2->data.int_.is_unsigned && !t1->data.int_.is_unsigned) {
+                            result_type = t2;
+                        }
                     }
                 }
             }
@@ -1661,8 +1686,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_system_types()->float_;
         case TokenType::KW_UNDEFINED:
             return get_system_types()->undefined;
-        case TokenType::CHAR:
+        case TokenType::CHAR: {
+            auto codepoint = token->val.i;
+            if (codepoint > 127) {
+                return get_system_types()->rune_;
+            }
+            if (scope.value_type && scope.value_type->kind == TypeKind::Rune) {
+                return get_system_types()->rune_;
+            }
             return get_system_types()->char_;
+        }
         default:
             unreachable();
         }
@@ -6025,6 +6058,10 @@ ChiType *Resolver::get_system_type(TypeKind kind) {
         return types->optional;
     case TypeKind::Bool:
         return types->bool_;
+    case TypeKind::Char:
+        return types->char_;
+    case TypeKind::Rune:
+        return types->rune_;
     case TypeKind::Void:
         return types->void_;
     default:
