@@ -682,7 +682,18 @@ void AstPrinter::print_node(Node *node) {
         if (is_mut || is_move || has_lifetime) {
             emit(" ");
         }
+        // Wrap inner type in parens when stacking different sigils for clarity
+        // Skip parens for ?& and ?* — those are common and unambiguous
+        auto inner_sigil = data.type->type == NodeType::TypeSigil
+                               ? data.type->data.sigil_type.sigil
+                               : SigilKind::None;
+        bool needs_parens = inner_sigil != SigilKind::None && inner_sigil != data.sigil &&
+                            !(data.sigil == SigilKind::Optional &&
+                              (inner_sigil == SigilKind::Reference ||
+                               inner_sigil == SigilKind::Pointer));
+        if (needs_parens) emit("(");
         print_node(data.type);
+        if (needs_parens) emit(")");
         break;
     }
     case NodeType::TypedefDecl: {

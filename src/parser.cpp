@@ -569,13 +569,17 @@ Node *Parser::parse_type_expr(bool type_only) {
 
     ast::Node *node = nullptr;
     auto token = get();
-    if (token->type == TokenType::KW_FUNC) {
+    if (token->type == TokenType::LPAREN) {
+        consume();
+        node = parse_type_expr(true);
+        expect(TokenType::RPAREN);
+    } else if (token->type == TokenType::KW_FUNC) {
         consume();
         node = parse_fn_type(token);
     } else {
         // Check if we have a valid identifier token for type
         if (token->type != TokenType::IDEN && token->type != TokenType::KW_THIS &&
-            token->type != TokenType::KW_THIS_TYPE && token->type != TokenType::KW_NEW && 
+            token->type != TokenType::KW_THIS_TYPE && token->type != TokenType::KW_NEW &&
             token->type != TokenType::KW_DELETE) {
             error(token, "expected type identifier, got '{}'", token->to_string());
             return create_error_node();

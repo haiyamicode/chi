@@ -143,3 +143,7 @@ func test_lambda_ref_types() {
     };
 }
 
+// sigil parenthesization: different sigils get wrapped, same sigils don't
+func test_sigil_parens(a: ?&mut int, b: ?&int, c: ?*int, d: **int, e: ??int, f: *?int) {
+}
+
