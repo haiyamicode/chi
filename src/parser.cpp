@@ -1981,7 +1981,16 @@ Node *Parser::parse_for_stmt() {
             }
         }
         if (kind == ForLoopKind::Range) {
-            node->data.for_stmt.expr = parse_expr();
+            auto expr = parse_expr();
+            if (next_is(TokenType::DOT_DOT)) {
+                consume();
+                auto range = create_node(NodeType::RangeExpr, expr->token);
+                range->data.range_expr.start = expr;
+                range->data.range_expr.end = parse_expr();
+                node->data.for_stmt.expr = range;
+            } else {
+                node->data.for_stmt.expr = expr;
+            }
             auto bind = node->data.for_stmt.bind;
             if (bind->name != "_") {
                 add_to_scope(bind, bind->name);

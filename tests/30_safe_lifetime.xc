@@ -392,7 +392,7 @@ func test_early_return_cleanup() Heavy {
 // Break from loop with block-local vars: cleaned up before exiting
 func test_break_cleanup() {
     printf("=== break cleanup ===\n");
-    for var i = 0; i < 3; i++ {
+    for i in 0..3 {
         var h = Heavy{value: 100 + i};
         if i == 1 {
             printf("breaking at {}\n", h.value);
@@ -406,7 +406,7 @@ func test_break_cleanup() {
 // Continue from loop: block vars cleaned up each iteration
 func test_continue_cleanup() {
     printf("=== continue cleanup ===\n");
-    for var i = 0; i < 3; i++ {
+    for i in 0..3 {
         var h = Heavy{value: 200 + i};
         if i == 1 {
             printf("skipping {}\n", h.value);
@@ -443,7 +443,7 @@ func test_move_block_cleanup() {
 // Move in loop — each iteration creates and moves, no double-destroy
 func test_move_in_loop() {
     printf("=== move in loop ===\n");
-    for var i = 0; i < 3; i++ {
+    for i in 0..3 {
         var h = Heavy{value: 300 + i};
         consume_heavy(move h);
         // h sunk each iteration

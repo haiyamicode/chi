@@ -681,6 +681,17 @@ void AstPrinter::print_node(Node *node) {
         emit("]");
         break;
     }
+    case NodeType::RangeExpr: {
+        auto &data = node->data.range_expr;
+        if (data.start) {
+            print_node(data.start);
+        }
+        emit("..");
+        if (data.end) {
+            print_node(data.end);
+        }
+        break;
+    }
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         bool has_lifetime = !data.lifetime.empty();
@@ -796,20 +807,43 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.for_stmt;
         emit("for ");
         if (data.kind == ForLoopKind::Ternary) {
-            if (data.init) {
-                print_node(data.init);
-            }
-            emit(";");
-            if (data.condition) {
+            // Collapse `for var i = START; i < END; i++` into `for i in START..END`
+            bool collapsed = false;
+            if (data.init && data.condition && data.post &&
+                data.init->type == NodeType::VarDecl &&
+                data.init->data.var_decl.type == nullptr &&
+                data.init->data.var_decl.expr &&
+                data.condition->type == NodeType::BinOpExpr &&
+                data.condition->data.bin_op_expr.op_type == TokenType::LT &&
+                data.condition->data.bin_op_expr.op1->type == NodeType::Identifier &&
+                data.condition->data.bin_op_expr.op1->name == data.init->name &&
+                data.post->type == NodeType::UnaryOpExpr &&
+                data.post->data.unary_op_expr.op_type == TokenType::INC &&
+                data.post->data.unary_op_expr.op1->type == NodeType::Identifier &&
+                data.post->data.unary_op_expr.op1->name == data.init->name) {
+                emit("{} in ", data.init->name);
+                print_node(data.init->data.var_decl.expr);
+                emit("..");
+                print_node(data.condition->data.bin_op_expr.op2);
                 emit(" ");
-                print_node(data.condition);
+                collapsed = true;
             }
-            emit(";");
-            if (data.post) {
+            if (!collapsed) {
+                if (data.init) {
+                    print_node(data.init);
+                }
+                emit(";");
+                if (data.condition) {
+                    emit(" ");
+                    print_node(data.condition);
+                }
+                emit(";");
+                if (data.post) {
+                    emit(" ");
+                    print_node(data.post);
+                }
                 emit(" ");
-                print_node(data.post);
             }
-            emit(" ");
         }
         if (data.kind == ForLoopKind::Range) {
             if (data.bind_sigil != SigilKind::None) {

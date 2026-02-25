@@ -2977,6 +2977,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             resolve(data.post, scope);
         }
         if (data.expr) {
+            if (data.expr->type == NodeType::RangeExpr) {
+                auto &range = data.expr->data.range_expr;
+                auto start_type = resolve(range.start, scope);
+                auto end_type = resolve(range.end, scope);
+                check_assignment(range.end, end_type, start_type);
+                data.kind = ast::ForLoopKind::IntRange;
+                if (data.bind) {
+                    auto bind_scope = scope.set_value_type(start_type);
+                    resolve(data.bind, bind_scope);
+                }
+            } else {
+
             auto expr_type = resolve(data.expr, scope);
             auto sty = resolve_struct_type(expr_type);
             if (!sty) {
@@ -3045,6 +3057,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
                 return nullptr;
             }
+
+            } // else (non-RangeExpr)
         }
         auto loop_scope = scope.set_parent_loop(node);
         resolve(data.body, loop_scope);

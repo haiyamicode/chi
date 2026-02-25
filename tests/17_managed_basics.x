@@ -59,7 +59,7 @@ func test_arrays() {
 
     printf("Array: [{}, {}, {}]\n", arr[0], arr[1], arr[2]);
 
-    for var i = 0; i < 3; i++ {
+    for i in 0..3 {
         printf("arr[{}] = {}\n", i, arr[i]);
     }
 }
@@ -100,7 +100,7 @@ func test_control_flow() {
 
     // For loops
     println("For loop:");
-    for var i = 0; i < 3; i++ {
+    for i in 0..3 {
         printf("i = {}\n", i);
     }
 

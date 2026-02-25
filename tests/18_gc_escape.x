@@ -134,7 +134,7 @@ func main() {
     println("\n=== Cleanup Phase ===");
 
     println("Final gc objects...");
-    for var i = 0; i < 5; i++ {
+    for i in 0..5 {
         var temp = GCBox{1000 + i};
     }
 

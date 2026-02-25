@@ -21,14 +21,14 @@ struct Scope;
 
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
-          ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, SliceExpr, TypedefDecl,
+          ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, SliceExpr, RangeExpr, TypedefDecl,
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, LifetimeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
           ImplementBlock);
 
 MAKE_ENUM(ModuleKind, XC, XM);
-MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter);
+MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
 
 enum FnParsingFlags : uint32_t {
     FN_BODY_REQUIRED = 1 << 0,
@@ -434,6 +434,11 @@ struct SliceExpr {
     ChiStructMember *resolved_method = nullptr;
 };
 
+struct RangeExpr {
+    Node *start = nullptr;
+    Node *end = nullptr;
+};
+
 MAKE_ENUM(IdentifierKind, Value, TypeName, This, ThisType)
 
 struct Identifier {
@@ -638,6 +643,7 @@ struct Node {
         SubtypeExpr subtype_expr;
         IndexExpr index_expr;
         SliceExpr slice_expr;
+        RangeExpr range_expr;
         TypedefDecl typedef_decl;
         TypeSigil sigil_type;
         EnumVariant enum_variant;

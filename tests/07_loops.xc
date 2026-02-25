@@ -2,7 +2,7 @@ func for_classic() {
     println("for_classic:");
     printf("print from 1 to 5:\n", 0);
 
-    for var i = 0; i < 5; i++ {
+    for i in 0..5 {
         printf("{}\n", i + 1);
     }
 

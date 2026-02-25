@@ -4609,7 +4609,44 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     case ast::NodeType::ForStmt: {
         auto &builder = *m_ctx->llvm_builder.get();
         auto &data = stmt->data.for_stmt;
-        if (data.kind == ast::ForLoopKind::Range) {
+        if (data.kind == ast::ForLoopKind::IntRange) {
+            auto &range = data.expr->data.range_expr;
+            auto start_val = compile_expr(fn, range.start);
+            auto end_val = compile_expr(fn, range.end);
+            auto iter_type = start_val->getType();
+
+            auto it = builder.CreateAlloca(iter_type, nullptr, "_range_iter");
+            builder.CreateStore(start_val, it);
+
+            if (data.bind) {
+                add_var(data.bind, it);
+            }
+
+            auto loop = fn->push_loop();
+            loop->start = fn->new_label("_for_start");
+            loop->end = fn->new_label("_for_end");
+            auto loop_main = fn->new_label("_for_main");
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->start);
+            auto cond = builder.CreateICmpSLT(builder.CreateLoad(iter_type, it), end_val);
+            builder.CreateCondBr(cond, loop_main, loop->end);
+
+            fn->use_label(loop_main);
+            auto loop_post = fn->new_label("_for_post");
+            loop->continue_target = loop_post;
+            compile_block(fn, stmt, data.body, loop_post);
+
+            fn->use_label(loop_post);
+            auto cur = builder.CreateLoad(iter_type, it);
+            builder.CreateStore(
+                builder.CreateAdd(cur, llvm::ConstantInt::get(iter_type, 1)), it);
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->end);
+            fn->pop_loop();
+
+        } else if (data.kind == ast::ForLoopKind::Range) {
             auto ptr = compile_dot_ptr(fn, data.expr);
             assert(ptr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
