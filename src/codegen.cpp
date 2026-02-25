@@ -2130,9 +2130,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         builder.CreateLoad(compile_type(get_system_types()->bool_), has_value_p);
                     auto assert = get_system_fn("assert");
                     emit_dbg_location(expr);
-                    auto value = builder.CreateCall(
-                        assert->llvm_fn,
-                        {has_value, compile_string_literal("unwrapping null optional")});
+                    auto msg = compile_string_literal("unwrapping null optional");
+                    auto opt_msg = compile_conversion(
+                        fn, msg, get_system_types()->string,
+                        get_resolver()->get_wrapped_type(get_system_types()->string,
+                                                         TypeKind::Optional));
+                    auto value = builder.CreateCall(assert->llvm_fn, {has_value, opt_msg});
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
@@ -2154,8 +2157,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         has_err, llvm::ConstantInt::getTrue(compile_type(get_system_types()->bool_)));
                     auto assert = get_system_fn("assert");
                     emit_dbg_location(expr);
-                    builder.CreateCall(assert->llvm_fn,
-                                       {is_ok, compile_string_literal("unwrapping error Result")});
+                    auto msg = compile_string_literal("unwrapping error Result");
+                    auto opt_msg = compile_conversion(
+                        fn, msg, get_system_types()->string,
+                        get_resolver()->get_wrapped_type(get_system_types()->string,
+                                                         TypeKind::Optional));
+                    builder.CreateCall(assert->llvm_fn, {is_ok, opt_msg});
                     auto value_p = builder.CreateStructGEP(result_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
@@ -4535,6 +4542,9 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         }
 
         fn->use_label(end_b);
+        for (auto var : data.post_narrow_vars) {
+            compile_stmt(fn, var);
+        }
         break;
     }
     case ast::NodeType::ForStmt: {
@@ -4670,6 +4680,13 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
     case ast::NodeType::Block: {
         compile_block(fn, stmt, stmt, nullptr);
+        break;
+    }
+    case ast::NodeType::FnCallExpr: {
+        compile_assignment_to_type(fn, stmt, nullptr);
+        for (auto var : stmt->data.fn_call_expr.post_narrow_vars) {
+            compile_stmt(fn, var);
+        }
         break;
     }
     default:

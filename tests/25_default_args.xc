@@ -43,6 +43,14 @@ struct GenericHolder<T: ops.Construct> {
     }
 }
 
+func optional_trailing(x: int, label: ?string) {
+    if label {
+        printf("x={}, label={}\n", x, label);
+    } else {
+        printf("x={}, label=none\n", x);
+    }
+}
+
 func main() {
     greet("Alice");
     greet("Bob", "Hi");
@@ -71,5 +79,10 @@ func main() {
     printf("direct: ({}, {})\n", c.x, c.y);
     var c2 = Configurable{x: 5};
     printf("partial: ({}, {})\n", c2.x, c2.y);
+
+    // Trailing ?T params auto-default to null
+    println("\n-- Optional param defaults --");
+    optional_trailing(1, "hi");
+    optional_trailing(2);
 }
 

@@ -441,9 +441,13 @@ func stringf(format: string, ...values: any) string {
     return str;
 }
 
-func assert(cond: bool, message: string) {
+func assert(cond: bool, message: ?string) {
     if !cond {
-        panic(string.format("assertion failed: {}", message));
+        if message {
+            panic(string.format("assertion failed: {}", message));
+        } else {
+            panic("assertion failed");
+        }
     }
 }
 

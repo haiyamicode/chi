@@ -348,6 +348,10 @@ class Resolver {
 
     ast::Node *get_dummy_var(const string &name, ast::Node *expr = nullptr);
 
+    ast::Node *create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt, ResolveScope &scope);
+
+    bool always_terminates(ast::Node *node);
+
     optional<ConstantValue> resolve_constant_value(ast::Node *node);
 
     void resolve(ast::Package *package);

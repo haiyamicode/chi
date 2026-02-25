@@ -1,5 +1,17 @@
 import "std/mem" as mem;
 
+func guard_add(x: ?int) int {
+    if !x {
+        return -1;
+    }
+    return x + 1;
+}
+
+func assert_add(x: ?int) int {
+    assert(x);
+    return x + 1;
+}
+
 func test_optional() {
     println("testing optional:");
     var t: ?int = null;
@@ -11,6 +23,9 @@ func test_optional() {
         println("has value");
         printf("t={}\n", t);
     }
+    printf("guard_add(10)={}\n", guard_add(10));
+    printf("guard_add(null)={}\n", guard_add(null));
+    printf("assert_add(10)={}\n", assert_add(10));
     println("");
 }
 

@@ -2,6 +2,9 @@ testing optional:
 t is null
 has value
 t=5
+guard_add(10)=11
+guard_add(null)=-1
+assert_add(10)=11
 
 testing array:
 a=[1, 2]

@@ -347,12 +347,14 @@ struct FnCallExpr {
     array<Node *> type_args = {}; // Explicit type parameters
     bool is_builtin = false;
     Node *generated_fn = nullptr;
+    array<Node *> post_narrow_vars = {}; // narrowed vars emitted after call
 };
 
 struct IfStmt {
     Node *condition = nullptr;
     Node *then_block = nullptr;
     Node *else_node = nullptr; // can be null, block node, or another if node
+    array<Node *> post_narrow_vars = {}; // narrowed vars emitted after guard clause
 };
 
 struct StructDecl {

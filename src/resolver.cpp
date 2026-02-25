@@ -882,6 +882,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             param_types.add(param_type);
         }
 
+        // Auto-default trailing ?T params to null (walk backwards, stop at first non-optional)
+        for (int i = data.params.len - 1; i >= 0; i--) {
+            auto &pdata = data.params[i]->data.param_decl;
+            if (pdata.default_value || pdata.is_variadic) continue;
+            auto ptype = data.params[i]->resolved_type;
+            if (!ptype || ptype->kind != TypeKind::Optional) break;
+            auto null_node = create_node(NodeType::LiteralExpr);
+            auto null_token = get_allocator()->create_token();
+            null_token->type = TokenType::NULLP;
+            null_node->token = null_token;
+            null_node->resolved_type = get_system_types()->null_ptr;
+            pdata.default_value = null_node;
+        }
+
         // Return type lifetime elision: return borrows from min(all ref params)
         if (return_type && return_type->is_reference() &&
             return_type->data.pointer.lifetimes.len == 0) {
@@ -2197,38 +2211,58 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        // Assert narrowing: assert(opt_var) → narrow opt_var after call
+        if (fn_decl && fn_decl == get_builtin("assert") && data.args.len >= 1 &&
+            data.args[0]->type == NodeType::Identifier) {
+            auto arg_type = node_get_type(data.args[0]);
+            if (arg_type &&
+                (arg_type->kind == TypeKind::Optional || arg_type->kind == TypeKind::Result)) {
+                auto var = create_narrowed_var(data.args[0], node, scope);
+                scope.block->scope->put(var->name, var);
+                data.post_narrow_vars.add(var);
+            }
+        }
+
         return result;
     }
     case NodeType::IfStmt: {
         auto &data = node->data.if_stmt;
         auto cond_type = resolve(data.condition, scope);
+
+        // Positive narrowing: if opt_var { ... } → narrow inside then-block
         if (data.condition->type == NodeType::Identifier &&
             (cond_type->kind == TypeKind::Optional || cond_type->kind == TypeKind::Result)) {
-            auto name = data.condition->token->get_name();
-            // Determine the unwrapped value type
-            auto unwrapped_type = cond_type->kind == TypeKind::Optional
-                                      ? cond_type->get_elem()
-                                      : cond_type->data.result.value;
-            auto expr = create_node(ast::NodeType::UnaryOpExpr);
-            expr->token = data.condition->token;
-            expr->data.unary_op_expr.is_suffix = true;
-            expr->data.unary_op_expr.op_type = TokenType::LNOT;
-            expr->data.unary_op_expr.op1 = data.condition;
-            expr->resolved_type = unwrapped_type;
-            auto var = get_dummy_var(name, expr);
-            var->token = data.condition->token;
-            var->parent_fn = scope.parent_fn_node;
-            var->resolved_type = unwrapped_type;
-            var->data.var_decl.initialized_at = node;
+            auto var = create_narrowed_var(data.condition, node, scope);
             auto &block_data = data.then_block->data.block;
             block_data.implicit_vars.add(var);
-            block_data.scope->put(name, var);
+            block_data.scope->put(var->name, var);
         }
+
         check_assignment(data.condition, cond_type, get_system_types()->bool_);
         resolve(data.then_block, scope);
         if (data.else_node) {
             resolve(data.else_node, scope);
         }
+
+        // Guard clause narrowing: if !opt_var { <terminates>; } → narrow after
+        if (!data.else_node
+            && data.condition->type == NodeType::UnaryOpExpr
+            && data.condition->data.unary_op_expr.op_type == TokenType::LNOT
+            && !data.condition->data.unary_op_expr.is_suffix) {
+            auto operand = data.condition->data.unary_op_expr.op1;
+            if (operand->type == NodeType::Identifier) {
+                auto operand_type = node_get_type(operand);
+                if (operand_type
+                    && (operand_type->kind == TypeKind::Optional ||
+                        operand_type->kind == TypeKind::Result)
+                    && always_terminates(data.then_block)) {
+                    auto var = create_narrowed_var(operand, node, scope);
+                    scope.block->scope->put(var->name, var);
+                    data.post_narrow_vars.add(var);
+                }
+            }
+        }
+
         return nullptr;
     }
     case NodeType::WhileStmt: {
@@ -5029,6 +5063,44 @@ ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
     node->data.var_decl.is_generated = true;
     node->data.var_decl.expr = expr;
     return node;
+}
+
+ast::Node *Resolver::create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt,
+                                         ResolveScope &scope) {
+    auto type = node_get_type(identifier);
+    auto name = identifier->token->get_name();
+    auto unwrapped = type->kind == TypeKind::Optional ? type->get_elem() : type->data.result.value;
+    auto expr = create_node(ast::NodeType::UnaryOpExpr);
+    expr->token = identifier->token;
+    expr->data.unary_op_expr.is_suffix = true;
+    expr->data.unary_op_expr.op_type = TokenType::LNOT;
+    expr->data.unary_op_expr.op1 = identifier;
+    expr->resolved_type = unwrapped;
+    auto var = get_dummy_var(name, expr);
+    var->token = identifier->token;
+    var->parent_fn = scope.parent_fn_node;
+    var->resolved_type = unwrapped;
+    var->data.var_decl.initialized_at = parent_stmt;
+    return var;
+}
+
+bool Resolver::always_terminates(ast::Node *node) {
+    switch (node->type) {
+    case NodeType::ReturnStmt:
+    case NodeType::ThrowStmt:
+    case NodeType::BranchStmt:
+        return true;
+    case NodeType::Block: {
+        auto &stmts = node->data.block.statements;
+        return stmts.len > 0 && always_terminates(stmts[stmts.len - 1]);
+    }
+    case NodeType::IfStmt: {
+        auto &d = node->data.if_stmt;
+        return d.else_node && always_terminates(d.then_block) && always_terminates(d.else_node);
+    }
+    default:
+        return false;
+    }
 }
 
 ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic, ChiType *container,

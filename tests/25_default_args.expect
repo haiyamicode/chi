@@ -15,3 +15,7 @@ config: (10, 20)
 explicit: (1, 2)
 direct: (10, 20)
 partial: (5, 20)
+
+-- Optional param defaults --
+x=1, label=hi
+x=2, label=none
