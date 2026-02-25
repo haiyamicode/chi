@@ -149,7 +149,8 @@ l0:
                 return;
             }
 
-            unread();
+            m_tok.type = TokenType::DOT_DOT;
+            return;
         }
 
         unread();
@@ -697,8 +698,8 @@ void Lexer::read_number(char c) {
     if (!is_int) {
         is_int = true; // assume long unless proven otherwise
 
-        // fraction
-        if (c == '.') {
+        // fraction (but not if followed by another '.', which is the range operator '..')
+        if (c == '.' && peek() != '.') {
             is_int = false;
             buf.push_back(c);
             c = read();
@@ -1012,6 +1013,8 @@ string cx::get_token_symbol(TokenType token_type) {
         return ";";
     case TokenType::ELLIPSIS:
         return "...";
+    case TokenType::DOT_DOT:
+        return "..";
     case TokenType::TILDE:
         return "~";
     case TokenType::QUES:

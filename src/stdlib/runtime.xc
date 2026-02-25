@@ -557,11 +557,38 @@ struct Array<T> {
         func display() string {
             var buf = Buffer{};
             buf.write("[");
+            var i: uint32 = 0;
             for item in this {
-                buf.write(string.format("{}, ", item));
+                if i > 0 {
+                    buf.write(", ");
+                }
+                buf.write(string.format("{}", item));
+                i++;
             }
             buf.write("]");
             return buf.to_string();
+        }
+    }
+
+    impl ops.Slice<Array<T>> {
+        func slice(start: ?uint32, end: ?uint32) Array<T> {
+            var s: uint32 = 0;
+            var e: uint32 = this.length;
+            if start {
+                s = start;
+            }
+            if end {
+                e = end;
+            }
+            assert(s <= e, "slice start must be <= end");
+            assert(e <= this.length, "slice end out of bounds");
+            var result: Array<T> = [];
+            var i = s;
+            while i < e {
+                result.add(this.data[i]);
+                i = i + 1;
+            }
+            return result;
         }
     }
 }

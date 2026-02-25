@@ -154,6 +154,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.UnwrapMut"] = IntrinsicSymbol::UnwrapMut;
     m_ctx->intrinsic_symbols["std.ops.MutIterator"] = IntrinsicSymbol::MutIterator;
     m_ctx->intrinsic_symbols["std.ops.MutIterable"] = IntrinsicSymbol::MutIterable;
+    m_ctx->intrinsic_symbols["std.ops.Slice"] = IntrinsicSymbol::Slice;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -2817,6 +2818,58 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         } else {
             return data.resolved_method->resolved_type->data.fn.return_type->get_elem();
         }
+    }
+    case NodeType::SliceExpr: {
+        auto &data = node->data.slice_expr;
+        auto expr_type = resolve(data.expr, scope);
+        if (!expr_type) {
+            return nullptr;
+        }
+
+        if (expr_type->kind != TypeKind::Struct && expr_type->kind != TypeKind::Subtype &&
+            expr_type->kind != TypeKind::Array) {
+            error(node, "cannot slice type {}", format_type_display(expr_type));
+            return nullptr;
+        }
+
+        auto struct_ = resolve_struct_type(expr_type);
+        if (!struct_) {
+            error(node, "cannot slice type {}", format_type_display(expr_type));
+            return nullptr;
+        }
+
+        bool has_slice = false;
+        for (auto &i : struct_->interfaces) {
+            if (i->inteface_symbol == IntrinsicSymbol::Slice) {
+                has_slice = true;
+                break;
+            }
+        }
+        if (!has_slice) {
+            error(node, "type {} does not implement ops.Slice", format_type_display(expr_type));
+            return nullptr;
+        }
+
+        auto method_p = struct_->member_table.get("slice");
+        assert(method_p);
+        auto method = *method_p;
+        data.resolved_method = method;
+
+        auto uint32_type = get_system_types()->uint32;
+        if (data.start) {
+            auto start_scope = scope.set_value_type(uint32_type);
+            auto start_type = resolve(data.start, start_scope);
+            if (!start_type) return nullptr;
+            check_assignment(data.start, start_type, uint32_type);
+        }
+        if (data.end) {
+            auto end_scope = scope.set_value_type(uint32_type);
+            auto end_type = resolve(data.end, end_scope);
+            if (!end_type) return nullptr;
+            check_assignment(data.end, end_type, uint32_type);
+        }
+
+        return method->resolved_type->data.fn.return_type;
     }
     case NodeType::EnumVariant: {
         auto &data = node->data.enum_variant;
@@ -6124,7 +6177,8 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
         return find_root_decl(node->data.unary_op_expr.op1);
     case NodeType::FnCallExpr:
     case NodeType::ConstructExpr:
-        // Function call/construct results are temporaries, return nullptr to indicate no root decl
+    case NodeType::SliceExpr:
+        // Function call/construct/slice results are temporaries, return nullptr to indicate no root decl
         return nullptr;
     default:
         // Literals, casts, etc. — no root decl to track

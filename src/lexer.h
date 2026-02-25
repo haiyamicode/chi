@@ -86,6 +86,7 @@ MAKE_ENUM(TokenType, END, IDEN, ERROR,
           COLON,     // :
           SEMICOLON, // ;
           ELLIPSIS,  // ...
+          DOT_DOT,   // ..
           QUES,      // ?
           TILDE,     // ~
           AT,        // @

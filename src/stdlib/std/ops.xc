@@ -45,6 +45,10 @@ interface UnwrapMut<T> {
     mut func unwrap_mut() &mut T;
 }
 
+interface Slice<Out> {
+    func slice(start: ?uint32, end: ?uint32) Out;
+}
+
 // interface Sub<T> {
 //   func sub(rhs: T) T;
 // }

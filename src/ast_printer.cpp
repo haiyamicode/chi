@@ -667,6 +667,20 @@ void AstPrinter::print_node(Node *node) {
         emit("]");
         break;
     }
+    case NodeType::SliceExpr: {
+        auto &data = node->data.slice_expr;
+        print_node(data.expr);
+        emit("[");
+        if (data.start) {
+            print_node(data.start);
+        }
+        emit("..");
+        if (data.end) {
+            print_node(data.end);
+        }
+        emit("]");
+        break;
+    }
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         bool has_lifetime = !data.lifetime.empty();

@@ -2378,9 +2378,38 @@ Node *Parser::parse_dot_expr(Node *expr) {
 
 Node *Parser::parse_index_expr(Node *expr) {
     auto lb = expect(TokenType::LBRACK);
+
+    // Check for slice syntax: a[..end] or a[..]
+    if (next_is(TokenType::DOT_DOT)) {
+        consume();
+        auto node = create_node(NodeType::SliceExpr, lb);
+        node->data.slice_expr.expr = expr;
+        if (!next_is(TokenType::RBRACK)) {
+            node->data.slice_expr.end = parse_expr();
+        }
+        expect(TokenType::RBRACK);
+        return node;
+    }
+
+    auto first = parse_expr();
+
+    // Check for slice syntax: a[start..end] or a[start..]
+    if (next_is(TokenType::DOT_DOT)) {
+        consume();
+        auto node = create_node(NodeType::SliceExpr, lb);
+        node->data.slice_expr.expr = expr;
+        node->data.slice_expr.start = first;
+        if (!next_is(TokenType::RBRACK)) {
+            node->data.slice_expr.end = parse_expr();
+        }
+        expect(TokenType::RBRACK);
+        return node;
+    }
+
+    // Regular index expression
     auto node = create_node(NodeType::IndexExpr, lb);
     node->data.index_expr.expr = expr;
-    node->data.index_expr.subscript = parse_expr();
+    node->data.index_expr.subscript = first;
     expect(TokenType::RBRACK);
     return node;
 }

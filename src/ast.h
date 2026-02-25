@@ -21,7 +21,7 @@ struct Scope;
 
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
-          ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, TypedefDecl,
+          ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, SliceExpr, TypedefDecl,
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, LifetimeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
@@ -427,6 +427,13 @@ struct IndexExpr {
     ChiStructMember *resolved_method = nullptr;
 };
 
+struct SliceExpr {
+    Node *expr = nullptr;
+    Node *start = nullptr;
+    Node *end = nullptr;
+    ChiStructMember *resolved_method = nullptr;
+};
+
 MAKE_ENUM(IdentifierKind, Value, TypeName, This, ThisType)
 
 struct Identifier {
@@ -629,6 +636,7 @@ struct Node {
         DotExpr dot_expr;
         SubtypeExpr subtype_expr;
         IndexExpr index_expr;
+        SliceExpr slice_expr;
         TypedefDecl typedef_decl;
         TypeSigil sigil_type;
         EnumVariant enum_variant;

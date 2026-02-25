@@ -2751,6 +2751,50 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto ref = compile_expr_ref(fn, expr);
         return builder.CreateLoad(compile_type_of(expr), ref.address);
     }
+    case ast::NodeType::SliceExpr: {
+        auto &data = expr->data.slice_expr;
+
+        // Get reference to the container
+        auto ref = compile_expr_ref(fn, data.expr);
+
+        // Resolve the slice method
+        auto method = data.resolved_method;
+        auto variant_type_id = resolve_variant_type_id(fn, data.expr->resolved_type);
+        auto method_node = get_variant_member_node(method, variant_type_id);
+        auto slice_fn = get_fn(method_node);
+        auto fn_type = method->resolved_type;
+
+        // Get ?uint32 type from the method's parameter types (params[0]=self, [1]=start, [2]=end)
+        auto opt_param_type = fn_type->data.fn.params[1];
+        auto opt_type_l = compile_type(opt_param_type);
+
+        // Build start: ?uint32
+        llvm::Value *start_opt;
+        if (data.start) {
+            auto start_val = compile_expr(fn, data.start);
+            start_opt = compile_conversion(fn, start_val, get_chitype(data.start), opt_param_type);
+        } else {
+            start_opt = llvm::ConstantAggregateZero::get(opt_type_l);
+        }
+
+        // Build end: ?uint32
+        llvm::Value *end_opt;
+        if (data.end) {
+            auto end_val = compile_expr(fn, data.end);
+            end_opt = compile_conversion(fn, end_val, get_chitype(data.end), opt_param_type);
+        } else {
+            end_opt = llvm::ConstantAggregateZero::get(opt_type_l);
+        }
+
+        // Call the slice method
+        std::vector<llvm::Value *> args = {ref.address, start_opt, end_opt};
+        auto sret_type = fn_type->data.fn.should_use_sret()
+                             ? compile_type(fn_type->data.fn.return_type)
+                             : nullptr;
+        auto result = create_fn_call_invoke(slice_fn->llvm_fn, args, sret_type, nullptr, nullptr);
+        emit_dbg_location(expr);
+        return result;
+    }
     case ast::NodeType::ParenExpr: {
         return compile_expr(fn, expr->data.child_expr);
     }

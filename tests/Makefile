@@ -34,7 +34,8 @@ TESTS_LIST = 00_fib.test \
 		31_pointer_arithmetic.test \
 		32_type_narrowing.test \
 		33_iterators.test \
-		34_rune.test
+		34_rune.test \
+		35_slice.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
