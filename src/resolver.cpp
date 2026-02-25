@@ -1305,7 +1305,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         } else {
             // Propagate type context for literal inference (e.g., `x == 0` where x is uint32)
-            auto op2_scope = scope.set_value_type(t1);
+            auto ctx_type = t1;
+            // For ??, propagate the unwrapped type so RHS gets T context, not ?T
+            if (data.op_type == TokenType::QUES_QUES && t1->kind == TypeKind::Optional) {
+                ctx_type = t1->get_elem();
+            }
+            auto op2_scope = scope.set_value_type(ctx_type);
             t2 = resolve(data.op2, op2_scope);
         }
 
@@ -1341,6 +1346,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.op1, t1, get_system_types()->bool_);
             check_assignment(data.op2, t2, get_system_types()->bool_);
             return get_system_types()->bool_;
+        case TokenType::QUES_QUES: {
+            if (t1->kind != TypeKind::Optional) {
+                error(node, "left operand of ?? must be optional, got {}", format_type_display(t1));
+                return nullptr;
+            }
+            auto elem_type = t1->get_elem();
+            check_assignment(data.op2, t2, elem_type);
+            return elem_type;
+        }
         default: {
             // Pointer arithmetic (requires unsafe)
             if (data.op_type == TokenType::ADD || data.op_type == TokenType::SUB) {
@@ -1809,6 +1823,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!expr_type) {
             return nullptr;
         }
+
+        // Optional chaining: unwrap ?T to T, resolve member, wrap result in ?
+        if (data.is_optional_chain) {
+            if (expr_type->kind != TypeKind::Optional) {
+                error(node, "optional chaining (?.) requires optional type, got {}",
+                      format_type_display(expr_type));
+                return nullptr;
+            }
+            expr_type = expr_type->get_elem();
+        }
+
         if (field_name.empty()) {
             return create_type(TypeKind::Unknown);
         }
@@ -1963,7 +1988,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Check if the resolved subtype has a different member with substituted type
             auto resolved_member = stype->data.struct_.find_member(field_name);
             if (resolved_member && resolved_member->resolved_type != member->resolved_type) {
-                return resolved_member->resolved_type;
+                auto rt = resolved_member->resolved_type;
+                if (data.is_optional_chain && !resolved_member->is_method()) {
+                    return get_wrapped_type(rt, TypeKind::Optional);
+                }
+                return rt;
             }
         }
 
@@ -2042,7 +2071,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return lambda_type;
         }
 
-        return member->resolved_type;
+        auto result_type = member->resolved_type;
+        if (data.is_optional_chain && !member->is_method()) {
+            return get_wrapped_type(result_type, TypeKind::Optional);
+        }
+        return result_type;
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
@@ -2263,6 +2296,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        // Optional chaining: a?.method() wraps return type in Optional
+        if (result && data.fn_ref_expr->type == NodeType::DotExpr &&
+            data.fn_ref_expr->data.dot_expr.is_optional_chain) {
+            result = get_wrapped_type(result, TypeKind::Optional);
+        }
         return result;
     }
     case NodeType::IfStmt: {

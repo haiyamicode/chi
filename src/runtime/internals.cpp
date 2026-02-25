@@ -264,11 +264,26 @@ static std::string get_value_display(const CxAny &v) {
         auto data_p = get_any_data(&v);
         auto has_value = *(bool *)data_p;
         if (has_value) {
+            auto elem_ti = v.type->data.pointer.elem;
+            if (elem_ti) {
+                // Value offset = optional size - elem size
+                auto value_offset = v.type->size - elem_ti->size;
+                auto value_p = (uint8_t *)data_p + value_offset;
+                CxAny inner;
+                inner.type = elem_ti;
+                inner.inlined = true;
+                if (elem_ti->size <= (int32_t)sizeof(inner.data)) {
+                    memcpy(inner.data, value_p, elem_ti->size);
+                } else {
+                    inner.inlined = false;
+                    memcpy(inner.data, &value_p, sizeof(value_p));
+                }
+                return get_value_display(inner);
+            }
             return "<optional>";
         } else {
             return "null";
         }
-        break;
     }
     case cx::TypeKind::Array:
     case cx::TypeKind::Struct: {

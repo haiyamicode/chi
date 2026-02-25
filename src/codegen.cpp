@@ -972,7 +972,8 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     llvm::Constant *typedata_l;
     llvm::Type *tidata_actual_l;
     if ((type->kind == TypeKind::Reference || type->kind == TypeKind::MutRef ||
-         type->kind == TypeKind::MoveRef || type->kind == TypeKind::Pointer) &&
+         type->kind == TypeKind::MoveRef || type->kind == TypeKind::Pointer ||
+         type->kind == TypeKind::Optional) &&
         type->get_elem()) {
         auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
         tidata_actual_l = ptr_type_l;
@@ -2085,6 +2086,26 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op, ChiType *type) {
 llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
+        auto &call_data = expr->data.fn_call_expr;
+
+        // Handle optional chaining method calls: obj?.method()
+        if (call_data.fn_ref_expr->type == ast::NodeType::DotExpr &&
+            call_data.fn_ref_expr->data.dot_expr.is_optional_chain) {
+            auto &dot_data = call_data.fn_ref_expr->data.dot_expr;
+            auto result_type = get_chitype(expr);
+            auto result_type_l = compile_type(result_type);
+            return compile_optional_branch(fn, dot_data.expr, result_type_l, "optcall",
+                [&](llvm::Value *) {
+                    auto call_result = compile_fn_call(fn, expr);
+                    // compile_fn_call returns T; wrap T -> ?T if needed
+                    if (call_result->getType() == result_type_l) return call_result;
+                    return compile_conversion(fn, call_result, result_type->get_elem(), result_type);
+                },
+                [&]() -> llvm::Value * {
+                    return llvm::ConstantAggregateZero::get(result_type_l);
+                });
+        }
+
         if (fn->get_def()->has_cleanup) {
             auto &builder = *m_ctx->llvm_builder.get();
             InvokeInfo invoke;
@@ -2275,6 +2296,17 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto rhs = compile_comparator(fn, data.op2);
             auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));
             return builder.CreateCmp(cmpop, lhs, rhs);
+        }
+        case TokenType::QUES_QUES: {
+            auto result_type_l = compile_type(get_chitype(expr));
+            return compile_optional_branch(fn, data.op1, result_type_l, "coalesce",
+                [&](llvm::Value *unwrapped_ptr) {
+                    return builder.CreateLoad(result_type_l, unwrapped_ptr);
+                },
+                [&]() {
+                    auto rhs = compile_expr(fn, data.op2);
+                    return compile_conversion(fn, rhs, get_chitype(data.op2), get_chitype(expr));
+                });
         }
         case TokenType::ASS: {
             auto ref = compile_expr_ref(fn, data.op1);
@@ -2666,7 +2698,36 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return result;
     }
     case ast::NodeType::DotExpr: {
-        auto member = expr->data.dot_expr.resolved_struct_member;
+        auto &dot_data = expr->data.dot_expr;
+
+        if (dot_data.is_optional_chain) {
+            auto &builder = *m_ctx->llvm_builder.get();
+            auto opt_type = get_chitype(dot_data.expr);
+            auto result_type = get_chitype(expr);
+            auto result_type_l = compile_type(result_type);
+            return compile_optional_branch(fn, dot_data.expr, result_type_l, "optchain",
+                [&](llvm::Value *unwrapped_ptr) {
+                    auto unwrapped_type = opt_type->get_elem();
+                    llvm::Value *struct_ptr;
+                    ChiType *struct_type;
+                    if (unwrapped_type->is_pointer_like()) {
+                        struct_type = unwrapped_type->get_elem();
+                        struct_ptr = builder.CreateLoad(compile_type(unwrapped_type), unwrapped_ptr);
+                    } else {
+                        struct_type = unwrapped_type;
+                        struct_ptr = unwrapped_ptr;
+                    }
+                    auto gep = compile_dot_access(fn, struct_ptr, struct_type, dot_data.resolved_struct_member);
+                    auto field_type = dot_data.resolved_struct_member->resolved_type;
+                    auto field_val = builder.CreateLoad(compile_type(field_type), gep);
+                    return compile_conversion(fn, field_val, field_type, result_type);
+                },
+                [&]() -> llvm::Value * {
+                    return llvm::ConstantAggregateZero::get(result_type_l);
+                });
+        }
+
+        auto member = dot_data.resolved_struct_member;
         auto ref = compile_expr_ref(fn, expr);
         // For constants/values, return the value directly
         if (ref.value && !ref.address) {
@@ -3376,6 +3437,13 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 
 llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     auto ctn_type = get_chitype(expr);
+    // Optional chaining: unwrap ?T to get pointer to T value
+    if (ctn_type->kind == TypeKind::Optional) {
+        auto ref = compile_expr_ref(fn, expr);
+        auto opt_type_l = compile_type(ctn_type);
+        auto &builder = *m_ctx->llvm_builder;
+        return builder.CreateStructGEP(opt_type_l, ref.address, 1);
+    }
     if (ctn_type->is_pointer_like()) {
         // Interface references are fat pointers — need address for CreateStructGEP
         auto elem = ctn_type->get_elem();
@@ -3387,6 +3455,40 @@ llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     }
     auto ref = compile_expr_ref(fn, expr);
     return ref.address ? ref.address : ref.value;
+}
+
+llvm::Value *Compiler::compile_optional_branch(
+    Function *fn, ast::Node *opt_expr, llvm::Type *result_type_l, const char *label,
+    std::function<llvm::Value *(llvm::Value *unwrapped_ptr)> on_has_value,
+    std::function<llvm::Value *()> on_null) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto base_ref = compile_expr_ref(fn, opt_expr);
+    auto opt_type_l = compile_type(get_chitype(opt_expr));
+
+    auto has_value_p = builder.CreateStructGEP(opt_type_l, base_ref.address, 0);
+    auto has_value = builder.CreateLoad(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), has_value_p);
+    auto unwrapped_ptr = builder.CreateStructGEP(opt_type_l, base_ref.address, 1);
+
+    auto has_val_bb = fn->new_label(string("_") + label + "_has");
+    auto null_bb = fn->new_label(string("_") + label + "_null");
+    auto merge_bb = fn->new_label(string("_") + label + "_merge");
+    builder.CreateCondBr(has_value, has_val_bb, null_bb);
+
+    fn->use_label(has_val_bb);
+    auto has_val_result = on_has_value(unwrapped_ptr);
+    auto has_val_end = builder.GetInsertBlock();
+    builder.CreateBr(merge_bb);
+
+    fn->use_label(null_bb);
+    auto null_result = on_null();
+    auto null_end = builder.GetInsertBlock();
+    builder.CreateBr(merge_bb);
+
+    fn->use_label(merge_bb);
+    auto phi = builder.CreatePHI(result_type_l, 2, string("_") + label);
+    phi->addIncoming(has_val_result, has_val_end);
+    phi->addIncoming(null_result, null_end);
+    return phi;
 }
 
 llvm::Value *Compiler::compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
@@ -3977,6 +4079,10 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         if (!ctn_type) {
             ctn_type = get_chitype(dot_expr.expr);
         }
+        // Unwrap Optional for ?. method calls
+        if (ctn_type->kind == TypeKind::Optional) {
+            ctn_type = ctn_type->get_elem();
+        }
         auto ctn_type_l = compile_type(ctn_type);
         auto ptr = compile_dot_ptr(fn, dot_expr.expr);
 
@@ -4156,9 +4262,10 @@ std::optional<TypeId> Compiler::resolve_variant_type_id(Function *fn, ChiType *t
     if (!type)
         return std::nullopt;
 
-    // Unwrap pointer-like types
+    // Unwrap pointer-like and optional types
     while (type && (type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-                    type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef)) {
+                    type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef ||
+                    type->kind == TypeKind::Optional)) {
         type = type->get_elem();
     }
 
@@ -4432,10 +4539,11 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         if (data.expr) {
             if (data.expr->type == ast::NodeType::FnCallExpr) {
                 auto &fn_call_data = data.expr->data.fn_call_expr;
-                // Only use direct sret for regular function calls, not lambdas
-                // Lambdas have a different calling convention that doesn't use sret_dest
+                // Only use direct sret for regular function calls, not lambdas or optional chains
                 bool is_lambda = fn_call_data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda;
-                if (!is_lambda) {
+                bool is_optional_chain = fn_call_data.fn_ref_expr->type == ast::NodeType::DotExpr &&
+                                         fn_call_data.fn_ref_expr->data.dot_expr.is_optional_chain;
+                if (!is_lambda && !is_optional_chain) {
                     // Pass var directly as sret destination - avoids intermediate copy
                     compile_fn_call(fn, data.expr, nullptr, var);
                 } else {

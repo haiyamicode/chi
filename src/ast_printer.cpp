@@ -521,7 +521,7 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::DotExpr: {
         auto &data = node->data.dot_expr;
         print_node(data.expr);
-        emit(".{}", data.field->str);
+        emit("{}{}", data.is_optional_chain ? "?." : ".", data.field->str);
         break;
     }
     case NodeType::ConstructExpr: {

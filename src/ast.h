@@ -412,6 +412,7 @@ struct DotExpr {
     int64_t resolved_value = 0;
     Node *resolved_decl = nullptr;
     bool should_resolve_variant = false;
+    bool is_optional_chain = false;
     DotKind resolved_dot_kind = DotKind::Field;
     int resolved_index = -1;
 };

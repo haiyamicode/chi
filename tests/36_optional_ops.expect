@@ -1,0 +1,16 @@
+test_null_coalescing:
+a ?? 0 = 42
+b ?? 99 = 99
+
+test_optional_chain_field:
+p?.x = 10
+q?.y = null
+
+test_optional_chain_method:
+p?.sum() = 7
+q?.sum() = null
+
+test_chaining:
+p?.x ?? -1 = 100
+q?.y ?? -1 = -1
+

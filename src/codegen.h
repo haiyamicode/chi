@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <functional>
 #include <list>
 #include <optional>
 #include <set>
@@ -376,6 +377,11 @@ class Compiler {
                                ast::Node *expr, bool destruct_old = false);
     void compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
                                ast::Node *expr = nullptr, bool destruct_old = false);
+
+    llvm::Value *compile_optional_branch(
+        Function *fn, ast::Node *opt_expr, llvm::Type *result_type_l, const char *label,
+        std::function<llvm::Value *(llvm::Value *unwrapped_ptr)> on_has_value,
+        std::function<llvm::Value *()> on_null);
 
     llvm::Value *compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
                                     ChiStructMember *member);

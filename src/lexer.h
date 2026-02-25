@@ -88,6 +88,8 @@ MAKE_ENUM(TokenType, END, IDEN, ERROR,
           ELLIPSIS,  // ...
           DOT_DOT,   // ..
           QUES,      // ?
+          QUES_QUES, // ??
+          QUES_DOT,  // ?.
           TILDE,     // ~
           AT,        // @
           ARROW,     // =>

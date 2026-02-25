@@ -313,7 +313,15 @@ l0:
             t = TokenType::SEMICOLON;
             break;
         case '?':
-            t = TokenType::QUES;
+            if (peek() == '?') {
+                read();
+                t = TokenType::QUES_QUES;
+            } else if (peek() == '.') {
+                read();
+                t = TokenType::QUES_DOT;
+            } else {
+                t = TokenType::QUES;
+            }
             break;
         default:
             error(fmt::format("unexpected character '{}'", c), pos());
@@ -1019,6 +1027,10 @@ string cx::get_token_symbol(TokenType token_type) {
         return "~";
     case TokenType::QUES:
         return "?";
+    case TokenType::QUES_QUES:
+        return "??";
+    case TokenType::QUES_DOT:
+        return "?.";
     case TokenType::AT:
         return "@";
     default:

@@ -58,6 +58,7 @@ int Parser::get_op_precedence(TokenType op_type) {
     case TokenType::QUES:
         return TERNARY_PREC;
 
+    case TokenType::QUES_QUES:
     case TokenType::LOR:
         return 2;
 
@@ -1396,6 +1397,10 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
             node = parse_dot_expr(node);
             break;
 
+        case TokenType::QUES_DOT:
+            node = parse_dot_expr(node, true);
+            break;
+
         case TokenType::LBRACK:
             node = parse_index_expr(node);
             break;
@@ -2382,16 +2387,20 @@ Node *Parser::parse_prefix_expr() {
     return node;
 }
 
-Node *Parser::parse_dot_expr(Node *expr) {
-    auto dot = expect(TokenType::DOT);
+Node *Parser::parse_dot_expr(Node *expr, bool is_optional_chain) {
+    auto dot = is_optional_chain ? expect(TokenType::QUES_DOT) : expect(TokenType::DOT);
     auto node = create_node(NodeType::DotExpr, dot);
     node->data.dot_expr.expr = expr;
+    node->data.dot_expr.is_optional_chain = is_optional_chain;
     auto field = expect_identifier();
     field->semantic_node = node;
     node->data.dot_expr.field = field;
 
     if (next_is(TokenType::DOT)) {
         return parse_dot_expr(node);
+    }
+    if (next_is(TokenType::QUES_DOT)) {
+        return parse_dot_expr(node, true);
     }
     return node;
 }
