@@ -312,6 +312,7 @@ class Resolver {
     ChiType *to_value_type(ChiType *type);
 
     ChiType *get_subtype(ChiType *generic, TypeList *type_args);
+    ChiType *get_enum_subtype(ChiType *generic, TypeList *type_args);
     ast::Node *get_fn_variant(ChiType *generic_fn, TypeList *type_args, ast::Node *fn_node);
     ChiType *resolve_fn_subtype(ChiType *subtype);
 

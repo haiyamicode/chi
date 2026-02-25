@@ -216,12 +216,16 @@ struct ChiTypeEnum {
     ChiType *enum_header_struct = nullptr;
     ChiType *base_value_type = nullptr;
 
+    array<ChiType *> type_params = {};
+    array<ChiType *> subtypes = {};
     array<ChiEnumVariant *> variants = {};
     map<string, ChiEnumVariant *> variant_table = {};
+    ChiType *resolved_generic = nullptr; // non-null for concrete instantiations of generic enums
 
     ChiEnumVariant *add_variant(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type);
     ChiEnumVariant *find_member(const string &name);
+    bool is_generic() { return type_params.len > 0; }
 };
 
 struct ChiTypeEnumValue {

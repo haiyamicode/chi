@@ -6,6 +6,17 @@ greeting: hello, f
 discriminator value: 1
 is_callable: true
 type_name: Node.FnDef
+=== Test: Generic enum ===
+a.value=42
+a.get_label()=one
+a.is_single()=true
+b.first=10
+b.second=20
+b.get_label()=pair
+b.is_single()=false
+c.label=empty
+d.value=hello
+d.get_label()=str
 === Test: Enum string copy ===
 s.label=name_42
 t.label=name_42

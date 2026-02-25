@@ -396,6 +396,9 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
 void Compiler::compile_enum(ast::Node *node) {
     auto enum_type = get_chitype(node)->data.type_symbol.underlying_type;
     assert(enum_type->kind == TypeKind::Enum);
+    if (enum_type->data.enum_.is_generic()) {
+        return;
+    }
     if (enum_type->data.enum_.compiled_data_size >= 0) {
         return;
     }
@@ -434,6 +437,54 @@ void Compiler::compile_enum(ast::Node *node) {
 
     // compile base struct methods
     if (auto base_struct = enum_type->data.enum_.base_struct) {
+        for (auto member : base_struct->data.struct_.members) {
+            if (member->is_method()) {
+                auto fn_node = member->node;
+                auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node);
+                m_ctx->pending_fns.add(fn);
+            }
+        }
+    }
+}
+
+void Compiler::compile_concrete_enum(ChiTypeEnum *enum_data) {
+    if (enum_data->compiled_data_size >= 0) {
+        return;
+    }
+
+    int data_size = 0;
+    for (auto variant : enum_data->variants) {
+        auto enum_value_type = variant->resolved_type;
+        assert(enum_value_type->kind == TypeKind::EnumValue);
+        if (auto inner_struct = enum_value_type->data.enum_value.variant_struct) {
+            data_size = std::max(data_size, (int)llvm_type_size(compile_type(inner_struct)));
+        }
+    }
+    enum_data->compiled_data_size = data_size;
+
+    auto header_type_l = compile_type(enum_data->enum_header_struct);
+    for (auto variant : enum_data->variants) {
+        auto variant_display_name = variant->resolved_type->get_display_name();
+        auto display_name_str = (llvm::Constant *)compile_string_literal(variant_display_name);
+        auto display_name_var =
+            new llvm::GlobalVariable(*m_ctx->llvm_module, display_name_str->getType(), true,
+                                     llvm::GlobalValue::InternalLinkage, display_name_str,
+                                     fmt::format("{}.display_name", variant_display_name));
+        auto variant_value = llvm::ConstantStruct::get(
+            (llvm::StructType *)header_type_l,
+            {
+                llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
+                                       variant->node->data.enum_variant.resolved_value),
+                display_name_var,
+            });
+        auto var = new llvm::GlobalVariable(*m_ctx->llvm_module, header_type_l, true,
+                                            llvm::GlobalValue::InternalLinkage, variant_value,
+                                            fmt::format("{}.constant", variant_display_name));
+        m_ctx->enum_variant_table[variant] = var;
+    }
+
+    // Compile base struct methods (same as compile_enum)
+    if (auto base_struct = enum_data->base_struct) {
         for (auto member : base_struct->data.struct_.members) {
             if (member->is_method()) {
                 auto fn_node = member->node;
@@ -6626,10 +6677,15 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
 
         auto enum_ = type->data.enum_value.parent_enum();
         if (enum_->compiled_data_size < 0) {
-            compile_enum(enum_->node);
+            if (enum_->resolved_generic) {
+                compile_concrete_enum(enum_);
+            } else {
+                compile_enum(enum_->node);
+            }
             assert(enum_->compiled_data_size >= 0);
         }
-        auto base_value_struct = enum_->base_value_type->data.enum_value.resolved_struct;
+
+        auto base_value_struct = type->data.enum_value.resolved_struct;
         std::vector<llvm::Type *> members;
         for (auto member : base_value_struct->data.struct_.members) {
             if (member->is_field()) {

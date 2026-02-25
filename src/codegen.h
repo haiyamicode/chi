@@ -450,6 +450,7 @@ class Compiler {
     void compile_struct(ast::Node *node);
 
     void compile_enum(ast::Node *node);
+    void compile_concrete_enum(ChiTypeEnum *enum_data);
 
     void compile_extern(ast::Node *node);
 

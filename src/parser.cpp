@@ -616,6 +616,11 @@ Node *Parser::parse_type_expr(bool type_only) {
             }
             expect(TokenType::GT);
         }
+
+        // Handle dot-qualified access after generic args (e.g., Container<int>.Single)
+        if (next_is(TokenType::DOT)) {
+            node = parse_dot_expr(node);
+        }
     }
 
     for (int i = int(sigil_nodes.len) - 1; i >= 0; --i) {
@@ -1869,6 +1874,15 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         }
     }
 
+    // Handle dot-qualified access after generic args (e.g., Container<int>.Single)
+    while (lookahead(pos)->type == TokenType::DOT) {
+        pos++;
+        if (lookahead(pos)->type != TokenType::IDEN) {
+            return false;
+        }
+        pos++;
+    }
+
     return true;
 }
 
@@ -2069,6 +2083,48 @@ Node *Parser::parse_enum_decl(DeclSpec *decl_spec) {
     node->start_token = kw;
     node->data.enum_decl.decl_spec = decl_spec;
 
+    auto &params = node->data.enum_decl.type_params;
+    if (next_is(TokenType::LT)) {
+        expect(TokenType::LT);
+        Token *token;
+        for (;;) {
+            token = get();
+            if (token->type == TokenType::END) {
+                error(token, errors::UNEXPECTED_EOF);
+                return node;
+            }
+            if (token->type == TokenType::GT) {
+                break;
+            }
+            auto param_iden = expect(TokenType::IDEN);
+            auto param_node = create_node(NodeType::TypeParam, param_iden);
+
+            // Check for colon syntax for type bounds: T: Trait1 + Trait2 + ...
+            if (next_is(TokenType::COLON)) {
+                consume(); // consume the colon
+                do {
+                    param_node->data.type_param.type_bounds.add(parse_type_expr(true));
+                } while (next_is(TokenType::ADD) && (consume(), true));
+            }
+
+            // Check for = syntax for default type: T = int
+            if (next_is(TokenType::ASS)) {
+                consume(); // consume the =
+                param_node->data.type_param.default_type = parse_type_expr(true);
+            }
+
+            param_node->data.type_param.index = params.len;
+            param_node->data.type_param.source_decl = node;
+            params.add(param_node);
+
+            if (!at_comma(TokenType::GT)) {
+                break;
+            }
+            consume();
+        }
+        expect(TokenType::GT);
+    }
+
     if (next_is(TokenType::LPAREN)) {
         consume();
         auto iden = expect(TokenType::IDEN);
@@ -2226,6 +2282,9 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
 
 void Parser::parse_enum_block(Node *node) {
     m_ctx->resolver->push_scope(node);
+    for (auto param : node->data.enum_decl.type_params) {
+        add_to_scope(param);
+    }
     expect(TokenType::LBRACE);
     bool variants_ended = false;
     while (get()->type != TokenType::RBRACE) {

@@ -588,6 +588,7 @@ struct EnumDecl {
     Node *base_struct = nullptr;
     Token *discriminator_field = nullptr;
     Node *discriminator_type = nullptr;
+    array<Node *> type_params = {};
 
     string get_discriminator_field() {
         return discriminator_field ? discriminator_field->get_name() : "__value";

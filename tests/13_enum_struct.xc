@@ -61,6 +61,77 @@ enum TaggedValue (type: int) {
     }
 }
 
+// Generic enum: single type param used in variants and base struct
+enum Container<T> {
+    Empty,
+    Single {
+        value: T;
+    },
+    Pair {
+        first: T;
+        second: T;
+    };
+
+    struct {
+        label: string = "";
+
+        func get_label() string {
+            return this.label;
+        }
+
+        func is_single() bool {
+            return switch this {
+                Container.Single => true,
+                else => false
+            };
+        }
+    }
+}
+
+// Generic enum: multiple type params
+enum Either<L, R> {
+    Left {
+        left: L;
+    },
+    Right {
+        right: R;
+    }
+}
+
+// Generic enum: type params with discriminator
+enum Tagged<T> (tag: uint64) {
+    First,
+    Second {
+        payload: T;
+    }
+}
+
+func test_generic_enum() {
+    println("=== Test: Generic enum ===");
+
+    // Single variant with type param field + base struct method
+    var a = Container<int>.Single{label: "one", value: 42};
+    printf("a.value={}\n", a.value);
+    printf("a.get_label()={}\n", a.get_label());
+    printf("a.is_single()={}\n", a.is_single());
+
+    // Pair variant with two type param fields
+    var b = Container<int>.Pair{label: "pair", first: 10, second: 20};
+    printf("b.first={}\n", b.first);
+    printf("b.second={}\n", b.second);
+    printf("b.get_label()={}\n", b.get_label());
+    printf("b.is_single()={}\n", b.is_single());
+
+    // Empty variant (no type param fields)
+    var c = Container<int>.Empty{label: "empty"};
+    printf("c.label={}\n", c.label);
+
+    // Different type instantiation
+    var d = Container<string>.Single{label: "str", value: "hello"};
+    printf("d.value={}\n", d.value);
+    printf("d.get_label()={}\n", d.get_label());
+}
+
 func test_enum_string_copy() {
     println("=== Test: Enum string copy ===");
     var s = TaggedValue.Named{id: 1, label: string.format("name_{}", 42)};
@@ -125,6 +196,7 @@ func main() {
     printf("discriminator value: {}\n", node.discriminator());
     printf("is_callable: {}\n", node.is_callable());
     printf("type_name: {}\n", node.type_name());
+    test_generic_enum();
     test_enum_string_copy();
     test_enum_traced_copy();
     test_enum_traced_reassign();

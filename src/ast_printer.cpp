@@ -1046,6 +1046,11 @@ void AstPrinter::print_node(Node *node) {
         if (!node->name.empty()) {
             emit("{}", node->name);
         }
+        if (data.type_params.len) {
+            emit("<");
+            emit_wrapped_list(&data.type_params, "", "", ", ");
+            emit(">");
+        }
         if (data.discriminator_field || data.discriminator_type) {
             emit(" (");
             if (data.discriminator_field) {

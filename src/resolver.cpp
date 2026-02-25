@@ -1866,6 +1866,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return member->resolved_type;
             }
             case TypeKind::Subtype: {
+                auto &subtype_data = underlying_type->data.subtype;
+                if (subtype_data.generic && subtype_data.generic->kind == TypeKind::Enum) {
+                    // Generic enum subtype: find variant on the concrete enum
+                    auto concrete_enum = subtype_data.final_type;
+                    assert(concrete_enum && concrete_enum->kind == TypeKind::Enum);
+                    auto member = concrete_enum->data.enum_.find_member(field_name);
+                    if (!member) {
+                        error(node, errors::MEMBER_NOT_FOUND, field_name,
+                              format_type_display(underlying_type));
+                        return nullptr;
+                    }
+                    data.resolved_decl = member->node;
+                    data.field->node = member->node;
+                    data.resolved_dot_kind = DotKind::EnumVariant;
+                    return member->resolved_type;
+                }
                 auto resolved = resolve_subtype(underlying_type);
                 if (!resolved) {
                     error(node, errors::MEMBER_NOT_FOUND, field_name,
@@ -2418,6 +2434,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             vstruct_clone->display_name = fmt::format("{}.BaseEnumValue", node->name);
             value_type->data.enum_value.resolved_struct = vstruct_clone;
 
+            for (auto param : data.type_params) {
+                enum_type->data.enum_.type_params.add(resolve(param, scope));
+            }
+
             if (data.base_struct) {
                 auto base_struct_type = resolve(data.base_struct, scope);
                 auto base_struct = eval_struct_type(base_struct_type);
@@ -2732,11 +2752,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::SubtypeExpr: {
         auto &data = node->data.subtype_expr;
-        auto type = to_value_type(resolve(data.type, scope));
+        auto resolved_sym = resolve(data.type, scope);
+        auto type = to_value_type(resolved_sym);
 
         // Handle invalid/unresolved types gracefully
         if (!type) {
             return nullptr;
+        }
+
+        // For enum TypeSymbols, to_value_type returns the giving_type (EnumValue),
+        // but we need the underlying_type (Enum) for generic instantiation
+        if (type->kind == TypeKind::EnumValue && resolved_sym &&
+            resolved_sym->kind == TypeKind::TypeSymbol) {
+            type = resolved_sym->data.type_symbol.underlying_type;
         }
 
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional) {
@@ -2747,8 +2775,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto elem_type = to_value_type(resolve(data.args[0], scope));
             return get_wrapped_type(elem_type, type->kind);
         }
-        auto &params = type->data.struct_.type_params;
-        auto &decl_params = type->data.struct_.node->data.struct_decl.type_params;
+        array<ChiType *> *params_ptr = nullptr;
+        array<ast::Node *> *decl_params_ptr = nullptr;
+        if (type->kind == TypeKind::Struct) {
+            params_ptr = &type->data.struct_.type_params;
+            decl_params_ptr = &type->data.struct_.node->data.struct_decl.type_params;
+        } else if (type->kind == TypeKind::Enum) {
+            params_ptr = &type->data.enum_.type_params;
+            decl_params_ptr = &type->data.enum_.node->data.enum_decl.type_params;
+        } else {
+            error(node, "cannot instantiate non-generic type '{}' with type arguments",
+                  format_type_display(type));
+            return nullptr;
+        }
+        auto &params = *params_ptr;
+        auto &decl_params = *decl_params_ptr;
         if (data.args.len > params.len) {
             error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.len,
                   data.args.len);
@@ -2782,13 +2823,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             args.add(resolved);
         }
 
-        // Ensure type is actually a Struct before calling get_subtype
-        if (type->kind != TypeKind::Struct) {
-            error(node, "cannot instantiate non-generic type '{}' with type arguments",
-                  format_type_display(type));
-            return nullptr;
-        }
-
         // Validate trait bounds on type arguments
         for (size_t i = 0; i < args.len && i < params.len; i++) {
             auto param_type = to_value_type(params[i]);
@@ -2806,7 +2840,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        auto subtype = get_subtype(type, &args);
+        auto subtype = type->kind == TypeKind::Enum
+                            ? get_enum_subtype(type, &args)
+                            : get_subtype(type, &args);
         return create_type_symbol({}, subtype);
     }
     case NodeType::IndexExpr: {
@@ -4442,6 +4478,55 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         return lambda_type;
     }
 
+    case TypeKind::EnumValue: {
+        auto &ev_data = type->data.enum_value;
+        auto new_ev = create_type(TypeKind::EnumValue);
+        new_ev->data.enum_value = ev_data;
+        new_ev->name = type->name;
+        new_ev->display_name = type->display_name;
+        // Substitute struct member types for variant_struct and resolved_struct
+        auto sub_struct = [&](ChiType *src) -> ChiType * {
+            if (!src || src->kind != TypeKind::Struct)
+                return src;
+            auto dst = create_type(TypeKind::Struct);
+            src->clone(dst);
+            dst->data.struct_.members = {};
+            dst->data.struct_.fields = {};
+            dst->data.struct_.member_table = {};
+            for (auto member : src->data.struct_.members) {
+                // Only substitute field types — methods have container_ref back to
+                // the EnumValue which would cause infinite recursion
+                auto new_type = member->is_method()
+                                    ? member->resolved_type
+                                    : make_recursive_call(member->resolved_type, subs);
+                auto new_member = dst->data.struct_.add_member(
+                    get_allocator(), member->get_name(), member->node, new_type);
+                // Preserve field_index override for variant fields with parent_member
+                if (member->parent_member) {
+                    new_member->field_index = member->field_index;
+                }
+            }
+            // Fix up parent_member pointers to reference new members (same order)
+            for (size_t i = 0; i < src->data.struct_.members.len; i++) {
+                auto orig = src->data.struct_.members[i];
+                if (orig->parent_member) {
+                    // Find the new parent_member by matching position
+                    for (size_t j = 0; j < src->data.struct_.members.len; j++) {
+                        if (src->data.struct_.members[j] == orig->parent_member) {
+                            dst->data.struct_.members[i]->parent_member =
+                                dst->data.struct_.members[j];
+                            break;
+                        }
+                    }
+                }
+            }
+            return dst;
+        };
+        new_ev->data.enum_value.variant_struct = sub_struct(ev_data.variant_struct);
+        new_ev->data.enum_value.resolved_struct = sub_struct(ev_data.resolved_struct);
+        return new_ev;
+    }
+
     case TypeKind::This:
     case TypeKind::ThisType: {
         // This and ThisType should be handled by the caller if needed
@@ -5767,6 +5852,125 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
     }
 
     return false;
+}
+
+ChiType *Resolver::get_enum_subtype(ChiType *generic, TypeList *type_args) {
+    assert(generic->kind == TypeKind::Enum);
+    auto &gen = generic->data.enum_;
+    for (auto subtype : gen.subtypes) {
+        assert(subtype->kind == TypeKind::Subtype);
+        auto &subtype_data = subtype->data.subtype;
+        if (subtype_data.args.len != type_args->len) {
+            continue;
+        }
+        bool matches = true;
+        for (size_t i = 0; i < type_args->len; i++) {
+            if (!is_same_type(type_args->at(i), subtype_data.args[i])) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
+            return subtype;
+        }
+    }
+    auto sub = create_type(TypeKind::Subtype);
+    sub->data.subtype.generic = generic;
+    sub->data.subtype.root_node = gen.node;
+    sub->global_id = fmt::format("{}<{}>", generic->global_id, format_type_list(type_args));
+    for (auto arg : *type_args) {
+        sub->data.subtype.args.add(arg);
+        if (arg->is_placeholder) {
+            sub->is_placeholder = true;
+        }
+    }
+    gen.subtypes.add(sub);
+
+    // Build a concrete enum type using index-based substitution (same as struct subtypes)
+    if (!sub->is_placeholder) {
+        auto &subtype_data = sub->data.subtype;
+
+        auto concrete_enum = create_type(TypeKind::Enum);
+        concrete_enum->name = sub->global_id;
+        concrete_enum->display_name = sub->global_id;
+        concrete_enum->global_id = sub->global_id;
+        concrete_enum->data.enum_.node = gen.node;
+        concrete_enum->data.enum_.resolved_generic = generic;
+        concrete_enum->data.enum_.discriminator = gen.discriminator;
+        concrete_enum->data.enum_.enum_header_struct = gen.enum_header_struct;
+
+        // Substitute base_value_type using index-based substitution
+        auto concrete_bvt = type_placeholders_sub(gen.base_value_type, &subtype_data);
+        concrete_bvt->data.enum_value.enum_type = concrete_enum;
+        concrete_enum->data.enum_.base_value_type = concrete_bvt;
+
+        // Substitute each variant's type — each variant is just a struct
+        for (auto variant : gen.variants) {
+            auto concrete_vt = type_placeholders_sub(variant->resolved_type, &subtype_data);
+            concrete_vt->data.enum_value.enum_type = concrete_enum;
+
+            // Create variant entry without mutating the shared AST node
+            auto member = get_allocator()->create_enum_member();
+            member->name = variant->name;
+            member->node = variant->node;
+            member->resolved_type = concrete_vt;
+            member->enum_ = &concrete_enum->data.enum_;
+            concrete_enum->data.enum_.variants.add(member);
+            member->index = concrete_enum->data.enum_.variants.len;
+            concrete_enum->data.enum_.variant_table[variant->name] = member;
+            concrete_vt->data.enum_value.member = member;
+        }
+
+        // Create specialized base_struct with updated method container_refs
+        if (gen.base_struct) {
+            auto src = gen.base_struct;
+            auto dst = create_type(TypeKind::Struct);
+            src->clone(dst);
+            dst->data.struct_.members = {};
+            dst->data.struct_.fields = {};
+            dst->data.struct_.member_table = {};
+
+            for (auto member : src->data.struct_.members) {
+                if (member->is_method()) {
+                    // Clone method type with updated container_ref
+                    auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
+                    member->resolved_type->clone(type);
+                    type->data.fn.container_ref =
+                        get_pointer_type(concrete_bvt, TypeKind::Reference);
+
+                    // Clone the FnDef AST node for unique identity
+                    auto node = get_allocator()->create_node(ast::NodeType::FnDef);
+                    member->node->clone(node);
+                    node->name = member->node->name;
+                    node->token = member->node->token;
+                    node->resolved_type = type;
+                    node->root_node = member->node->get_root_node();
+                    node->data.fn_def.is_generated = true;
+
+                    auto new_proto = get_allocator()->create_node(ast::NodeType::FnProto);
+                    auto orig_proto = member->node->data.fn_def.fn_proto;
+                    orig_proto->clone(new_proto);
+                    new_proto->resolved_type = type;
+                    node->data.fn_def.fn_proto = new_proto;
+                    node->data.fn_def.fn_proto->data.fn_proto.fn_def_node = node;
+
+                    dst->data.struct_.add_member(
+                        get_allocator(), member->get_name(), node, type);
+                } else {
+                    // Substitute field types for T → concrete
+                    auto new_type =
+                        type_placeholders_sub(member->resolved_type, &subtype_data);
+                    dst->data.struct_.add_member(
+                        get_allocator(), member->get_name(), member->node, new_type);
+                }
+            }
+            concrete_enum->data.enum_.base_struct = dst;
+        }
+
+        subtype_data.final_type = concrete_enum;
+    }
+
+    return sub;
 }
 
 ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
