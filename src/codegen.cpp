@@ -912,7 +912,14 @@ void Compiler::compile_struct_vtables(ChiType *type) {
                                            "vtables." + get_resolver()->format_type_display(type));
 
     for (auto &vtable : vtables) {
-        m_ctx->impl_table[vtable.impl] = global + vtable.offset;
+        if (vtable.offset == 0) {
+            m_ctx->impl_table[vtable.impl] = global;
+        } else {
+            auto idx = llvm::ConstantInt::get(
+                llvm::Type::getInt64Ty(m_ctx->llvm_module->getContext()), vtable.offset);
+            m_ctx->impl_table[vtable.impl] = llvm::ConstantExpr::getGetElementPtr(
+                get_llvm_ptr_type(), global, idx);
+        }
     }
 }
 
@@ -4557,7 +4564,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             auto beginp = sty->member_table.get("begin");
             auto endp = sty->member_table.get("end");
             auto nextp = sty->member_table.get("next");
-            auto indexp = sty->member_table.get("index");
+            auto indexp = sty->member_table.get("index_mut");
             assert(beginp && endp && nextp && indexp);
             auto begin = *beginp;
             auto end = *endp;

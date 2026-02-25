@@ -370,7 +370,7 @@ struct WhereClause {
 };
 
 struct ImplementBlockData {
-    Node *interface_type = nullptr;
+    array<Node *> interface_types = {};
     array<Node *> members = {};
     array<WhereClause> where_clauses = {};  // Non-empty = conditional where-block
 };

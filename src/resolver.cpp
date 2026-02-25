@@ -140,8 +140,8 @@ void Resolver::context_init_primitives() {
     // add_primitive("Promise", system_types.promise);
 
     // intrinsic symbols
-    m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
-    m_ctx->intrinsic_symbols["std.ops.IndexIterable"] = IntrinsicSymbol::IndexInterable;
+    m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
+    m_ctx->intrinsic_symbols["std.ops.IndexIterMut"] = IntrinsicSymbol::IndexIterMut;
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
@@ -2512,32 +2512,34 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto &impl_data = member->data.implement_block;
 
                 // Skip where-blocks (handled below)
-                if (!impl_data.interface_type)
+                if (impl_data.interface_types.len == 0)
                     continue;
 
-                auto impl_trait = resolve_value(impl_data.interface_type, scope);
-                if (!impl_trait)
-                    continue;
-                auto trait_struct = resolve_struct_type(impl_trait);
-                if (!trait_struct || !ChiTypeStruct::is_interface(trait_struct)) {
-                    error(impl_data.interface_type, errors::NON_INTERFACE_IMPL_TYPE,
-                          format_type_display(impl_trait));
-                    if (!trait_struct)
+                for (auto iface_node : impl_data.interface_types) {
+                    auto impl_trait = resolve_value(iface_node, scope);
+                    if (!impl_trait)
                         continue;
-                }
-
-                resolve_vtable(impl_trait, struct_type, impl_data.interface_type);
-                if (struct_->is_generic()) {
-                    for (auto subtype : struct_->subtypes) {
-                        if (subtype->is_placeholder) {
+                    auto trait_struct = resolve_struct_type(impl_trait);
+                    if (!trait_struct || !ChiTypeStruct::is_interface(trait_struct)) {
+                        error(iface_node, errors::NON_INTERFACE_IMPL_TYPE,
+                              format_type_display(impl_trait));
+                        if (!trait_struct)
                             continue;
+                    }
+
+                    resolve_vtable(impl_trait, struct_type, iface_node);
+                    if (struct_->is_generic()) {
+                        for (auto subtype : struct_->subtypes) {
+                            if (subtype->is_placeholder) {
+                                continue;
+                            }
+                            ChiType *subtype_impl_trait = impl_trait;
+                            if (impl_trait->kind == TypeKind::Subtype) {
+                                auto &subtype_data = subtype->data.subtype;
+                                subtype_impl_trait = type_placeholders_sub(impl_trait, &subtype_data);
+                            }
+                            resolve_vtable(subtype_impl_trait, subtype, iface_node);
                         }
-                        ChiType *subtype_impl_trait = impl_trait;
-                        if (impl_trait->kind == TypeKind::Subtype) {
-                            auto &subtype_data = subtype->data.subtype;
-                            subtype_impl_trait = type_placeholders_sub(impl_trait, &subtype_data);
-                        }
-                        resolve_vtable(subtype_impl_trait, subtype, impl_data.interface_type);
                     }
                 }
             }
@@ -2547,7 +2549,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type != NodeType::ImplementBlock)
                     continue;
                 auto &impl_data = member->data.implement_block;
-                if (impl_data.interface_type || impl_data.where_clauses.len == 0)
+                if (impl_data.interface_types.len > 0 || impl_data.where_clauses.len == 0)
                     continue;
 
                 auto *cond = get_allocator()->create_where_condition();
@@ -2608,7 +2610,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     // For where-blocks, temporarily set placeholder traits so method
                     // bodies can access trait methods on the constrained type params
                     array<std::pair<ChiType *, array<ChiType *>>> saved_traits;
-                    if (!impl_data.interface_type && impl_data.where_clauses.len > 0) {
+                    if (impl_data.interface_types.len == 0 && impl_data.where_clauses.len > 0) {
                         for (auto &clause : impl_data.where_clauses) {
                             auto param_name = clause.param_name->str;
                             for (auto tp : struct_->type_params) {
@@ -2749,12 +2751,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TypeKind::Struct:
         case TypeKind::Subtype: {
             auto struct_ = resolve_struct_type(expr_type);
-            auto has_index = has_interface_impl(struct_, "std.ops.Index");
+            auto has_index = has_interface_impl(struct_, "std.ops.IndexMut");
             if (!has_index) {
                 error(node, errors::CANNOT_SUBSCRIPT, format_type_display(expr_type));
                 return nullptr;
             }
-            auto method_p = struct_->member_table.get("index");
+            auto method_p = struct_->member_table.get("index_mut");
             assert(method_p);
             auto method = *method_p;
             expected_index_type = method->resolved_type->data.fn.get_param_at(0);
@@ -2889,13 +2891,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.expr) {
             auto expr_type = resolve(data.expr, scope);
             auto sty = resolve_struct_type(expr_type);
-            if (!sty || !sty->member_intrinsics.get(IntrinsicSymbol::IndexInterable)) {
+            if (!sty || !sty->member_intrinsics.get(IntrinsicSymbol::IndexIterMut)) {
                 error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
                 return nullptr;
             }
 
             if (data.bind) {
-                auto index_fn = sty->member_table.get("index");
+                auto index_fn = sty->member_table.get("index_mut");
                 if (!index_fn) {
                     error(node, errors::CANNOT_INDEX, format_type_display(expr_type));
                     return nullptr;
@@ -3393,7 +3395,8 @@ string Resolver::resolve_global_id(ast::Node *node) {
 
 bool Resolver::has_interface_impl(ChiTypeStruct *struct_type, string interface_id) {
     for (auto &i : struct_type->interfaces) {
-        if (i->inteface_symbol == IntrinsicSymbol::Index) {
+        if (i->inteface_symbol == IntrinsicSymbol::IndexMut ||
+            i->inteface_symbol == IntrinsicSymbol::IndexIterMut) {
             return true;
         }
     }

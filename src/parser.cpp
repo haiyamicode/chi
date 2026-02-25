@@ -2146,7 +2146,7 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
                 consume(); // consume 'where'
                 auto node = create_node(NodeType::ImplementBlock, kw);
                 node->start_token = kw;
-                node->data.implement_block.interface_type = nullptr;
+                // interface_types left empty for where-blocks
                 do {
                     ast::WhereClause clause;
                     clause.param_name = expect(TokenType::IDEN);
@@ -2170,7 +2170,9 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
             }
             auto node = create_node(NodeType::ImplementBlock, kw);
             node->start_token = kw;
-            node->data.implement_block.interface_type = parse_type_expr(true);
+            do {
+                node->data.implement_block.interface_types.add(parse_type_expr(true));
+            } while (next_is(TokenType::COMMA) && (consume(), true));
             expect(TokenType::LBRACE);
             while (get()->type != TokenType::RBRACE) {
                 if (get()->type == TokenType::END) {

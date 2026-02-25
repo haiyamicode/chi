@@ -167,11 +167,65 @@ func test_box() {
     println("before cleanup:");
 }
 
+// --- Multi-interface dispatch ---
+
+interface Describable {
+    func describe() string;
+}
+
+interface Measurable {
+    func measure() int;
+}
+
+struct Widget {
+    label: string = "";
+    size: int = 0;
+
+    impl Describable, Measurable {
+        func describe() string {
+            return string.format("Widget({})", this.label);
+        }
+
+        func measure() int {
+            return this.size;
+        }
+    }
+}
+
+func show_desc(d: &Describable) string {
+    return d.describe();
+}
+
+func show_measure(m: &Measurable) int {
+    return m.measure();
+}
+
+func test_multi_interface() {
+    println("=== multi-interface dispatch ===");
+    var w = Widget{label: "btn", size: 42};
+
+    // Direct calls
+    printf("direct: {} size={}\n", w.describe(), w.measure());
+
+    // Dispatch through first interface
+    printf("desc: {}\n", show_desc(&w));
+
+    // Dispatch through second interface
+    printf("measure: {}\n", show_measure(&w));
+
+    // Interface ref variables
+    var d: &Describable = &w;
+    var m: &Measurable = &w;
+    printf("ref desc: {}\n", d.describe());
+    printf("ref measure: {}\n", m.measure());
+}
+
 func main() {
     test_basic();
     test_heap_and_delete();
     test_function_params();
     test_sizeof();
     test_box();
+    test_multi_interface();
 }
 

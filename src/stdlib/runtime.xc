@@ -147,9 +147,9 @@ struct Shared<T> {
         }
     }
 
-    impl ops.Unwrap<T> {
-        func unwrap() &T {
-            return &this.data.value;
+    impl ops.UnwrapMut<T> {
+        func unwrap_mut() &mut T {
+            return &mut this.data.value;
         }
     }
 
@@ -187,8 +187,12 @@ struct Box<T: ops.AllowUnsized> {
     }
 
     func as_ref() &T {
+        return this.as_mut();
+    }
+
+    func as_mut() &mut T {
         unsafe {
-            return this._ptr as &T;
+            return this._ptr;
         }
     }
 
@@ -206,18 +210,10 @@ struct Box<T: ops.AllowUnsized> {
         }
     }
 
-    impl ops.Unwrap<T> {
-        func unwrap() &T {
-            unsafe {
-                return this._ptr as &T;
-            }
-        }
-    }
-
     impl ops.UnwrapMut<T> {
         mut func unwrap_mut() &mut T {
             unsafe {
-                return this._ptr as &mut T;
+                return this._ptr;
             }
         }
     }
@@ -530,10 +526,8 @@ struct Array<T> {
         return result;
     }
 
-    impl ops.Index<uint32, T> {}
-
-    impl ops.IndexIterable<uint32, T> {
-        func index(index: uint32) &mut T {
+    impl ops.IndexMut<uint32, T>, ops.IndexIterMut<uint32, T> {
+        func index_mut(index: uint32) &mut T {
             assert(index < this.length, "index out of bounds");
             return &mut this.data[index];
         }
@@ -634,7 +628,7 @@ struct __CxString {
         }
     }
 
-    func as_chars() Array<char> {
+    func to_chars() Array<char> {
         var result: Array<char> = [];
         var i: uint32 = 0;
         while i < this.length {
@@ -693,8 +687,8 @@ struct Map<K, V> {
         return null;
     }
 
-    impl ops.Index<K, V> {
-        func index(key: K) &mut V {
+    impl ops.IndexMut<K, V> {
+        func index_mut(key: K) &mut V {
             var k: any = key;
             var h = HashBytes{};
             unsafe {

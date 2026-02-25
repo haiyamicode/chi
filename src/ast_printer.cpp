@@ -486,7 +486,10 @@ void AstPrinter::print_node(Node *node) {
             }
         } else {
             emit("impl ");
-            print_node(data.interface_type);
+            for (size_t i = 0; i < data.interface_types.len; i++) {
+                if (i > 0) emit(", ");
+                print_node(data.interface_types[i]);
+            }
         }
         emit(" {{");
         if (data.members.len) {

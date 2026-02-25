@@ -27,3 +27,9 @@ rect: area=6
 before cleanup:
 Rect.delete(2x3)
 Circle.delete(r=7)
+=== multi-interface dispatch ===
+direct: Widget(btn) size=42
+desc: Widget(btn)
+measure: 42
+ref desc: Widget(btn)
+ref measure: 42
