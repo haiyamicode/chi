@@ -557,13 +557,11 @@ struct Array<T> {
         func display() string {
             var buf = Buffer{};
             buf.write("[");
-            var i: uint32 = 0;
-            for item in this {
+            for item, i in this {
                 if i > 0 {
                     buf.write(", ");
                 }
                 buf.write(string.format("{}", item));
-                i++;
             }
             buf.write("]");
             return buf.to_string();

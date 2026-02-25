@@ -1945,11 +1945,18 @@ Node *Parser::parse_for_stmt() {
             }
 
             // Check the 'in' keyword for for in loop, or fallback to ternary
-            if (is_range || lookahead(1)->type == TokenType::KW_IN) {
+            if (is_range || lookahead(1)->type == TokenType::KW_IN ||
+                lookahead(1)->type == TokenType::COMMA) {
                 auto iden = expect(TokenType::IDEN);
                 auto bind = create_node(NodeType::BindIdentifier, iden);
                 node->data.for_stmt.bind = bind;
                 kind = ForLoopKind::Range;
+                if (next_is(TokenType::COMMA)) {
+                    consume();
+                    auto index_iden = expect(TokenType::IDEN);
+                    auto index_bind = create_node(NodeType::BindIdentifier, index_iden);
+                    node->data.for_stmt.index_bind = index_bind;
+                }
                 expect(TokenType::KW_IN);
             } else {
                 expr = parse_expr();
@@ -1976,8 +1983,12 @@ Node *Parser::parse_for_stmt() {
         if (kind == ForLoopKind::Range) {
             node->data.for_stmt.expr = parse_expr();
             auto bind = node->data.for_stmt.bind;
-            if (node->data.for_stmt.bind->name != "_") {
+            if (bind->name != "_") {
                 add_to_scope(bind, bind->name);
+            }
+            auto index_bind = node->data.for_stmt.index_bind;
+            if (index_bind && index_bind->name != "_") {
+                add_to_scope(index_bind, index_bind->name);
             }
         }
     }

@@ -466,6 +466,7 @@ struct ForStmt {
     Node *post = nullptr;
     Node *body = nullptr;
     Node *bind = nullptr;
+    Node *index_bind = nullptr;
     Node *expr = nullptr;
     SigilKind bind_sigil = SigilKind::None;
 };

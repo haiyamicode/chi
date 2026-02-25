@@ -3007,6 +3007,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto bind_scope = scope.set_value_type(value_type);
                     resolve(data.bind, bind_scope);
                 }
+                if (data.index_bind) {
+                    auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                    resolve(data.index_bind, idx_scope);
+                }
             } else if (sty->member_intrinsics.get(IntrinsicSymbol::MutIterable)) {
                 // Iterator-based iteration (MutIterable)
                 data.kind = ast::ForLoopKind::Iter;
@@ -3032,6 +3036,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto value_type = opt_type->get_elem(); // ?&mut T → &mut T
                     auto bind_scope = scope.set_value_type(value_type);
                     resolve(data.bind, bind_scope);
+                }
+                if (data.index_bind) {
+                    auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                    resolve(data.index_bind, idx_scope);
                 }
             } else {
                 error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));

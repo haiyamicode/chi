@@ -17,6 +17,11 @@ modify the list and print again
 3
 4
 
+for_in_indexed:
+0: 10
+1: 20
+2: 30
+
 empty_while:
 print from 1 to 5 without 4:
 1

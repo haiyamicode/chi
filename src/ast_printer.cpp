@@ -820,6 +820,10 @@ void AstPrinter::print_node(Node *node) {
             }
             if (data.bind) {
                 print_node(data.bind);
+                if (data.index_bind) {
+                    emit(", ");
+                    print_node(data.index_bind);
+                }
                 emit(" ");
             }
             emit("in ");

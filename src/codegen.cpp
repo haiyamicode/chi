@@ -4628,6 +4628,12 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                                                 "_bind_item_var");
                 add_var(data.bind, item_var);
             }
+            llvm::Value *index_var = nullptr;
+            if (data.index_bind) {
+                auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
+                index_var = builder.CreateAlloca(idx_type, nullptr, "_bind_index_var");
+                add_var(data.index_bind, index_var);
+            }
 
             auto loop = fn->push_loop();
             auto iter_begin =
@@ -4649,6 +4655,15 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop_main);
             auto loop_post = fn->new_label("_for_post");
             loop->continue_target = loop_post;
+            if (index_var) {
+                auto iter_value = builder.CreateLoad(iter_type_l, it);
+                // Convert iterator value to uint32 if needed
+                auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
+                auto idx_val = iter_value->getType() == idx_type
+                                   ? iter_value
+                                   : builder.CreateIntCast(iter_value, idx_type, false);
+                builder.CreateStore(idx_val, index_var);
+            }
             if (item_var) {
                 auto item_ref =
                     builder.CreateCall(get_fn(index->node)->llvm_fn,
@@ -4711,6 +4726,13 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                                                 "_bind_item_var");
                 add_var(data.bind, item_var);
             }
+            auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
+            llvm::Value *index_var = nullptr;
+            if (data.index_bind) {
+                index_var = builder.CreateAlloca(idx_type, nullptr, "_bind_index_var");
+                builder.CreateStore(llvm::ConstantInt::get(idx_type, 0), index_var);
+                add_var(data.index_bind, index_var);
+            }
 
             auto loop = fn->push_loop();
             loop->start = fn->new_label("_for_start");
@@ -4746,6 +4768,11 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             compile_block(fn, stmt, data.body, loop_post);
 
             fn->use_label(loop_post);
+            if (index_var) {
+                auto cur = builder.CreateLoad(idx_type, index_var);
+                builder.CreateStore(
+                    builder.CreateAdd(cur, llvm::ConstantInt::get(idx_type, 1)), index_var);
+            }
             builder.CreateBr(loop->start);
 
             fn->use_label(loop->end);

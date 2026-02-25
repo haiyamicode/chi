@@ -35,6 +35,17 @@ func for_in() {
     println("");
 }
 
+func for_in_indexed() {
+    println("for_in_indexed:");
+    var list: Array<int> = [10, 20, 30];
+
+    for item, i in list {
+        printf("{}: {}\n", i, item);
+    }
+
+    println("");
+}
+
 func empty_while() {
     println("empty_while:");
     printf("print from 1 to 5 without 4:\n", 0);
@@ -71,6 +82,7 @@ func while_with_condition() {
 func main() {
     for_classic();
     for_in();
+    for_in_indexed();
     empty_while();
     while_with_condition();
 }
