@@ -789,7 +789,9 @@ void AstPrinter::print_node(Node *node) {
         if (data.kind == ForLoopKind::Range) {
             if (data.bind_sigil != SigilKind::None) {
                 emit("{}", get_sigil_symbol(data.bind_sigil));
-                emit(" ");
+                if (data.bind_sigil == SigilKind::MutRef || data.bind_sigil == SigilKind::Move) {
+                    emit(" ");
+                }
             }
             if (data.bind) {
                 print_node(data.bind);
