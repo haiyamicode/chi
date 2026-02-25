@@ -352,6 +352,8 @@ class Resolver {
 
     bool always_terminates(ast::Node *node);
 
+    void collect_narrowables(ast::Node *expr, bool when_truthy, array<ast::Node *> &out);
+
     optional<ConstantValue> resolve_constant_value(ast::Node *node);
 
     void resolve(ast::Package *package);

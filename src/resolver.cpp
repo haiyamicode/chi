@@ -1313,6 +1313,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             return get_system_types()->bool_;
         }
+        case TokenType::LAND:
+        case TokenType::LOR:
+            check_assignment(data.op1, t1, get_system_types()->bool_);
+            check_assignment(data.op2, t2, get_system_types()->bool_);
+            return get_system_types()->bool_;
         default: {
             // Pointer arithmetic (requires unsafe)
             if (data.op_type == TokenType::ADD || data.op_type == TokenType::SUB) {
@@ -2211,13 +2216,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // Assert narrowing: assert(opt_var) → narrow opt_var after call
-        if (fn_decl && fn_decl == get_builtin("assert") && data.args.len >= 1 &&
-            data.args[0]->type == NodeType::Identifier) {
-            auto arg_type = node_get_type(data.args[0]);
-            if (arg_type &&
-                (arg_type->kind == TypeKind::Optional || arg_type->kind == TypeKind::Result)) {
-                auto var = create_narrowed_var(data.args[0], node, scope);
+        // Assert narrowing: assert(expr) → narrow all optional/result vars in expr
+        if (fn_decl && fn_decl == get_builtin("assert") && data.args.len >= 1) {
+            array<ast::Node *> narrowables;
+            collect_narrowables(data.args[0], true, narrowables);
+            for (auto ident : narrowables) {
+                auto var = create_narrowed_var(ident, node, scope);
                 scope.block->scope->put(var->name, var);
                 data.post_narrow_vars.add(var);
             }
@@ -2229,10 +2233,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.if_stmt;
         auto cond_type = resolve(data.condition, scope);
 
-        // Positive narrowing: if opt_var { ... } → narrow inside then-block
-        if (data.condition->type == NodeType::Identifier &&
-            (cond_type->kind == TypeKind::Optional || cond_type->kind == TypeKind::Result)) {
-            auto var = create_narrowed_var(data.condition, node, scope);
+        // Positive narrowing: identifiers narrowed when condition is truthy
+        array<ast::Node *> then_narrowables;
+        collect_narrowables(data.condition, true, then_narrowables);
+        for (auto ident : then_narrowables) {
+            auto var = create_narrowed_var(ident, node, scope);
             auto &block_data = data.then_block->data.block;
             block_data.implicit_vars.add(var);
             block_data.scope->put(var->name, var);
@@ -2244,22 +2249,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             resolve(data.else_node, scope);
         }
 
-        // Guard clause narrowing: if !opt_var { <terminates>; } → narrow after
-        if (!data.else_node
-            && data.condition->type == NodeType::UnaryOpExpr
-            && data.condition->data.unary_op_expr.op_type == TokenType::LNOT
-            && !data.condition->data.unary_op_expr.is_suffix) {
-            auto operand = data.condition->data.unary_op_expr.op1;
-            if (operand->type == NodeType::Identifier) {
-                auto operand_type = node_get_type(operand);
-                if (operand_type
-                    && (operand_type->kind == TypeKind::Optional ||
-                        operand_type->kind == TypeKind::Result)
-                    && always_terminates(data.then_block)) {
-                    auto var = create_narrowed_var(operand, node, scope);
-                    scope.block->scope->put(var->name, var);
-                    data.post_narrow_vars.add(var);
-                }
+        // Guard clause narrowing: identifiers narrowed when condition is falsy
+        if (!data.else_node && always_terminates(data.then_block)) {
+            array<ast::Node *> guard_narrowables;
+            collect_narrowables(data.condition, false, guard_narrowables);
+            for (auto ident : guard_narrowables) {
+                auto var = create_narrowed_var(ident, node, scope);
+                scope.block->scope->put(var->name, var);
+                data.post_narrow_vars.add(var);
             }
         }
 
@@ -5100,6 +5097,44 @@ bool Resolver::always_terminates(ast::Node *node) {
     }
     default:
         return false;
+    }
+}
+
+void Resolver::collect_narrowables(ast::Node *expr, bool when_truthy, array<ast::Node *> &out) {
+    using namespace ast;
+
+    if (expr->type == NodeType::ParenExpr) {
+        collect_narrowables(expr->data.child_expr, when_truthy, out);
+        return;
+    }
+
+    if (expr->type == NodeType::Identifier) {
+        if (when_truthy) {
+            auto type = node_get_type(expr);
+            if (type && (type->kind == TypeKind::Optional || type->kind == TypeKind::Result)) {
+                out.add(expr);
+            }
+        }
+        return;
+    }
+
+    if (expr->type == NodeType::UnaryOpExpr) {
+        auto &data = expr->data.unary_op_expr;
+        if (data.op_type == TokenType::LNOT && !data.is_suffix) {
+            collect_narrowables(data.op1, !when_truthy, out);
+        }
+        return;
+    }
+
+    if (expr->type == NodeType::BinOpExpr) {
+        auto &data = expr->data.bin_op_expr;
+        if (data.op_type == TokenType::LAND && when_truthy) {
+            collect_narrowables(data.op1, true, out);
+            collect_narrowables(data.op2, true, out);
+        } else if (data.op_type == TokenType::LOR && !when_truthy) {
+            collect_narrowables(data.op1, false, out);
+            collect_narrowables(data.op2, false, out);
+        }
     }
 }
 
