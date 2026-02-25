@@ -28,7 +28,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ImplementBlock);
 
 MAKE_ENUM(ModuleKind, XC, XM);
-MAKE_ENUM(ForLoopKind, Empty, Ternary, Range);
+MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter);
 
 enum FnParsingFlags : uint32_t {
     FN_BODY_REQUIRED = 1 << 0,

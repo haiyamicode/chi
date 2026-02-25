@@ -141,7 +141,7 @@ void Resolver::context_init_primitives() {
 
     // intrinsic symbols
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
-    m_ctx->intrinsic_symbols["std.ops.IndexIterMut"] = IntrinsicSymbol::IndexIterMut;
+    m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
@@ -150,6 +150,8 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Construct"] = IntrinsicSymbol::Construct;
     m_ctx->intrinsic_symbols["std.ops.Unwrap"] = IntrinsicSymbol::Unwrap;
     m_ctx->intrinsic_symbols["std.ops.UnwrapMut"] = IntrinsicSymbol::UnwrapMut;
+    m_ctx->intrinsic_symbols["std.ops.MutIterator"] = IntrinsicSymbol::MutIterator;
+    m_ctx->intrinsic_symbols["std.ops.MutIterable"] = IntrinsicSymbol::MutIterable;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -2891,31 +2893,63 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.expr) {
             auto expr_type = resolve(data.expr, scope);
             auto sty = resolve_struct_type(expr_type);
-            if (!sty || !sty->member_intrinsics.get(IntrinsicSymbol::IndexIterMut)) {
+            if (!sty) {
                 error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
                 return nullptr;
             }
 
-            if (data.bind) {
-                auto index_fn = sty->member_table.get("index_mut");
-                if (!index_fn) {
-                    error(node, errors::CANNOT_INDEX, format_type_display(expr_type));
+            if (sty->member_intrinsics.get(IntrinsicSymbol::IndexMutIterable)) {
+                // Index-based iteration (Array, etc.)
+                if (data.bind) {
+                    auto index_fn = sty->member_table.get("index_mut");
+                    if (!index_fn) {
+                        error(node, errors::CANNOT_INDEX, format_type_display(expr_type));
+                        return nullptr;
+                    }
+                    auto ref_type = (*index_fn)->resolved_type->data.fn.return_type;
+                    auto value_type = ref_type->get_elem();
+                    switch (data.bind_sigil) {
+                    case ast::SigilKind::Reference:
+                        value_type = get_pointer_type(value_type, TypeKind::Reference);
+                        break;
+                    case ast::SigilKind::MutRef:
+                        value_type = get_pointer_type(value_type, TypeKind::MutRef);
+                        break;
+                    default:
+                        break;
+                    }
+                    auto bind_scope = scope.set_value_type(value_type);
+                    resolve(data.bind, bind_scope);
+                }
+            } else if (sty->member_intrinsics.get(IntrinsicSymbol::MutIterable)) {
+                // Iterator-based iteration (MutIterable)
+                data.kind = ast::ForLoopKind::Iter;
+                auto iter_fn = sty->member_table.get("to_iter_mut");
+                if (!iter_fn) {
+                    error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
                     return nullptr;
                 }
-                auto ref_type = (*index_fn)->resolved_type->data.fn.return_type;
-                auto value_type = ref_type->get_elem();
-                switch (data.bind_sigil) {
-                case ast::SigilKind::Reference:
-                    value_type = get_pointer_type(value_type, TypeKind::Reference);
-                    break;
-                case ast::SigilKind::MutRef:
-                    value_type = get_pointer_type(value_type, TypeKind::MutRef);
-                    break;
-                default:
-                    break;
+                auto iter_type = (*iter_fn)->resolved_type->data.fn.return_type;
+                auto iter_sty = resolve_struct_type(iter_type);
+                if (!iter_sty || !iter_sty->member_intrinsics.get(IntrinsicSymbol::MutIterator)) {
+                    error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
+                    return nullptr;
                 }
-                auto bind_scope = scope.set_value_type(value_type);
-                resolve(data.bind, bind_scope);
+                if (data.bind) {
+                    auto next_fn = iter_sty->member_table.get("next");
+                    if (!next_fn) {
+                        error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
+                        return nullptr;
+                    }
+                    // next() returns ?&mut T — unwrap optional to get &mut T
+                    auto opt_type = (*next_fn)->resolved_type->data.fn.return_type;
+                    auto value_type = opt_type->get_elem(); // ?&mut T → &mut T
+                    auto bind_scope = scope.set_value_type(value_type);
+                    resolve(data.bind, bind_scope);
+                }
+            } else {
+                error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
+                return nullptr;
             }
         }
         auto loop_scope = scope.set_parent_loop(node);
@@ -3396,7 +3430,7 @@ string Resolver::resolve_global_id(ast::Node *node) {
 bool Resolver::has_interface_impl(ChiTypeStruct *struct_type, string interface_id) {
     for (auto &i : struct_type->interfaces) {
         if (i->inteface_symbol == IntrinsicSymbol::IndexMut ||
-            i->inteface_symbol == IntrinsicSymbol::IndexIterMut) {
+            i->inteface_symbol == IntrinsicSymbol::IndexMutIterable) {
             return true;
         }
     }
@@ -6519,6 +6553,18 @@ bool Resolver::compare_impl_type(ChiType *base, ChiType *impl) {
             return false;
         }
         return true;
+    }
+    // Allow return type covariance: if base is an interface and impl is a
+    // concrete type that implements it, accept the match
+    auto base_sty = resolve_struct_type(base);
+    auto impl_sty = resolve_struct_type(impl);
+    if (base_sty && impl_sty && ChiTypeStruct::is_interface(base_sty)) {
+        for (auto &iface : impl_sty->interfaces) {
+            auto iface_sty = resolve_struct_type(iface->interface_type);
+            if (iface_sty && iface_sty->node == base_sty->node) {
+                return true;
+            }
+        }
     }
     return can_assign(base, impl);
 }

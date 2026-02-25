@@ -4622,6 +4622,83 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop->end);
             fn->pop_loop();
 
+        } else if (data.kind == ast::ForLoopKind::Iter) {
+            // Iterator-based loop: call to_iter_mut(), then loop calling next()
+            auto container_ptr = compile_dot_ptr(fn, data.expr);
+            assert(container_ptr);
+            auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+            auto iter_fn = *sty->member_table.get("to_iter_mut");
+            auto iter_fn_type = iter_fn->resolved_type;
+            auto iter_ret_type = iter_fn_type->data.fn.return_type;
+            auto iter_type_l = compile_type(iter_ret_type);
+
+            // Allocate space for the iterator
+            auto iter_alloca = builder.CreateAlloca(iter_type_l, nullptr, "_iter_alloca");
+
+            // Call to_iter_mut() — handle sret if needed
+            auto iter_llvm_fn = get_fn(iter_fn->node)->llvm_fn;
+            if (iter_fn_type->data.fn.should_use_sret()) {
+                builder.CreateCall(iter_llvm_fn, {iter_alloca, container_ptr});
+            } else {
+                auto iter_val = builder.CreateCall(iter_llvm_fn, {container_ptr}, "_iter_val");
+                builder.CreateStore(iter_val, iter_alloca);
+            }
+
+            // Look up next() on the iterator struct
+            auto iter_sty = get_resolver()->resolve_struct_type(iter_ret_type);
+            auto next_fn = *iter_sty->member_table.get("next");
+            auto next_fn_type = next_fn->resolved_type;
+            auto next_ret_type = next_fn_type->data.fn.return_type;
+            auto next_ret_type_l = compile_type(next_ret_type);
+            auto next_llvm_fn = get_fn(next_fn->node)->llvm_fn;
+            bool next_uses_sret = next_fn_type->data.fn.should_use_sret();
+
+            llvm::Value *item_var = nullptr;
+            if (data.bind) {
+                item_var = builder.CreateAlloca(compile_type(data.bind->resolved_type), nullptr,
+                                                "_bind_item_var");
+                add_var(data.bind, item_var);
+            }
+
+            auto loop = fn->push_loop();
+            loop->start = fn->new_label("_for_start");
+            loop->end = fn->new_label("_for_end");
+            auto loop_main = fn->new_label("_for_main");
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->start);
+            // Call next(&iter) → ?&mut T
+            auto opt_alloca = builder.CreateAlloca(next_ret_type_l, nullptr, "_opt_alloca");
+            if (next_uses_sret) {
+                builder.CreateCall(next_llvm_fn, {opt_alloca, iter_alloca});
+            } else {
+                auto opt_result = builder.CreateCall(next_llvm_fn, {iter_alloca}, "_opt_result");
+                builder.CreateStore(opt_result, opt_alloca);
+            }
+            // Check has_value (field 0)
+            auto has_value_p = builder.CreateStructGEP(next_ret_type_l, opt_alloca, 0);
+            auto has_value = builder.CreateLoad(
+                llvm::Type::getInt1Ty(m_ctx->llvm_module->getContext()), has_value_p);
+            builder.CreateCondBr(has_value, loop_main, loop->end);
+
+            fn->use_label(loop_main);
+            auto loop_post = fn->new_label("_for_post");
+            loop->continue_target = loop_post;
+            if (item_var) {
+                // Extract value (field 1) — this is &mut T (a pointer)
+                auto value_p = builder.CreateStructGEP(next_ret_type_l, opt_alloca, 1);
+                auto value = builder.CreateLoad(compile_type(data.bind->resolved_type),
+                                                value_p, "_iter_item");
+                builder.CreateStore(value, item_var);
+            }
+            compile_block(fn, stmt, data.body, loop_post);
+
+            fn->use_label(loop_post);
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->end);
+            fn->pop_loop();
+
         } else {
             auto loop = fn->push_loop();
             if (data.init) {

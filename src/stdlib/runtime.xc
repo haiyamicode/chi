@@ -515,7 +515,7 @@ struct Array<T> {
         return result;
     }
 
-    impl ops.IndexMut<uint32, T>, ops.IndexIterMut<uint32, T> {
+    impl ops.IndexMut<uint32, T>, ops.IndexMutIterable<uint32, T> {
         func index_mut(index: uint32) &mut T {
             assert(index < this.length, "index out of bounds");
             return &mut this.data[index];

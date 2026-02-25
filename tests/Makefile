@@ -32,7 +32,8 @@ TESTS_LIST = 00_fib.test \
 		29_error_handling.test \
 		30_safe_lifetime.test \
 		31_pointer_arithmetic.test \
-		32_type_narrowing.test
+		32_type_narrowing.test \
+		33_iterators.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

@@ -1,0 +1,12 @@
+test_basic_iteration
+1 2 3
+test_mutation
+10 20 30
+test_empty_list
+count: 0
+test_single_element
+hello
+test_manual_iterator
+first: 10
+second: 20
+done

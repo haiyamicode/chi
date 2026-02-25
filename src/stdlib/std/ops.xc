@@ -10,7 +10,7 @@ interface CopyFrom<T> {
     func copy_from(source: &T);
 }
 
-interface IndexIterMut<K, V> {
+interface IndexMutIterable<K, V> {
     func index_mut(index: K) &mut V;
     func begin() K;
     func end() K;
@@ -27,6 +27,14 @@ interface AllowUnsized {}
 
 interface Construct {
     func new();
+}
+
+interface MutIterator<T> {
+    func next() ?(&mut T);
+}
+
+interface MutIterable<T> {
+    func to_iter_mut() MutIterator<T>;
 }
 
 interface Unwrap<T> {
