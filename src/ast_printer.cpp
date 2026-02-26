@@ -1019,6 +1019,7 @@ void AstPrinter::print_node(Node *node) {
         auto *expr = data.expr;
         if (expr && expr->type == NodeType::ParenExpr) expr = expr->data.child_expr;
         print_node(expr);
+        if (data.is_type_switch) emit(".(type)");
         emit(" {{\n");
         m_indent++;
         for (int i = 0; i < data.cases.len; i++) {
