@@ -1097,6 +1097,12 @@ void AstPrinter::print_node(Node *node) {
         emit("}}\n");
         break;
     }
+    case NodeType::PackExpansion: {
+        auto &data = node->data.pack_expansion;
+        print_node(data.expr);
+        emit("...");
+        break;
+    }
     default:
         break;
     }

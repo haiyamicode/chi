@@ -98,3 +98,4 @@ func main() {
     w.value = 100;
     printf("dot_guard_never={}\n", dot_guard_never(&w));
 }
+
