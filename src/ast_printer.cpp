@@ -1150,19 +1150,33 @@ void AstPrinter::print_node_list(array<Node *> *list) {
 
 void AstPrinter::print_destructure_pattern(Node *node) {
     auto &data = node->data.destructure_decl;
-    emit("{{");
-    for (size_t i = 0; i < data.fields.len; i++) {
-        if (i > 0) emit(", ");
-        auto &field_data = data.fields[i]->data.destructure_field;
-        emit("{}", field_data.field_name->str);
-        if (field_data.nested) {
-            emit(": ");
-            print_destructure_pattern(field_data.nested);
-        } else if (field_data.binding_name != field_data.field_name) {
-            emit(": {}", field_data.binding_name->str);
+    if (data.is_array) {
+        emit("[");
+        for (size_t i = 0; i < data.fields.len; i++) {
+            if (i > 0) emit(", ");
+            auto &field_data = data.fields[i]->data.destructure_field;
+            if (field_data.sigil == SigilKind::MutRef) emit("&mut ");
+            else if (field_data.sigil == SigilKind::Reference) emit("&");
+            emit("{}", field_data.binding_name->str);
         }
+        emit("]");
+    } else {
+        emit("{{");
+        for (size_t i = 0; i < data.fields.len; i++) {
+            if (i > 0) emit(", ");
+            auto &field_data = data.fields[i]->data.destructure_field;
+            if (field_data.sigil == SigilKind::MutRef) emit("&mut ");
+            else if (field_data.sigil == SigilKind::Reference) emit("&");
+            emit("{}", field_data.field_name->str);
+            if (field_data.nested) {
+                emit(": ");
+                print_destructure_pattern(field_data.nested);
+            } else if (field_data.binding_name != field_data.field_name) {
+                emit(": {}", field_data.binding_name->str);
+            }
+        }
+        emit("}}");
     }
-    emit("}}");
 }
 
 void AstPrinter::print_struct_members(StructDecl &data) {

@@ -1222,7 +1222,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         // Resolve each field pattern
-        resolve_destructure_fields(node, data.fields, expr_type, scope, data.generated_vars);
+        if (data.is_array) {
+            resolve_array_destructure(node, data.fields, expr_type, scope, data.generated_vars);
+        } else {
+            resolve_destructure_fields(node, data.fields, expr_type, scope, data.generated_vars);
+        }
 
         // Add temp to cleanup if needed
         if (scope.parent_fn_node && scope.block && should_destroy(temp_var, expr_type) &&
@@ -5501,7 +5505,12 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
             auto var = get_dummy_var(binding_name);
             var->module = parent->module;
             var->parent_fn = scope.parent_fn_node;
-            var->resolved_type = member->resolved_type;
+            auto field_type = member->resolved_type;
+            var->resolved_type = field_data.sigil == ast::SigilKind::MutRef
+                                     ? get_pointer_type(field_type, TypeKind::MutRef)
+                                 : field_data.sigil == ast::SigilKind::Reference
+                                     ? get_pointer_type(field_type, TypeKind::Reference)
+                                     : field_type;
             var->data.var_decl.kind = kind;
             var->data.var_decl.initialized_at = parent;
             var->token = field_data.binding_name;
@@ -5515,7 +5524,7 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
                 scope.block->scope->put(binding_name, var);
             }
 
-            if (scope.parent_fn_node && scope.block && should_destroy(var, member->resolved_type) &&
+            if (scope.parent_fn_node && scope.block && should_destroy(var, field_type) &&
                 !var->escape.is_capture()) {
                 scope.block->cleanup_vars.add(var);
                 scope.parent_fn_def()->has_cleanup = true;
@@ -5523,6 +5532,67 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
 
             generated_vars.add(var);
         }
+    }
+}
+
+void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &fields,
+                                         ChiType *source_type, ResolveScope &scope,
+                                         array<ast::Node *> &generated_vars) {
+    // Same as IndexExpr resolver: get the internal struct, look up index_mut
+    auto struct_type = resolve_struct_type(source_type);
+    if (!struct_type) {
+        error(parent, "cannot destructure non-indexable type '{}'", format_type_display(source_type));
+        return;
+    }
+
+    auto has_index = has_interface_impl(struct_type, "std.ops.IndexMut");
+    if (!has_index) {
+        error(parent, "cannot destructure non-indexable type '{}'", format_type_display(source_type));
+        return;
+    }
+
+    auto method_p = struct_type->member_table.get("index_mut");
+    assert(method_p);
+    auto method = *method_p;
+    parent->data.destructure_decl.resolved_index_method = method;
+
+    // Element type from index_mut return type (returns &T)
+    auto elem_type = method->resolved_type->data.fn.return_type->get_elem();
+    auto kind = parent->data.destructure_decl.kind;
+
+    for (auto field_node : fields) {
+        auto &field_data = field_node->data.destructure_field;
+        auto binding_name = string(field_data.binding_name->str);
+
+        auto var = get_dummy_var(binding_name);
+        var->module = parent->module;
+        var->parent_fn = scope.parent_fn_node;
+        auto var_type = field_data.sigil == ast::SigilKind::MutRef
+                            ? get_pointer_type(elem_type, TypeKind::MutRef)
+                        : field_data.sigil == ast::SigilKind::Reference
+                            ? get_pointer_type(elem_type, TypeKind::Reference)
+                            : elem_type;
+        var->resolved_type = var_type;
+        var->data.var_decl.kind = kind;
+        var->data.var_decl.initialized_at = parent;
+        var->token = field_data.binding_name;
+        var->name = binding_name;
+
+        if (scope.parent_fn_node) {
+            var->decl_order = scope.parent_fn_def()->next_decl_order++;
+        }
+
+        if (scope.block && scope.block->scope) {
+            scope.block->scope->put(binding_name, var);
+        }
+
+        if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
+            !var->escape.is_capture()) {
+            scope.block->cleanup_vars.add(var);
+            scope.parent_fn_def()->has_cleanup = true;
+        }
+
+        generated_vars.add(var);
     }
 }
 

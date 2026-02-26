@@ -3543,17 +3543,68 @@ void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fiel
             auto &nested = field_data.nested->data.destructure_decl;
             compile_destructure_fields(fn, nested.fields, field_ptr, member->resolved_type);
         } else {
-            // Allocate binding variable, copy field value into it
+            // Allocate binding variable
             auto &gen_vars = field_node->parent->data.destructure_decl.generated_vars;
             assert(var_idx < gen_vars.len);
             auto var_node = gen_vars[var_idx++];
-            auto var_type = get_chitype(var_node);
-            auto var_type_l = compile_type(var_type);
             auto var_ptr = compile_alloc(fn, var_node);
             add_var(var_node, var_ptr);
 
-            auto field_value = builder.CreateLoad(var_type_l, field_ptr);
-            compile_store_or_copy(fn, field_value, var_ptr, var_type, field_node);
+            if (field_data.sigil == ast::SigilKind::Reference || field_data.sigil == ast::SigilKind::MutRef) {
+                // Reference binding: store field address directly
+                builder.CreateStore(field_ptr, var_ptr);
+            } else {
+                // Copy binding: load field value and copy
+                auto var_type = get_chitype(var_node);
+                auto var_type_l = compile_type(var_type);
+                auto field_value = builder.CreateLoad(var_type_l, field_ptr);
+                compile_store_or_copy(fn, field_value, var_ptr, var_type, field_node);
+            }
+        }
+    }
+}
+
+void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &data,
+                                         llvm::Value *source_ptr, ChiType *source_type) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    // Same pattern as IndexExpr codegen (Struct case, lines 3835-3843)
+    auto method = data.resolved_index_method;
+    auto variant_type_id = resolve_variant_type_id(fn, source_type);
+    auto method_node = get_variant_member_node(method, variant_type_id);
+    auto index_fn = get_fn(method_node);
+
+    // Index parameter type (first param of index_mut)
+    auto index_type = method->resolved_type->data.fn.get_param_at(0);
+    auto index_type_l = compile_type(index_type);
+
+    // Element type from return type (index_mut returns &T)
+    auto elem_type = method->resolved_type->data.fn.return_type->get_elem();
+    auto elem_type_l = compile_type(elem_type);
+
+    for (size_t i = 0; i < data.fields.len; i++) {
+        auto field_node = data.fields[i];
+
+        // Create index constant
+        auto index_val = llvm::ConstantInt::get(index_type_l, i);
+
+        // Call index_mut(source_ptr, i) → returns pointer to element
+        auto elem_ptr = builder.CreateCall(index_fn->llvm_fn, {source_ptr, index_val});
+
+        // Allocate binding variable
+        assert(i < data.generated_vars.len);
+        auto var_node = data.generated_vars[i];
+        auto var_ptr = compile_alloc(fn, var_node);
+        add_var(var_node, var_ptr);
+
+        auto &field_data = field_node->data.destructure_field;
+        if (field_data.sigil == ast::SigilKind::Reference || field_data.sigil == ast::SigilKind::MutRef) {
+            // Reference binding: store element address directly
+            builder.CreateStore(elem_ptr, var_ptr);
+        } else {
+            // Copy binding: load element value and copy
+            auto elem_value = builder.CreateLoad(elem_type_l, elem_ptr);
+            compile_store_or_copy(fn, elem_value, var_ptr, elem_type, field_node);
         }
     }
 }
@@ -4686,8 +4737,12 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             compile_store_or_copy(fn, rhs_value, temp_ptr, source_type, data.expr);
         }
 
-        // Extract fields
-        compile_destructure_fields(fn, data.fields, temp_ptr, source_type);
+        // Extract elements
+        if (data.is_array) {
+            compile_array_destructure(fn, data, temp_ptr, source_type);
+        } else {
+            compile_destructure_fields(fn, data.fields, temp_ptr, source_type);
+        }
         break;
     }
     case ast::NodeType::VarDecl: {

@@ -391,11 +391,14 @@ struct FieldInitExpr {
     void *compiled_field_address = nullptr;
 };
 
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move)
+
 struct DestructureField {
     Token *field_name = nullptr;      // struct field to extract
     Token *binding_name = nullptr;    // local variable name (default = field_name)
     Node *nested = nullptr;           // for nested: points to DestructureDecl
     ChiStructMember *resolved_field = nullptr;
+    SigilKind sigil = SigilKind::None; // &field or &mut field
 };
 
 struct DestructureDecl {
@@ -404,6 +407,8 @@ struct DestructureDecl {
     VarKind kind = VarKind::Mutable;
     array<Node *> generated_vars = {}; // resolver creates VarDecl nodes here
     Node *temp_var = nullptr;          // temp to hold RHS value
+    bool is_array = false;            // array destructuring: var [a, b] = arr
+    ChiStructMember *resolved_index_method = nullptr; // index_mut for array destructure
 };
 
 // composite literal
@@ -475,8 +480,6 @@ struct CastExpr {
 };
 
 MAKE_ENUM(CSizeClass, Default, Long, LongLong, Short)
-
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move)
 
 struct SigilExpr {
     SigilKind sigil = SigilKind::None;

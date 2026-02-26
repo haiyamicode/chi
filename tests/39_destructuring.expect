@@ -145,3 +145,30 @@ te.t.id=77 te.name=big te.extra=42
 func exit
 Traced(77) destroyed
 Traced(77) destroyed
+
+-- Array destructure: basic --
+a=10 b=20 c=30
+
+-- Array destructure: let --
+x=10 y=20
+
+-- Array destructure: strings --
+s1=hello s2=world
+names[0]=hello names[1]=world
+
+-- Ref destructure: struct --
+x=10 y=20
+
+-- Ref destructure: mixed --
+rx=30 cy=40
+
+-- Ref destructure: array --
+a=100 b=200 c=300
+
+-- Mut ref destructure: struct --
+rx=1 ry=2
+rx=99 ry=88
+
+-- Mut ref destructure: array --
+a=1 b=2
+a=999

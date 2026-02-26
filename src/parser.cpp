@@ -820,6 +820,10 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
         return parse_destructure_decl(var_kind);
     }
 
+    if (!as_field && next_is(TokenType::LBRACK)) {
+        return parse_array_destructure_decl(var_kind);
+    }
+
     bool is_embed = false;
     if (as_field && next_is(TokenType::ELLIPSIS)) {
         is_embed = true;
@@ -876,12 +880,24 @@ Node *Parser::parse_destructure_pattern(VarKind kind) {
         auto token = get();
         if (token->type == TokenType::RBRACE || token->type == TokenType::END) break;
 
+        auto sigil = SigilKind::None;
+        if (next_is(TokenType::AND)) {
+            consume();
+            if (next_is(TokenType::KW_MUT)) {
+                consume();
+                sigil = SigilKind::MutRef;
+            } else {
+                sigil = SigilKind::Reference;
+            }
+        }
+
         auto field_token = expect(TokenType::IDEN);
         if (field_token->type != TokenType::IDEN) break;
 
         auto field_node = create_node(NodeType::DestructureField, field_token);
         field_node->data.destructure_field.field_name = field_token;
         field_node->data.destructure_field.binding_name = field_token; // default: same name
+        field_node->data.destructure_field.sigil = sigil;
 
         if (next_is(TokenType::COLON)) {
             consume(); // consume ':'
@@ -930,6 +946,52 @@ Node *Parser::parse_destructure_decl(VarKind kind) {
     expect(TokenType::SEMICOLON);
 
     // Register bindings in parser scope so subsequent identifiers resolve
+    register_destructure_bindings(this, node);
+    return node;
+}
+
+Node *Parser::parse_array_destructure_decl(VarKind kind) {
+    auto lbrack = expect(TokenType::LBRACK);
+    auto node = create_node(NodeType::DestructureDecl, lbrack);
+    node->data.destructure_decl.kind = kind;
+    node->data.destructure_decl.is_array = true;
+
+    for (;;) {
+        auto token = get();
+        if (token->type == TokenType::RBRACK || token->type == TokenType::END) break;
+
+        auto sigil = SigilKind::None;
+        if (next_is(TokenType::AND)) {
+            consume();
+            if (next_is(TokenType::KW_MUT)) {
+                consume();
+                sigil = SigilKind::MutRef;
+            } else {
+                sigil = SigilKind::Reference;
+            }
+        }
+
+        auto binding_token = expect(TokenType::IDEN);
+        if (binding_token->type != TokenType::IDEN) break;
+
+        auto field_node = create_node(NodeType::DestructureField, binding_token);
+        field_node->data.destructure_field.field_name = binding_token;
+        field_node->data.destructure_field.binding_name = binding_token;
+        field_node->data.destructure_field.sigil = sigil;
+
+        node->data.destructure_decl.fields.add(field_node);
+        field_node->parent = node;
+
+        if (!at_comma(TokenType::RBRACK)) break;
+        consume();
+    }
+    expect(TokenType::RBRACK);
+
+    node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
+    expect(TokenType::ASS);
+    node->data.destructure_decl.expr = parse_child_expr_construct(false, node);
+    expect(TokenType::SEMICOLON);
+
     register_destructure_bindings(this, node);
     return node;
 }

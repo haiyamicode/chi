@@ -357,6 +357,10 @@ class Resolver {
                                     ChiType *source_type, ResolveScope &scope,
                                     array<ast::Node *> &generated_vars);
 
+    void resolve_array_destructure(ast::Node *parent, array<ast::Node *> &fields,
+                                   ChiType *source_type, ResolveScope &scope,
+                                   array<ast::Node *> &generated_vars);
+
     bool always_terminates(ast::Node *node);
 
     void collect_narrowables(ast::Node *expr, bool when_truthy, array<ast::Node *> &out);

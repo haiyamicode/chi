@@ -163,6 +163,7 @@ class Parser {
 
     Node *parse_destructure_pattern(VarKind kind);
     Node *parse_destructure_decl(VarKind kind);
+    Node *parse_array_destructure_decl(VarKind kind);
 
     Node *parse_fn_proto(Token *iden, Node *fn_node);
 

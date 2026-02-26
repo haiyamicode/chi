@@ -290,6 +290,67 @@ func test_cross_spread_discard_lifecycle() {
     println("func exit");
 }
 
+// === Array destructuring: basic ===
+
+func test_array_basic() {
+    var arr: Array<int> = [10, 20, 30];
+    var [a, b, c] = arr;
+    printf("a={} b={} c={}\n", a, b, c);
+}
+
+// === Array destructuring: let ===
+
+func test_array_let() {
+    var arr: Array<int> = [10, 20, 30];
+    let [x, y] = arr;
+    printf("x={} y={}\n", x, y);
+}
+
+// === Array destructuring: strings ===
+
+func test_array_strings() {
+    var names: Array<string> = ["hello", "world"];
+    var [s1, s2] = names;
+    printf("s1={} s2={}\n", s1, s2);
+    // Original still valid
+    printf("names[0]={} names[1]={}\n", names[0], names[1]);
+}
+
+func test_ref_struct() {
+    var p = Point{x: 10, y: 20};
+    var {&x, &y} = p;
+    printf("x={} y={}\n", *x, *y);
+}
+
+func test_ref_mixed() {
+    var p = Point{x: 30, y: 40};
+    var {&x: rx, y: cy} = p;
+    printf("rx={} cy={}\n", *rx, cy);
+}
+
+func test_ref_array() {
+    var arr: Array<int> = [100, 200, 300];
+    var [&a, &b, c] = arr;
+    printf("a={} b={} c={}\n", *a, *b, c);
+}
+
+func test_mut_ref_struct() {
+    var p = Point{x: 1, y: 2};
+    var {&mut x: rx, &mut y: ry} = p;
+    printf("rx={} ry={}\n", *rx, *ry);
+    *rx = 99;
+    *ry = 88;
+    printf("rx={} ry={}\n", *rx, *ry);
+}
+
+func test_mut_ref_array() {
+    var arr: Array<int> = [1, 2, 3];
+    var [&mut a, b] = arr;
+    printf("a={} b={}\n", *a, b);
+    *a = 999;
+    printf("a={}\n", *a);
+}
+
 func main() {
     println("-- Basic destructuring --");
     test_basic();
@@ -356,5 +417,29 @@ func main() {
 
     println("\n-- Cross spread: discard lifecycle --");
     test_cross_spread_discard_lifecycle();
+
+    println("\n-- Array destructure: basic --");
+    test_array_basic();
+
+    println("\n-- Array destructure: let --");
+    test_array_let();
+
+    println("\n-- Array destructure: strings --");
+    test_array_strings();
+
+    println("\n-- Ref destructure: struct --");
+    test_ref_struct();
+
+    println("\n-- Ref destructure: mixed --");
+    test_ref_mixed();
+
+    println("\n-- Ref destructure: array --");
+    test_ref_array();
+
+    println("\n-- Mut ref destructure: struct --");
+    test_mut_ref_struct();
+
+    println("\n-- Mut ref destructure: array --");
+    test_mut_ref_array();
 }
 
