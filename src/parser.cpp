@@ -1533,6 +1533,9 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
         auto token = get();
         switch (token->type) {
         case TokenType::DOT:
+            // .(type) is type switch syntax, not a DotExpr
+            if (lookahead(1)->type == TokenType::LPAREN)
+                return node;
             node = parse_dot_expr(node);
             break;
 
@@ -3089,9 +3092,21 @@ Node *Parser::parse_switch_expr() {
         node->data.switch_expr.expr = create_node(NodeType::LiteralExpr, kw);
     }
 
+    // Check for .(type) suffix → type switch
+    if (next_is(TokenType::DOT) && lookahead(1)->type == TokenType::LPAREN) {
+        consume(); // .
+        consume(); // (
+        auto tok = get();
+        if (tok->type == TokenType::IDEN && tok->str == "type") {
+            consume(); // type
+            node->data.switch_expr.is_type_switch = true;
+        }
+        expect(TokenType::RPAREN);
+    }
+
     expect(TokenType::LBRACE);
     while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
-        auto case_expr = parse_case_expr();
+        auto case_expr = parse_case_expr(node->data.switch_expr.is_type_switch);
         // Only add valid case expressions
         if (case_expr) {
             node->data.switch_expr.cases.add(case_expr);
@@ -3117,7 +3132,7 @@ Node *Parser::parse_switch_expr() {
     return node;
 }
 
-Node *Parser::parse_case_expr() {
+Node *Parser::parse_case_expr(bool is_type_switch) {
     Token *token = nullptr;
     Node *node = nullptr;
     if (next_is(TokenType::KW_ELSE)) {
@@ -3126,13 +3141,13 @@ Node *Parser::parse_case_expr() {
         node->data.case_expr.is_else = true;
 
     } else {
-        auto expr = parse_expr();
+        auto expr = is_type_switch ? parse_type_expr(true) : parse_expr();
         node = create_node(NodeType::CaseExpr, expr->token);
         node->data.case_expr.clauses = {expr};
         if (next_is(TokenType::COMMA)) {
             consume();
             while (!next_is(TokenType::ARROW) && !next_is(TokenType::END)) {
-                auto expr = parse_expr();
+                auto expr = is_type_switch ? parse_type_expr(true) : parse_expr();
                 node->data.case_expr.clauses.add(expr);
                 if (!at_comma(TokenType::ARROW)) {
                     break;

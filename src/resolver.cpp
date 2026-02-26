@@ -3642,6 +3642,63 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        // Type switch on interface references
+        if (data.is_type_switch) {
+            auto iface_elem = expr_type->is_pointer_like() ? expr_type->get_elem() : nullptr;
+            if (!iface_elem || !ChiTypeStruct::is_interface(iface_elem)) {
+                error(data.expr, "type switch requires an interface reference");
+                return nullptr;
+            }
+
+            ChiType *ret_type = scope.value_type;
+            for (auto scase : data.cases) {
+                if (!scase) continue;
+
+                if (!scase->data.case_expr.is_else) {
+                    for (auto clause : scase->data.case_expr.clauses) {
+                        auto clause_type = resolve(clause, scope);
+                        // Unwrap TypeSymbol from type expression resolution
+                        if (clause_type && clause_type->kind == TypeKind::TypeSymbol)
+                            clause_type = clause_type->data.type_symbol.underlying_type;
+                        // Verify the concrete type implements the interface
+                        auto clause_elem = clause_type ? (clause_type->is_pointer_like() ? clause_type->get_elem() : clause_type) : nullptr;
+                        if (clause_elem && clause_elem->kind == TypeKind::Struct &&
+                            !ChiTypeStruct::is_interface(clause_elem)) {
+                            if (!clause_elem->data.struct_.interface_table.get(iface_elem)) {
+                                error(clause, "type '{}' does not implement interface '{}'",
+                                      format_type_display(clause_type), format_type_display(iface_elem));
+                            }
+                        }
+                        clause->resolved_type = clause_type;
+                    }
+
+                    // Type narrowing: single-clause case
+                    if (scase->data.case_expr.clauses.len == 1) {
+                        auto clause_type = node_get_type(scase->data.case_expr.clauses[0]);
+                        if (clause_type) {
+                            auto switch_expr = data.expr;
+                            if (switch_expr->type == NodeType::Identifier ||
+                                switch_expr->type == NodeType::DotExpr) {
+                                auto var = create_narrowed_var(switch_expr, node, scope, clause_type);
+                                auto &block_data = scase->data.case_expr.body->data.block;
+                                block_data.implicit_vars.add(var);
+                                block_data.scope->put(var->name, var);
+                            }
+                        }
+                    }
+                }
+
+                auto case_type = resolve(scase, scope);
+                if (ret_type) {
+                    check_assignment(scase, case_type, ret_type);
+                    scase->resolved_type = ret_type;
+                } else {
+                    ret_type = case_type;
+                }
+            }
+            return ret_type ? ret_type : get_system_types()->void_;
+        }
+
         auto expr_comparator = resolve_comparator(expr_type, scope);
 
         ChiType *ret_type = scope.value_type;

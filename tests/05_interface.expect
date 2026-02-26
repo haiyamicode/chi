@@ -33,3 +33,11 @@ desc: Widget(btn)
 measure: 42
 ref desc: Widget(btn)
 ref measure: 42
+=== type switch ===
+circle r=8
+rect 5x3
+sheep: sheep
+cat: cat
+ant: other
+Rect.delete(5x3)
+Circle.delete(r=8)

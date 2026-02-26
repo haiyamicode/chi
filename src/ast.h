@@ -507,6 +507,7 @@ struct SwitchExpr {
     Node *expr = nullptr;
     array<Node *> cases = {};
     Node *resolved_outlet = nullptr;
+    bool is_type_switch = false;
 };
 
 struct CaseExpr {

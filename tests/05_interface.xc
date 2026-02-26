@@ -220,6 +220,37 @@ func test_multi_interface() {
     printf("ref measure: {}\n", m.measure());
 }
 
+func describe_shape(s: &Shape) {
+    switch s.(type) {
+        &Circle => printf("circle r={}\n", s.radius),
+        &Rect => printf("rect {}x{}\n", s.w, s.h),
+        else => println("unknown shape")
+    };
+}
+
+func describe_animal(a: &Animal) string {
+    return switch a.(type) {
+        &Sheep => "sheep",
+        &Cat => "cat",
+        else => "other"
+    };
+}
+
+func test_type_switch() {
+    println("=== type switch ===");
+    var c = Circle{radius: 8};
+    var r = Rect{w: 5, h: 3};
+    describe_shape(&c);
+    describe_shape(&r);
+
+    var sheep = Sheep{10};
+    var cat = Cat{20};
+    var ant = Ant{30};
+    printf("sheep: {}\n", describe_animal(&sheep));
+    printf("cat: {}\n", describe_animal(&cat));
+    printf("ant: {}\n", describe_animal(&ant));
+}
+
 func main() {
     test_basic();
     test_heap_and_delete();
@@ -227,5 +258,6 @@ func main() {
     test_sizeof();
     test_box();
     test_multi_interface();
+    test_type_switch();
 }
 

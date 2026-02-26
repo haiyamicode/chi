@@ -246,6 +246,6 @@ class Parser {
 
     Node *parse_switch_expr();
 
-    Node *parse_case_expr();
+    Node *parse_case_expr(bool is_type_switch = false);
 };
 } // namespace cx

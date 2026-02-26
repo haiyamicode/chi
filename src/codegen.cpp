@@ -2930,9 +2930,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::SwitchExpr: {
         auto &data = expr->data.switch_expr;
-        auto expr_value = compile_comparator(fn, data.expr);
-        auto comparator_type = expr_value->getType();
         auto ret_type = get_chitype(expr);
+        auto &builder = *m_ctx->llvm_builder;
         llvm::Value *var = nullptr;
         if (ret_type->kind != TypeKind::Void) {
             if (data.resolved_outlet) {
@@ -2941,7 +2940,71 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 var = compile_alloc(fn, expr, false);
             }
         }
-        auto &builder = *m_ctx->llvm_builder;
+
+        if (data.is_type_switch) {
+            // Type switch: compare typeinfo pointers from fat pointer vtable
+            auto ptr_type = get_llvm_ptr_type();
+            auto iface_type_l = llvm::StructType::get(*m_ctx->llvm_ctx, {ptr_type, ptr_type});
+
+            auto iref_ref = compile_expr_ref(fn, data.expr);
+            auto fp = builder.CreateLoad(iface_type_l, iref_ref.address, "fat_ptr");
+            auto vtable_ptr = builder.CreateExtractValue(fp, {1}, "vtable_ptr");
+
+            // Load runtime typeinfo from vtable[0]
+            auto runtime_ti = builder.CreateLoad(ptr_type, vtable_ptr, "runtime_ti");
+
+            // Get the interface type from the switch expression
+            auto expr_type = get_chitype(data.expr);
+            auto iface_elem = expr_type->get_elem();
+
+            auto done_label = fn->new_label("_tswitch_done");
+            auto else_label = fn->new_label("_tswitch_else");
+
+            // Build if-else chain for each non-else case
+            ast::Node *else_case = nullptr;
+            for (auto scase : data.cases) {
+                if (scase->data.case_expr.is_else) {
+                    else_case = scase;
+                    continue;
+                }
+
+                auto case_label = fn->new_label("_tswitch_case");
+                auto next_label = fn->new_label("_tswitch_next");
+
+                // Get typeinfo from the concrete type's vtable for this interface
+                auto clause = scase->data.case_expr.clauses[0];
+                auto clause_type = get_resolver()->node_get_type(clause);
+                auto clause_elem = clause_type->is_pointer_like() ? clause_type->get_elem() : clause_type;
+                auto impl = clause_elem->data.struct_.interface_table[iface_elem];
+                auto vtable_global = m_ctx->impl_table[impl];
+                // vtable[0] is the typeinfo pointer
+                auto case_ti = builder.CreateLoad(ptr_type, vtable_global, "case_ti");
+                auto cmp = builder.CreateICmpEQ(runtime_ti, case_ti, "ti_cmp");
+                builder.CreateCondBr(cmp, case_label, next_label);
+
+                fn->use_label(case_label);
+                compile_block(fn, scase, scase->data.case_expr.body, done_label, var);
+
+                fn->use_label(next_label);
+            }
+
+            // Fall through to else
+            builder.CreateBr(else_label);
+            fn->use_label(else_label);
+            if (else_case) {
+                compile_block(fn, else_case, else_case->data.case_expr.body, done_label, var);
+            } else {
+                builder.CreateBr(done_label);
+            }
+
+            fn->use_label(done_label);
+            if (!var) return nullptr;
+            return builder.CreateLoad(compile_type(ret_type), var);
+        }
+
+        // Normal switch: integer comparator with LLVM switch instruction
+        auto expr_value = compile_comparator(fn, data.expr);
+        auto comparator_type = expr_value->getType();
         auto default_label = fn->new_label("_switch_default");
 
         auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.len);
@@ -4770,10 +4833,25 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     // Enum variant narrowing: same address, more specific type
                     add_var(stmt, addr);
                 } else {
-                    // Optional/Result narrowing: GEP to value field
-                    auto original_type_l = compile_type(get_chitype(data.narrowed_from));
-                    auto value_ptr = llvm_builder.CreateStructGEP(original_type_l, addr, 1);
-                    add_var(stmt, value_ptr);
+                    // Check for interface → concrete narrowing (type switch)
+                    auto from_type = get_chitype(data.narrowed_from);
+                    auto from_elem = from_type->is_pointer_like() ? from_type->get_elem() : nullptr;
+                    if (from_elem && ChiTypeStruct::is_interface(from_elem)) {
+                        // Extract data_ptr (field 0) from the fat pointer
+                        auto ptr_type = get_llvm_ptr_type();
+                        auto iface_type_l = llvm::StructType::get(*m_ctx->llvm_ctx, {ptr_type, ptr_type});
+                        auto fp = llvm_builder.CreateLoad(iface_type_l, addr, "narrow_fp");
+                        auto data_ptr = llvm_builder.CreateExtractValue(fp, {0}, "data_ptr");
+                        // Store in alloca so from_address() works correctly
+                        auto alloca = llvm_builder.CreateAlloca(ptr_type, nullptr, "narrow_ref");
+                        llvm_builder.CreateStore(data_ptr, alloca);
+                        add_var(stmt, alloca);
+                    } else {
+                        // Optional/Result narrowing: GEP to value field
+                        auto original_type_l = compile_type(from_type);
+                        auto value_ptr = llvm_builder.CreateStructGEP(original_type_l, addr, 1);
+                        add_var(stmt, value_ptr);
+                    }
                 }
                 break;
             }
