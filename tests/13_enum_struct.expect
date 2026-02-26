@@ -48,3 +48,8 @@ a.label=name_77
 copy.ret=int
 copy.name=f
 --- scope exit ---
+=== Test: Switch narrowing ===
+int
+none
+add
+x

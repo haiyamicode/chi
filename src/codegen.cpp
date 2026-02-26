@@ -2967,6 +2967,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
 
         fn->use_label(done_label);
+        if (!var) return nullptr;
         return builder.CreateLoad(compile_type(ret_type), var);
     }
     default:
@@ -3927,6 +3928,10 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     auto &data = iden->data.identifier;
 
     if (data.kind == ast::IdentifierKind::This) {
+        // Check for narrowed 'this' (e.g., enum variant narrowing in switch)
+        if (data.decl && data.decl->data.var_decl.narrowed_from) {
+            return RefValue::from_address(get_var(data.decl));
+        }
         return RefValue::from_value(fn->get_this_arg());
     }
     // Unwrap ImportSymbol to reach the actual declaration
@@ -4751,13 +4756,21 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
         auto &llvm_module = *m_ctx->llvm_module.get();
 
-        // Narrowed variable: GEP alias into original optional/result value field
+        // Narrowed variable: alias into original value
         if (data.narrowed_from) {
             auto ref = compile_expr_ref(fn, data.narrowed_from);
-            if (ref.address) {
-                auto original_type_l = compile_type(get_chitype(data.narrowed_from));
-                auto value_ptr = llvm_builder.CreateStructGEP(original_type_l, ref.address, 1);
-                add_var(stmt, value_ptr);
+            auto addr = ref.address ? ref.address : ref.value;
+            if (addr) {
+                auto narrowed_type = get_chitype(stmt);
+                if (narrowed_type->kind == TypeKind::EnumValue) {
+                    // Enum variant narrowing: same address, more specific type
+                    add_var(stmt, addr);
+                } else {
+                    // Optional/Result narrowing: GEP to value field
+                    auto original_type_l = compile_type(get_chitype(data.narrowed_from));
+                    auto value_ptr = llvm_builder.CreateStructGEP(original_type_l, addr, 1);
+                    add_var(stmt, value_ptr);
+                }
                 break;
             }
         }

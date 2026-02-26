@@ -987,6 +987,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::Identifier: {
         auto &data = node->data.identifier;
         if (data.kind == ast::IdentifierKind::This) {
+            // Check for narrowed 'this' (e.g., enum variant narrowing in switch)
+            if (scope.block && scope.block->scope) {
+                auto narrowed = scope.block->scope->find_one("this");
+                if (narrowed && narrowed->type == NodeType::VarDecl &&
+                    narrowed->data.var_decl.is_generated && narrowed->data.var_decl.narrowed_from) {
+                    data.decl = narrowed;
+                    return narrowed->resolved_type;
+                }
+            }
             auto declspec =
                 scope.parent_fn_node ? scope.parent_fn_node->declspec() : ast::DeclSpec();
             auto is_static = declspec.is_static();
@@ -3642,8 +3651,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!scase)
                 continue;
 
-            auto case_type = resolve(scase, scope);
-
+            // Resolve clauses BEFORE body so we can inject narrowed vars
             if (!scase->data.case_expr.is_else) {
                 for (auto clause : scase->data.case_expr.clauses) {
                     auto clause_type = resolve(clause, scope);
@@ -3659,7 +3667,36 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         }
                     }
                 }
+
+                // Enum variant narrowing: single-clause case matching a specific variant
+                if (scase->data.case_expr.clauses.len == 1) {
+                    // Unwrap expr_type to find underlying EnumValue
+                    auto unwrapped = expr_type;
+                    while (unwrapped) {
+                        if (unwrapped->kind == TypeKind::EnumValue) break;
+                        if (unwrapped->kind == TypeKind::This) { unwrapped = unwrapped->eval(); continue; }
+                        if (unwrapped->is_pointer_like()) { unwrapped = unwrapped->get_elem(); continue; }
+                        unwrapped = nullptr;
+                    }
+                    if (unwrapped && unwrapped->kind == TypeKind::EnumValue) {
+                        auto clause = scase->data.case_expr.clauses[0];
+                        auto clause_type = node_get_type(clause);
+                        if (clause_type && clause_type->kind == TypeKind::EnumValue &&
+                            clause_type->data.enum_value.member) {
+                            auto switch_expr = data.expr;
+                            if (switch_expr->type == NodeType::Identifier ||
+                                switch_expr->type == NodeType::DotExpr) {
+                                auto var = create_narrowed_var(switch_expr, node, scope, clause_type);
+                                auto &block_data = scase->data.case_expr.body->data.block;
+                                block_data.implicit_vars.add(var);
+                                block_data.scope->put(var->name, var);
+                            }
+                        }
+                    }
+                }
             }
+
+            auto case_type = resolve(scase, scope);
 
             if (ret_type) {
                 check_assignment(scase, case_type, ret_type);
@@ -5597,7 +5634,7 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
 }
 
 ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent_stmt,
-                                         ResolveScope &scope) {
+                                         ResolveScope &scope, ChiType *narrowed_type) {
     auto type = node_get_type(expr_node);
     string name;
     ast::VarKind kind;
@@ -5606,19 +5643,28 @@ ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent
         kind = ast::VarKind::Immutable;
     } else {
         name = expr_node->token->get_name();
-        kind = expr_node->data.identifier.decl->data.var_decl.kind;
+        if (name.empty() && expr_node->data.identifier.kind == ast::IdentifierKind::This)
+            name = "this";
+        auto decl = expr_node->data.identifier.decl;
+        kind = (decl && decl->type == NodeType::VarDecl)
+                   ? decl->data.var_decl.kind
+                   : ast::VarKind::Immutable;
     }
-    auto unwrapped = type->kind == TypeKind::Optional ? type->get_elem() : type->data.result.value;
-    auto expr = create_node(ast::NodeType::UnaryOpExpr);
-    expr->token = expr_node->token;
-    expr->data.unary_op_expr.is_suffix = true;
-    expr->data.unary_op_expr.op_type = TokenType::LNOT;
-    expr->data.unary_op_expr.op1 = expr_node;
-    expr->resolved_type = unwrapped;
-    auto var = get_dummy_var(name, expr);
+    ast::Node *var_expr = expr_node;
+    if (!narrowed_type) {
+        narrowed_type = type->kind == TypeKind::Optional ? type->get_elem() : type->data.result.value;
+        auto expr = create_node(ast::NodeType::UnaryOpExpr);
+        expr->token = expr_node->token;
+        expr->data.unary_op_expr.is_suffix = true;
+        expr->data.unary_op_expr.op_type = TokenType::LNOT;
+        expr->data.unary_op_expr.op1 = expr_node;
+        expr->resolved_type = narrowed_type;
+        var_expr = expr;
+    }
+    auto var = get_dummy_var(name, var_expr);
     var->token = expr_node->token;
     var->parent_fn = scope.parent_fn_node;
-    var->resolved_type = unwrapped;
+    var->resolved_type = narrowed_type;
     var->data.var_decl.initialized_at = parent_stmt;
     var->data.var_decl.narrowed_from = expr_node;
     var->data.var_decl.kind = kind;

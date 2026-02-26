@@ -24,6 +24,20 @@ enum Node (type: uint64) {
         func type_name() string {
             return this.display();
         }
+
+        func get_ret_or_default() string {
+            return switch this {
+                Node.FnDef => this.ret,
+                else => "none"
+            };
+        }
+
+        func describe() string {
+            return switch this {
+                Node.VarDecl, Node.FnDef => this.name,
+                else => "unknown"
+            };
+        }
     }
 }
 
@@ -177,6 +191,21 @@ func test_enum_string_reassign() {
     println("--- scope exit ---");
 }
 
+func test_switch_narrowing() {
+    println("=== Test: Switch narrowing ===");
+
+    // Method using narrowing to access variant fields
+    var fn = Node.FnDef{name: "add", params: {}, ret: "int"};
+    println(fn.get_ret_or_default());
+
+    var vd = Node.VarDecl{name: "x"};
+    println(vd.get_ret_or_default());
+
+    // Multi-clause case should not narrow (returns base field only)
+    println(fn.describe());
+    println(vd.describe());
+}
+
 func test_node_copy() {
     println("=== Test: Node copy ===");
     var node = Node.FnDef{name: "f", params: {}, ret: "int"};
@@ -203,5 +232,6 @@ func main() {
     test_enum_trivial_copy();
     test_enum_string_reassign();
     test_node_copy();
+    test_switch_narrowing();
 }
 

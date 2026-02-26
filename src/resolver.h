@@ -351,7 +351,8 @@ class Resolver {
 
     ast::Node *get_dummy_var(const string &name, ast::Node *expr = nullptr);
 
-    ast::Node *create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt, ResolveScope &scope);
+    ast::Node *create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt,
+                                   ResolveScope &scope, ChiType *narrowed_type = nullptr);
 
     void resolve_destructure_fields(ast::Node *parent, array<ast::Node *> &fields,
                                     ChiType *source_type, ResolveScope &scope,
