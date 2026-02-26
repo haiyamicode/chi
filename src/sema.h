@@ -468,7 +468,6 @@ struct ChiType {
         switch (kind) {
         case TypeKind::Int:
         case TypeKind::Float:
-        case TypeKind::This:
         case TypeKind::Pointer:
         case TypeKind::Reference:
         case TypeKind::MutRef:

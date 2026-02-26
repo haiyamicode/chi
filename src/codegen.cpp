@@ -117,7 +117,8 @@ ChiType *Compiler::eval_type(ChiType *type) {
         return type->data.subtype.final_type;
     }
     if (type->kind == TypeKind::This && m_fn) {
-        return m_fn->fn_type->data.fn.container_ref;
+        auto cr = m_fn->fn_type->data.fn.container_ref;
+        return cr ? cr->get_elem() : type;
     }
     return type;
 }
@@ -129,7 +130,8 @@ llvm::Type *Compiler::get_llvm_ptr_type() {
 
 ChiType *Compiler::get_chitype(ast::Node *node) {
     if (m_fn && node->orig_type && node->orig_type->kind == TypeKind::This) {
-        return m_fn->fn_type->data.fn.container_ref;
+        auto cr = m_fn->fn_type->data.fn.container_ref;
+        return cr ? cr->get_elem() : eval_type(node->resolved_type);
     }
     return eval_type(node->resolved_type);
 }
@@ -593,6 +595,8 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         return compile_di_type(type->data.subtype.final_type);
     }
     case TypeKind::This: {
+        auto e = type->eval();
+        if (e != type) return compile_di_type(e);
         return llvm_db.createBasicType("this", 0, llvm::dwarf::DW_ATE_address);
     }
     default:
@@ -3932,7 +3936,7 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
         if (data.decl && data.decl->data.var_decl.narrowed_from) {
             return RefValue::from_address(get_var(data.decl));
         }
-        return RefValue::from_value(fn->get_this_arg());
+        return RefValue::from_address(fn->get_this_arg());
     }
     // Unwrap ImportSymbol to reach the actual declaration
     auto *resolved_decl = data.decl;
@@ -6730,10 +6734,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
     case TypeKind::This: {
-        if (m_fn && m_fn->container_subtype) {
-            return m_fn->get_this_arg()->getType();
-        }
-        return compile_type(type->get_elem());
+        return compile_type(type->eval());
     }
     case TypeKind::Never:
     case TypeKind::Void: {

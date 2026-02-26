@@ -210,7 +210,7 @@ class Resolver {
 
     bool is_ref_mutable(ast::Node *node, ResolveScope &scope);
 
-    bool is_struct_access_mutable(ChiType *type);
+    bool is_struct_access_mutable(ChiType *type, ResolveScope *scope = nullptr);
 
     void check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type);
 
@@ -415,7 +415,7 @@ class Resolver {
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
     ChiStructMember *get_struct_member_access(ast::Node *node, ChiType *struct_type,
                                               const string &field_name, bool is_internal,
-                                              bool is_write);
+                                              bool is_write, ResolveScope *scope = nullptr);
     bool is_friend_struct(ChiType *a, ChiType *b);
 
     struct OperatorMethodCall {

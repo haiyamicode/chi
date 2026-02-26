@@ -372,7 +372,7 @@ struct JsonValue {
     impl ops.CopyFrom<JsonValue> {
         func copy_from(source: &JsonValue) {
             unsafe {
-                cx_json_value_copy(source.data, this);
+                cx_json_value_copy(source.data, &this);
             }
         }
     }
@@ -470,11 +470,11 @@ struct Array<T> {
 
     func new(...values: T) {
         unsafe {
-            cx_array_new(this);
+            cx_array_new(&this);
         }
         if values.length > 0 {
             unsafe {
-                cx_array_reserve(this, sizeof T, values.length);
+                cx_array_reserve(&this, sizeof T, values.length);
             }
             for value in values {
                 this.add(value);
@@ -490,7 +490,7 @@ struct Array<T> {
 
     func add(item: T) {
         unsafe {
-            var ptr = cx_array_add(this, sizeof T) as *T;
+            var ptr = cx_array_add(&this, sizeof T) as *T;
             *ptr = item;
         }
     }
@@ -500,7 +500,7 @@ struct Array<T> {
             if this.data {
                 cx_free(this.data as *void);
             }
-            cx_array_new(this);
+            cx_array_new(&this);
         }
     }
 
@@ -649,7 +649,7 @@ struct __CxString {
 
     func to_cstring() CString {
         unsafe {
-            return {cx_string_to_cstring(this as *string)};
+            return {cx_string_to_cstring(&this as *string)};
         }
     }
 
@@ -667,7 +667,7 @@ struct __CxString {
         func add(rhs: string) string {
             var result = string{};
             unsafe {
-                cx_string_concat(&result as *string, this as *string, &rhs as *string);
+                cx_string_concat(&result as *string, &this as *string, &rhs as *string);
             }
             return result;
         }

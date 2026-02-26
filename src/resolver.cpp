@@ -1015,8 +1015,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             auto type = create_type(TypeKind::This);
             auto is_mut = declspec.is_mutable();
-            type->data.pointer.elem = get_pointer_type(
-                scope.parent_struct, is_mut ? TypeKind::MutRef : TypeKind::Reference);
+            type->data.pointer.elem = scope.parent_struct;
             // Attach 'this lifetime so satisfies_lifetime_constraint can check it
             auto &st = scope.parent_struct->data.struct_;
             if (!st.this_lifetime) {
@@ -1614,8 +1613,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     decl->escape.escaped = decl->can_escape();
                 }
             }
-            return get_pointer_type(t, data.op_type == TokenType::MUTREF ? TypeKind::MutRef
-                                                                         : TypeKind::Reference);
+            return get_pointer_type(t->eval(), data.op_type == TokenType::MUTREF ? TypeKind::MutRef
+                                                                                : TypeKind::Reference);
         }
         case TokenType::MOVEREF: {
             if (!is_addressable(data.op1)) {
@@ -2058,7 +2057,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
-        auto member = get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs);
+        auto member = get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs, &scope);
         if (!member) {
             return nullptr;
         }
@@ -3670,15 +3669,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
                 // Enum variant narrowing: single-clause case matching a specific variant
                 if (scase->data.case_expr.clauses.len == 1) {
-                    // Unwrap expr_type to find underlying EnumValue
-                    auto unwrapped = expr_type;
-                    while (unwrapped) {
-                        if (unwrapped->kind == TypeKind::EnumValue) break;
-                        if (unwrapped->kind == TypeKind::This) { unwrapped = unwrapped->eval(); continue; }
-                        if (unwrapped->is_pointer_like()) { unwrapped = unwrapped->get_elem(); continue; }
-                        unwrapped = nullptr;
-                    }
-                    if (unwrapped && unwrapped->kind == TypeKind::EnumValue) {
+                    auto underlying = expr_type->eval();
+                    if (underlying && underlying->kind == TypeKind::EnumValue) {
                         auto clause = scase->data.case_expr.clauses[0];
                         auto clause_type = node_get_type(clause);
                         if (clause_type && clause_type->kind == TypeKind::EnumValue &&
@@ -3832,7 +3824,7 @@ string Resolver::format_type(ChiType *type, bool for_display) {
 
     switch (type->kind) {
     case TypeKind::This:
-        return format_type(type->get_elem(), for_display);
+        return format_type(type->eval(), for_display);
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
         switch (data.generic->kind) {
@@ -5086,10 +5078,12 @@ void Resolver::copy_struct_members(ChiType *from, ChiType *to, ChiStructMember *
     }
 }
 
-bool Resolver::is_struct_access_mutable(ChiType *type) {
+bool Resolver::is_struct_access_mutable(ChiType *type, ResolveScope *scope) {
     auto sty = type;
     if (sty->kind == TypeKind::This) {
-        return is_struct_access_mutable(sty->get_elem());
+        if (scope && scope->parent_fn_node)
+            return scope->parent_fn_node->declspec().is_mutable();
+        return false;
     }
     if (sty->is_pointer_like()) {
         return ChiTypeStruct::is_mutable_pointer(sty);
@@ -5110,13 +5104,13 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
 
 ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *struct_type,
                                                     const string &field_name, bool is_internal,
-                                                    bool is_write) {
+                                                    bool is_write, ResolveScope *scope) {
     auto field_member = get_struct_member(struct_type, field_name);
     if (!field_member) {
         error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(struct_type));
         return nullptr;
     }
-    if (is_write && !is_struct_access_mutable(struct_type)) {
+    if (is_write && !is_struct_access_mutable(struct_type, scope)) {
         error(node, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, format_type_display(struct_type));
         return nullptr;
     }
@@ -5133,7 +5127,7 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
 
     if (field_member->is_method()) {
         auto is_mutable = field_member->node->declspec_ref().is_mutable();
-        if (is_mutable && !is_struct_access_mutable(struct_type)) {
+        if (is_mutable && !is_struct_access_mutable(struct_type, scope)) {
             error(node, errors::MUTATING_METHOD_ON_IMMUTABLE_REFERENCE, field_name,
                   format_type_display(struct_type));
             return nullptr;

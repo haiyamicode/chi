@@ -252,7 +252,8 @@ Node *Parser::create_node(NodeType type, Token *token) {
     auto node = m_ctx->allocator->create_node(type);
     node->token = token;
     node->module = m_ctx->module;
-    if (token->type == TokenType::IDEN || token->type == TokenType::KW_THIS_TYPE) {
+    if (token->type == TokenType::IDEN || token->type == TokenType::KW_THIS ||
+        token->type == TokenType::KW_THIS_TYPE) {
         node->name = token->str;
         if (!token->node) {
             token->node = node;

@@ -332,6 +332,13 @@ static std::string get_symbol_info(cx::ast::Node *decl, cx::Resolver &resolver) 
     if (decl->type == cx::ast::NodeType::ImportSymbol && decl->data.import_symbol.resolved_decl) {
         decl = decl->data.import_symbol.resolved_decl;
     }
+    // Handle 'this' keyword
+    if (decl->type == cx::ast::NodeType::Identifier &&
+        decl->data.identifier.kind == cx::ast::IdentifierKind::This) {
+        auto type = decl->resolved_type;
+        return fmt::format("(variable) this: {}",
+                           type ? resolver.format_type_display(type) : "unknown");
+    }
     auto kind = get_symbol_kind(decl);
     auto name = decl->name.size() ? decl->name : "<anonymous>";
     if (decl->type == cx::ast::NodeType::FnDef) {
