@@ -1551,7 +1551,16 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
             break;
         } else {
             auto arg = parse_child_expr_construct(lhs, parent);
-            node->data.fn_call_expr.args.add(arg);
+            // Check for pack expansion: expr...
+            if (next_is(TokenType::ELLIPSIS)) {
+                auto ellipsis = get();
+                consume();
+                auto expansion = create_node(NodeType::PackExpansion, ellipsis);
+                expansion->data.pack_expansion.expr = arg;
+                node->data.fn_call_expr.args.add(expansion);
+            } else {
+                node->data.fn_call_expr.args.add(arg);
+            }
         }
         if (!at_comma(TokenType::RPAREN)) {
             break;

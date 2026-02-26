@@ -4191,6 +4191,23 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     for (int i = 0; i < data.args.len; i++) {
         if (is_variadic && !is_extern && i >= va_start) {
             emit_dbg_location(data.args[i]);
+
+            // Check for pack expansion - use Array.copy_from to append all elements
+            if (data.args[i]->type == ast::NodeType::PackExpansion) {
+                auto &pack_data = data.args[i]->data.pack_expansion;
+                auto src_ptr = compile_expr_ref(fn, pack_data.expr).address;
+
+                // Call dest_array.copy_from(&src_array)
+                auto array_type = fn_spec.params.last(); // variadic param is Array<any>
+                auto array_struct = get_resolver()->resolve_struct_type(array_type);
+                auto copy_from_member = array_struct->find_member("copy_from");
+                assert(copy_from_member && "Array.copy_from() method not found");
+                auto copy_from_method_node = get_variant_member_node(copy_from_member, std::nullopt);
+                auto copy_from_fn = get_fn(copy_from_method_node);
+                builder.CreateCall(copy_from_fn->llvm_fn, {va_ptr, src_ptr});
+                continue;
+            }
+
             auto add_fn = get_system_fn("cx_array_add");
             auto arg = compile_assignment_to_type(fn, data.args[i], va_type);
             auto tsize =

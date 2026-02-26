@@ -25,7 +25,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, LifetimeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
-          ImplementBlock);
+          ImplementBlock, PackExpansion);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
@@ -517,6 +517,10 @@ struct PrefixExpr {
     Node *expr = nullptr;
 };
 
+struct PackExpansion {
+    Node *expr = nullptr; // The expression being expanded (e.g., args)
+};
+
 struct CapturePath {
     Node *function = nullptr;   // The function in the capture chain
     int32_t capture_index = -1; // Index of this variable in this function's captures
@@ -656,6 +660,7 @@ struct Node {
         TypeParam type_param;
         LifetimeParam lifetime_param;
         PrefixExpr prefix_expr;
+        PackExpansion pack_expansion;
         ExternDecl extern_decl;
         ImportDecl import_decl;
         ExportDecl export_decl;

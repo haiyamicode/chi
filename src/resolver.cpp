@@ -2246,6 +2246,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         return result_type;
     }
+    case NodeType::PackExpansion: {
+        // Pack expansion is only valid in function call arguments
+        // Resolve the inner expression - it should be a homogeneous variadic (Array<any>)
+        auto &data = node->data.pack_expansion;
+        auto expr_type = resolve(data.expr, scope);
+        if (!expr_type) {
+            return nullptr;
+        }
+
+        // For now, just validate it's an Array type (homogeneous variadics are Array<T>)
+        auto val_type = to_value_type(expr_type);
+        if (val_type->kind != TypeKind::Array) {
+            error(node, "pack expansion can only be used on variadic parameters (Array type)");
+            return nullptr;
+        }
+
+        // The type of the pack expansion is the array type
+        return expr_type;
+    }
     case NodeType::FnCallExpr: {
         auto &data = node->data.fn_call_expr;
         auto fn_ref_scope = scope.set_is_lhs(false).set_is_fn_call(true);
