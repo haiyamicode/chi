@@ -452,6 +452,15 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
         }
         break;
     }
+    case ast::NodeType::EnumDecl: {
+        auto &enum_decl = node->data.enum_decl;
+        if (enum_decl.base_struct) {
+            if (scan(enum_decl.base_struct, cursor_pos, result)) {
+                return true;
+            }
+        }
+        break;
+    }
     default:
         break;
     }
