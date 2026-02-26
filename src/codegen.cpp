@@ -187,8 +187,12 @@ void Compiler::compile_module(ast::Module *module) {
                         continue;
                     }
 
-                    // Compile specialized version of the function
-                    auto specialized_fn = compile_fn_proto(proto, variant, "");
+                    // For pack functions, use the generated proto (expanded params)
+                    auto variant_proto = (fn_type->data.fn.has_type_pack &&
+                                          variant->data.generated_fn.fn_proto)
+                                             ? variant->data.generated_fn.fn_proto
+                                             : proto;
+                    auto specialized_fn = compile_fn_proto(variant_proto, variant, "");
                     m_ctx->pending_fns.add(specialized_fn);
                 }
             } else {
@@ -607,8 +611,16 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
     assert(fn_def_node->type == ast::NodeType::FnDef);
     auto &fn_def = fn_def_node->data.fn_def;
-    // auto proto_node = is_generated ? node->data.generated_fn.fn_proto : fn_def.fn_proto;
+    // For pack functions, use the generated proto (expanded params)
     auto proto_node = fn_def.fn_proto;
+    if (is_generated && node->data.generated_fn.fn_proto) {
+        auto gen_ftype = node->data.generated_fn.fn_subtype;
+        if (gen_ftype && gen_ftype->kind == TypeKind::Subtype &&
+            gen_ftype->data.subtype.generic->kind == TypeKind::Fn &&
+            gen_ftype->data.subtype.generic->data.fn.has_type_pack) {
+            proto_node = node->data.generated_fn.fn_proto;
+        }
+    }
     auto &fn_proto = proto_node->data.fn_proto;
 
     if (!fn) {
@@ -677,6 +689,43 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
                 var, dbg_var, dbg_builder->createExpression(),
                 llvm::DILocation::get(sp->getContext(), param_line_no, 0, sp),
                 builder.GetInsertBlock());
+        }
+    }
+
+    // Populate pack_params for variadic type pack functions
+    if (is_generated && node->data.generated_fn.fn_proto) {
+        auto gen_ftype = node->data.generated_fn.fn_subtype;
+        if (gen_ftype && gen_ftype->kind == TypeKind::Subtype &&
+            gen_ftype->data.subtype.generic->kind == TypeKind::Fn &&
+            gen_ftype->data.subtype.generic->data.fn.has_type_pack) {
+            // Find the original pack param name
+            auto orig_proto = fn_def.fn_proto->data.fn_proto;
+            string pack_name;
+            size_t pack_param_idx = 0;
+            for (size_t i = 0; i < orig_proto.params.len; i++) {
+                if (orig_proto.params[i]->data.param_decl.is_pack_param) {
+                    pack_name = orig_proto.params[i]->name;
+                    pack_param_idx = i;
+                    break;
+                }
+            }
+            if (!pack_name.empty()) {
+                // Collect expanded param allocas from the generated proto
+                // Params from pack_param_idx onward are expanded from the pack
+                array<llvm::Value *> pack_allocas;
+                array<ChiType *> pack_types;
+                auto &gen_proto = proto_node->data.fn_proto;
+                auto specialized_fn_type = node->resolved_type;
+                for (size_t i = pack_param_idx; i < gen_proto.params.len; i++) {
+                    auto param_node = gen_proto.params[i];
+                    if (m_ctx->var_table.has_key(param_node)) {
+                        pack_allocas.add(m_ctx->var_table[param_node]);
+                        pack_types.add(specialized_fn_type->data.fn.params[i]);
+                    }
+                }
+                fn->pack_params[pack_name] = pack_allocas;
+                fn->pack_param_types[pack_name] = pack_types;
+            }
         }
     }
 
@@ -3900,7 +3949,25 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(
         builder.CreateCall(init_fn->llvm_fn, {va_ptr});
     }
 
+    int param_offset = 0;
     for (int i = 0; i < args.len; i++) {
+        // Handle pack expansion: args...
+        auto arg_node_check = args[i];
+        if (arg_node_check->type == ast::NodeType::PackExpansion) {
+            auto pack_expr = arg_node_check->data.pack_expansion.expr;
+            auto pack_name = pack_expr->name;
+            if (fn->pack_params.has_key(pack_name)) {
+                auto &pack_allocas = fn->pack_params[pack_name];
+                auto &pack_types = fn->pack_param_types[pack_name];
+                for (size_t j = 0; j < pack_allocas.len; j++) {
+                    auto val = builder.CreateLoad(compile_type(pack_types[j]), pack_allocas[j]);
+                    call_args.push_back(val);
+                }
+                param_offset += (int)pack_allocas.len - 1;
+            }
+            continue;
+        }
+
         if (is_variadic && !is_extern && i >= va_start) {
             emit_dbg_location(args[i]);
             auto add_fn = get_system_fn("cx_array_add");
@@ -3920,7 +3987,7 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(
             continue;
         }
         auto arg_node = args[i];
-        auto param_type = fn_spec.get_param_at(i);
+        auto param_type = fn_spec.get_param_at(i + param_offset);
 
         // Check if this argument is a ConstructExpr that will create a temporary
         // that needs destruction after the call
@@ -4188,26 +4255,77 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     // Track temporaries created for struct arguments that need destruction after the call
     std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
 
+    // Pre-expand pack expansion args into a flat list
+    // Each entry is either (ast_node, nullptr, nullptr) for normal args
+    // or (nullptr, llvm_value, chi_type) for expanded pack values
+    struct ExpandedArg {
+        ast::Node *node = nullptr;
+        llvm::Value *pack_value = nullptr;
+        ChiType *pack_type = nullptr;
+    };
+    std::vector<ExpandedArg> expanded_args;
     for (int i = 0; i < data.args.len; i++) {
+        auto arg_node = data.args[i];
+        if (arg_node->type == ast::NodeType::PackExpansion) {
+            auto pack_expr = arg_node->data.pack_expansion.expr;
+            auto pack_name = pack_expr->name;
+            if (fn->pack_params.has_key(pack_name)) {
+                auto &pack_allocas = fn->pack_params[pack_name];
+                auto &pack_types = fn->pack_param_types[pack_name];
+                for (size_t j = 0; j < pack_allocas.len; j++) {
+                    auto val = builder.CreateLoad(compile_type(pack_types[j]), pack_allocas[j]);
+                    expanded_args.push_back({nullptr, val, pack_types[j]});
+                }
+            }
+        } else {
+            expanded_args.push_back({arg_node, nullptr, nullptr});
+        }
+    }
+
+    for (int i = 0; i < (int)expanded_args.size(); i++) {
+        auto &ea = expanded_args[i];
+
         if (is_variadic && !is_extern && i >= va_start) {
-            emit_dbg_location(data.args[i]);
-            auto add_fn = get_system_fn("cx_array_add");
-            auto arg = compile_assignment_to_type(fn, data.args[i], va_type);
-            auto tsize =
-                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
-            auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
-            auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
-            builder.CreateStore(arg, ptr);
+            if (ea.pack_value) {
+                // Pack-expanded value going into variadic array
+                emit_dbg_location(expr);
+                auto add_fn = get_system_fn("cx_array_add");
+                auto val = compile_conversion(fn, ea.pack_value, ea.pack_type, va_type);
+                auto tsize =
+                    m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
+                auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
+                auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
+                builder.CreateStore(val, ptr);
+            } else {
+                emit_dbg_location(ea.node);
+                auto add_fn = get_system_fn("cx_array_add");
+                auto arg = compile_assignment_to_type(fn, ea.node, va_type);
+                auto tsize =
+                    m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
+                auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
+                auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
+                builder.CreateStore(arg, ptr);
+            }
             continue;
         }
         // For extern variadic functions, pass variadic args directly
         if (is_variadic && is_extern && i >= va_start) {
-            // Compile the argument without wrapping in array
-            auto arg = compile_expr(fn, data.args[i]);
-            args.push_back(arg);
+            if (ea.pack_value) {
+                args.push_back(ea.pack_value);
+            } else {
+                auto arg = compile_expr(fn, ea.node);
+                args.push_back(arg);
+            }
             continue;
         }
-        auto arg = data.args[i];
+
+        // Pack-expanded value as a regular (non-variadic) arg
+        if (ea.pack_value) {
+            args.push_back(ea.pack_value);
+            continue;
+        }
+
+        auto arg = ea.node;
         auto param_type = fn_spec.get_param_at(i);
 
         // Check if this argument is a ConstructExpr that will create a temporary
@@ -6327,12 +6445,51 @@ Function *Compiler::get_fn(ast::Node *node) {
         node->data.generated_fn.fn_subtype->is_placeholder) {
         auto &gfn = node->data.generated_fn;
         array<ChiType *> concrete_args;
-        for (auto arg : gfn.fn_subtype->data.subtype.args)
-            concrete_args.add(eval_type(arg));
 
+        // For pack function variants, expand variadic placeholder args using
+        // the enclosing function's concrete pack param types
+        bool has_pack_placeholder = false;
+        for (auto arg : gfn.fn_subtype->data.subtype.args) {
+            auto resolved = eval_type(arg);
+            if (resolved->kind == TypeKind::Placeholder &&
+                resolved->data.placeholder.is_variadic) {
+                has_pack_placeholder = true;
+                break;
+            }
+        }
+
+        if (has_pack_placeholder && m_fn) {
+            // Find the enclosing function's pack types and use them
+            for (auto arg : gfn.fn_subtype->data.subtype.args) {
+                auto resolved = eval_type(arg);
+                if (resolved->kind == TypeKind::Placeholder &&
+                    resolved->data.placeholder.is_variadic) {
+                    // Expand pack: use the concrete types from the enclosing function
+                    for (auto &entry : m_fn->pack_param_types.data) {
+                        for (size_t i = 0; i < entry.second.len; i++) {
+                            concrete_args.add(entry.second[i]);
+                        }
+                    }
+                } else {
+                    concrete_args.add(resolved);
+                }
+            }
+        } else {
+            for (auto arg : gfn.fn_subtype->data.subtype.args)
+                concrete_args.add(eval_type(arg));
+        }
+
+        auto original_fn_type = get_resolver()->node_get_type(gfn.original_fn);
         auto variant = get_resolver()->get_fn_variant(
-            get_resolver()->node_get_type(gfn.original_fn), &concrete_args, gfn.original_fn);
-        auto fn = compile_fn_proto(gfn.original_fn->data.fn_def.fn_proto, variant, "");
+            original_fn_type, &concrete_args, gfn.original_fn);
+
+        // For pack functions, use the generated proto (expanded params)
+        auto proto = gfn.original_fn->data.fn_def.fn_proto;
+        if (original_fn_type->data.fn.has_type_pack && variant->data.generated_fn.fn_proto) {
+            proto = variant->data.generated_fn.fn_proto;
+        }
+
+        auto fn = compile_fn_proto(proto, variant, "");
         m_ctx->pending_fns.add(fn);
         entry = m_ctx->function_table.get(get_resolver()->resolve_global_id(variant));
     }

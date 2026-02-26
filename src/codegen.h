@@ -83,6 +83,10 @@ struct Function {
     std::vector<ParameterInfo> parameter_info;
     llvm::Value *bind_ptr = nullptr;
 
+    // Variadic type pack: maps original pack param name to expanded param allocas
+    map<string, array<llvm::Value *>> pack_params;
+    map<string, array<ChiType *>> pack_param_types;
+
     // Error ownership for catch blocks (cleaned up at function return for diverge paths)
     struct ErrorOwner {
         llvm::Value *ptr_var;    // alloca holding error data pointer (null if already freed)

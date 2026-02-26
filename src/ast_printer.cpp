@@ -206,6 +206,7 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::TypeParam: {
         auto &data = node->data.type_param;
+        if (data.is_variadic) emit("...");
         emit("{}", node->name);
         if (!data.lifetime_bound.empty()) {
             emit(": '{}", data.lifetime_bound);
@@ -230,6 +231,7 @@ void AstPrinter::print_node(Node *node) {
         emit(node->name);
         if (data.type) {
             emit(": ");
+            if (data.is_pack_param) emit("...");
             print_node(data.type);
         }
         if (data.default_value) {
@@ -986,6 +988,12 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.prefix_expr;
         emit("{} ", data.prefix->str);
         print_node(data.expr);
+        break;
+    }
+    case NodeType::PackExpansion: {
+        auto &data = node->data.pack_expansion;
+        print_node(data.expr);
+        emit("...");
         break;
     }
     case NodeType::SwitchExpr: {

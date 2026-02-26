@@ -36,7 +36,8 @@ TESTS_LIST = 00_fib.test \
 		33_iterators.test \
 		34_rune.test \
 		35_slice.test \
-		36_optional_ops.test
+		36_optional_ops.test \
+		37_variadic_pack.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
@@ -107,6 +108,36 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	for f in testdata/30_safe_errors/*.xc testdata/30_safe_errors/*.x; do \
 		name=$$(basename $$f); \
 		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_safe 2>&1); \
+		if [ $$? -eq 0 ]; then \
+			echo "error: $$name should have been rejected but compiled successfully"; \
+			failed=1; \
+		else \
+			expected=$$(grep '// expect-error:' $$f | head -1 | sed 's/.*expect-error: *//'); \
+			if [ -n "$$expected" ] && ! echo "$$errmsg" | grep -q "$$expected"; then \
+				echo "error: $$name wrong error (expected '$$expected')"; \
+				echo "  got: $$(echo "$$errmsg" | head -1)"; \
+				failed=1; \
+			fi; \
+		fi; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
+
+# Special rule for variadic pack test — also tests rejection cases
+37_variadic_pack.test: 37_variadic_pack.expect
+	echo Test: 37_variadic_pack...
+	@$(CHI) -o $(TMP).37_variadic_pack -c 37_variadic_pack.xc && $(TMP).37_variadic_pack 2>&1 >37_variadic_pack.output
+	@if [ "x`diff -qbu 37_variadic_pack.expect 37_variadic_pack.output`" != "x" ]; \
+	then \
+		echo "error in test 37_variadic_pack (output mismatch)"; \
+		diff -u 37_variadic_pack.expect 37_variadic_pack.output; \
+		rm -f 37_variadic_pack.output; \
+		exit 1; \
+	fi; \
+	rm -f 37_variadic_pack.output
+	@failed=0; \
+	for f in testdata/37_variadic_pack_errors/*.xc; do \
+		name=$$(basename $$f); \
+		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_pack 2>&1); \
 		if [ $$? -eq 0 ]; then \
 			echo "error: $$name should have been rejected but compiled successfully"; \
 			failed=1; \

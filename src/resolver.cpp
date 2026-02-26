@@ -866,6 +866,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(param, errors::VARIADIC_NOT_FINAL, param->name);
                 return create_type(TypeKind::Fn);
             }
+            if (pdata.is_pack_param && !is_last) {
+                error(param, "variadic type pack parameter must be the last parameter");
+                return create_type(TypeKind::Fn);
+            }
             // Pass expected parameter type for inference if available
             ChiType *expected_param_type = nullptr;
             if (expected_fn && (size_t)i < expected_fn->params.len) {
@@ -956,6 +960,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto fn_type = get_fn_type(return_type, &param_types, is_variadic, method_container,
                                    is_extern, &type_param_types);
+
+        // Check if any param uses a variadic type pack
+        for (auto param : data.params) {
+            if (param->data.param_decl.is_pack_param) {
+                fn_type->data.fn.has_type_pack = true;
+                break;
+            }
+        }
 
         if (fn_lifetime_list.len > 0) {
             fn_type->data.fn.lifetime_params = fn_lifetime_list;
@@ -3196,6 +3208,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         phty->data.placeholder.index = data.index;
         phty->data.placeholder.name = node->name;
+        phty->data.placeholder.is_variadic = data.is_variadic;
 
         assert(data.source_decl && "Type parameter without source declaration");
         phty->data.placeholder.source_decl = data.source_decl;
@@ -3249,6 +3262,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             panic("unhandled prefix operator {}", data.prefix->to_string());
         }
         break;
+    }
+    case NodeType::PackExpansion: {
+        // Pack expansion: args... — resolve the pack parameter
+        auto &data = node->data.pack_expansion;
+        auto type = resolve(data.expr, scope);
+        // Validate that the expression refers to a pack parameter
+        auto decl = data.expr->get_decl();
+        if (!decl || decl->type != NodeType::ParamDecl ||
+            !decl->data.param_decl.is_pack_param) {
+            error(node, "pack expansion '...' can only be used on a variadic type pack parameter");
+            return type;
+        }
+        return type;
     }
     case NodeType::ExternDecl: {
         auto &data = node->data.extern_decl;
@@ -4997,7 +5023,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     auto n_params = fn->params.len;
 
     // Count required parameters (those without defaults, excluding variadic)
-    size_t params_required = n_params - (fn->is_variadic ? 1 : 0);
+    size_t params_required = n_params - (fn->is_variadic ? 1 : 0) - (fn->has_type_pack ? 1 : 0);
     size_t max_args = params_required;
     if (fn_decl && fn_decl->type == ast::NodeType::FnDef) {
         auto *fn_proto_node = fn_decl->data.fn_def.fn_proto;
@@ -5005,15 +5031,25 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         params_required = 0;
         for (size_t i = 0; i < fn_proto.params.len; i++) {
             auto param = fn_proto.params[i];
-            if (!param->data.param_decl.default_value && !param->data.param_decl.is_variadic) {
+            if (!param->data.param_decl.default_value && !param->data.param_decl.is_variadic &&
+                !param->data.param_decl.is_pack_param) {
                 params_required++;
             }
         }
-        max_args = n_params - (fn->is_variadic ? 1 : 0);
+        max_args = n_params - (fn->is_variadic ? 1 : 0) - (fn->has_type_pack ? 1 : 0);
+    }
+
+    // Check if any arg is a pack expansion — skip arg count check since it expands to N args
+    bool has_pack_expansion_arg = false;
+    for (size_t i = 0; i < n_args; i++) {
+        if (args->at(i)->type == ast::NodeType::PackExpansion) {
+            has_pack_expansion_arg = true;
+            break;
+        }
     }
 
     // Validate: n_args must be >= required and <= total (non-variadic) or >= required (variadic)
-    bool ok = n_args >= params_required && (fn->is_variadic || n_args <= max_args);
+    bool ok = has_pack_expansion_arg || (n_args >= params_required && (fn->is_variadic || fn->has_type_pack || n_args <= max_args));
     if (!ok) {
         if (fn_decl && params_required != max_args) {
             error(node, "wrong number of arguments: expected {} to {}, got {}", params_required,
@@ -5027,6 +5063,173 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     // Default values for missing arguments are handled by codegen
     // (compile_construction and compile_fn_args inject them at compile time).
     // We do NOT mutate the AST args list here.
+
+    // Handle variadic type pack functions — separate path from normal generics
+    if (fn->is_generic() && fn->has_type_pack) {
+        assert(node->type == ast::NodeType::FnCallExpr);
+        auto &fn_call_data = node->data.fn_call_expr;
+
+        // Find the pack param index (must be last param)
+        size_t pack_param_idx = fn->params.len - 1;
+
+        // Check for explicit type arguments (e.g., forward_print<string, int>(...))
+        bool has_explicit_type_args = fn_call_data.type_args.len > 0;
+        array<ChiType *> explicit_types;
+        if (has_explicit_type_args) {
+            for (size_t i = 0; i < fn_call_data.type_args.len; i++) {
+                explicit_types.add(resolve_value(fn_call_data.type_args[i], scope));
+            }
+        }
+
+        // Resolve all arguments to get their types.
+        // When explicit type args are provided, use pack types as hints for resolution.
+        array<ChiType *> arg_types;
+        for (size_t i = 0; i < n_args; i++) {
+            auto arg = args->at(i);
+
+            // Determine expected type for this arg position
+            ChiType *expected = nullptr;
+            if (i < pack_param_idx) {
+                expected = fn->params[i];
+            } else if (has_explicit_type_args) {
+                size_t pack_idx = i - pack_param_idx;
+                if (pack_idx < explicit_types.len) {
+                    expected = explicit_types[pack_idx];
+                }
+            }
+            auto arg_scope = scope.set_value_type(expected).set_move_outlet(nullptr);
+
+            // Handle pack expansion args (other_pack...) — resolve inner expr
+            if (arg->type == ast::NodeType::PackExpansion) {
+                auto inner = arg->data.pack_expansion.expr;
+                auto inner_type = resolve(inner, arg_scope);
+                arg->resolved_type = inner_type;
+                arg_types.add(inner_type);
+                continue;
+            }
+
+            auto arg_type = resolve(arg, arg_scope);
+            arg_types.add(arg_type);
+        }
+
+        // Build type_args: use explicit type args if provided, otherwise infer from arg types
+        array<ChiType *> type_args;
+        if (has_explicit_type_args) {
+            type_args = explicit_types;
+
+            // Validate actual arg types against the explicit type args
+            for (size_t i = 0; i < n_args; i++) {
+                ChiType *expected_type = nullptr;
+                if (i < pack_param_idx) {
+                    // Non-pack params: not covered by explicit type args here
+                    continue;
+                } else {
+                    size_t pack_idx = i - pack_param_idx;
+                    if (pack_idx < explicit_types.len) {
+                        expected_type = explicit_types[pack_idx];
+                    }
+                }
+                if (expected_type && !can_assign(arg_types[i], expected_type)) {
+                    error(args->at(i), "cannot convert from {} to {}",
+                          format_type_display(arg_types[i]),
+                          format_type_display(expected_type));
+                    return fn->return_type;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < fn->type_params.len; i++) {
+                auto tp = to_value_type(fn->type_params[i]);
+                if (tp->kind == TypeKind::Placeholder && tp->data.placeholder.is_variadic) {
+                    // Pack type param — add all remaining arg types
+                    for (size_t j = pack_param_idx; j < n_args; j++) {
+                        type_args.add(arg_types[j]);
+                    }
+                } else {
+                    // Regular type param — infer from corresponding arg
+                    if (i < pack_param_idx && i < arg_types.len) {
+                        type_args.add(arg_types[i]);
+                    }
+                }
+            }
+        }
+
+        // Validate concrete pack types against inferred constraints
+        // (e.g., if pack was used as printf(args...), first type must be string)
+        {
+            // Find the variadic type param and validate pack constraints
+            for (size_t i = 0; i < fn->type_params.len; i++) {
+                auto tp = to_value_type(fn->type_params[i]);
+                if (tp->kind == TypeKind::Placeholder && tp->data.placeholder.is_variadic) {
+                    auto &ph = tp->data.placeholder;
+                    size_t pack_start = i;
+                    size_t pack_count = type_args.len - pack_start;
+
+                    // If type_args are placeholders (inside another generic pack fn),
+                    // propagate constraint groups instead of validating.
+                    if (pack_count > 0) {
+                        auto first_pack_type = to_value_type(type_args[pack_start]);
+                        if (first_pack_type->kind == TypeKind::Placeholder &&
+                            first_pack_type->data.placeholder.is_variadic) {
+                            auto &caller_ph = first_pack_type->data.placeholder;
+                            for (size_t g = 0; g < ph.pack_constraint_groups.len; g++) {
+                                caller_ph.pack_constraint_groups.add(ph.pack_constraint_groups[g]);
+                            }
+                            break;
+                        }
+                    }
+
+                    // Validate concrete types against each constraint group independently
+                    for (size_t g = 0; g < ph.pack_constraint_groups.len; g++) {
+                        auto &group = ph.pack_constraint_groups[g];
+
+                        // Check minimum arg count
+                        if (pack_count < group.types.len) {
+                            if (group.allows_more) {
+                                error(node, "variadic pack expands to {} arguments, but at least {} are required",
+                                      pack_count, group.types.len);
+                            } else {
+                                error(node, "variadic pack expands to {} arguments, but {} are required",
+                                      pack_count, group.types.len);
+                            }
+                            return fn->return_type;
+                        }
+
+                        // Check max arg count (non-variadic callee: pack can't be longer)
+                        if (!group.allows_more && pack_count > group.types.len) {
+                            error(node, "variadic pack expands to {} arguments, but only {} are expected",
+                                  pack_count, group.types.len);
+                            return fn->return_type;
+                        }
+
+                        // Check each type constraint
+                        for (size_t j = 0; j < group.types.len && j < pack_count; j++) {
+                            auto concrete = type_args[pack_start + j];
+                            auto required = group.types[j];
+                            if (!can_assign(concrete, required)) {
+                                error(node,
+                                      "pack expansion type mismatch at position {}: "
+                                      "expected {}, got {}",
+                                      j + 1, format_type_display(required),
+                                      format_type_display(concrete));
+                                return fn->return_type;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Get specialized function variant
+        auto fn_decl_node = fn_call_data.fn_ref_expr->get_decl();
+        assert(fn_decl_node && fn_decl_node->type == ast::NodeType::FnDef);
+        auto original_fn_type = node_get_type(fn_decl_node);
+        assert(original_fn_type && original_fn_type->kind == TypeKind::Fn);
+
+        auto fn_variant = get_fn_variant(original_fn_type, &type_args, fn_decl_node);
+        fn_call_data.generated_fn = fn_variant;
+        return fn_variant->resolved_type->data.fn.return_type;
+    }
 
     // Check if this is a generic function call that needs explicit type parameters
     if (fn->is_generic()) {
@@ -5237,6 +5440,45 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         for (size_t i = 0; i < n_args; i++) {
             auto param_type = fn->get_param_at(i);
             auto arg = args->at(i);
+
+            // Pack expansion (args...) — unify pack placeholder against callee params
+            if (arg->type == ast::NodeType::PackExpansion) {
+                auto inner = arg->data.pack_expansion.expr;
+                auto arg_scope = scope.set_value_type(nullptr).set_move_outlet(nullptr);
+                auto arg_type = resolve(inner, arg_scope);
+                arg->resolved_type = arg_type;
+
+                // Validate: must be a pack parameter
+                auto decl = inner->get_decl();
+                if (!decl || decl->type != NodeType::ParamDecl ||
+                    !decl->data.param_decl.is_pack_param) {
+                    error(arg, "pack expansion '...' can only be used on a variadic type pack parameter");
+                    continue;
+                }
+
+                // Infer pack constraints from the callee's param types via unification.
+                // The pack fills params from position i onward. Non-variadic params
+                // become type constraints; if the callee is variadic, the pack can
+                // carry additional args beyond the required ones.
+                auto unwrapped = to_value_type(arg_type);
+                if (unwrapped->kind == TypeKind::Placeholder &&
+                    unwrapped->data.placeholder.is_variadic) {
+                    auto &ph = unwrapped->data.placeholder;
+                    auto va_start = fn->get_va_start();
+                    // Create a constraint group for this call site
+                    ChiTypePlaceholder::PackConstraintGroup group;
+                    for (size_t j = i; j < (size_t)va_start; j++) {
+                        auto p = fn->get_param_at(j);
+                        if (p) {
+                            group.types.add(p);
+                        }
+                    }
+                    group.allows_more = fn->is_variadic || fn->is_extern;
+                    ph.pack_constraint_groups.add(group);
+                }
+                continue;
+            }
+
             // Clear move_outlet for function args - they're passed by value,
             // not written directly to any outer destination
             auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
@@ -6068,11 +6310,46 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
     new_proto->data.fn_proto.return_type = orig_proto->data.fn_proto.return_type;
     generated_fn->data.generated_fn.fn_proto = new_proto;
 
-    for (auto param : orig_proto->data.fn_proto.params) {
-        auto new_param = create_node(NodeType::ParamDecl);
-        param->clone(new_param);
-        new_param->name = param->name;
-        new_proto->data.fn_proto.params.add(new_param);
+    // For pack functions, expand the pack param into N params in the new proto
+    if (gen.has_type_pack) {
+        // Find the pack param index (must be last)
+        size_t pack_param_idx = orig_proto->data.fn_proto.params.len - 1;
+
+        // Copy non-pack params
+        for (size_t i = 0; i < pack_param_idx; i++) {
+            auto param = orig_proto->data.fn_proto.params[i];
+            auto new_param = create_node(NodeType::ParamDecl);
+            param->clone(new_param);
+            new_param->name = param->name;
+            new_proto->data.fn_proto.params.add(new_param);
+        }
+
+        // Find the variadic type param to determine which type_args belong to the pack
+        size_t pack_type_start = 0;
+        for (size_t i = 0; i < gen.type_params.len; i++) {
+            auto tp = to_value_type(gen.type_params[i]);
+            if (tp->kind == TypeKind::Placeholder && tp->data.placeholder.is_variadic) {
+                pack_type_start = i;
+                break;
+            }
+        }
+
+        // Expand pack param into N individual params
+        auto pack_param = orig_proto->data.fn_proto.params[pack_param_idx];
+        for (size_t i = pack_type_start; i < type_args->len; i++) {
+            auto new_param = create_node(NodeType::ParamDecl);
+            pack_param->clone(new_param);
+            new_param->name = fmt::format("{}_{}", pack_param->name, i - pack_type_start);
+            new_param->data.param_decl.is_pack_param = false;
+            new_proto->data.fn_proto.params.add(new_param);
+        }
+    } else {
+        for (auto param : orig_proto->data.fn_proto.params) {
+            auto new_param = create_node(NodeType::ParamDecl);
+            param->clone(new_param);
+            new_param->name = param->name;
+            new_proto->data.fn_proto.params.add(new_param);
+        }
     }
 
     for (auto arg : *type_args) {
@@ -6120,10 +6397,23 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
         }
 
         // Include the function's own type parameters
-        for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
-            // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in
-            // params/return contain raw Placeholder types, not TypeSymbol wrappers
-            subs[to_value_type(gen.type_params[i])] = type_args->at(i);
+        if (gen.has_type_pack) {
+            // For pack functions, only map non-variadic type params
+            for (size_t i = 0; i < gen.type_params.len; i++) {
+                auto tp = to_value_type(gen.type_params[i]);
+                if (tp->kind == TypeKind::Placeholder && tp->data.placeholder.is_variadic) {
+                    break; // Skip variadic type param — can't map 1:1
+                }
+                if (i < type_args->len) {
+                    subs[tp] = type_args->at(i);
+                }
+            }
+        } else {
+            for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
+                // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in
+                // params/return contain raw Placeholder types, not TypeSymbol wrappers
+                subs[to_value_type(gen.type_params[i])] = type_args->at(i);
+            }
         }
         auto fn_name = fn_node->name + "<" + format_type_list(type_args) + ">";
         auto variant_id = resolve_global_id(generated_fn);
@@ -6144,6 +6434,55 @@ ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
     auto generic_fn = data.generic;
     assert(generic_fn->kind == TypeKind::Fn);
     auto &generic_fn_data = generic_fn->data.fn;
+
+    // Handle variadic type pack functions
+    if (generic_fn_data.has_type_pack) {
+        // Find the variadic type param and its index in data.args
+        size_t pack_type_start = 0;
+        for (size_t i = 0; i < generic_fn_data.type_params.len; i++) {
+            auto tp = to_value_type(generic_fn_data.type_params[i]);
+            if (tp->kind == TypeKind::Placeholder && tp->data.placeholder.is_variadic) {
+                pack_type_start = i;
+                break;
+            }
+        }
+
+        // Build substitution map for non-pack type params only
+        map<ChiType *, ChiType *> type_substitutions;
+        for (size_t i = 0; i < pack_type_start; i++) {
+            auto type_param = to_value_type(generic_fn_data.type_params[i]);
+            type_substitutions[type_param] = data.args[i];
+        }
+
+        // Substitute return type (packs can't appear in return types for now)
+        auto specialized_return_type =
+            type_placeholders_sub_map(generic_fn_data.return_type, &type_substitutions);
+
+        // Expand params: non-pack params get substituted normally,
+        // pack param expands to N concrete params from data.args
+        array<ChiType *> specialized_params;
+        for (size_t i = 0; i < generic_fn_data.params.len; i++) {
+            auto param_type = generic_fn_data.params[i];
+            auto unwrapped = to_value_type(param_type);
+            if (unwrapped->kind == TypeKind::Placeholder && unwrapped->data.placeholder.is_variadic) {
+                // Pack param — expand to N concrete types
+                for (size_t j = pack_type_start; j < data.args.len; j++) {
+                    specialized_params.add(data.args[j]);
+                }
+            } else {
+                specialized_params.add(type_placeholders_sub_map(param_type, &type_substitutions));
+            }
+        }
+
+        auto container_elem =
+            generic_fn_data.container_ref ? generic_fn_data.container_ref->get_elem() : nullptr;
+        auto specialized_fn_type =
+            get_fn_type(specialized_return_type, &specialized_params, false,
+                        container_elem, generic_fn_data.is_extern);
+
+        data.final_type = specialized_fn_type;
+        return specialized_fn_type;
+    }
 
     // Create type substitution map
     map<ChiType *, ChiType *> type_substitutions;

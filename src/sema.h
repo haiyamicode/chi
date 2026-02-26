@@ -59,6 +59,7 @@ struct ChiTypeFn {
     bool is_static = false; // static method variant — container_ref for ID only, no 'this' param
     array<ChiType *> type_params = {};
     array<ChiLifetime *> lifetime_params = {};
+    bool has_type_pack = false; // true if function has a variadic type pack parameter
 
     ChiType *get_param_at(size_t index);
     int get_va_start();
@@ -247,6 +248,14 @@ struct ChiTypePlaceholder {
         nullptr; // The struct/function declaration that owns this type parameter
     string name; // The name of the type parameter (T, U, etc.)
     ChiLifetime *lifetime_bound = nullptr; // Resolved lifetime from T: 'a
+    bool is_variadic = false; // true for ...T (variadic type pack)
+    // Inferred constraints from pack expansion usage at each call site.
+    // Each group represents one call site where the pack is expanded (e.g., printf(args...)).
+    struct PackConstraintGroup {
+        array<ChiType *> types = {};  // required param types for each position
+        bool allows_more = false;     // true if callee is variadic (pack can be longer)
+    };
+    array<PackConstraintGroup> pack_constraint_groups = {};
 };
 
 struct ChiTypeFnLambda {

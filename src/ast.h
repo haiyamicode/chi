@@ -25,7 +25,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, LifetimeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
-          ImplementBlock);
+          ImplementBlock, PackExpansion);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
@@ -258,6 +258,7 @@ struct FnDef {
 struct ParamDecl {
     Node *type = nullptr;
     bool is_variadic = false;
+    bool is_pack_param = false;  // true for param: ...T (variadic type pack param)
     Node *default_value = nullptr;
     ChiLifetime *borrow_lifetime = nullptr; // for borrowing value params (e.g. func() types)
 };
@@ -268,6 +269,7 @@ struct TypeParam {
     Node *default_type = nullptr;
     Node *source_decl = nullptr; // The struct/function that owns this type parameter
     string lifetime_bound;       // "a" for T: 'a (lifetime bound)
+    bool is_variadic = false;    // true for ...T (variadic type pack)
 };
 
 struct LifetimeParam {
@@ -517,6 +519,10 @@ struct PrefixExpr {
     Node *expr = nullptr;
 };
 
+struct PackExpansionExpr {
+    Node *expr = nullptr; // the pack variable being expanded (e.g., 'args' in 'args...')
+};
+
 struct CapturePath {
     Node *function = nullptr;   // The function in the capture chain
     int32_t capture_index = -1; // Index of this variable in this function's captures
@@ -668,6 +674,7 @@ struct Node {
         GeneratedFn generated_fn;
         ThrowStmt throw_stmt;
         ImplementBlockData implement_block;
+        PackExpansionExpr pack_expansion;
 
         NodeData() {}
 
@@ -788,6 +795,7 @@ struct Node {
     Node *get_decl(optional<TypeId> container_type_id = std::nullopt) {
         switch (type) {
         case NodeType::VarDecl:
+        case NodeType::ParamDecl:
             return this;
         case NodeType::Identifier:
             return data.identifier.decl ? data.identifier.decl->get_decl() : nullptr;

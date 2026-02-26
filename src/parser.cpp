@@ -906,12 +906,18 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
 
                 lifetime_params.add(lt_node);
             } else {
-                // Type parameter: T or T: SomeInterface
+                // Type parameter: T, T: SomeInterface, or ...T (variadic type pack)
+                bool is_variadic_pack = false;
+                if (param_token->type == TokenType::ELLIPSIS) {
+                    consume();
+                    is_variadic_pack = true;
+                }
                 auto param_iden = expect(TokenType::IDEN);
                 auto param_node = create_node(NodeType::TypeParam, param_iden);
                 param_node->name = param_iden->str;
                 param_node->data.type_param.index = type_params.len;
                 param_node->data.type_param.source_decl = fn_node;
+                param_node->data.type_param.is_variadic = is_variadic_pack;
 
                 if (next_is(TokenType::COLON)) {
                     consume();
@@ -1026,15 +1032,22 @@ Node *Parser::parse_fn_param() {
     // Check if type is provided (colon indicates type annotation)
     auto token = get();
     Node *type = nullptr;
+    bool is_pack_param = false;
     if (token->type == TokenType::COLON) {
-        // Has type annotation
-        type = parse_type_expr();
+        consume(); // consume ':'
+        // Has type annotation — check for ...T (variadic type pack)
+        if (next_is(TokenType::ELLIPSIS)) {
+            consume();
+            is_pack_param = true;
+        }
+        type = parse_type_expr(true);
     }
     // If no colon, type remains nullptr - will be inferred during resolution
 
     auto param = create_node(NodeType::ParamDecl, iden);
     param->data.param_decl.type = type;
     param->data.param_decl.is_variadic = is_variadic;
+    param->data.param_decl.is_pack_param = is_pack_param;
 
     // Check for default value
     if (next_is(TokenType::ASS)) {
@@ -1551,7 +1564,16 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
             break;
         } else {
             auto arg = parse_child_expr_construct(lhs, parent);
-            node->data.fn_call_expr.args.add(arg);
+            // Pack expansion: args...
+            if (next_is(TokenType::ELLIPSIS)) {
+                auto ellipsis_token = get();
+                consume();
+                auto pack_node = create_node(NodeType::PackExpansion, ellipsis_token);
+                pack_node->data.pack_expansion.expr = arg;
+                node->data.fn_call_expr.args.add(pack_node);
+            } else {
+                node->data.fn_call_expr.args.add(arg);
+            }
         }
         if (!at_comma(TokenType::RPAREN)) {
             break;
