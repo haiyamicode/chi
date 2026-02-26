@@ -516,6 +516,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     auto &llvm_cu = *(m_ctx->dbg_cu);
 
     switch (type->kind) {
+    case TypeKind::Never:
     case TypeKind::Void: {
         return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
     }
@@ -684,7 +685,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     auto fn_type = fn->fn_type;
     auto return_type = fn_type->data.fn.return_type;
     auto return_type_l = compile_type(return_type);
-    if (return_type->kind != TypeKind::Void) {
+    if (return_type->kind != TypeKind::Void && return_type->kind != TypeKind::Never) {
         fn->return_value =
             sret_arg ? sret_arg : builder.CreateAlloca(return_type_l, nullptr, "_fn_ret");
     }
@@ -762,7 +763,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
     }
-    if (return_type->kind == TypeKind::Void || fn->use_sret()) {
+    if (return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
+        fn->use_sret()) {
         builder.CreateRetVoid();
     } else {
         auto value = builder.CreateLoad(return_type_l, fn->return_value);
@@ -1880,6 +1882,11 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
 
 llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
                                           ChiType *to_type) {
+    // never is the bottom type — unreachable code, return undef
+    if (from_type->kind == TypeKind::Never) {
+        return llvm::UndefValue::get(compile_type(to_type));
+    }
+
     switch (to_type->kind) {
     case TypeKind::Any: {
         if (from_type->kind == TypeKind::Any) {
@@ -5081,6 +5088,12 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         for (auto var : stmt->data.fn_call_expr.post_narrow_vars) {
             compile_stmt(fn, var);
         }
+        auto call_type = get_chitype(stmt);
+        if (call_type && call_type->kind == TypeKind::Never) {
+            auto &builder = *m_ctx->llvm_builder.get();
+            builder.CreateUnreachable();
+            scope->branched = true;
+        }
         break;
     }
     default:
@@ -6572,6 +6585,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         }
         return compile_type(type->get_elem());
     }
+    case TypeKind::Never:
     case TypeKind::Void: {
         return llvm::Type::getVoidTy(llvm_ctx);
     }

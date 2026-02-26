@@ -417,7 +417,7 @@ func printf(format: string, ...values: any) {
     }
 }
 
-func panic(message: string) {
+func panic(message: string) never {
     unsafe {
         cx_panic(&message);
     }

@@ -25,7 +25,7 @@ struct ChiLifetime;
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, Rune, String, Struct, Pointer,
           Reference, MutRef, MoveRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
-          Undefined)
+          Undefined, Never)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
@@ -476,6 +476,7 @@ struct ChiType {
         case TypeKind::Char:
         case TypeKind::Rune:
         case TypeKind::Void:
+        case TypeKind::Never:
             return true;
         default:
             return false;

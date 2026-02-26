@@ -1,0 +1,19 @@
+-- Guard clause narrowing --
+guard_die(5)=6
+guard_panic(10)=11
+
+-- Positive narrowing with never else --
+positive_never(3)=4
+
+-- Compound guard --
+compound_guard(1,2)=3
+
+-- Assert narrowing --
+assert_narrow(7)=8
+
+-- Never as bottom type --
+coalesce(42)=42
+if_else_never(9)=9
+
+-- DotExpr with never guard --
+dot_guard_never=101

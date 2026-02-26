@@ -103,6 +103,7 @@ void Resolver::context_init_primitives() {
     // Promise is now defined as a Chi-native struct in runtime.xc
     // system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
+    system_types.never_ = create_type(TypeKind::Never);
 
     // Create a system lambda type for LLVM compatibility
     // All lambdas use the same underlying structure: {ptr, size, data, flags}
@@ -135,6 +136,7 @@ void Resolver::context_init_primitives() {
     add_primitive("uint16", create_int_type(16, true));
     add_primitive("uint32", create_int_type(32, true));
     add_primitive("uint64", create_int_type(64, true));
+    add_primitive("never", system_types.never_);
 
     // non-primitive builtins
     add_primitive("Result", system_types.result);
@@ -299,6 +301,11 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     }
 
     if (is_same_type(from_type, to_type)) {
+        return true;
+    }
+
+    // never is the bottom type — assignable to any type
+    if (from_type->kind == TypeKind::Never) {
         return true;
     }
 
@@ -1730,6 +1737,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.return_stmt;
         assert(scope.parent_fn);
         auto return_type = scope.parent_fn->data.fn.return_type;
+
+        if (return_type && return_type->kind == TypeKind::Never) {
+            error(node, "cannot return from a function with return type 'never'");
+            return nullptr;
+        }
 
         // For async functions, the value type for the expression is the inner Promise value type
         ChiType *value_type_hint = return_type;
@@ -3754,6 +3766,8 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "unknown";
     case TypeKind::Undefined:
         return "undefined";
+    case TypeKind::Never:
+        return "never";
     default:
         break;
     }
@@ -5424,6 +5438,10 @@ bool Resolver::always_terminates(ast::Node *node) {
     case NodeType::ThrowStmt:
     case NodeType::BranchStmt:
         return true;
+    case NodeType::FnCallExpr: {
+        auto type = node_get_type(node);
+        return type && type->kind == TypeKind::Never;
+    }
     case NodeType::Block: {
         auto &stmts = node->data.block.statements;
         return stmts.len > 0 && always_terminates(stmts[stmts.len - 1]);
