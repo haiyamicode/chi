@@ -518,10 +518,10 @@ struct Array<T> {
         return result;
     }
 
-    func map<U>(transform: func (value: T) U) Array<U> {
+    func map<U>(transform: func (value: T, index: uint32) U) Array<U> {
         var result: Array<U> = [];
-        for item in this {
-            result.add(transform(item));
+        for item, i in this {
+            result.add(transform(item, i));
         }
         return result;
     }

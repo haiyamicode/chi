@@ -905,6 +905,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             param_types.add(param_type);
         }
 
+        // Lambda arity flexibility: if the lambda declares fewer params than the
+        // expected function type, pad with the remaining expected param types.
+        // This allows e.g. a.map(v => v * 2) when map expects func(T, uint32) U.
+        if (is_lambda && expected_fn && param_types.len < expected_fn->params.len) {
+            for (size_t i = param_types.len; i < expected_fn->params.len; i++) {
+                param_types.add(expected_fn->params[i]);
+            }
+        }
+
         // Auto-default trailing ?T params to null (walk backwards, stop at first non-optional)
         for (int i = data.params.len - 1; i >= 0; i--) {
             auto &pdata = data.params[i]->data.param_decl;
