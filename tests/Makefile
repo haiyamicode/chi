@@ -10,7 +10,7 @@ TESTS_LIST = 00_fib.test \
     06_enum.test \
     07_loops.test \
 		08_module.test \
-		09_switch.test \
+		09_control.test \
 		10_copy.test \
 		11_copy_builtins.test \
 		12_references.test \

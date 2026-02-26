@@ -59,9 +59,9 @@ void AstPrinter::print_node(Node *node) {
             // so the loop's \n already creates a blank line.
             // VarDecl/ImportDecl/ExportDecl don't, so preserve source
             // blank lines after them.
-            if (prev_decl && (prev_decl->type == NodeType::VarDecl ||
-                              prev_decl->type == NodeType::ImportDecl ||
-                              prev_decl->type == NodeType::ExportDecl) &&
+            if (prev_decl &&
+                (prev_decl->type == NodeType::VarDecl || prev_decl->type == NodeType::ImportDecl ||
+                 prev_decl->type == NodeType::ExportDecl) &&
                 has_blank_line_between(prev_decl, decl)) {
                 emit("\n");
             }
@@ -141,13 +141,16 @@ void AstPrinter::print_node(Node *node) {
         if (data.lifetime_params.len > 0 || data.type_params.len > 0) {
             emit("<");
             for (int i = 0; i < data.lifetime_params.len; i++) {
-                if (i > 0) emit(", ");
+                if (i > 0)
+                    emit(", ");
                 auto *lt = data.lifetime_params[i];
                 emit("'{}", lt->name);
                 auto &bound = lt->data.lifetime_param.bound;
-                if (!bound.empty()) emit(": '{}", bound);
+                if (!bound.empty())
+                    emit(": '{}", bound);
             }
-            if (data.lifetime_params.len > 0 && data.type_params.len > 0) emit(", ");
+            if (data.lifetime_params.len > 0 && data.type_params.len > 0)
+                emit(", ");
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
@@ -212,7 +215,8 @@ void AstPrinter::print_node(Node *node) {
         } else if (data.type_bounds.len > 0) {
             emit(": ");
             for (size_t i = 0; i < data.type_bounds.len; i++) {
-                if (i > 0) emit(" + ");
+                if (i > 0)
+                    emit(" + ");
                 print_node(data.type_bounds[i]);
             }
         }
@@ -270,7 +274,7 @@ void AstPrinter::print_node(Node *node) {
                 print_node(stmt);
                 if (stmt->type == NodeType::ForStmt || stmt->type == NodeType::WhileStmt) {
                     // These handlers print their own \n
-                } else if (stmt->type == NodeType::IfStmt || stmt->type == NodeType::Block) {
+                } else if (stmt->type == NodeType::IfExpr || stmt->type == NodeType::Block) {
                     emit("\n");
                 } else {
                     emit(";");
@@ -312,9 +316,15 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::DestructureDecl: {
         auto &data = node->data.destructure_decl;
         switch (data.kind) {
-        case ast::VarKind::Mutable: emit("var "); break;
-        case ast::VarKind::Immutable: emit("let "); break;
-        case ast::VarKind::Constant: emit("const "); break;
+        case ast::VarKind::Mutable:
+            emit("var ");
+            break;
+        case ast::VarKind::Immutable:
+            emit("let ");
+            break;
+        case ast::VarKind::Constant:
+            emit("const ");
+            break;
         }
         print_destructure_pattern(node);
         emit(" = ");
@@ -384,7 +394,8 @@ void AstPrinter::print_node(Node *node) {
                     print_node(vtype);
                 }
                 emit(" = ");
-                if (etype) print_node(etype);
+                if (etype)
+                    print_node(etype);
                 // Use wrapping for long construct expressions
                 if (cdata.items.len && !cdata.field_inits.len && !cdata.spread_expr) {
                     emit_wrapped_list(&cdata.items, "{", "}", ", ");
@@ -498,7 +509,8 @@ void AstPrinter::print_node(Node *node) {
         if (data.where_clauses.len > 0) {
             emit("impl where ");
             for (size_t i = 0; i < data.where_clauses.len; i++) {
-                if (i > 0) emit(", ");
+                if (i > 0)
+                    emit(", ");
                 emit(data.where_clauses[i].param_name->str);
                 emit(": ");
                 print_node(data.where_clauses[i].bound_type);
@@ -506,7 +518,8 @@ void AstPrinter::print_node(Node *node) {
         } else {
             emit("impl ");
             for (size_t i = 0; i < data.interface_types.len; i++) {
-                if (i > 0) emit(", ");
+                if (i > 0)
+                    emit(", ");
                 print_node(data.interface_types[i]);
             }
         }
@@ -596,8 +609,7 @@ void AstPrinter::print_node(Node *node) {
         emit(" {} ", get_token_symbol(data.op_type));
         // Strip redundant type from construct in assignments (same pattern as ReturnStmt)
         if (data.op_type == TokenType::ASS && data.op2 &&
-            data.op2->type == NodeType::ConstructExpr &&
-            data.op2->data.construct_expr.type &&
+            data.op2->type == NodeType::ConstructExpr && data.op2->data.construct_expr.type &&
             !data.op2->data.construct_expr.is_new &&
             !data.op2->data.construct_expr.is_array_literal) {
             auto *var = data.op1->get_decl();
@@ -608,8 +620,7 @@ void AstPrinter::print_node(Node *node) {
                     var->data.var_decl.expr->type == NodeType::ConstructExpr)
                     target_type = var->data.var_decl.expr->data.construct_expr.type;
             }
-            if (target_type &&
-                types_match(target_type, data.op2->data.construct_expr.type)) {
+            if (target_type && types_match(target_type, data.op2->data.construct_expr.type)) {
                 m_suppress_construct_type = true;
             }
         }
@@ -649,17 +660,56 @@ void AstPrinter::print_node(Node *node) {
         emit(")");
         break;
     }
-    case NodeType::IfStmt: {
+    case NodeType::IfExpr: {
         auto &data = node->data.if_stmt;
         emit("if ");
         auto *cond = data.condition;
-        if (cond && cond->type == NodeType::ParenExpr) cond = cond->data.child_expr;
+        if (cond && cond->type == NodeType::ParenExpr)
+            cond = cond->data.child_expr;
         print_node(cond);
-        emit(" ");
+
+        // Collapse single-expression blocks: { expr } → => expr
+        auto can_collapse = [](Node *block) {
+            return block && block->type == NodeType::Block && block->data.block.has_braces &&
+                   block->data.block.statements.len == 0 &&
+                   block->data.block.return_expr != nullptr;
+        };
+        auto already_arrow = [](Node *block) {
+            return block && block->type == NodeType::Block && block->data.block.is_arrow;
+        };
+
+        bool collapse_then = can_collapse(data.then_block);
+        if (collapse_then) {
+            data.then_block->data.block.is_arrow = true;
+            data.then_block->data.block.has_braces = false;
+        } else if (!already_arrow(data.then_block)) {
+            emit(" ");
+        }
         print_node(data.then_block);
+        if (collapse_then) {
+            data.then_block->data.block.is_arrow = false;
+            data.then_block->data.block.has_braces = true;
+        }
+
         if (data.else_node) {
-            emit(" else ");
-            print_node(data.else_node);
+            emit(" else");
+            if (data.else_node->type == NodeType::IfExpr) {
+                emit(" ");
+                print_node(data.else_node);
+            } else {
+                bool collapse_else = can_collapse(data.else_node);
+                if (collapse_else) {
+                    data.else_node->data.block.is_arrow = true;
+                    data.else_node->data.block.has_braces = false;
+                } else if (!already_arrow(data.else_node)) {
+                    emit(" ");
+                }
+                print_node(data.else_node);
+                if (collapse_else) {
+                    data.else_node->data.block.is_arrow = false;
+                    data.else_node->data.block.has_braces = true;
+                }
+            }
         }
         // No \n here — Block handler owns it, preventing double \n in else-if chains
         break;
@@ -734,16 +784,17 @@ void AstPrinter::print_node(Node *node) {
         }
         // Wrap inner type in parens when stacking different sigils for clarity
         // Skip parens for ?& and ?* — those are common and unambiguous
-        auto inner_sigil = data.type->type == NodeType::TypeSigil
-                               ? data.type->data.sigil_type.sigil
-                               : SigilKind::None;
-        bool needs_parens = inner_sigil != SigilKind::None && inner_sigil != data.sigil &&
-                            !(data.sigil == SigilKind::Optional &&
-                              (inner_sigil == SigilKind::Reference ||
-                               inner_sigil == SigilKind::Pointer));
-        if (needs_parens) emit("(");
+        auto inner_sigil = data.type->type == NodeType::TypeSigil ? data.type->data.sigil_type.sigil
+                                                                  : SigilKind::None;
+        bool needs_parens =
+            inner_sigil != SigilKind::None && inner_sigil != data.sigil &&
+            !(data.sigil == SigilKind::Optional &&
+              (inner_sigil == SigilKind::Reference || inner_sigil == SigilKind::Pointer));
+        if (needs_parens)
+            emit("(");
         print_node(data.type);
-        if (needs_parens) emit(")");
+        if (needs_parens)
+            emit(")");
         break;
     }
     case NodeType::TypedefDecl: {
@@ -834,10 +885,8 @@ void AstPrinter::print_node(Node *node) {
         if (data.kind == ForLoopKind::Ternary) {
             // Collapse `for var i = START; i < END; i++` into `for i in START..END`
             bool collapsed = false;
-            if (data.init && data.condition && data.post &&
-                data.init->type == NodeType::VarDecl &&
-                data.init->data.var_decl.type == nullptr &&
-                data.init->data.var_decl.expr &&
+            if (data.init && data.condition && data.post && data.init->type == NodeType::VarDecl &&
+                data.init->data.var_decl.type == nullptr && data.init->data.var_decl.expr &&
                 data.condition->type == NodeType::BinOpExpr &&
                 data.condition->data.bin_op_expr.op_type == TokenType::LT &&
                 data.condition->data.bin_op_expr.op1->type == NodeType::Identifier &&
@@ -899,7 +948,8 @@ void AstPrinter::print_node(Node *node) {
         if (data.condition) {
             emit(" ");
             auto *cond = data.condition;
-            if (cond->type == NodeType::ParenExpr) cond = cond->data.child_expr;
+            if (cond->type == NodeType::ParenExpr)
+                cond = cond->data.child_expr;
             print_node(cond);
         }
         emit(" ");
@@ -1017,9 +1067,11 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.switch_expr;
         emit("switch ");
         auto *expr = data.expr;
-        if (expr && expr->type == NodeType::ParenExpr) expr = expr->data.child_expr;
+        if (expr && expr->type == NodeType::ParenExpr)
+            expr = expr->data.child_expr;
         print_node(expr);
-        if (data.is_type_switch) emit(".(type)");
+        if (data.is_type_switch)
+            emit(".(type)");
         emit(" {{\n");
         m_indent++;
         for (int i = 0; i < data.cases.len; i++) {
@@ -1154,20 +1206,26 @@ void AstPrinter::print_destructure_pattern(Node *node) {
     if (data.is_array) {
         emit("[");
         for (size_t i = 0; i < data.fields.len; i++) {
-            if (i > 0) emit(", ");
+            if (i > 0)
+                emit(", ");
             auto &field_data = data.fields[i]->data.destructure_field;
-            if (field_data.sigil == SigilKind::MutRef) emit("&mut ");
-            else if (field_data.sigil == SigilKind::Reference) emit("&");
+            if (field_data.sigil == SigilKind::MutRef)
+                emit("&mut ");
+            else if (field_data.sigil == SigilKind::Reference)
+                emit("&");
             emit("{}", field_data.binding_name->str);
         }
         emit("]");
     } else {
         emit("{{");
         for (size_t i = 0; i < data.fields.len; i++) {
-            if (i > 0) emit(", ");
+            if (i > 0)
+                emit(", ");
             auto &field_data = data.fields[i]->data.destructure_field;
-            if (field_data.sigil == SigilKind::MutRef) emit("&mut ");
-            else if (field_data.sigil == SigilKind::Reference) emit("&");
+            if (field_data.sigil == SigilKind::MutRef)
+                emit("&mut ");
+            else if (field_data.sigil == SigilKind::Reference)
+                emit("&");
             emit("{}", field_data.field_name->str);
             if (field_data.nested) {
                 emit(": ");
@@ -1256,7 +1314,7 @@ string AstPrinter::format_node_to_string(Node *node) {
 }
 
 bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const char *close,
-                                    const char *separator, int extra_indent) {
+                                   const char *separator, int extra_indent) {
     if (!items || items->len == 0) {
         emit("{}{}", open, close);
         return false;

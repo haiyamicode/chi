@@ -18,7 +18,7 @@ const int LOWEST_PREC = -1;
 const int COMMA_PREC = 0;
 const int DEFAULT_PREC = COMMA_PREC + 1;
 const int TERNARY_PREC = 1;
-const int UNARY_PREC = 8;  // For parsing unary operator operands
+const int UNARY_PREC = 8; // For parsing unary operator operands
 
 static string get_token_type_repr(TokenType token_type) {
     switch (token_type) {
@@ -540,7 +540,8 @@ Node *Parser::parse_type_expr(bool type_only) {
                         } else {
                             break;
                         }
-                        if (!next_is(TokenType::COMMA)) break;
+                        if (!next_is(TokenType::COMMA))
+                            break;
                         consume();
                     }
                     expect(TokenType::RPAREN);
@@ -641,8 +642,12 @@ bool Parser::is_arrow_lambda_ahead() {
     // Parse parameter list
     for (;;) {
         auto tok = lookahead(pos);
-        if (tok->type == TokenType::END) return false;
-        if (tok->type == TokenType::RPAREN) { pos++; break; }
+        if (tok->type == TokenType::END)
+            return false;
+        if (tok->type == TokenType::RPAREN) {
+            pos++;
+            break;
+        }
 
         // Optional variadic
         if (tok->type == TokenType::ELLIPSIS) {
@@ -651,27 +656,35 @@ bool Parser::is_arrow_lambda_ahead() {
         }
 
         // Each param must be an identifier
-        if (tok->type != TokenType::IDEN) return false;
+        if (tok->type != TokenType::IDEN)
+            return false;
         pos++;
 
         // Optional ': type'
         tok = lookahead(pos);
         if (tok->type == TokenType::COLON) {
             pos++;
-            if (!try_parse_type_expr_lookahead(pos)) return false;
+            if (!try_parse_type_expr_lookahead(pos))
+                return false;
             tok = lookahead(pos);
         }
 
-        if (tok->type == TokenType::COMMA) { pos++; }
-        else if (tok->type == TokenType::RPAREN) { pos++; break; }
-        else return false;
+        if (tok->type == TokenType::COMMA) {
+            pos++;
+        } else if (tok->type == TokenType::RPAREN) {
+            pos++;
+            break;
+        } else
+            return false;
     }
 
     // Check for '=>' directly or after a return type
-    if (lookahead(pos)->type == TokenType::ARROW) return true;
+    if (lookahead(pos)->type == TokenType::ARROW)
+        return true;
     int type_pos = pos;
     if (try_parse_type_expr_lookahead(type_pos)) {
-        if (lookahead(type_pos)->type == TokenType::ARROW) return true;
+        if (lookahead(type_pos)->type == TokenType::ARROW)
+            return true;
     }
     return false;
 }
@@ -691,7 +704,8 @@ Node *Parser::parse_fn_lambda() {
         while (!next_is(TokenType::RBRACK)) {
             auto iden = expect(TokenType::IDEN);
             fn->data.fn_def.value_captures.add(iden->str);
-            if (!next_is(TokenType::COMMA)) break;
+            if (!next_is(TokenType::COMMA))
+                break;
             read(); // consume ,
         }
         expect(TokenType::RBRACK);
@@ -845,7 +859,8 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
         node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
         // Allow top-level const and let declarations, but not var outside functions
         if (!node->parent_fn && var_kind == VarKind::Mutable) {
-            error(iden, "global variables are not supported; use 'let' or 'const' for module-level declarations");
+            error(iden, "global variables are not supported; use 'let' or 'const' for module-level "
+                        "declarations");
         }
     }
     if (!next_is(TokenType::ASS)) {
@@ -879,7 +894,8 @@ Node *Parser::parse_destructure_pattern(VarKind kind) {
 
     for (;;) {
         auto token = get();
-        if (token->type == TokenType::RBRACE || token->type == TokenType::END) break;
+        if (token->type == TokenType::RBRACE || token->type == TokenType::END)
+            break;
 
         auto sigil = SigilKind::None;
         if (next_is(TokenType::AND)) {
@@ -893,7 +909,8 @@ Node *Parser::parse_destructure_pattern(VarKind kind) {
         }
 
         auto field_token = expect(TokenType::IDEN);
-        if (field_token->type != TokenType::IDEN) break;
+        if (field_token->type != TokenType::IDEN)
+            break;
 
         auto field_node = create_node(NodeType::DestructureField, field_token);
         field_node->data.destructure_field.field_name = field_token;
@@ -916,7 +933,8 @@ Node *Parser::parse_destructure_pattern(VarKind kind) {
         node->data.destructure_decl.fields.add(field_node);
         field_node->parent = node;
 
-        if (!at_comma(TokenType::RBRACE)) break;
+        if (!at_comma(TokenType::RBRACE))
+            break;
         consume(); // consume ','
     }
     expect(TokenType::RBRACE);
@@ -959,7 +977,8 @@ Node *Parser::parse_array_destructure_decl(VarKind kind) {
 
     for (;;) {
         auto token = get();
-        if (token->type == TokenType::RBRACK || token->type == TokenType::END) break;
+        if (token->type == TokenType::RBRACK || token->type == TokenType::END)
+            break;
 
         auto sigil = SigilKind::None;
         if (next_is(TokenType::AND)) {
@@ -973,7 +992,8 @@ Node *Parser::parse_array_destructure_decl(VarKind kind) {
         }
 
         auto binding_token = expect(TokenType::IDEN);
-        if (binding_token->type != TokenType::IDEN) break;
+        if (binding_token->type != TokenType::IDEN)
+            break;
 
         auto field_node = create_node(NodeType::DestructureField, binding_token);
         field_node->data.destructure_field.field_name = binding_token;
@@ -983,7 +1003,8 @@ Node *Parser::parse_array_destructure_decl(VarKind kind) {
         node->data.destructure_decl.fields.add(field_node);
         field_node->parent = node;
 
-        if (!at_comma(TokenType::RBRACK)) break;
+        if (!at_comma(TokenType::RBRACK))
+            break;
         consume();
     }
     expect(TokenType::RBRACK);
@@ -1080,7 +1101,8 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
     }
     expect(TokenType::RPAREN);
     // Don't parse return type if next is {, ;, or => (arrow for lambda expression body)
-    if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON) && !next_is(TokenType::ARROW)) {
+    if (!next_is(TokenType::LBRACE) && !next_is(TokenType::SEMICOLON) &&
+        !next_is(TokenType::ARROW)) {
         proto->data.fn_proto.return_type = parse_type_expr(true);
     }
 
@@ -1105,7 +1127,7 @@ Node *Parser::parse_fn_type(Token *func) {
     expect(TokenType::RPAREN);
     auto next_is_separator = next_is(TokenType::RPAREN) || next_is(TokenType::SEMICOLON) ||
                              next_is(TokenType::COMMA) || next_is(TokenType::GT) ||
-                             next_is(TokenType::ASS);  // For default values in struct fields
+                             next_is(TokenType::ASS); // For default values in struct fields
     if (!next_is_separator) {
         data.return_type = parse_type_expr(true);
     }
@@ -1172,7 +1194,7 @@ Node *Parser::parse_fn_param() {
 
     // Check for default value
     if (next_is(TokenType::ASS)) {
-        consume();  // consume '='
+        consume(); // consume '='
         param->data.param_decl.default_value = parse_expr();
     }
 
@@ -1206,12 +1228,11 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
     node->data.block.scope = scope;
 
     if (!has_braces) {
-        bool as_expr = false;
         auto start_token = token;
-        auto stmt = parse_stmt(&as_expr);
-        node->data.block.return_expr = stmt;
-        stmt->start_token = start_token;
-        stmt->end_token = lookahead(-1);
+        auto expr = parse_expr();
+        node->data.block.return_expr = expr;
+        expr->start_token = start_token;
+        expr->end_token = lookahead(-1);
 
     } else {
         for (;;) {
@@ -1259,8 +1280,13 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
 Node *Parser::parse_stmt(bool *as_expr) {
     auto token = get();
     switch (token->type) {
-    case TokenType::KW_IF:
-        return parse_if_stmt();
+    case TokenType::KW_IF: {
+        auto node = parse_if_expr();
+        // If-expression: if with else as last expr in block
+        if (node->data.if_stmt.else_node && next_is(TokenType::RBRACE))
+            *as_expr = true;
+        return node;
+    }
 
     case TokenType::KW_FOR:
         return parse_for_stmt();
@@ -1639,6 +1665,9 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     case TokenType::KW_FUNC: {
         return parse_fn_lambda();
     }
+    case TokenType::KW_IF: {
+        return parse_if_expr();
+    }
     case TokenType::KW_SWITCH: {
         return parse_switch_expr();
     }
@@ -1660,7 +1689,8 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
                 break;
             }
             node->data.construct_expr.items.add(parse_expr());
-            if (!at_comma(TokenType::RBRACK)) break;
+            if (!at_comma(TokenType::RBRACK))
+                break;
             consume();
         }
         expect(TokenType::RBRACK);
@@ -1936,31 +1966,35 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
             pos++;
             for (;;) {
                 token = lookahead(pos);
-                if (token->type == TokenType::KW_MUT ||
-                    token->type == TokenType::KW_MOVE ||
+                if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MOVE ||
                     token->type == TokenType::LIFETIME) {
                     pos++;
                 } else {
                     break;
                 }
                 token = lookahead(pos);
-                if (token->type != TokenType::COMMA) break;
+                if (token->type != TokenType::COMMA)
+                    break;
                 pos++;
             }
-            if (lookahead(pos)->type != TokenType::RPAREN) return false;
+            if (lookahead(pos)->type != TokenType::RPAREN)
+                return false;
             pos++;
             token = lookahead(pos);
-            if (token->type == TokenType::END) return false;
+            if (token->type == TokenType::END)
+                return false;
         } else if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MOVE) {
             // &mut T, &move T
             pos++;
             token = lookahead(pos);
-            if (token->type == TokenType::END) return false;
+            if (token->type == TokenType::END)
+                return false;
         } else if (token->type == TokenType::LIFETIME) {
             // &'a T
             pos++;
             token = lookahead(pos);
-            if (token->type == TokenType::END) return false;
+            if (token->type == TokenType::END)
+                return false;
         }
     }
 
@@ -2063,18 +2097,22 @@ void Parser::add_to_scope(Node *node, const string &name) {
     }
 }
 
-Node *Parser::parse_if_stmt() {
+Node *Parser::parse_if_expr() {
     auto kw = expect(TokenType::KW_IF);
-    auto node = create_node(NodeType::IfStmt, kw);
+    auto node = create_node(NodeType::IfExpr, kw);
     auto scope = m_ctx->resolver->push_scope(node);
     node->data.if_stmt.condition = parse_expr();
-    node->data.if_stmt.then_block = parse_block(scope);
+    // Then block: { ... } or => expr
+    Token *then_arrow = next_is(TokenType::ARROW) ? read() : nullptr;
+    node->data.if_stmt.then_block = parse_block(scope, then_arrow);
     auto token = get();
     if (token->type == TokenType::KW_ELSE) {
         consume();
         token = get();
         if (token->type == TokenType::KW_IF) {
-            node->data.if_stmt.else_node = parse_if_stmt();
+            node->data.if_stmt.else_node = parse_if_expr();
+        } else if (token->type == TokenType::ARROW) {
+            node->data.if_stmt.else_node = parse_block(nullptr, read());
         } else if (token->type == TokenType::LBRACE) {
             node->data.if_stmt.else_node = parse_block();
         } else {
@@ -2531,7 +2569,8 @@ Node *Parser::parse_construct_expr() {
                 error(token, "only one spread expression allowed");
             }
             node->data.construct_expr.spread_expr = parse_child_expr_construct(false, node);
-            if (!at_comma(TokenType::RBRACE)) break;
+            if (!at_comma(TokenType::RBRACE))
+                break;
             consume();
             continue;
         }
@@ -2791,7 +2830,7 @@ Node *Parser::parse_import_decl() {
 
         // Check if followed by * for pattern import: import str* from "module"
         if (next_is(TokenType::MUL)) {
-            consume();  // consume the *
+            consume(); // consume the *
 
             // Convert to pattern import: {str*} from "module"
             std::string pattern = iden->str + "*";
@@ -2848,9 +2887,10 @@ Node *Parser::parse_import_decl() {
     } else if (next_is(TokenType::LBRACE)) {
         // import {X, Y} from "./module" OR import "./module" {X, Y} (after path parsed)
         consume();
-        while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
+        while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) &&
+               !next_is(TokenType::SEMICOLON)) {
             // Handle wildcard patterns: SDL_*, *_init, etc.
-            Token* pattern_token = nullptr;
+            Token *pattern_token = nullptr;
             std::string pattern_str;
 
             // Check for leading *
@@ -2917,7 +2957,8 @@ Node *Parser::parse_import_decl() {
             add_to_scope(node, iden->str);
         } else if (next_is(TokenType::LBRACE)) {
             consume();
-            while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
+            while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) &&
+                   !next_is(TokenType::SEMICOLON)) {
                 // Skip if we encounter unexpected tokens
                 if (!next_is(TokenType::IDEN) && !next_is(TokenType::RBRACE)) {
                     consume();
@@ -2982,7 +3023,7 @@ Node *Parser::parse_export_decl() {
         auto iden = expect(TokenType::IDEN);
 
         if (next_is(TokenType::MUL)) {
-            consume();  // consume the *
+            consume(); // consume the *
 
             // Convert to pattern export: {str*} from "module"
             std::string pattern = iden->str + "*";
@@ -3000,13 +3041,14 @@ Node *Parser::parse_export_decl() {
             if (!m_ctx->format_mode) {
                 error(iden, "expected '*' or 'from' after identifier in export declaration");
             }
-            node->data.export_decl.path = iden;  // Use as dummy path
+            node->data.export_decl.path = iden; // Use as dummy path
         }
     } else if (next_is(TokenType::LBRACE)) {
         consume();
-        while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
+        while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) &&
+               !next_is(TokenType::SEMICOLON)) {
             // Handle wildcard patterns: SDL_*, *_init, etc.
-            Token* pattern_token = nullptr;
+            Token *pattern_token = nullptr;
             std::string pattern_str;
 
             // Check for leading *
@@ -3105,7 +3147,8 @@ Node *Parser::parse_switch_expr() {
     }
 
     expect(TokenType::LBRACE);
-    while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) && !next_is(TokenType::SEMICOLON)) {
+    while (!next_is(TokenType::RBRACE) && !next_is(TokenType::END) &&
+           !next_is(TokenType::SEMICOLON)) {
         auto case_expr = parse_case_expr(node->data.switch_expr.is_type_switch);
         // Only add valid case expressions
         if (case_expr) {

@@ -83,9 +83,8 @@ static bool has_placeholder_descendants(ChiType *type) {
             if (p->is_placeholder || p->kind == TypeKind::Infer)
                 return true;
         }
-        if (type->data.fn.return_type &&
-            (type->data.fn.return_type->is_placeholder ||
-             type->data.fn.return_type->kind == TypeKind::Infer))
+        if (type->data.fn.return_type && (type->data.fn.return_type->is_placeholder ||
+                                          type->data.fn.return_type->kind == TypeKind::Infer))
             return true;
         return false;
     case TypeKind::FnLambda:
@@ -107,8 +106,7 @@ ChiType *Compiler::eval_type(ChiType *type) {
     }
 
     // Handle m_fn_eval_subtype (for function proto compilation, before m_fn exists)
-    if (type->is_placeholder && m_fn_eval_subtype &&
-        m_fn_eval_subtype->kind == TypeKind::Subtype) {
+    if (type->is_placeholder && m_fn_eval_subtype && m_fn_eval_subtype->kind == TypeKind::Subtype) {
         type = get_resolver()->type_placeholders_sub(type, &m_fn_eval_subtype->data.subtype);
     }
 
@@ -164,12 +162,13 @@ void Compiler::compile_module(ast::Module *module) {
 
     // Skip debug info for virtual modules (C interop)
     bool is_virtual = module->path.size() >= 8 && module->path.substr(0, 8) == "<virtual";
-    llvm::DICompileUnit* module_cu = nullptr;
+    llvm::DICompileUnit *module_cu = nullptr;
 
     if (!is_virtual) {
         module_cu = m_ctx->dbg_builder->createCompileUnit(
             llvm::dwarf::DW_LANG_C,
-            m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt, std::nullopt),
+            m_ctx->dbg_builder->createFile(module->filename, module->path, std::nullopt,
+                                           std::nullopt),
             "Chi Compiler", 0, "", 0);
         m_ctx->module_cu_table[module->global_id()] = module_cu;
         m_ctx->dbg_cu = module_cu;
@@ -227,10 +226,9 @@ void Compiler::compile_module(ast::Module *module) {
                 auto var_type_l = compile_type_of(decl);
                 auto initial = llvm::Constant::getNullValue(var_type_l);
                 auto global_name = "__chi_" + module->id_path + "_" + decl->name;
-                auto global = new llvm::GlobalVariable(
-                    *m_ctx->llvm_module, var_type_l, false,
-                    llvm::GlobalValue::InternalLinkage, initial,
-                    global_name);
+                auto global = new llvm::GlobalVariable(*m_ctx->llvm_module, var_type_l, false,
+                                                       llvm::GlobalValue::InternalLinkage, initial,
+                                                       global_name);
                 add_var(decl, global);
                 m_ctx->pending_global_inits.add({decl, global});
                 break;
@@ -322,7 +320,8 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
                 if (!subtype_member) {
                     subtype_member = struct_type->data.struct_.find_static_member(member->name);
                 }
-                if (!subtype_member) continue;
+                if (!subtype_member)
+                    continue;
                 fn_node = subtype_member->node;
             }
 
@@ -347,7 +346,8 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
                             fn->type_env = &entry->subs;
                         } else if (subtype) {
                             // Fallback to struct's type_env if no function-specific entry
-                            if (auto entry = get_resolver()->get_generics()->struct_envs.get(subtype->global_id)) {
+                            if (auto entry = get_resolver()->get_generics()->struct_envs.get(
+                                    subtype->global_id)) {
                                 fn->type_env = &entry->subs;
                             }
                         }
@@ -362,10 +362,12 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
                 fn->container_subtype = &subtype->data.subtype;
                 fn->container_type = subtype;
                 // Look up the TypeEnv for this struct specialization
-                if (auto entry = get_resolver()->get_generics()->struct_envs.get(subtype->global_id)) {
+                if (auto entry =
+                        get_resolver()->get_generics()->struct_envs.get(subtype->global_id)) {
                     fn->type_env = &entry->subs;
                 } else if (getenv("DUMP_GENERICS")) {
-                    print("WARNING: No TypeEnv found for struct method, struct: {}\n", subtype->global_id);
+                    print("WARNING: No TypeEnv found for struct method, struct: {}\n",
+                          subtype->global_id);
                 }
             } else {
                 fn->container_type = type;
@@ -596,7 +598,8 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     case TypeKind::This: {
         auto e = type->eval();
-        if (e != type) return compile_di_type(e);
+        if (e != type)
+            return compile_di_type(e);
         return llvm_db.createBasicType("this", 0, llvm::dwarf::DW_ATE_address);
     }
     default:
@@ -746,8 +749,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     // Destroy any caught error objects still owned (from diverging catch blocks)
     for (auto &owner : fn->error_owner_vars) {
         auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
-        auto is_nonnull = builder.CreateICmpNE(
-            owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
+        auto is_nonnull =
+            builder.CreateICmpNE(owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
         auto do_free_b = fn->new_label("_err_cleanup");
         auto skip_free_b = fn->new_label("_err_cleanup_done");
         builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
@@ -788,8 +791,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         }
         for (auto &owner : fn->error_owner_vars) {
             auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
-            auto is_nonnull = builder.CreateICmpNE(
-                owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
+            auto is_nonnull =
+                builder.CreateICmpNE(owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
             auto do_free_b = fn->new_label("_err_cleanup");
             auto skip_free_b = fn->new_label("_err_cleanup_done");
             builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
@@ -856,10 +859,11 @@ llvm::Value *Compiler::compile_c_string_literal(const string &str) {
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto &llvm_module = *(m_ctx->llvm_module.get());
     // Create null-terminated string constant
-    auto str_value = llvm::ConstantDataArray::getString(llvm_ctx, str, true);  // true = add null terminator
+    auto str_value =
+        llvm::ConstantDataArray::getString(llvm_ctx, str, true); // true = add null terminator
     auto char_array_type = llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), str.size() + 1);
-    auto str_global = new llvm::GlobalVariable(llvm_module, char_array_type, true,
-                                               llvm::GlobalValue::PrivateLinkage, str_value, "cstr");
+    auto str_global = new llvm::GlobalVariable(
+        llvm_module, char_array_type, true, llvm::GlobalValue::PrivateLinkage, str_value, "cstr");
     // Return pointer to first element (char*)
     return llvm::ConstantExpr::getPointerCast(str_global, llvm::Type::getInt8PtrTy(llvm_ctx));
 }
@@ -870,7 +874,8 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
 
     // Check if src_type has placeholder type params (for generic struct field defaults)
     auto has_placeholder_params = [](ChiType *type) -> bool {
-        if (type->is_placeholder) return true;
+        if (type->is_placeholder)
+            return true;
         if (type->kind == TypeKind::Struct && type->data.struct_.type_params.len > 0) {
             return true;
         }
@@ -935,15 +940,13 @@ void Compiler::compile_struct_vtables(ChiType *type) {
 
     // Get destructor for this concrete type (may be null)
     auto dtor_it = m_ctx->destructor_table.get(type);
-    llvm::Constant *dtor_ptr = dtor_it && *dtor_it
-        ? (llvm::Constant *)(*dtor_it)->llvm_fn
-        : get_null_ptr();
+    llvm::Constant *dtor_ptr =
+        dtor_it && *dtor_it ? (llvm::Constant *)(*dtor_it)->llvm_fn : get_null_ptr();
 
     // Get copier for this concrete type (may be null)
     auto copier_it = m_ctx->copier_table.get(type);
-    llvm::Constant *copier_ptr = copier_it && *copier_it
-        ? (llvm::Constant *)(*copier_it)->llvm_fn
-        : get_null_ptr();
+    llvm::Constant *copier_ptr =
+        copier_it && *copier_it ? (llvm::Constant *)(*copier_it)->llvm_fn : get_null_ptr();
 
     for (auto impl : type->data.struct_.interfaces) {
         auto vtable = vtables.add({});
@@ -977,8 +980,8 @@ void Compiler::compile_struct_vtables(ChiType *type) {
         } else {
             auto idx = llvm::ConstantInt::get(
                 llvm::Type::getInt64Ty(m_ctx->llvm_module->getContext()), vtable.offset);
-            m_ctx->impl_table[vtable.impl] = llvm::ConstantExpr::getGetElementPtr(
-                get_llvm_ptr_type(), global, idx);
+            m_ctx->impl_table[vtable.impl] =
+                llvm::ConstantExpr::getGetElementPtr(get_llvm_ptr_type(), global, idx);
         }
     }
 }
@@ -1052,8 +1055,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
 
     auto ti_type_l = llvm::StructType::create(
         {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
-         ptr_type_l, ptr_type_l,
-         llvm::Type::getInt32Ty(llvm_ctx), ti_meta_table_type_l},
+         ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ti_meta_table_type_l},
         "TypeInfo", true);
 
     auto info_l = llvm::ConstantStruct::get(
@@ -1086,7 +1088,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
 // ============================================================================
 
 Compiler::CxLambdaInit Compiler::compile_cxlambda_init(Function *fn, llvm::Value *fn_ptr,
-                                                     uint32_t capture_size) {
+                                                       uint32_t capture_size) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
@@ -1117,8 +1119,8 @@ Compiler::CxLambdaInit Compiler::compile_cxlambda_init(Function *fn, llvm::Value
 }
 
 Compiler::CxCaptureInfo Compiler::compile_cxcapture_create(uint32_t payload_size,
-                                                         llvm::Value *type_info,
-                                                         llvm::Value *dtor) {
+                                                           llvm::Value *type_info,
+                                                           llvm::Value *dtor) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
 
@@ -1177,8 +1179,8 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
 
         // Zero-init bind struct before populating
         auto bind_size_bytes = llvm_type_size(bstruct_l);
-        builder.CreateMemSet(bind_var,
-            llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+        builder.CreateMemSet(
+            bind_var, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
             bind_size_bytes, {});
 
         // Store captures into bind_struct
@@ -1195,12 +1197,10 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
                     auto current_fn_type = get_chitype(fn->node);
                     if (current_fn_type->kind == TypeKind::FnLambda) {
                         auto current_bstruct = current_fn_type->data.fn_lambda.bind_struct;
-                        auto current_bstruct_l =
-                            (llvm::StructType *)compile_type(current_bstruct);
+                        auto current_bstruct_l = (llvm::StructType *)compile_type(current_bstruct);
                         auto nested_gep =
                             builder.CreateStructGEP(current_bstruct_l, fn->bind_ptr, j);
-                        src_addr = builder.CreateLoad(current_bstruct_l->elements()[j],
-                                                       nested_gep);
+                        src_addr = builder.CreateLoad(current_bstruct_l->elements()[j], nested_gep);
                         break;
                     }
                 }
@@ -1243,7 +1243,8 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         auto captures_ti = compile_type_info(bstruct);
         auto captures_ti_ptr = builder.CreateBitCast(captures_ti, builder.getInt8PtrTy());
 
-        auto [capture_ptr, payload_data_ptr] = compile_cxcapture_create(bind_size, captures_ti_ptr, dtor_ptr);
+        auto [capture_ptr, payload_data_ptr] =
+            compile_cxcapture_create(bind_size, captures_ti_ptr, dtor_ptr);
 
         auto bind_struct_value = builder.CreateLoad(bstruct_l, bind_var);
         auto payload_typed_ptr = builder.CreateBitCast(payload_data_ptr, bstruct_l->getPointerTo());
@@ -1261,8 +1262,10 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
 
 // Helper to check if an expression contains an await
 static bool contains_await(ast::Node *node) {
-    if (!node) return false;
-    if (node->type == ast::NodeType::AwaitExpr) return true;
+    if (!node)
+        return false;
+    if (node->type == ast::NodeType::AwaitExpr)
+        return true;
 
     switch (node->type) {
     case ast::NodeType::DestructureDecl:
@@ -1280,7 +1283,8 @@ static bool contains_await(ast::Node *node) {
                contains_await(node->data.bin_op_expr.op2);
     case ast::NodeType::FnCallExpr:
         for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
-            if (contains_await(node->data.fn_call_expr.args[i])) return true;
+            if (contains_await(node->data.fn_call_expr.args[i]))
+                return true;
         }
         return contains_await(node->data.fn_call_expr.fn_ref_expr);
     case ast::NodeType::UnaryOpExpr:
@@ -1292,8 +1296,10 @@ static bool contains_await(ast::Node *node) {
 
 // Find the await expression within a node
 static ast::Node *find_await_expr(ast::Node *node) {
-    if (!node) return nullptr;
-    if (node->type == ast::NodeType::AwaitExpr) return node;
+    if (!node)
+        return nullptr;
+    if (node->type == ast::NodeType::AwaitExpr)
+        return node;
 
     switch (node->type) {
     case ast::NodeType::DestructureDecl:
@@ -1311,7 +1317,8 @@ static ast::Node *find_await_expr(ast::Node *node) {
     case ast::NodeType::FnCallExpr:
         for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
             auto arg = find_await_expr(node->data.fn_call_expr.args[i]);
-            if (arg) return arg;
+            if (arg)
+                return arg;
         }
         return find_await_expr(node->data.fn_call_expr.fn_ref_expr);
     case ast::NodeType::UnaryOpExpr:
@@ -1322,7 +1329,8 @@ static ast::Node *find_await_expr(ast::Node *node) {
 }
 
 void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars) {
-    if (!node) return;
+    if (!node)
+        return;
 
     switch (node->type) {
     case ast::NodeType::Identifier: {
@@ -1403,7 +1411,8 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
 
     // Now compute vars_to_capture for each segment
     // A var defined in segment i needs to be captured if used in segment j (j > i)
-    // Note: await_var_decl for segment i is NOT captured by segment i - it's passed as the value parameter
+    // Note: await_var_decl for segment i is NOT captured by segment i - it's passed as the value
+    // parameter
     std::set<ast::Node *> defined_vars;
     for (size_t i = 0; i < segments.size(); i++) {
         // Collect vars defined in this segment's statements
@@ -1457,7 +1466,8 @@ llvm::Function *Compiler::create_continuation_fn_decl(AsyncContext &ctx, int seg
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
     auto fn_type = llvm::FunctionType::get(void_type, {ptr_type, value_type_l}, false);
     auto fn_name = parent_fn->qualified_name + "__cont_" + std::to_string(segment_index);
-    auto llvm_fn = llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fn_name, llvm_module);
+    auto llvm_fn =
+        llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fn_name, llvm_module);
 
     // Create a Function object for code generation
     auto cont_fn = new Function(m_ctx, llvm_fn, parent_fn->node);
@@ -1514,7 +1524,8 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
     auto value_arg = llvm_fn->getArg(1);
 
     // Get capture struct type and ordered list of captured variables
-    auto [capture_struct_type, captured_vars_ordered] = get_continuation_capture_info(ctx, segment_index);
+    auto [capture_struct_type, captured_vars_ordered] =
+        get_continuation_capture_info(ctx, segment_index);
     auto captures_ptr = builder.CreateBitCast(data_arg, capture_struct_type->getPointerTo());
 
     // Previous segment (needed for await_var_decl)
@@ -1589,7 +1600,8 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         } else if (contains_await(stmt)) {
             // This segment has another await - chain to next continuation
             auto await_expr = find_await_expr(stmt);
-            emit_promise_chain(cont_fn, ctx, await_expr, segment_index + 1, local_vars, result_promise_ptr);
+            emit_promise_chain(cont_fn, ctx, await_expr, segment_index + 1, local_vars,
+                               result_promise_ptr);
         } else {
             compile_stmt(cont_fn, stmt);
         }
@@ -1597,7 +1609,8 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
 
     // If segment has an await (not final), chain to next continuation
     if (segment.await_expr && !is_final) {
-        emit_promise_chain(cont_fn, ctx, segment.await_expr, segment_index + 1, local_vars, result_promise_ptr);
+        emit_promise_chain(cont_fn, ctx, segment.await_expr, segment_index + 1, local_vars,
+                           result_promise_ptr);
     }
 
     cont_fn->pop_scope();
@@ -1612,13 +1625,14 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
 }
 
 llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,
-                                                  map<ast::Node *, llvm::Value *> &local_vars,
-                                                  llvm::Value *result_promise_ptr) {
+                                                 map<ast::Node *, llvm::Value *> &local_vars,
+                                                 llvm::Value *result_promise_ptr) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
 
     // Get capture struct type and ordered list of captured variables
-    auto [capture_struct_type, captured_vars_ordered] = get_continuation_capture_info(ctx, segment_index);
+    auto [capture_struct_type, captured_vars_ordered] =
+        get_continuation_capture_info(ctx, segment_index);
     auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
@@ -1634,22 +1648,26 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
         }
     }
     if (needs_destruction) {
-        auto dtor = generate_destructor_continuation(capture_struct_type, ctx.promise_type, captured_vars_ordered);
+        auto dtor = generate_destructor_continuation(capture_struct_type, ctx.promise_type,
+                                                     captured_vars_ordered);
         if (dtor) {
             dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, ptr_type);
         }
     }
 
     // Allocate capture via CxCapture (refcounted, type-erased)
-    auto null_ti = llvm::ConstantPointerNull::get(ptr_type); // no Chi type for ad-hoc capture struct
-    auto [capture_ptr, captures_payload_ptr] = compile_cxcapture_create((uint32_t)capture_size, null_ti, dtor_ptr);
-    auto captures_ptr = builder.CreateBitCast(captures_payload_ptr, capture_struct_type->getPointerTo());
+    auto null_ti =
+        llvm::ConstantPointerNull::get(ptr_type); // no Chi type for ad-hoc capture struct
+    auto [capture_ptr, captures_payload_ptr] =
+        compile_cxcapture_create((uint32_t)capture_size, null_ti, dtor_ptr);
+    auto captures_ptr =
+        builder.CreateBitCast(captures_payload_ptr, capture_struct_type->getPointerTo());
 
     // Zero-init the payload before populating (needed for compile_copy on Promise,
     // since copy_from may release the old value which would be garbage otherwise)
     builder.CreateMemSet(captures_payload_ptr,
-        llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
-        capture_size, {});
+                         llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
+                         capture_size, {});
 
     // Store result promise VALUE (not pointer) - copy it so it survives after stack frame is gone
     auto result_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
@@ -1677,15 +1695,17 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
     // Build __CxLambda struct
     emit_dbg_location(fn->node);
     auto cont_fn_llvm = ctx.continuations[segment_index - 1];
-    auto [lambda_alloca, lambda_struct_type_l] = compile_cxlambda_init(fn, cont_fn_llvm, (uint32_t)capture_size);
+    auto [lambda_alloca, lambda_struct_type_l] =
+        compile_cxlambda_init(fn, cont_fn_llvm, (uint32_t)capture_size);
     compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
 
     return builder.CreateLoad(lambda_struct_type_l, lambda_alloca);
 }
 
 void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
-                                   int next_segment_index, map<ast::Node *, llvm::Value *> &local_vars,
-                                   llvm::Value *result_promise_ptr) {
+                                  int next_segment_index,
+                                  map<ast::Node *, llvm::Value *> &local_vars,
+                                  llvm::Value *result_promise_ptr) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
 
@@ -1703,12 +1723,14 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     // Zero-initialize the destination before copy to avoid garbage in Shared.data
     auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(promise_type_l);
     builder.CreateMemSet(awaited_promise_ptr,
-        llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
-        size, {});
-    compile_copy(fn, awaited_promise, awaited_promise_ptr, promise_type, await_expr->data.await_expr.expr);
+                         llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0), size,
+                         {});
+    compile_copy(fn, awaited_promise, awaited_promise_ptr, promise_type,
+                 await_expr->data.await_expr.expr);
 
     // Build continuation lambda for next segment
-    auto lambda = build_continuation_lambda(fn, ctx, next_segment_index, local_vars, result_promise_ptr);
+    auto lambda =
+        build_continuation_lambda(fn, ctx, next_segment_index, local_vars, result_promise_ptr);
 
     // Call Promise.then(callback) to register the continuation
     // Use variant lookup to get the specialized Promise<T>.then() method
@@ -1808,7 +1830,8 @@ void Compiler::compile_async_fn_body(Function *fn) {
 
     // Handle the first await - chain to continuation for segment 1
     if (first_segment.await_expr) {
-        emit_promise_chain(fn, ctx, first_segment.await_expr, 1, local_vars, ctx.result_promise_ptr);
+        emit_promise_chain(fn, ctx, first_segment.await_expr, 1, local_vars,
+                           ctx.result_promise_ptr);
     }
 
     fn->pop_scope();
@@ -1846,7 +1869,8 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
     } else if (from_type->kind == TypeKind::Float && to_int) {
         auto &builder = *m_ctx->llvm_builder;
         bool is_unsigned;
-        if (to_type->kind == TypeKind::Bool || to_type->kind == TypeKind::Char || to_type->kind == TypeKind::Rune) {
+        if (to_type->kind == TypeKind::Bool || to_type->kind == TypeKind::Char ||
+            to_type->kind == TypeKind::Rune) {
             is_unsigned = true;
         } else {
             is_unsigned = to_type->data.int_.is_unsigned;
@@ -1863,7 +1887,8 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
         auto from_type_l = compile_type(from_type);
         auto to_type_l = compile_type(to_type);
         bool is_signed;
-        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char || from_type->kind == TypeKind::Rune) {
+        if (from_type->kind == TypeKind::Bool || from_type->kind == TypeKind::Char ||
+            from_type->kind == TypeKind::Rune) {
             is_signed = false;
         } else {
             is_signed = !from_type->data.int_.is_unsigned;
@@ -1954,9 +1979,8 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             if (elem && ChiTypeStruct::is_interface(elem)) {
                 // Fat pointer struct {data_ptr, vtable_ptr} — check data_ptr (field 0) for null
                 auto data_ptr = builder.CreateExtractValue(value, {0}, "data_ptr");
-                return builder.CreateICmp(
-                    llvm::CmpInst::Predicate::ICMP_NE, data_ptr,
-                    get_null_ptr());
+                return builder.CreateICmp(llvm::CmpInst::Predicate::ICMP_NE, data_ptr,
+                                          get_null_ptr());
             }
             return builder.CreateICmp(
                 llvm::CmpInst::Predicate::ICMP_NE, value,
@@ -2032,7 +2056,8 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             auto data_p = builder.CreateStructGEP(iface_type_l, vp, 0);
             builder.CreateStore(value, data_p);
             auto vtable_p = builder.CreateStructGEP(iface_type_l, vp, 1);
-            if (from_elem && from_elem->kind == TypeKind::Struct && !ChiTypeStruct::is_interface(from_elem)) {
+            if (from_elem && from_elem->kind == TypeKind::Struct &&
+                !ChiTypeStruct::is_interface(from_elem)) {
                 // &Concrete → &Interface: look up vtable from impl table
                 auto impl = from_elem->data.struct_.interface_table[to_elem];
                 assert(impl);
@@ -2041,9 +2066,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
                 builder.CreateStore(vtable, vtable_p);
             } else {
                 // *void → *Interface: no vtable yet, null
-                builder.CreateStore(
-                    get_null_ptr(),
-                    vtable_p);
+                builder.CreateStore(get_null_ptr(), vtable_p);
             }
             return builder.CreateLoad(iface_type_l, vp);
         }
@@ -2082,8 +2105,8 @@ static llvm::CmpInst::Predicate get_cmpop(TokenType op, ChiType *type) {
         }
     }
     auto is_unsigned = (type->kind == TypeKind::Int && type->data.int_.is_unsigned) ||
-                       type->kind == TypeKind::Pointer ||
-                       type->kind == TypeKind::Char || type->kind == TypeKind::Rune;
+                       type->kind == TypeKind::Pointer || type->kind == TypeKind::Char ||
+                       type->kind == TypeKind::Rune;
     switch (op) {
     case TokenType::LT:
         return is_unsigned ? llvm::CmpInst::Predicate::ICMP_ULT
@@ -2163,16 +2186,17 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto &dot_data = call_data.fn_ref_expr->data.dot_expr;
             auto result_type = get_chitype(expr);
             auto result_type_l = compile_type(result_type);
-            return compile_optional_branch(fn, dot_data.expr, result_type_l, "optcall",
+            return compile_optional_branch(
+                fn, dot_data.expr, result_type_l, "optcall",
                 [&](llvm::Value *) {
                     auto call_result = compile_fn_call(fn, expr);
                     // compile_fn_call returns T; wrap T -> ?T if needed
-                    if (call_result->getType() == result_type_l) return call_result;
-                    return compile_conversion(fn, call_result, result_type->get_elem(), result_type);
+                    if (call_result->getType() == result_type_l)
+                        return call_result;
+                    return compile_conversion(fn, call_result, result_type->get_elem(),
+                                              result_type);
                 },
-                [&]() -> llvm::Value * {
-                    return llvm::ConstantAggregateZero::get(result_type_l);
-                });
+                [&]() -> llvm::Value * { return llvm::ConstantAggregateZero::get(result_type_l); });
         }
 
         if (fn->get_def()->has_cleanup) {
@@ -2236,10 +2260,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto assert = get_system_fn("assert");
                     emit_dbg_location(expr);
                     auto msg = compile_string_literal("unwrapping null optional");
-                    auto opt_msg = compile_conversion(
-                        fn, msg, get_system_types()->string,
-                        get_resolver()->get_wrapped_type(get_system_types()->string,
-                                                         TypeKind::Optional));
+                    auto opt_msg =
+                        compile_conversion(fn, msg, get_system_types()->string,
+                                           get_resolver()->get_wrapped_type(
+                                               get_system_types()->string, TypeKind::Optional));
                     auto value = builder.CreateCall(assert->llvm_fn, {has_value, opt_msg});
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
@@ -2252,21 +2276,23 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto result_type_l = compile_type(result_type);
                     // Result internal struct: { ?E err, T value }
                     // err is ?E which is { bool has_value, E }
-                    auto err_type = result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
+                    auto err_type =
+                        result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
                     auto err_type_l = compile_type(err_type);
                     auto err_p = builder.CreateStructGEP(result_type_l, ref.address, 0);
                     auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
-                    auto has_err = builder.CreateLoad(compile_type(get_system_types()->bool_), has_err_p);
+                    auto has_err =
+                        builder.CreateLoad(compile_type(get_system_types()->bool_), has_err_p);
                     // Assert no error: has_err must be false → negate for assert
-                    auto is_ok = builder.CreateXor(
-                        has_err, llvm::ConstantInt::getTrue(compile_type(get_system_types()->bool_)));
+                    auto is_ok = builder.CreateXor(has_err, llvm::ConstantInt::getTrue(compile_type(
+                                                                get_system_types()->bool_)));
                     auto assert = get_system_fn("assert");
                     emit_dbg_location(expr);
                     auto msg = compile_string_literal("unwrapping error Result");
-                    auto opt_msg = compile_conversion(
-                        fn, msg, get_system_types()->string,
-                        get_resolver()->get_wrapped_type(get_system_types()->string,
-                                                         TypeKind::Optional));
+                    auto opt_msg =
+                        compile_conversion(fn, msg, get_system_types()->string,
+                                           get_resolver()->get_wrapped_type(
+                                               get_system_types()->string, TypeKind::Optional));
                     builder.CreateCall(assert->llvm_fn, {is_ok, opt_msg});
                     auto value_p = builder.CreateStructGEP(result_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
@@ -2274,7 +2300,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 if (data.resolved_call) {
                     auto ref_ptr = compile_fn_call(fn, data.resolved_call);
                     auto elem = expr->resolved_type;
-                    if (ChiTypeStruct::is_interface(elem)) return ref_ptr;
+                    if (ChiTypeStruct::is_interface(elem))
+                        return ref_ptr;
                     return builder.CreateLoad(compile_type(elem), ref_ptr);
                 }
                 panic("unreachable: suffix ! on non-optional/result type");
@@ -2293,10 +2320,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // For &move: null out the source after taking the pointer
             if (data.op_type == TokenType::MOVEREF) {
                 auto ptr_val = builder.CreateLoad(compile_type(get_chitype(data.op1)), ref.address);
-                builder.CreateStore(
-                    llvm::ConstantPointerNull::get(
-                        (llvm::PointerType *)compile_type(get_chitype(data.op1))),
-                    ref.address);
+                builder.CreateStore(llvm::ConstantPointerNull::get(
+                                        (llvm::PointerType *)compile_type(get_chitype(data.op1))),
+                                    ref.address);
                 return ptr_val;
             }
             return result;
@@ -2311,8 +2337,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto size = llvm_type_size(type_l);
             builder.CreateMemSet(
                 ref.address,
-                llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
-                size, {});
+                llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0), size,
+                {});
             return value;
         }
         case TokenType::INC:
@@ -2368,7 +2394,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::QUES_QUES: {
             auto result_type_l = compile_type(get_chitype(expr));
-            return compile_optional_branch(fn, data.op1, result_type_l, "coalesce",
+            return compile_optional_branch(
+                fn, data.op1, result_type_l, "coalesce",
                 [&](llvm::Value *unwrapped_ptr) {
                     return builder.CreateLoad(result_type_l, unwrapped_ptr);
                 },
@@ -2387,8 +2414,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // check if this is a field being initialized inside a constructor
             if (destruct_old && fn->node) {
                 auto var = data.op1->get_decl();
-                if (var && var->type == ast::NodeType::VarDecl &&
-                    var->data.var_decl.is_field &&
+                if (var && var->type == ast::NodeType::VarDecl && var->data.var_decl.is_field &&
                     fn->node->type == ast::NodeType::FnDef &&
                     fn->node->data.fn_def.fn_kind == ast::FnKind::Constructor) {
                     auto init = var->data.var_decl.initialized_at;
@@ -2401,8 +2427,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
             // Check if RHS constructs in-place at dest (resolved_outlet set)
             bool in_place = data.op2->escape.moved &&
-                data.op2->type == ast::NodeType::ConstructExpr &&
-                data.op2->data.construct_expr.resolved_outlet;
+                            data.op2->type == ast::NodeType::ConstructExpr &&
+                            data.op2->data.construct_expr.resolved_outlet;
             // If in-place, destruct old BEFORE RHS overwrites dest
             if (in_place && destruct_old) {
                 compile_destruction_for_type(fn, ref.address, dest_type);
@@ -2428,8 +2454,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto val = src_ref.value;
             if (!val && src_ref.address)
                 val = builder.CreateLoad(compile_type(dest_type), src_ref.address);
-            compile_store_or_copy(fn, val, ref.address, dest_type, data.op2,
-                                  destruct_old);
+            compile_store_or_copy(fn, val, ref.address, dest_type, data.op2, destruct_old);
             return val;
         }
         default: {
@@ -2456,15 +2481,14 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto elem_type_l = compile_type(rhs_type->get_elem());
                     return builder.CreateGEP(elem_type_l, rhs, {lhs});
                 }
-                if (lhs_type->kind == TypeKind::Pointer &&
-                    rhs_type->kind == TypeKind::Pointer) {
+                if (lhs_type->kind == TypeKind::Pointer && rhs_type->kind == TypeKind::Pointer) {
                     // ptr - ptr → ptrdiff
                     auto elem_type_l = compile_type(lhs_type->get_elem());
                     auto lhs_int = builder.CreatePtrToInt(lhs, builder.getInt64Ty());
                     auto rhs_int = builder.CreatePtrToInt(rhs, builder.getInt64Ty());
                     auto diff_bytes = builder.CreateSub(lhs_int, rhs_int);
-                    auto elem_size = llvm::ConstantInt::get(builder.getInt64Ty(),
-                                                            llvm_type_size(elem_type_l));
+                    auto elem_size =
+                        llvm::ConstantInt::get(builder.getInt64Ty(), llvm_type_size(elem_type_l));
                     return builder.CreateSDiv(diff_bytes, elem_size);
                 }
             }
@@ -2529,9 +2553,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             // Zero-initialize the result
             auto size = llvm_type_size(result_type_l);
-            builder.CreateMemSet(
-                result_var, llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
-                size.getFixedValue(), llvm::MaybeAlign());
+            builder.CreateMemSet(result_var,
+                                 llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
+                                 size.getFixedValue(), llvm::MaybeAlign());
         }
 
         auto continue_b = fn->new_label("_try_continue");
@@ -2580,17 +2604,18 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // Save error_data pointer for cleanup (initialized to null, set on catch path)
             // This alloca is in the entry block, so it persists for function-level cleanup
             auto error_data_var = fn->entry_alloca(builder.getPtrTy(), "error_owner");
-            builder.CreateStore(
-                llvm::ConstantPointerNull::get(builder.getPtrTy()), error_data_var);
+            builder.CreateStore(llvm::ConstantPointerNull::get(builder.getPtrTy()), error_data_var);
 
             // Type check if specific catch
             ChiType *catch_type = nullptr;
             if (data.catch_expr) {
                 catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
-                auto caught_type_id = builder.CreateCall(get_error_type_id_fn->llvm_fn, {}, "caught_type_id");
-                auto expected_id = llvm::ConstantInt::get(
-                    llvm::Type::getInt32Ty(llvm_ctx), catch_type->id);
-                auto type_matches = builder.CreateICmpEQ(caught_type_id, expected_id, "type_matches");
+                auto caught_type_id =
+                    builder.CreateCall(get_error_type_id_fn->llvm_fn, {}, "caught_type_id");
+                auto expected_id =
+                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), catch_type->id);
+                auto type_matches =
+                    builder.CreateICmpEQ(caught_type_id, expected_id, "type_matches");
 
                 auto match_b = fn->new_label("_try_type_match");
                 auto nomatch_b = fn->new_label("_try_type_nomatch");
@@ -2635,7 +2660,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // === CATCH CLEANUP: destroy error object after catch block ===
             fn->use_label(catch_cleanup_b);
             {
-                auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), error_data_var, "err_owned");
+                auto owned_ptr =
+                    builder.CreateLoad(builder.getPtrTy(), error_data_var, "err_owned");
                 auto is_nonnull = builder.CreateICmpNE(
                     owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
                 auto do_free_b = fn->new_label("_catch_free");
@@ -2651,8 +2677,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 auto free_fn = get_system_fn("cx_free");
                 builder.CreateCall(free_fn->llvm_fn, {owned_ptr});
                 // Clear ownership so function-level cleanup doesn't double-free
-                builder.CreateStore(
-                    llvm::ConstantPointerNull::get(builder.getPtrTy()), error_data_var);
+                builder.CreateStore(llvm::ConstantPointerNull::get(builder.getPtrTy()),
+                                    error_data_var);
                 builder.CreateBr(skip_free_b);
 
                 fn->use_label(skip_free_b);
@@ -2667,10 +2693,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             if (data.catch_expr) {
                 auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
-                auto caught_type_id = builder.CreateCall(get_error_type_id_fn->llvm_fn, {}, "caught_type_id");
-                auto expected_id = llvm::ConstantInt::get(
-                    llvm::Type::getInt32Ty(llvm_ctx), catch_type->id);
-                auto type_matches = builder.CreateICmpEQ(caught_type_id, expected_id, "type_matches");
+                auto caught_type_id =
+                    builder.CreateCall(get_error_type_id_fn->llvm_fn, {}, "caught_type_id");
+                auto expected_id =
+                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), catch_type->id);
+                auto type_matches =
+                    builder.CreateICmpEQ(caught_type_id, expected_id, "type_matches");
 
                 auto match_b = fn->new_label("_try_type_match");
                 auto nomatch_b = fn->new_label("_try_type_nomatch");
@@ -2682,20 +2710,24 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
                 // Type matches: populate result with &ConcreteError
                 fn->use_label(match_b);
-                auto err_type = result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
+                auto err_type =
+                    result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
                 auto err_type_l = compile_type(err_type);
                 auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
                 auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
-                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1), has_err_p);
+                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
+                                    has_err_p);
                 auto err_value_p = builder.CreateStructGEP(err_type_l, err_p, 1);
                 builder.CreateStore(error_data, err_value_p);
             } else {
                 // Catch-all: populate result with Error interface
-                auto err_type = result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
+                auto err_type =
+                    result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
                 auto err_type_l = compile_type(err_type);
                 auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
                 auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
-                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1), has_err_p);
+                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
+                                    has_err_p);
                 auto err_value_p = builder.CreateStructGEP(err_type_l, err_p, 1);
                 auto iface_type_l = compile_type(err_type->get_elem());
                 auto data_p = builder.CreateStructGEP(iface_type_l, err_value_p, 0);
@@ -2759,7 +2791,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         // Promise struct layout: {state, value, error, on_resolve, on_reject}
         // value is at index 1, and it's a pointer to the actual value
         // GEP to get the value pointer field (index 1)
-        auto value_ptr_ptr = builder.CreateStructGEP(promise_struct_type_l, promise_ptr, 1, "await_value_ptr");
+        auto value_ptr_ptr =
+            builder.CreateStructGEP(promise_struct_type_l, promise_ptr, 1, "await_value_ptr");
         auto value_ptr = builder.CreateLoad(get_llvm_ptr_type(), value_ptr_ptr, "await_value_addr");
 
         // Load the actual value
@@ -2774,26 +2807,27 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto opt_type = get_chitype(dot_data.expr);
             auto result_type = get_chitype(expr);
             auto result_type_l = compile_type(result_type);
-            return compile_optional_branch(fn, dot_data.expr, result_type_l, "optchain",
+            return compile_optional_branch(
+                fn, dot_data.expr, result_type_l, "optchain",
                 [&](llvm::Value *unwrapped_ptr) {
                     auto unwrapped_type = opt_type->get_elem();
                     llvm::Value *struct_ptr;
                     ChiType *struct_type;
                     if (unwrapped_type->is_pointer_like()) {
                         struct_type = unwrapped_type->get_elem();
-                        struct_ptr = builder.CreateLoad(compile_type(unwrapped_type), unwrapped_ptr);
+                        struct_ptr =
+                            builder.CreateLoad(compile_type(unwrapped_type), unwrapped_ptr);
                     } else {
                         struct_type = unwrapped_type;
                         struct_ptr = unwrapped_ptr;
                     }
-                    auto gep = compile_dot_access(fn, struct_ptr, struct_type, dot_data.resolved_struct_member);
+                    auto gep = compile_dot_access(fn, struct_ptr, struct_type,
+                                                  dot_data.resolved_struct_member);
                     auto field_type = dot_data.resolved_struct_member->resolved_type;
                     auto field_val = builder.CreateLoad(compile_type(field_type), gep);
                     return compile_conversion(fn, field_val, field_type, result_type);
                 },
-                [&]() -> llvm::Value * {
-                    return llvm::ConstantAggregateZero::get(result_type_l);
-                });
+                [&]() -> llvm::Value * { return llvm::ConstantAggregateZero::get(result_type_l); });
         }
 
         auto member = dot_data.resolved_struct_member;
@@ -2861,7 +2895,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             emit_dbg_location(expr);
             auto ptr = compile_expr(fn, data.expr);
             auto ptr_type = get_chitype(data.expr);
-            auto elem_type = (ptr_type && ptr_type->is_pointer_like()) ? ptr_type->get_elem() : nullptr;
+            auto elem_type =
+                (ptr_type && ptr_type->is_pointer_like()) ? ptr_type->get_elem() : nullptr;
             compile_heap_free(fn, ptr, elem_type);
             return nullptr;
         }
@@ -2928,6 +2963,61 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::ParenExpr: {
         return compile_expr(fn, expr->data.child_expr);
     }
+    case ast::NodeType::IfExpr: {
+        auto &data = expr->data.if_stmt;
+        auto ret_type = expr->resolved_type ? get_chitype(expr) : nullptr;
+        auto &builder = *m_ctx->llvm_builder;
+
+        llvm::Value *var = nullptr;
+        if (ret_type && ret_type->kind != TypeKind::Void) {
+            if (data.resolved_outlet) {
+                var = compile_expr_ref(fn, data.resolved_outlet).address;
+            } else {
+                var = compile_alloc(fn, expr, false);
+            }
+        }
+
+        auto cond = compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
+        auto then_b = fn->new_label("_if_then");
+        auto end_b = fn->new_label("_if_end");
+        label_t *else_b = nullptr;
+        if (data.else_node) {
+            else_b = fn->new_label("_if_else");
+            builder.CreateCondBr(cond, then_b, else_b);
+        } else {
+            builder.CreateCondBr(cond, then_b, end_b);
+        }
+
+        fn->use_label(then_b);
+        compile_block(fn, expr, data.then_block, end_b, var);
+
+        if (data.else_node) {
+            fn->use_label(else_b);
+            if (data.else_node->type == ast::NodeType::Block) {
+                compile_block(fn, expr, data.else_node, end_b, var);
+            } else {
+                // else-if chain: compile recursively as expression
+                if (var) {
+                    auto else_val = compile_expr(fn, data.else_node);
+                    if (else_val)
+                        builder.CreateStore(else_val, var);
+                    builder.CreateBr(end_b);
+                } else {
+                    compile_expr(fn, data.else_node);
+                    builder.CreateBr(end_b);
+                }
+            }
+        }
+
+        fn->use_label(end_b);
+        for (auto nvar : data.post_narrow_vars) {
+            compile_stmt(fn, nvar);
+        }
+
+        if (!var)
+            return nullptr;
+        return builder.CreateLoad(compile_type(ret_type), var);
+    }
     case ast::NodeType::SwitchExpr: {
         auto &data = expr->data.switch_expr;
         auto ret_type = get_chitype(expr);
@@ -2974,7 +3064,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 // Get typeinfo from the concrete type's vtable for this interface
                 auto clause = scase->data.case_expr.clauses[0];
                 auto clause_type = get_resolver()->node_get_type(clause);
-                auto clause_elem = clause_type->is_pointer_like() ? clause_type->get_elem() : clause_type;
+                auto clause_elem =
+                    clause_type->is_pointer_like() ? clause_type->get_elem() : clause_type;
                 auto impl = clause_elem->data.struct_.interface_table[iface_elem];
                 auto vtable_global = m_ctx->impl_table[impl];
                 // vtable[0] is the typeinfo pointer
@@ -2998,7 +3089,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
 
             fn->use_label(done_label);
-            if (!var) return nullptr;
+            if (!var)
+                return nullptr;
             return builder.CreateLoad(compile_type(ret_type), var);
         }
 
@@ -3034,7 +3126,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
 
         fn->use_label(done_label);
-        if (!var) return nullptr;
+        if (!var)
+            return nullptr;
         return builder.CreateLoad(compile_type(ret_type), var);
     }
     default:
@@ -3076,7 +3169,8 @@ void Compiler::compile_copy(Function *fn, llvm::Value *value, llvm::Value *dest,
 
 void Compiler::compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Value *dest,
                                      ChiType *type, ast::Node *expr, bool destruct_old) {
-    if (!value) return;
+    if (!value)
+        return;
     if (expr->escape.moved) {
         // Moved temporary — destruct old if needed, then bitwise store
         if (destruct_old)
@@ -3217,7 +3311,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         if (ChiTypeStruct::is_interface(type)) {
             // dest is the ADDRESS of the fat pointer {data_ptr, vtable_ptr}
             // Load the fat pointer to extract data and vtable pointers
-            auto iface_type_l = llvm::StructType::get(*m_ctx->llvm_ctx, {get_llvm_ptr_type(), get_llvm_ptr_type()});
+            auto iface_type_l =
+                llvm::StructType::get(*m_ctx->llvm_ctx, {get_llvm_ptr_type(), get_llvm_ptr_type()});
             auto dest_fp = builder.CreateLoad(iface_type_l, dest, "dest_fp");
             auto dest_data_ptr = builder.CreateExtractValue(dest_fp, {0}, "dest_data");
             auto dest_vtable = builder.CreateExtractValue(dest_fp, {1}, "dest_vtable");
@@ -3257,7 +3352,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         }
 
         auto sty = get_resolver()->resolve_struct_type(eval_type(type));
-        if (!sty) break;  // Not a struct type, fall through to default copy
+        if (!sty)
+            break; // Not a struct type, fall through to default copy
         auto &builder = *m_ctx->llvm_builder;
         auto copy_fn_p = sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
         if (copy_fn_p) {
@@ -3283,9 +3379,9 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             auto copy_fn_node = get_variant_member_node(copy_fn, variant_type_id);
             auto loc = m_ctx->llvm_builder->getCurrentDebugLocation();
             auto call = builder.CreateCall(get_fn(copy_fn_node)->llvm_fn, {
-                                                                               dest,
-                                                                               from_address,
-                                                                           });
+                                                                              dest,
+                                                                              from_address,
+                                                                          });
             call->setDebugLoc(loc);
             emit_dbg_location(expr);
             return;
@@ -3311,14 +3407,17 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                 }
                 auto from_address = src.address;
                 if (!from_address) {
-                    from_address = builder.CreateAlloca(compile_type(type), nullptr, "_struct_copy_src");
+                    from_address =
+                        builder.CreateAlloca(compile_type(type), nullptr, "_struct_copy_src");
                     builder.CreateStore(ensure_value(), from_address);
                 }
 
                 auto llvm_type = compile_type(type);
                 for (auto field : data.fields) {
-                    auto field_src_gep = builder.CreateStructGEP(llvm_type, from_address, field->field_index);
-                    auto field_dest_gep = builder.CreateStructGEP(llvm_type, dest, field->field_index);
+                    auto field_src_gep =
+                        builder.CreateStructGEP(llvm_type, from_address, field->field_index);
+                    auto field_dest_gep =
+                        builder.CreateStructGEP(llvm_type, dest, field->field_index);
                     auto field_llvm_type = compile_type(field->resolved_type);
                     auto field_value = builder.CreateLoad(field_llvm_type, field_src_gep);
                     compile_copy(fn, field_value, field_dest_gep, field->resolved_type, expr);
@@ -3361,7 +3460,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         auto is_inlined = builder.CreateICmpNE(inlined, llvm::ConstantInt::get(i8_ty, 0));
 
         // Load copier and size from TypeInfo
-        auto ti_header_l = llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type, ptr_type}, true);
+        auto ti_header_l =
+            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type, ptr_type}, true);
         auto size_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 1);
         auto typesize = builder.CreateLoad(i32_ty, size_gep, "any_typesize");
         auto copier_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 4);
@@ -3388,8 +3488,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             builder.CreateBr(bb_done);
 
             fn->use_label(bb_copier);
-            auto copier_fn_type = llvm::FunctionType::get(
-                llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+            auto copier_fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx),
+                                                          {ptr_type, ptr_type}, false);
             builder.CreateCall(copier_fn_type, copier_ptr, {dst_data_gep, src_data_gep});
             builder.CreateBr(bb_done);
         }
@@ -3399,7 +3499,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         {
             auto src_heap_ptr = builder.CreateLoad(ptr_type, src_data_gep, "src_heap_ptr");
             auto malloc_fn = get_system_fn("cx_malloc");
-            auto new_buf = builder.CreateCall(malloc_fn->llvm_fn, {typesize, get_null_ptr()}, "new_heap_buf");
+            auto new_buf =
+                builder.CreateCall(malloc_fn->llvm_fn, {typesize, get_null_ptr()}, "new_heap_buf");
 
             auto copier_is_null = builder.CreateICmpEQ(copier_ptr, get_null_ptr());
             auto bb_h_memcpy = fn->new_label("any_cp_heap_memcpy");
@@ -3412,8 +3513,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             builder.CreateBr(bb_h_done);
 
             fn->use_label(bb_h_copier);
-            auto copier_fn_type = llvm::FunctionType::get(
-                llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+            auto copier_fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx),
+                                                          {ptr_type, ptr_type}, false);
             builder.CreateCall(copier_fn_type, copier_ptr, {new_buf, src_heap_ptr});
             builder.CreateBr(bb_h_done);
 
@@ -3496,18 +3597,17 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto args = std::vector<llvm::Value *>{dest};
             // Track temporaries created for constructor arguments
             std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
-            auto remaining_args = compile_fn_args(fn, constructor_fn,
-                                                  expr->data.construct_expr.items, expr,
-                                                  &arg_temporaries);
+            auto remaining_args = compile_fn_args(
+                fn, constructor_fn, expr->data.construct_expr.items, expr, &arg_temporaries);
             args.insert(args.end(), remaining_args.begin(), remaining_args.end());
 
             // Compile default args for missing params (e.g. = {} on generic field)
             if (constructor_node->type == ast::NodeType::FnDef) {
                 auto &proto = constructor_node->data.fn_def.fn_proto->data.fn_proto;
-                for (size_t i = expr->data.construct_expr.items.len;
-                     i < proto.params.len; i++) {
+                for (size_t i = expr->data.construct_expr.items.len; i < proto.params.len; i++) {
                     auto default_val = proto.params[i]->data.param_decl.default_value;
-                    if (!default_val) break;
+                    if (!default_val)
+                        break;
                     auto param_type = constructor_fn->fn_type->data.fn.get_param_at(i);
                     auto val = compile_assignment_to_type(fn, default_val, param_type);
                     args.push_back(val);
@@ -3538,8 +3638,10 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             // Iterate source fields, find matching target field by name
             for (auto src_field : spread_type->data.struct_.fields) {
                 auto tgt_field = get_resolver()->get_struct_member(type, src_field->get_name());
-                if (!tgt_field) continue; // validated by resolver
-                if (overridden.count(tgt_field->field_index)) continue;
+                if (!tgt_field)
+                    continue; // validated by resolver
+                if (overridden.count(tgt_field->field_index))
+                    continue;
 
                 auto src_gep = builder.CreateStructGEP(spread_type_l, spread_ref.address,
                                                        src_field->field_index);
@@ -3618,7 +3720,8 @@ void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fiel
             auto var_ptr = compile_alloc(fn, var_node);
             add_var(var_node, var_ptr);
 
-            if (field_data.sigil == ast::SigilKind::Reference || field_data.sigil == ast::SigilKind::MutRef) {
+            if (field_data.sigil == ast::SigilKind::Reference ||
+                field_data.sigil == ast::SigilKind::MutRef) {
                 // Reference binding: store field address directly
                 builder.CreateStore(field_ptr, var_ptr);
             } else {
@@ -3666,7 +3769,8 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
         add_var(var_node, var_ptr);
 
         auto &field_data = field_node->data.destructure_field;
-        if (field_data.sigil == ast::SigilKind::Reference || field_data.sigil == ast::SigilKind::MutRef) {
+        if (field_data.sigil == ast::SigilKind::Reference ||
+            field_data.sigil == ast::SigilKind::MutRef) {
             // Reference binding: store element address directly
             builder.CreateStore(elem_ptr, var_ptr);
         } else {
@@ -3812,7 +3916,8 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                 (uint32_t)m_ctx->llvm_module->getDataLayout().getTypeAllocSize(bind_struct_type_l);
 
             // Initialize __CxLambda struct
-            auto [lambda_alloca, lambda_struct_type_l] = compile_cxlambda_init(fn, proxy_fn, struct_size);
+            auto [lambda_alloca, lambda_struct_type_l] =
+                compile_cxlambda_init(fn, proxy_fn, struct_size);
 
             // Get the instance pointer
             llvm::Value *instance_ptr;
@@ -3842,7 +3947,8 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                 }
             }
 
-            auto [capture_ptr, payload_data_ptr] = compile_cxcapture_create(struct_size, captures_ti_ptr, dtor_ptr);
+            auto [capture_ptr, payload_data_ptr] =
+                compile_cxcapture_create(struct_size, captures_ti_ptr, dtor_ptr);
 
             auto bind_struct_value = builder.CreateLoad(bind_struct_type_l, bind_alloca);
             auto payload_typed_ptr =
@@ -3857,8 +3963,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             ptr = compile_expr(fn, data.expr);
         } else {
             // Check if this is module member access (e.g., sdl.SDL_Init)
-            if (data.expr->type == ast::NodeType::Identifier &&
-                data.expr->data.identifier.decl &&
+            if (data.expr->type == ast::NodeType::Identifier && data.expr->data.identifier.decl &&
                 data.expr->data.identifier.decl->type == ast::NodeType::ImportDecl) {
                 // Module member access - use resolved_decl if available
                 if (data.resolved_decl) {
@@ -3899,8 +4004,8 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             // For pointer-to-interface deref, return the fat pointer variable's address
             // so interface copy can update both data and vtable
             auto op1_type = get_chitype(data.op1);
-            if (op1_type && op1_type->is_pointer_like() &&
-                op1_type->get_elem() && ChiTypeStruct::is_interface(op1_type->get_elem())) {
+            if (op1_type && op1_type->is_pointer_like() && op1_type->get_elem() &&
+                ChiTypeStruct::is_interface(op1_type->get_elem())) {
                 auto ref = compile_expr_ref(fn, data.op1);
                 return RefValue::from_address(ref.address);
             }
@@ -3977,6 +4082,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     // Rvalue expressions - return value only (no meaningful address)
     case ast::NodeType::ParenExpr:
         return compile_expr_ref(fn, expr->data.child_expr);
+    case ast::NodeType::IfExpr:
     case ast::NodeType::SwitchExpr:
     case ast::NodeType::BinOpExpr:
     case ast::NodeType::ConstructExpr:
@@ -4003,7 +4109,8 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     }
     // Unwrap ImportSymbol to reach the actual declaration
     auto *resolved_decl = data.decl;
-    if (resolved_decl->type == ast::NodeType::ImportSymbol && resolved_decl->data.import_symbol.resolved_decl) {
+    if (resolved_decl->type == ast::NodeType::ImportSymbol &&
+        resolved_decl->data.import_symbol.resolved_decl) {
         resolved_decl = resolved_decl->data.import_symbol.resolved_decl;
     }
 
@@ -4041,7 +4148,8 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
     if (data.decl->type == ast::NodeType::ImportDecl) {
         // Module identifiers (import aliases) should not be compiled directly
         // They should only appear as part of DotExpr for module member access
-        panic("Cannot compile module identifier '{}' directly - module member access should be resolved",
+        panic("Cannot compile module identifier '{}' directly - module member access should be "
+              "resolved",
               iden->name);
     }
 
@@ -4078,9 +4186,10 @@ normal:
     return RefValue::from_address(get_var(data.decl));
 }
 
-std::vector<llvm::Value *> Compiler::compile_fn_args(
-    Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call,
-    std::vector<std::pair<llvm::Value *, ast::Node *>> *out_temporaries) {
+std::vector<llvm::Value *>
+Compiler::compile_fn_args(Function *fn, Function *callee, array<ast::Node *> args,
+                          ast::Node *fn_call,
+                          std::vector<std::pair<llvm::Value *, ast::Node *>> *out_temporaries) {
     std::vector<llvm::Value *> call_args = {};
     auto &builder = *m_ctx->llvm_builder.get();
     llvm::Value *va_ptr = nullptr;
@@ -4365,8 +4474,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                     param_types.push_back(param);
                 }
             }
-            auto dispatch_fn_type = llvm::FunctionType::get(
-                orig_fn_type->getReturnType(), param_types, orig_fn_type->isVarArg());
+            auto dispatch_fn_type = llvm::FunctionType::get(orig_fn_type->getReturnType(),
+                                                            param_types, orig_fn_type->isVarArg());
             callee = {dispatch_fn_type, callee_ptr};
         } else {
             ctn_ptr = ptr;
@@ -4403,7 +4512,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 auto array_struct = get_resolver()->resolve_struct_type(array_type);
                 auto copy_from_member = array_struct->find_member("copy_from");
                 assert(copy_from_member && "Array.copy_from() method not found");
-                auto copy_from_method_node = get_variant_member_node(copy_from_member, std::nullopt);
+                auto copy_from_method_node =
+                    get_variant_member_node(copy_from_member, std::nullopt);
                 auto copy_from_fn = get_fn(copy_from_method_node);
                 builder.CreateCall(copy_from_fn->llvm_fn, {va_ptr, src_ptr});
                 continue;
@@ -4460,7 +4570,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto &proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
         for (size_t i = data.args.len; i < proto.params.len; i++) {
             auto default_val = proto.params[i]->data.param_decl.default_value;
-            if (!default_val) break;
+            if (!default_val)
+                break;
             auto param_type = fn_spec.get_param_at(i);
             args.push_back(compile_assignment_to_type(fn, default_val, param_type));
         }
@@ -4550,7 +4661,8 @@ std::optional<TypeId> Compiler::resolve_variant_type_id(Function *fn, ChiType *t
         }
     }
 
-    // Also handle specialized_subtype for generic function parameters (e.g., Promise<T> in promise<T>)
+    // Also handle specialized_subtype for generic function parameters (e.g., Promise<T> in
+    // promise<T>)
     if (type && type->is_placeholder && fn && fn->specialized_subtype &&
         fn->specialized_subtype->kind == TypeKind::Subtype) {
         auto &subtype_data = fn->specialized_subtype->data.subtype;
@@ -4679,7 +4791,8 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
     // Check by comparing parameter counts:
     // - bound_fn_type has (_binds, user_args...)
     // - original_fn_type has (user_args...)
-    // - If the original LLVM function has more params than original_fn_type, it's a lambda with _binds
+    // - If the original LLVM function has more params than original_fn_type, it's a lambda with
+    // _binds
 
     std::vector<llvm::Value *> original_args;
     auto proxy_arg_count = proxy_llvm_fn->arg_size();
@@ -4690,16 +4803,16 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
 
     // Determine if we should pass the _binds parameter
     // If the original function has more parameters than the original type spec, it has _binds
-    bool original_has_binds = original_llvm_fn &&
-                             (original_llvm_fn->arg_size() > original_fn_type_l->getNumParams());
+    bool original_has_binds =
+        original_llvm_fn && (original_llvm_fn->arg_size() > original_fn_type_l->getNumParams());
 
     // Check if the function uses sret (struct return)
     bool use_sret = bound_fn_type->data.fn.should_use_sret();
 
     // Start index: skip sret arg (if present), then skip _binds if original doesn't take it
-    unsigned start_idx = use_sret ? 1 : 0;  // Skip sret if present
+    unsigned start_idx = use_sret ? 1 : 0; // Skip sret if present
     if (!original_has_binds) {
-        start_idx++;  // Skip _binds
+        start_idx++; // Skip _binds
     }
 
     for (unsigned i = start_idx; i < proxy_arg_count; ++i) {
@@ -4719,7 +4832,7 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
 
     // For sret, insert the sret pointer at the beginning of args
     if (use_sret) {
-        auto sret_arg = proxy_llvm_fn->getArg(0);  // First arg is the sret pointer
+        auto sret_arg = proxy_llvm_fn->getArg(0); // First arg is the sret pointer
         original_args.insert(original_args.begin(), sret_arg);
     }
 
@@ -4839,7 +4952,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     if (from_elem && ChiTypeStruct::is_interface(from_elem)) {
                         // Extract data_ptr (field 0) from the fat pointer
                         auto ptr_type = get_llvm_ptr_type();
-                        auto iface_type_l = llvm::StructType::get(*m_ctx->llvm_ctx, {ptr_type, ptr_type});
+                        auto iface_type_l =
+                            llvm::StructType::get(*m_ctx->llvm_ctx, {ptr_type, ptr_type});
                         auto fp = llvm_builder.CreateLoad(iface_type_l, addr, "narrow_fp");
                         auto data_ptr = llvm_builder.CreateExtractValue(fp, {0}, "data_ptr");
                         // Store in alloca so from_address() works correctly
@@ -4865,7 +4979,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             if (data.expr->type == ast::NodeType::FnCallExpr) {
                 auto &fn_call_data = data.expr->data.fn_call_expr;
                 // Only use direct sret for regular function calls, not lambdas or optional chains
-                bool is_lambda = fn_call_data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda;
+                bool is_lambda =
+                    fn_call_data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda;
                 bool is_optional_chain = fn_call_data.fn_ref_expr->type == ast::NodeType::DotExpr &&
                                          fn_call_data.fn_ref_expr->data.dot_expr.is_optional_chain;
                 if (!is_lambda && !is_optional_chain) {
@@ -4915,9 +5030,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
                 // Zero-initialize return_value before calling Promise.new()
                 auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(return_type_l);
-                llvm_builder.CreateMemSet(fn->return_value,
-                    llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
-                    size, {});
+                llvm_builder.CreateMemSet(
+                    fn->return_value,
+                    llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0), size,
+                    {});
 
                 std::optional<TypeId> variant_type_id = std::nullopt;
                 if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
@@ -4979,10 +5095,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
         // Call cx_throw(type_info, data_ptr, vtable_ptr, type_id)
         auto throw_fn = get_system_fn("cx_throw");
-        auto type_id = llvm::ConstantInt::get(
-            llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
-        llvm_builder.CreateCall(throw_fn->llvm_fn,
-                                {type_info, error_ref, vtable, type_id});
+        auto type_id = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
+        llvm_builder.CreateCall(throw_fn->llvm_fn, {type_info, error_ref, vtable, type_id});
         llvm_builder.CreateUnreachable();
         scope->branched = true;
         break;
@@ -5003,40 +5117,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         }
         break;
     }
-    case ast::NodeType::IfStmt: {
-        auto &data = stmt->data.if_stmt;
-        auto &builder = *m_ctx->llvm_builder.get();
-        auto &llvm_ctx = *m_ctx->llvm_ctx.get();
-        auto &llvm_module = *m_ctx->llvm_module.get();
-        auto cond = compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
-        auto bb = builder.GetInsertBlock();
-        auto then_b = fn->new_label("_if_then");
-        auto end_b = fn->new_label("_if_end");
-        label_t *else_b = nullptr;
-        if (data.else_node) {
-            else_b = fn->new_label("_if_else");
-            builder.CreateCondBr(cond, then_b, else_b);
-        } else {
-            builder.CreateCondBr(cond, then_b, end_b);
-        }
-
-        fn->use_label(then_b);
-        compile_block(fn, stmt, data.then_block, end_b);
-
-        if (data.else_node) {
-            fn->use_label(else_b);
-            if (data.else_node->type == ast::NodeType::Block) {
-                compile_block(fn, stmt, data.else_node, end_b);
-            } else {
-                compile_stmt(fn, data.else_node);
-                builder.CreateBr(end_b);
-            }
-        }
-
-        fn->use_label(end_b);
-        for (auto var : data.post_narrow_vars) {
-            compile_stmt(fn, var);
-        }
+    case ast::NodeType::IfExpr: {
+        compile_expr(fn, stmt);
         break;
     }
     case ast::NodeType::ForStmt: {
@@ -5072,8 +5154,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
             fn->use_label(loop_post);
             auto cur = builder.CreateLoad(iter_type, it);
-            builder.CreateStore(
-                builder.CreateAdd(cur, llvm::ConstantInt::get(iter_type, 1)), it);
+            builder.CreateStore(builder.CreateAdd(cur, llvm::ConstantInt::get(iter_type, 1)), it);
             builder.CreateBr(loop->start);
 
             fn->use_label(loop->end);
@@ -5231,8 +5312,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             if (item_var) {
                 // Extract value (field 1) — this is &mut T (a pointer)
                 auto value_p = builder.CreateStructGEP(next_ret_type_l, opt_alloca, 1);
-                auto value = builder.CreateLoad(compile_type(data.bind->resolved_type),
-                                                value_p, "_iter_item");
+                auto value = builder.CreateLoad(compile_type(data.bind->resolved_type), value_p,
+                                                "_iter_item");
                 builder.CreateStore(value, item_var);
             }
             compile_block(fn, stmt, data.body, loop_post);
@@ -5240,8 +5321,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop_post);
             if (index_var) {
                 auto cur = builder.CreateLoad(idx_type, index_var);
-                builder.CreateStore(
-                    builder.CreateAdd(cur, llvm::ConstantInt::get(idx_type, 1)), index_var);
+                builder.CreateStore(builder.CreateAdd(cur, llvm::ConstantInt::get(idx_type, 1)),
+                                    index_var);
             }
             builder.CreateBr(loop->start);
 
@@ -5337,9 +5418,11 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block) {
     auto *fn_def = fn->get_def();
     for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
         auto var = block->cleanup_vars[i];
-        if (fn_def->is_sunk(var)) continue;
+        if (fn_def->is_sunk(var))
+            continue;
         // Skip variables not yet compiled (e.g. early return before var decl)
-        if (!m_ctx->var_table.has_key(var)) continue;
+        if (!m_ctx->var_table.has_key(var))
+            continue;
         compile_destruction(fn, get_var(var), var);
     }
 }
@@ -5377,7 +5460,8 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         }
     }
 
-    if (!type) return;
+    if (!type)
+        return;
 
     // Any: destroy inner value via TypeInfo destructor, free heap if not inlined
     if (type->kind == TypeKind::Any) {
@@ -5399,7 +5483,8 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         fn->use_label(bb_has_ti);
 
         // Load destructor from TypeInfo (field 3: kind, size, data, destructor, copier, ...)
-        auto ti_header_l = llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type}, true);
+        auto ti_header_l =
+            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type}, true);
         auto dtor_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 3);
         auto dtor_ptr = builder.CreateLoad(ptr_type, dtor_gep, "any_dtor");
 
@@ -5434,7 +5519,8 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         builder.CreateCondBr(dtor_is_null, bb_after_dtor, bb_call_dtor);
 
         fn->use_label(bb_call_dtor);
-        auto dtor_fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+        auto dtor_fn_type =
+            llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
         builder.CreateCall(dtor_fn_type, dtor_ptr, {data_ptr});
         builder.CreateBr(bb_after_dtor);
 
@@ -5534,8 +5620,8 @@ void Compiler::call_vtable_destructor(Function *fn, llvm::Value *vtable_ptr,
     auto ptr_type = get_llvm_ptr_type();
 
     // Load destructor from vtable[1] (index 0=typeinfo, 1=destructor)
-    auto dtor_gep = builder.CreateGEP(ptr_type, vtable_ptr,
-        {llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, 1))});
+    auto dtor_gep = builder.CreateGEP(
+        ptr_type, vtable_ptr, {llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, 1))});
     auto dtor_ptr = builder.CreateLoad(ptr_type, dtor_gep);
 
     auto is_null = builder.CreateICmpEQ(dtor_ptr, get_null_ptr());
@@ -5544,22 +5630,22 @@ void Compiler::call_vtable_destructor(Function *fn, llvm::Value *vtable_ptr,
     builder.CreateCondBr(is_null, merge_bb, then_bb);
 
     fn->use_label(then_bb);
-    auto dtor_fn_type = llvm::FunctionType::get(
-        llvm::Type::getVoidTy(*m_ctx->llvm_ctx), {ptr_type}, false);
+    auto dtor_fn_type =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*m_ctx->llvm_ctx), {ptr_type}, false);
     builder.CreateCall(dtor_fn_type, dtor_ptr, {data_ptr});
     builder.CreateBr(merge_bb);
 
     fn->use_label(merge_bb);
 }
 
-void Compiler::call_vtable_copier(Function *fn, llvm::Value *vtable_ptr,
-                                  llvm::Value *dest_data, llvm::Value *src_data) {
+void Compiler::call_vtable_copier(Function *fn, llvm::Value *vtable_ptr, llvm::Value *dest_data,
+                                  llvm::Value *src_data) {
     auto &builder = *m_ctx->llvm_builder;
     auto ptr_type = get_llvm_ptr_type();
 
     // Load copier from vtable[2] (index 0=typeinfo, 1=destructor, 2=copier)
-    auto copier_gep = builder.CreateGEP(ptr_type, vtable_ptr,
-        {llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, 2))});
+    auto copier_gep = builder.CreateGEP(
+        ptr_type, vtable_ptr, {llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, 2))});
     auto copier_fn_ptr = builder.CreateLoad(ptr_type, copier_gep, "copier_fn");
     auto copier_is_null = builder.CreateICmpEQ(copier_fn_ptr, get_null_ptr());
     auto bb_copy = fn->new_label("vtable_copy");
@@ -5569,8 +5655,8 @@ void Compiler::call_vtable_copier(Function *fn, llvm::Value *vtable_ptr,
 
     // Call copier(dest_data, src_data)
     fn->use_label(bb_copy);
-    auto copier_fn_type = llvm::FunctionType::get(
-        llvm::Type::getVoidTy(*m_ctx->llvm_ctx), {ptr_type, ptr_type}, false);
+    auto copier_fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*m_ctx->llvm_ctx),
+                                                  {ptr_type, ptr_type}, false);
     builder.CreateCall(copier_fn_type, copier_fn_ptr, {dest_data, src_data});
     builder.CreateBr(bb_done);
 
@@ -5606,12 +5692,15 @@ llvm::Value *Compiler::load_typesize_from_vtable(llvm::Value *vtable_ptr) {
 llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) {
     auto &builder = *m_ctx->llvm_builder;
 
-    if (!fn || !fn->container_subtype) return nullptr;
+    if (!fn || !fn->container_subtype)
+        return nullptr;
 
     auto container_type = fn->container_subtype->final_type;
-    if (!container_type) return nullptr;
+    if (!container_type)
+        return nullptr;
     container_type = eval_type(container_type);
-    if (container_type->kind != TypeKind::Struct) return nullptr;
+    if (container_type->kind != TypeKind::Struct)
+        return nullptr;
 
     auto &struct_data = container_type->data.struct_;
 
@@ -5632,7 +5721,8 @@ llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) 
         }
     }
 
-    if (!target_field) return nullptr;
+    if (!target_field)
+        return nullptr;
 
     auto container_type_l = compile_type(container_type);
     auto fat_ptr_type_l = compile_type(field_type);
@@ -5641,21 +5731,26 @@ llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) 
     if (fn->node && fn->node->type == ast::NodeType::FnDef) {
         auto proto_node = fn->node->data.fn_def.fn_proto;
         for (auto &param_info : fn->parameter_info) {
-            if (param_info.kind != ParameterKind::Regular) continue;
+            if (param_info.kind != ParameterKind::Regular)
+                continue;
             auto param_type = param_info.type;
-            if (!param_type || !param_type->is_pointer_like()) continue;
+            if (!param_type || !param_type->is_pointer_like())
+                continue;
             auto param_elem = param_type->get_elem();
-            if (!param_elem) continue;
+            if (!param_elem)
+                continue;
             param_elem = eval_type(param_elem);
             if (get_resolver()->format_type_id(param_elem) !=
-                get_resolver()->format_type_id(container_type)) continue;
+                get_resolver()->format_type_id(container_type))
+                continue;
 
             // This param references the same container struct — use its fat pointer field
             auto param_node = proto_node->data.fn_proto.params[param_info.user_param_index];
             auto param_alloca = get_var(param_node);
-            auto struct_ptr = builder.CreateLoad(get_llvm_ptr_type(), param_alloca, "param_struct_ptr");
-            auto field_gep = builder.CreateStructGEP(container_type_l, struct_ptr,
-                                                     target_field->field_index);
+            auto struct_ptr =
+                builder.CreateLoad(get_llvm_ptr_type(), param_alloca, "param_struct_ptr");
+            auto field_gep =
+                builder.CreateStructGEP(container_type_l, struct_ptr, target_field->field_index);
             auto fat_ptr = builder.CreateLoad(fat_ptr_type_l, field_gep, "iface_fat_ptr");
             return builder.CreateExtractValue(fat_ptr, {1}, "vtable_ptr");
         }
@@ -5663,8 +5758,8 @@ llvm::Value *Compiler::find_interface_vtable(Function *fn, ChiType *iface_type) 
 
     // Fall back to `this` pointer
     if (fn->bind_ptr) {
-        auto field_gep = builder.CreateStructGEP(container_type_l, fn->bind_ptr,
-                                                 target_field->field_index);
+        auto field_gep =
+            builder.CreateStructGEP(container_type_l, fn->bind_ptr, target_field->field_index);
         auto fat_ptr = builder.CreateLoad(fat_ptr_type_l, field_gep, "iface_fat_ptr");
         return builder.CreateExtractValue(fat_ptr, {1}, "vtable_ptr");
     }
@@ -5723,7 +5818,8 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
 
     // Create function type: void __delete(T*)
     auto struct_ptr_type = get_llvm_ptr_type();
-    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
     // Generate unique name for the destructor
     auto type_name = get_resolver()->format_type_display(type);
@@ -5797,7 +5893,8 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
             }
         }
 
-        if (!resolved_field_type) continue;
+        if (!resolved_field_type)
+            continue;
 
         // Check if field needs destruction using resolver's utility
         if (!get_resolver()->type_needs_destruction(resolved_field_type)) {
@@ -5855,7 +5952,8 @@ Function *Compiler::generate_copier(ChiType *type) {
 
     // Create function type: void __copy(T* dest, T* src)
     auto ptr_type = get_llvm_ptr_type();
-    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
 
     // Generate unique name for the copier
     auto type_name = get_resolver()->format_type_display(type);
@@ -5883,7 +5981,8 @@ Function *Compiler::generate_copier(ChiType *type) {
 
     // Delegate to compile_copy_with_ref — pure copy without destruct_old
     // The caller is responsible for destructing the old value first if needed
-    compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, resolved_type, nullptr, false);
+    compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, resolved_type, nullptr,
+                          false);
 
     builder.CreateRetVoid();
 
@@ -5948,7 +6047,8 @@ Function *Compiler::generate_any_copier(ChiType *type) {
     auto ptr_type = get_llvm_ptr_type();
 
     // void __any_copy_T(void* dest, void* src)
-    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
     auto type_name = get_resolver()->format_type_display(type);
     auto fn_name = fmt::format("{}.__any_copy", type_name);
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -6109,7 +6209,8 @@ Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_ty
                 }
             }
         }
-        if (any_variant_needs) break;
+        if (any_variant_needs)
+            break;
     }
 
     if (any_variant_needs) {
@@ -6125,7 +6226,8 @@ Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_ty
 
         for (auto variant : enum_->variants) {
             auto vs = variant->resolved_type->data.enum_value.variant_struct;
-            if (!vs) continue;
+            if (!vs)
+                continue;
 
             bool variant_needs = false;
             for (auto field : vs->data.struct_.fields) {
@@ -6134,7 +6236,8 @@ Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_ty
                     break;
                 }
             }
-            if (!variant_needs) continue;
+            if (!variant_needs)
+                continue;
 
             auto bb = fn->new_label(fmt::format("enum_dtor_{}", variant->name));
             sw->addCase(
@@ -6211,17 +6314,24 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
         };
         if (bvs) {
             for (auto field : bvs->data.struct_.fields) {
-                if (check_field_copier(field->resolved_type)) { needs_copier = true; break; }
+                if (check_field_copier(field->resolved_type)) {
+                    needs_copier = true;
+                    break;
+                }
             }
         }
         if (!needs_copier) {
             for (auto variant : enum_->variants) {
                 if (auto vs = variant->resolved_type->data.enum_value.variant_struct) {
                     for (auto field : vs->data.struct_.fields) {
-                        if (check_field_copier(field->resolved_type)) { needs_copier = true; break; }
+                        if (check_field_copier(field->resolved_type)) {
+                            needs_copier = true;
+                            break;
+                        }
                     }
                 }
-                if (needs_copier) break;
+                if (needs_copier)
+                    break;
             }
         }
     }
@@ -6232,8 +6342,8 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
 
     // Create function type: void __copy(T* dest, T* src)
     auto ptr_type = get_llvm_ptr_type();
-    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx),
-                                              {ptr_type, ptr_type}, false);
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
 
     auto type_name = get_resolver()->format_type_display(type);
     auto fn_name = fmt::format("{}.__copy", type_name);
@@ -6294,7 +6404,8 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
                 }
             }
         }
-        if (any_variant_needs) break;
+        if (any_variant_needs)
+            break;
     }
 
     if (any_variant_needs) {
@@ -6310,7 +6421,8 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
 
         for (auto variant : enum_->variants) {
             auto vs = variant->resolved_type->data.enum_value.variant_struct;
-            if (!vs) continue;
+            if (!vs)
+                continue;
 
             // For variants with only trivial fields, copy the byte array via memcpy
             bool variant_has_nontrivial = false;
@@ -6361,9 +6473,10 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
     return fn;
 }
 
-Function *Compiler::generate_destructor_continuation(llvm::StructType *capture_struct_type,
-                                                      ChiType *promise_type,
-                                                      const std::vector<ast::Node *> &captured_vars) {
+Function *
+Compiler::generate_destructor_continuation(llvm::StructType *capture_struct_type,
+                                           ChiType *promise_type,
+                                           const std::vector<ast::Node *> &captured_vars) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
 
@@ -6449,7 +6562,8 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
     auto &struct_data = resolved_type->data.struct_;
     bool has_defaults = false;
     for (auto field : struct_data.fields) {
-        if (!field->node) continue;
+        if (!field->node)
+            continue;
         auto default_expr = field->node->data.var_decl.expr;
         if (default_expr) {
             has_defaults = true;
@@ -6465,7 +6579,8 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
 
     // Create function type: void __new(T*)
     auto struct_ptr_type = get_llvm_ptr_type();
-    auto fn_type_l = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
     // Generate unique name for the constructor
     auto type_name = get_resolver()->format_type_display(struct_type);
@@ -6493,16 +6608,19 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
 
     // Initialize all fields with default values
     for (auto field : struct_data.fields) {
-        if (!field->node) continue;
+        if (!field->node)
+            continue;
         auto default_expr = field->node->data.var_decl.expr;
-        if (!default_expr) continue;
+        if (!default_expr)
+            continue;
 
         auto field_gep = builder.CreateStructGEP(llvm_struct_type, this_ptr, field->field_index);
 
         // Clear resolved_outlet on ConstructExpr to avoid using stale outlets
         if (default_expr->type == ast::NodeType::ConstructExpr) {
             std::function<void(ast::Node *)> clear_outlets = [&](ast::Node *node) {
-                if (!node) return;
+                if (!node)
+                    return;
                 if (node->type == ast::NodeType::ConstructExpr) {
                     node->data.construct_expr.resolved_outlet = nullptr;
                     for (auto item : node->data.construct_expr.items) {
@@ -6589,12 +6707,10 @@ Function *Compiler::get_fn(ast::Node *node) {
             auto container = fn_type->data.fn.container_ref->get_elem();
             // Build ID using the container's global_id (includes module prefix)
             auto container_id = container->global_id.empty()
-                ? get_resolver()->format_type_id(container)
-                : container->global_id;
-            auto subst_id = fmt::format("{}.{}.{}",
-                node->module->global_id(),
-                container_id,
-                node->name);
+                                    ? get_resolver()->format_type_id(container)
+                                    : container->global_id;
+            auto subst_id =
+                fmt::format("{}.{}.{}", node->module->global_id(), container_id, node->name);
             entry = m_ctx->function_table.get(subst_id);
         }
     }
@@ -6602,8 +6718,7 @@ Function *Compiler::get_fn(ast::Node *node) {
     // Placeholder GeneratedFn with type_env: the concrete variant exists on the
     // original fn_def but wasn't compiled yet (created after codegen passed over
     // the function's declaration). Compile its proto now; body goes to pending_fns.
-    if (!entry && m_fn && m_fn->type_env &&
-        node->type == ast::NodeType::GeneratedFn &&
+    if (!entry && m_fn && m_fn->type_env && node->type == ast::NodeType::GeneratedFn &&
         node->data.generated_fn.fn_subtype->is_placeholder) {
         auto &gfn = node->data.generated_fn;
         array<ChiType *> concrete_args;
@@ -6885,8 +7000,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             members.push_back(get_llvm_ptr_type()); // [0] data
             members.push_back(get_llvm_ptr_type()); // [1] vtable
             return llvm::StructType::create(
-                members,
-                "FatIFacePointer<" + get_resolver()->format_type_display(data.elem) + ">");
+                members, "FatIFacePointer<" + get_resolver()->format_type_display(data.elem) + ">");
         }
         return get_llvm_ptr_type();
     }
@@ -7037,7 +7151,8 @@ void Compiler::dump_generics_comparison() {
             fn_missing++;
         }
     }
-    if (fn_missing == 0) print("  (none)\n");
+    if (fn_missing == 0)
+        print("  (none)\n");
 
     // Check for functions compiled but not in GenericResolver
     print("Functions compiled but NOT in GenericResolver:\n");
@@ -7048,7 +7163,8 @@ void Compiler::dump_generics_comparison() {
             fn_extra++;
         }
     }
-    if (fn_extra == 0) print("  (none)\n");
+    if (fn_extra == 0)
+        print("  (none)\n");
 
     // Check for structs in GenericResolver but not compiled
     print("Structs in GenericResolver but NOT compiled:\n");
@@ -7059,7 +7175,8 @@ void Compiler::dump_generics_comparison() {
             struct_missing++;
         }
     }
-    if (struct_missing == 0) print("  (none)\n");
+    if (struct_missing == 0)
+        print("  (none)\n");
 
     // Check for structs compiled but not in GenericResolver
     print("Structs compiled but NOT in GenericResolver:\n");
@@ -7070,13 +7187,14 @@ void Compiler::dump_generics_comparison() {
             struct_extra++;
         }
     }
-    if (struct_extra == 0) print("  (none)\n");
+    if (struct_extra == 0)
+        print("  (none)\n");
 
     print("\n=== Summary ===\n");
-    print("GenericResolver: {} fns, {} structs\n",
-          generics->fn_envs.size(), generics->struct_envs.size());
-    print("Codegen compiled: {} fns, {} structs\n",
-          m_ctx->compiled_generic_fns.size(), m_ctx->compiled_generic_structs.size());
+    print("GenericResolver: {} fns, {} structs\n", generics->fn_envs.size(),
+          generics->struct_envs.size());
+    print("Codegen compiled: {} fns, {} structs\n", m_ctx->compiled_generic_fns.size(),
+          m_ctx->compiled_generic_structs.size());
     print("Missing from codegen: {} fns, {} structs\n", fn_missing, struct_missing);
     print("Extra in codegen (not tracked): {} fns, {} structs\n", fn_extra, struct_extra);
 }

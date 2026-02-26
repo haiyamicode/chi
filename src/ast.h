@@ -12,7 +12,7 @@
 
 namespace cx {
 
-struct PackageConfig;  // Forward declaration from package_config.h
+struct PackageConfig; // Forward declaration from package_config.h
 
 namespace ast {
 struct Node;
@@ -20,12 +20,13 @@ struct Package;
 struct Scope;
 
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
-          UnaryOpExpr, LiteralExpr, IfStmt, FnCallExpr, Primitive, Identifier, EmptyStmt,
-          ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, SliceExpr, RangeExpr, TypedefDecl,
-          TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, LifetimeParam, PrefixExpr,
-          ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
-          SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
-          ImplementBlock, PackExpansion, DestructureDecl, DestructureField);
+          UnaryOpExpr, LiteralExpr, IfExpr, FnCallExpr, Primitive, Identifier, EmptyStmt,
+          ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, SliceExpr,
+          RangeExpr, TypedefDecl, TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt,
+          TypeParam, LifetimeParam, PrefixExpr, ExternDecl, TryExpr, AwaitExpr, InferredType,
+          ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier, SwitchExpr, CaseExpr, ImportSymbol,
+          ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt, ImplementBlock,
+          PackExpansion, DestructureDecl, DestructureField);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
@@ -100,7 +101,7 @@ struct Package {
     string id_path = "";
     PackageKind kind = PackageKind::DEFAULT;
     string name = "";
-    cx::PackageConfig* config = nullptr;  // Package configuration (from package.jsonc)
+    cx::PackageConfig *config = nullptr; // Package configuration (from package.jsonc)
 
     Module *add_module() { return modules.emplace(new Module())->get(); }
 };
@@ -159,42 +160,44 @@ struct FnDef {
     DeclSpec *decl_spec = nullptr;
     array<FnCapture> captures = {};
     map<Node *, int32_t> capture_map = {};
-    array<string> value_captures = {};  // parsed [ident, ...] names, consumed during resolution
+    array<string> value_captures = {}; // parsed [ident, ...] names, consumed during resolution
     bool is_generated = false;
     bool has_try = false;
     bool has_cleanup = false;
     array<Node *> variants = {};
-    map<Node *, array<Node *>> ref_edges = {};  // escape analysis: dependency graph
-    map<Node *, Node *> sink_edges = {};  // move: a → b means a's ownership transferred to b
-    map<Node *, size_t> edge_offsets = {};  // per-variable: index where current edges start
+    map<Node *, array<Node *>> ref_edges = {}; // escape analysis: dependency graph
+    map<Node *, Node *> sink_edges = {};       // move: a → b means a's ownership transferred to b
+    map<Node *, size_t> edge_offsets = {};     // per-variable: index where current edges start
     map<Node *, long> terminal_last_use = {};  // per-terminal: offset of last reference
-    array<Node *> terminals = {};  // nodes whose lifetimes extend beyond the function
-    int32_t next_decl_order = 0;  // counter for assigning decl_order to locals
+    array<Node *> terminals = {};              // nodes whose lifetimes extend beyond the function
+    int32_t next_decl_order = 0;               // counter for assigning decl_order to locals
 
     // Register a terminal node (return statement, this with field assignments, etc.)
     void add_terminal(Node *terminal) {
-        if (!terminal) return;
+        if (!terminal)
+            return;
         for (size_t i = 0; i < terminals.len; i++) {
-            if (terminals[i] == terminal) return;
+            if (terminals[i] == terminal)
+                return;
         }
         terminals.add(terminal);
     }
 
     // Direct reference: A points to B's memory (from & operator)
     void add_ref_edge(Node *from, Node *to) {
-        if (!from || !to || from == to) return;
+        if (!from || !to || from == to)
+            return;
         ref_edges[from].add(to);
     }
 
     // Move/sink: A's ownership was transferred to B (A is dead after this)
     void add_sink_edge(Node *from, Node *to) {
-        if (!from || !to) return;
+        if (!from || !to)
+            return;
         sink_edges[from] = to;
     }
 
-    bool is_sunk(Node *node) {
-        return sink_edges.has_key(node);
-    }
+    bool is_sunk(Node *node) { return sink_edges.has_key(node); }
 
     // Get the offset where current (non-stale) edges start for a variable
     size_t current_edge_offset(Node *node) {
@@ -211,7 +214,8 @@ struct FnDef {
     // By-value copy: A inherits B's leaf terminals (the actual memory targets)
     // Traverses B's edges to find leaves, then creates edges from A to each leaf.
     void copy_ref_edges(Node *to, Node *from) {
-        if (!to || !from || to == from) return;
+        if (!to || !from || to == from)
+            return;
         auto *deps = ref_edges.get(from);
         if (!deps || deps->len == 0) {
             // from itself is a leaf terminal
@@ -220,16 +224,19 @@ struct FnDef {
         }
         // Follow edges to find leaf terminals (nodes with no outgoing edges)
         array<Node *> stack;
-        for (size_t i = 0; i < deps->len; i++) stack.add(deps->items[i]);
+        for (size_t i = 0; i < deps->len; i++)
+            stack.add(deps->items[i]);
         map<Node *, bool> visited;
         while (stack.len > 0) {
             auto *node = stack.last();
             stack.len--;
-            if (visited.has_key(node)) continue;
+            if (visited.has_key(node))
+                continue;
             visited[node] = true;
             auto *next = ref_edges.get(node);
             if (next && next->len > 0) {
-                for (size_t i = 0; i < next->len; i++) stack.add(next->items[i]);
+                for (size_t i = 0; i < next->len; i++)
+                    stack.add(next->items[i]);
             } else {
                 // Leaf terminal — add direct edge
                 add_ref_edge(to, node);
@@ -272,7 +279,7 @@ struct TypeParam {
 
 struct LifetimeParam {
     long index = 0;
-    string bound;            // "b" for 'a: 'b (outlives bound)
+    string bound; // "b" for 'a: 'b (outlives bound)
     Node *source_decl = nullptr;
 };
 
@@ -296,9 +303,9 @@ struct ThrowStmt {
 };
 
 enum class VarKind {
-    Mutable,    // var - can be reassigned
-    Immutable,  // let - cannot be reassigned (runtime value OK)
-    Constant    // const - compile-time constant (must be evaluable at compile time)
+    Mutable,   // var - can be reassigned
+    Immutable, // let - cannot be reassigned (runtime value OK)
+    Constant   // const - compile-time constant (must be evaluable at compile time)
 };
 
 struct VarDecl {
@@ -355,6 +362,7 @@ struct IfStmt {
     Node *condition = nullptr;
     Node *then_block = nullptr;
     Node *else_node = nullptr; // can be null, block node, or another if node
+    Node *resolved_outlet = nullptr;
     array<Node *> post_narrow_vars = {}; // narrowed vars emitted after guard clause
 };
 
@@ -366,21 +374,21 @@ struct StructDecl {
 };
 
 struct WhereClause {
-    Token *param_name = nullptr;  // type parameter name token (e.g., T)
-    Node *bound_type = nullptr;   // trait type expression (e.g., Show)
+    Token *param_name = nullptr; // type parameter name token (e.g., T)
+    Node *bound_type = nullptr;  // trait type expression (e.g., Show)
 };
 
 struct ImplementBlockData {
     array<Node *> interface_types = {};
     array<Node *> members = {};
-    array<WhereClause> where_clauses = {};  // Non-empty = conditional where-block
+    array<WhereClause> where_clauses = {}; // Non-empty = conditional where-block
 };
 
 struct ExternDecl {
     Token *type = nullptr;
     array<Node *> members = {};
-    array<Node *> imports = {};  // Import declarations (ImportDecl nodes) for C headers
-    array<Node *> exports = {};  // Export declarations (ExportDecl nodes) for C headers
+    array<Node *> imports = {}; // Import declarations (ImportDecl nodes) for C headers
+    array<Node *> exports = {}; // Export declarations (ExportDecl nodes) for C headers
 };
 
 struct FieldInitExpr {
@@ -394,20 +402,20 @@ struct FieldInitExpr {
 MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move)
 
 struct DestructureField {
-    Token *field_name = nullptr;      // struct field to extract
-    Token *binding_name = nullptr;    // local variable name (default = field_name)
-    Node *nested = nullptr;           // for nested: points to DestructureDecl
+    Token *field_name = nullptr;   // struct field to extract
+    Token *binding_name = nullptr; // local variable name (default = field_name)
+    Node *nested = nullptr;        // for nested: points to DestructureDecl
     ChiStructMember *resolved_field = nullptr;
     SigilKind sigil = SigilKind::None; // &field or &mut field
 };
 
 struct DestructureDecl {
-    array<Node *> fields = {};        // DestructureField nodes
-    Node *expr = nullptr;             // RHS expression
+    array<Node *> fields = {}; // DestructureField nodes
+    Node *expr = nullptr;      // RHS expression
     VarKind kind = VarKind::Mutable;
-    array<Node *> generated_vars = {}; // resolver creates VarDecl nodes here
-    Node *temp_var = nullptr;          // temp to hold RHS value
-    bool is_array = false;            // array destructuring: var [a, b] = arr
+    array<Node *> generated_vars = {};                // resolver creates VarDecl nodes here
+    Node *temp_var = nullptr;                         // temp to hold RHS value
+    bool is_array = false;                            // array destructuring: var [a, b] = arr
     ChiStructMember *resolved_index_method = nullptr; // index_mut for array destructure
 };
 
@@ -644,7 +652,7 @@ struct Node {
     Token *end_token = nullptr;
     string global_id = "";
     IntrinsicSymbol symbol = IntrinsicSymbol::None;
-    int32_t decl_order = -1;  // declaration order within function (-1 = not a local)
+    int32_t decl_order = -1; // declaration order within function (-1 = not a local)
 
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;
@@ -917,7 +925,8 @@ struct Node {
 
     bool is_ancestor_of(Node *child) {
         for (auto *n = child; n; n = n->parent) {
-            if (n == this) return true;
+            if (n == this)
+                return true;
         }
         return false;
     }

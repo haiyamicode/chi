@@ -195,13 +195,13 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
 }
 
 static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
-    if (!node) return nullptr;
+    if (!node)
+        return nullptr;
     if (node->type == ast::NodeType::DotExpr && node->token) {
         // the DotExpr's token is the '.' itself; cursor is right after it
         auto dot_offset = node->token->pos.offset;
         if (cursor_pos.offset == dot_offset + 1 ||
-            (node->data.dot_expr.field &&
-             cursor_pos.offset > dot_offset &&
+            (node->data.dot_expr.field && cursor_pos.offset > dot_offset &&
              cursor_pos.offset <= dot_offset + 1 + node->data.dot_expr.field->to_string().size())) {
             // check children first for nested dots (e.g. a.b.c)
             auto inner = find_dot_expr(node->data.dot_expr.expr, cursor_pos);
@@ -227,10 +227,12 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
         return find_dot_expr(node->data.throw_stmt.expr, cursor_pos);
     case ast::NodeType::FnCallExpr: {
         auto r = find_dot_expr(node->data.fn_call_expr.fn_ref_expr, cursor_pos);
-        if (r) return r;
+        if (r)
+            return r;
         for (auto arg : node->data.fn_call_expr.args) {
             r = find_dot_expr(arg, cursor_pos);
-            if (r) return r;
+            if (r)
+                return r;
         }
         return nullptr;
     }
@@ -252,16 +254,18 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
         return find_dot_expr(node->data.await_expr.expr, cursor_pos);
     case ast::NodeType::PrefixExpr:
         return find_dot_expr(node->data.prefix_expr.expr, cursor_pos);
-    case ast::NodeType::IfStmt: {
+    case ast::NodeType::IfExpr: {
         auto r = find_dot_expr(node->data.if_stmt.condition, cursor_pos);
-        if (r) return r;
+        if (r)
+            return r;
         r = find_dot_expr(node->data.if_stmt.then_block, cursor_pos);
         return r ? r : find_dot_expr(node->data.if_stmt.else_node, cursor_pos);
     }
     case ast::NodeType::ConstructExpr: {
         for (auto item : node->data.construct_expr.field_inits) {
             auto r = find_dot_expr(item, cursor_pos);
-            if (r) return r;
+            if (r)
+                return r;
         }
         return nullptr;
     }
@@ -269,10 +273,12 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
         return find_dot_expr(node->data.field_init_expr.value, cursor_pos);
     case ast::NodeType::SwitchExpr: {
         auto r = find_dot_expr(node->data.switch_expr.expr, cursor_pos);
-        if (r) return r;
+        if (r)
+            return r;
         for (auto c : node->data.switch_expr.cases) {
             r = find_dot_expr(c, cursor_pos);
-            if (r) return r;
+            if (r)
+                return r;
         }
         return nullptr;
     }
@@ -281,7 +287,8 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
     case ast::NodeType::Block: {
         for (auto stmt : node->data.block.statements) {
             auto r = find_dot_expr(stmt, cursor_pos);
-            if (r) return r;
+            if (r)
+                return r;
         }
         return nullptr;
     }
@@ -293,21 +300,23 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
 // Find the innermost FnCallExpr whose argument list contains the cursor.
 // Sets result->fn_call and result->active_param.
 static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
-    if (!node) return false;
+    if (!node)
+        return false;
 
     if (node->type == ast::NodeType::FnCallExpr) {
         auto &call = node->data.fn_call_expr;
         auto fn_ref = call.fn_ref_expr;
-        auto fn_ref_end = fn_ref ? (fn_ref->end_token ? fn_ref->end_token : fn_ref->token) : nullptr;
+        auto fn_ref_end =
+            fn_ref ? (fn_ref->end_token ? fn_ref->end_token : fn_ref->token) : nullptr;
         if (fn_ref_end && node->end_token) {
-            auto open_offset = fn_ref_end->pos.offset +
-                               (long)fn_ref_end->to_string().size();
+            auto open_offset = fn_ref_end->pos.offset + (long)fn_ref_end->to_string().size();
             auto close_offset = node->end_token->pos.offset;
 
             if (cursor_pos.offset > open_offset && cursor_pos.offset <= close_offset) {
                 // Check children first for nested calls
                 for (auto arg : call.args) {
-                    if (find_fn_call(arg, cursor_pos, result)) return true;
+                    if (find_fn_call(arg, cursor_pos, result))
+                        return true;
                 }
                 // This is the innermost call
                 result->fn_call = node;
@@ -323,9 +332,8 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                 if (call.args.len > 0) {
                     auto last = call.args[call.args.len - 1];
                     auto last_end = last->end_token ? last->end_token : last->token;
-                    if (last_end &&
-                        cursor_pos.offset > last_end->pos.offset +
-                                                (long)last_end->to_string().size()) {
+                    if (last_end && cursor_pos.offset >
+                                        last_end->pos.offset + (long)last_end->to_string().size()) {
                         result->active_param = call.args.len;
                     }
                 }
@@ -349,9 +357,11 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
         return find_fn_call(node->data.throw_stmt.expr, cursor_pos, result);
     case ast::NodeType::FnCallExpr: {
         auto &call = node->data.fn_call_expr;
-        if (find_fn_call(call.fn_ref_expr, cursor_pos, result)) return true;
+        if (find_fn_call(call.fn_ref_expr, cursor_pos, result))
+            return true;
         for (auto arg : call.args) {
-            if (find_fn_call(arg, cursor_pos, result)) return true;
+            if (find_fn_call(arg, cursor_pos, result))
+                return true;
         }
         return false;
     }
@@ -364,20 +374,22 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
         return find_fn_call(node->data.dot_expr.expr, cursor_pos, result);
     case ast::NodeType::PrefixExpr:
         return find_fn_call(node->data.prefix_expr.expr, cursor_pos, result);
-    case ast::NodeType::IfStmt:
+    case ast::NodeType::IfExpr:
         return find_fn_call(node->data.if_stmt.condition, cursor_pos, result) ||
                find_fn_call(node->data.if_stmt.then_block, cursor_pos, result) ||
                find_fn_call(node->data.if_stmt.else_node, cursor_pos, result);
     case ast::NodeType::ConstructExpr:
         for (auto item : node->data.construct_expr.field_inits) {
-            if (find_fn_call(item, cursor_pos, result)) return true;
+            if (find_fn_call(item, cursor_pos, result))
+                return true;
         }
         return false;
     case ast::NodeType::FieldInitExpr:
         return find_fn_call(node->data.field_init_expr.value, cursor_pos, result);
     case ast::NodeType::Block:
         for (auto stmt : node->data.block.statements) {
-            if (find_fn_call(stmt, cursor_pos, result)) return true;
+            if (find_fn_call(stmt, cursor_pos, result))
+                return true;
         }
         return false;
     case ast::NodeType::TryExpr:
@@ -388,7 +400,8 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
 }
 
 bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
-    if (!node) return false;
+    if (!node)
+        return false;
     switch (node->type) {
     case ast::NodeType::FnDef: {
         auto &fn = node->data.fn_def;
@@ -404,7 +417,8 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
 
                 // scan statements
                 auto check_stmt = [&](ast::Node *stmt) -> bool {
-                    if (!stmt) return false;
+                    if (!stmt)
+                        return false;
                     if (stmt->start_token && stmt->end_token) {
                         auto start_pos = stmt->start_token->pos;
                         auto end_pos = stmt->end_token->pos;
@@ -433,10 +447,12 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                 };
 
                 for (auto stmt : block.statements) {
-                    if (check_stmt(stmt)) return true;
+                    if (check_stmt(stmt))
+                        return true;
                 }
                 // also check return_expr (incomplete expressions land here)
-                if (check_stmt(block.return_expr)) return true;
+                if (check_stmt(block.return_expr))
+                    return true;
             }
         }
         break;

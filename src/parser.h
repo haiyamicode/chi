@@ -208,7 +208,7 @@ class Parser {
 
     Node *parse_branch_stmt();
 
-    Node *parse_if_stmt();
+    Node *parse_if_expr();
 
     Node *parse_for_stmt();
 

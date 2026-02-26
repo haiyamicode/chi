@@ -26,12 +26,7 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(
-        type_info: *void,
-        data_ptr: *void,
-        vtable_ptr: *void,
-        type_id: uint32
-    );
+    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -313,13 +308,7 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(
-                string.format(
-                    "expected {}, got {}",
-                    json_kind_display(kind),
-                    json_kind_display(this.kind)
-                )
-            );
+            panic(string.format("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
         }
     }
 
@@ -359,7 +348,7 @@ struct JsonValue {
     func to_array() Array<JsonValue> {
         let result: Array<JsonValue> = [];
         let len = this.length();
-        for var i = 0; i < len; i++ {
+        for i in 0..len {
             let new_value = JsonValue{};
             unsafe {
                 cx_json_array_index(this.data, i, &new_value);
@@ -438,12 +427,10 @@ func stringf(format: string, ...values: any) string {
 }
 
 func assert(cond: bool, message: ?string) {
-    if !cond {
-        if message {
-            panic(string.format("assertion failed: {}", message));
-        } else {
-            panic("assertion failed");
-        }
+    if !cond => if message {
+        panic(string.format("assertion failed: {}", message));
+    } else {
+        panic("assertion failed");
     }
 }
 
@@ -827,12 +814,10 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(
-        func (resolve) {
-            timeout(ms, func [resolve] () {
-                resolve({});
-            });
-        }
-    );
+    return Promise<Unit>.make(func (resolve) {
+        timeout(ms, func [resolve] () {
+            resolve({});
+        });
+    });
 }
 

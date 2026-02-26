@@ -443,7 +443,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         }
         // Implicit: only widening. Explicit: narrowing allowed too.
         if (from_type->kind == TypeKind::Float) {
-            return to_type->data.float_.bit_count >= from_type->data.float_.bit_count || is_explicit;
+            return to_type->data.float_.bit_count >= from_type->data.float_.bit_count ||
+                   is_explicit;
         }
         return false;
     }
@@ -926,9 +927,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Auto-default trailing ?T params to null (walk backwards, stop at first non-optional)
         for (int i = data.params.len - 1; i >= 0; i--) {
             auto &pdata = data.params[i]->data.param_decl;
-            if (pdata.default_value || pdata.is_variadic) continue;
+            if (pdata.default_value || pdata.is_variadic)
+                continue;
             auto ptype = data.params[i]->resolved_type;
-            if (!ptype || ptype->kind != TypeKind::Optional) break;
+            if (!ptype || ptype->kind != TypeKind::Optional)
+                break;
             auto null_node = create_node(NodeType::LiteralExpr);
             auto null_token = get_allocator()->create_token();
             null_token->type = TokenType::NULLP;
@@ -1221,7 +1224,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Resolve RHS with move_outlet set to temp — same as VarDecl
         auto expr_scope = scope.set_move_outlet(temp_var);
         auto expr_type = resolve(data.expr, expr_scope);
-        if (!expr_type) return nullptr;
+        if (!expr_type)
+            return nullptr;
 
         temp_var->resolved_type = expr_type;
 
@@ -1344,8 +1348,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 bool is_first = !vd.initialized_at;
                 // Field with only a default value (parser sets initialized_at = var itself)
                 // being assigned for the first time in a constructor
-                if (!is_first && vd.is_field && vd.initialized_at == var &&
-                    scope.parent_fn && scope.parent_fn->name == "new") {
+                if (!is_first && vd.is_field && vd.initialized_at == var && scope.parent_fn &&
+                    scope.parent_fn->name == "new") {
                     is_first = true;
                 }
                 if (is_first) {
@@ -1451,8 +1455,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         return nullptr;
                     }
                     if (!is_same_type(t1->get_elem(), t2->get_elem())) {
-                        error(node,
-                              "pointer subtraction requires same element type, got {} and {}",
+                        error(node, "pointer subtraction requires same element type, got {} and {}",
                               format_type_display(t1), format_type_display(t2));
                         return nullptr;
                     }
@@ -1534,8 +1537,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::ADD:
         case TokenType::INC:
         case TokenType::DEC:
-            if (t->kind == TypeKind::Pointer &&
-                (tt == TokenType::INC || tt == TokenType::DEC)) {
+            if (t->kind == TypeKind::Pointer && (tt == TokenType::INC || tt == TokenType::DEC)) {
                 if (!scope.is_unsafe_block) {
                     error(node, "pointer arithmetic requires unsafe block");
                     return nullptr;
@@ -1553,8 +1555,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     return nullptr;
                 }
                 if (scope.is_lhs && !ChiTypeStruct::is_mutable_pointer(t)) {
-                    error(data.op1, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, format_type_display(t),
-                          format_type_display(t));
+                    error(data.op1, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE,
+                          format_type_display(t), format_type_display(t));
                     return nullptr;
                 }
                 return t->get_elem();
@@ -1570,16 +1572,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 // Check for ops.Unwrap / ops.UnwrapMut
                 {
-                    auto symbol = scope.is_lhs ? IntrinsicSymbol::UnwrapMut : IntrinsicSymbol::Unwrap;
-                    auto method_call = try_resolve_operator_method(symbol, t, nullptr, data.op1, nullptr, node, scope);
+                    auto symbol =
+                        scope.is_lhs ? IntrinsicSymbol::UnwrapMut : IntrinsicSymbol::Unwrap;
+                    auto method_call = try_resolve_operator_method(symbol, t, nullptr, data.op1,
+                                                                   nullptr, node, scope);
                     // Fallback: if only UnwrapMut is provided, use it for reads too
                     if (!method_call && !scope.is_lhs) {
-                        method_call = try_resolve_operator_method(IntrinsicSymbol::UnwrapMut, t, nullptr, data.op1, nullptr, node, scope);
+                        method_call = try_resolve_operator_method(
+                            IntrinsicSymbol::UnwrapMut, t, nullptr, data.op1, nullptr, node, scope);
                     }
                     if (method_call) {
                         data.resolved_call = method_call->call_node;
                         auto ret = method_call->return_type;
-                        if (ret && ret->is_reference()) return ret->get_elem();
+                        if (ret && ret->is_reference())
+                            return ret->get_elem();
                         return ret;
                     }
                 }
@@ -1613,8 +1619,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     decl->escape.escaped = decl->can_escape();
                 }
             }
-            return get_pointer_type(t->eval(), data.op_type == TokenType::MUTREF ? TypeKind::MutRef
-                                                                                : TypeKind::Reference);
+            return get_pointer_type(t->eval(), data.op_type == TokenType::MUTREF
+                                                   ? TypeKind::MutRef
+                                                   : TypeKind::Reference);
         }
         case TokenType::MOVEREF: {
             if (!is_addressable(data.op1)) {
@@ -1656,7 +1663,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             unreachable();
         }
     invalid:
-        error(data.op1, errors::INVALID_OPERATOR, get_token_symbol(data.op_type), format_type_display(t));
+        error(data.op1, errors::INVALID_OPERATOR, get_token_symbol(data.op_type),
+              format_type_display(t));
         return nullptr;
     }
     case NodeType::TryExpr: {
@@ -1675,11 +1683,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (catch_type && catch_type->kind == TypeKind::Struct) {
                     auto rt_error = m_ctx->rt_error_type;
                     if (rt_error && !catch_type->data.struct_.interface_table.get(rt_error)) {
-                        error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type_display(catch_type));
+                        error(data.catch_expr, errors::CATCH_NOT_ERROR,
+                              format_type_display(catch_type));
                     }
                     err_var_type = get_pointer_type(catch_type, TypeKind::Reference);
                 } else {
-                    error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type_display(catch_type));
+                    error(data.catch_expr, errors::CATCH_NOT_ERROR,
+                          format_type_display(catch_type));
                 }
             } else {
                 // catch-all: error binding is &Error (interface reference)
@@ -1707,7 +1717,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (catch_type && catch_type->kind == TypeKind::Struct) {
                 auto rt_error = m_ctx->rt_error_type;
                 if (rt_error && !catch_type->data.struct_.interface_table.get(rt_error)) {
-                    error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type_display(catch_type));
+                    error(data.catch_expr, errors::CATCH_NOT_ERROR,
+                          format_type_display(catch_type));
                 }
                 auto ref_type = get_pointer_type(catch_type, TypeKind::Reference);
                 return get_result_type(expr_type, ref_type);
@@ -2057,7 +2068,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
-        auto member = get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs, &scope);
+        auto member =
+            get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs, &scope);
         if (!member) {
             return nullptr;
         }
@@ -2180,7 +2192,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
-        auto dest_type = scope.value_type;  // Save before resolve calls modify scope
+        auto dest_type = scope.value_type; // Save before resolve calls modify scope
         if (scope.move_outlet && !data.is_new) {
             data.resolved_outlet = scope.move_outlet;
             node->escape.moved = true;
@@ -2322,13 +2334,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         for (auto src_field : spread_type->data.struct_.fields) {
                             auto field_name = src_field->get_name();
                             auto tgt_field = get_struct_member(value_type, field_name);
-                            if (!tgt_field) continue; // source-only field — discard
+                            if (!tgt_field)
+                                continue; // source-only field — discard
                             if (to_value_type(src_field->resolved_type) !=
                                 to_value_type(tgt_field->resolved_type)) {
-                                error(data.spread_expr,
-                                      "field '{}' has type {} in {} but {} in {}",
-                                      field_name,
-                                      format_type_display(src_field->resolved_type),
+                                error(data.spread_expr, "field '{}' has type {} in {} but {} in {}",
+                                      field_name, format_type_display(src_field->resolved_type),
                                       format_type_display(spread_type),
                                       format_type_display(tgt_field->resolved_type),
                                       format_type_display(value_type));
@@ -2455,8 +2466,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         return result;
     }
-    case NodeType::IfStmt: {
+    case NodeType::IfExpr: {
         auto &data = node->data.if_stmt;
+
+        if (scope.move_outlet) {
+            data.resolved_outlet = scope.move_outlet;
+            node->escape.moved = true;
+        }
+
         auto cond_type = resolve(data.condition, scope);
 
         // Positive narrowing: identifiers narrowed when condition is truthy
@@ -2470,9 +2487,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         check_assignment(data.condition, cond_type, get_system_types()->bool_);
-        resolve(data.then_block, scope);
+        auto then_type = resolve(data.then_block, scope);
+        ChiType *else_type = nullptr;
         if (data.else_node) {
-            resolve(data.else_node, scope);
+            else_type = resolve(data.else_node, scope);
         }
 
         // Guard clause narrowing: identifiers narrowed when condition is falsy
@@ -2484,6 +2502,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 scope.block->scope->put(var->name, var);
                 data.post_narrow_vars.add(var);
             }
+        }
+
+        // If-expression: both branches return non-void types
+        if (data.else_node && then_type && else_type && then_type->kind != TypeKind::Void &&
+            else_type->kind != TypeKind::Void) {
+            check_assignment(data.else_node, else_type, then_type);
+            return then_type;
         }
 
         return nullptr;
@@ -2766,7 +2791,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             ChiType *subtype_impl_trait = impl_trait;
                             if (impl_trait->kind == TypeKind::Subtype) {
                                 auto &subtype_data = subtype->data.subtype;
-                                subtype_impl_trait = type_placeholders_sub(impl_trait, &subtype_data);
+                                subtype_impl_trait =
+                                    type_placeholders_sub(impl_trait, &subtype_data);
                             }
                             resolve_vtable(subtype_impl_trait, subtype, iface_node);
                         }
@@ -2934,8 +2960,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Check that missing args all have defaults
         for (auto i = data.args.len; i < params.len; i++) {
             if (!decl_params[i]->data.type_param.default_type) {
-                error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.len,
-                      data.args.len);
+                error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type),
+                      params.len, data.args.len);
                 return nullptr;
             }
         }
@@ -2976,9 +3002,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        auto subtype = type->kind == TypeKind::Enum
-                            ? get_enum_subtype(type, &args)
-                            : get_subtype(type, &args);
+        auto subtype =
+            type->kind == TypeKind::Enum ? get_enum_subtype(type, &args) : get_subtype(type, &args);
         return create_type_symbol({}, subtype);
     }
     case NodeType::IndexExpr: {
@@ -3069,13 +3094,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.start) {
             auto start_scope = scope.set_value_type(uint32_type);
             auto start_type = resolve(data.start, start_scope);
-            if (!start_type) return nullptr;
+            if (!start_type)
+                return nullptr;
             check_assignment(data.start, start_type, uint32_type);
         }
         if (data.end) {
             auto end_scope = scope.set_value_type(uint32_type);
             auto end_type = resolve(data.end, end_scope);
-            if (!end_type) return nullptr;
+            if (!end_type)
+                return nullptr;
             check_assignment(data.end, end_type, uint32_type);
         }
 
@@ -3199,74 +3226,76 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             } else {
 
-            auto expr_type = resolve(data.expr, scope);
-            auto sty = resolve_struct_type(expr_type);
-            if (!sty) {
-                error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
-                return nullptr;
-            }
+                auto expr_type = resolve(data.expr, scope);
+                auto sty = resolve_struct_type(expr_type);
+                if (!sty) {
+                    error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
+                    return nullptr;
+                }
 
-            if (sty->member_intrinsics.get(IntrinsicSymbol::IndexMutIterable)) {
-                // Index-based iteration (Array, etc.)
-                if (data.bind) {
-                    auto index_fn = sty->member_table.get("index_mut");
-                    if (!index_fn) {
-                        error(node, errors::CANNOT_INDEX, format_type_display(expr_type));
-                        return nullptr;
+                if (sty->member_intrinsics.get(IntrinsicSymbol::IndexMutIterable)) {
+                    // Index-based iteration (Array, etc.)
+                    if (data.bind) {
+                        auto index_fn = sty->member_table.get("index_mut");
+                        if (!index_fn) {
+                            error(node, errors::CANNOT_INDEX, format_type_display(expr_type));
+                            return nullptr;
+                        }
+                        auto ref_type = (*index_fn)->resolved_type->data.fn.return_type;
+                        auto value_type = ref_type->get_elem();
+                        switch (data.bind_sigil) {
+                        case ast::SigilKind::Reference:
+                            value_type = get_pointer_type(value_type, TypeKind::Reference);
+                            break;
+                        case ast::SigilKind::MutRef:
+                            value_type = get_pointer_type(value_type, TypeKind::MutRef);
+                            break;
+                        default:
+                            break;
+                        }
+                        auto bind_scope = scope.set_value_type(value_type);
+                        resolve(data.bind, bind_scope);
                     }
-                    auto ref_type = (*index_fn)->resolved_type->data.fn.return_type;
-                    auto value_type = ref_type->get_elem();
-                    switch (data.bind_sigil) {
-                    case ast::SigilKind::Reference:
-                        value_type = get_pointer_type(value_type, TypeKind::Reference);
-                        break;
-                    case ast::SigilKind::MutRef:
-                        value_type = get_pointer_type(value_type, TypeKind::MutRef);
-                        break;
-                    default:
-                        break;
+                    if (data.index_bind) {
+                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        resolve(data.index_bind, idx_scope);
                     }
-                    auto bind_scope = scope.set_value_type(value_type);
-                    resolve(data.bind, bind_scope);
-                }
-                if (data.index_bind) {
-                    auto idx_scope = scope.set_value_type(get_system_types()->uint32);
-                    resolve(data.index_bind, idx_scope);
-                }
-            } else if (sty->member_intrinsics.get(IntrinsicSymbol::MutIterable)) {
-                // Iterator-based iteration (MutIterable)
-                data.kind = ast::ForLoopKind::Iter;
-                auto iter_fn = sty->member_table.get("to_iter_mut");
-                if (!iter_fn) {
-                    error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
-                    return nullptr;
-                }
-                auto iter_type = (*iter_fn)->resolved_type->data.fn.return_type;
-                auto iter_sty = resolve_struct_type(iter_type);
-                if (!iter_sty || !iter_sty->member_intrinsics.get(IntrinsicSymbol::MutIterator)) {
-                    error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
-                    return nullptr;
-                }
-                if (data.bind) {
-                    auto next_fn = iter_sty->member_table.get("next");
-                    if (!next_fn) {
+                } else if (sty->member_intrinsics.get(IntrinsicSymbol::MutIterable)) {
+                    // Iterator-based iteration (MutIterable)
+                    data.kind = ast::ForLoopKind::Iter;
+                    auto iter_fn = sty->member_table.get("to_iter_mut");
+                    if (!iter_fn) {
                         error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
                         return nullptr;
                     }
-                    // next() returns ?&mut T — unwrap optional to get &mut T
-                    auto opt_type = (*next_fn)->resolved_type->data.fn.return_type;
-                    auto value_type = opt_type->get_elem(); // ?&mut T → &mut T
-                    auto bind_scope = scope.set_value_type(value_type);
-                    resolve(data.bind, bind_scope);
+                    auto iter_type = (*iter_fn)->resolved_type->data.fn.return_type;
+                    auto iter_sty = resolve_struct_type(iter_type);
+                    if (!iter_sty ||
+                        !iter_sty->member_intrinsics.get(IntrinsicSymbol::MutIterator)) {
+                        error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
+                        return nullptr;
+                    }
+                    if (data.bind) {
+                        auto next_fn = iter_sty->member_table.get("next");
+                        if (!next_fn) {
+                            error(node, errors::FOR_EXPR_NOT_ITERABLE,
+                                  format_type_display(expr_type));
+                            return nullptr;
+                        }
+                        // next() returns ?&mut T — unwrap optional to get &mut T
+                        auto opt_type = (*next_fn)->resolved_type->data.fn.return_type;
+                        auto value_type = opt_type->get_elem(); // ?&mut T → &mut T
+                        auto bind_scope = scope.set_value_type(value_type);
+                        resolve(data.bind, bind_scope);
+                    }
+                    if (data.index_bind) {
+                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        resolve(data.index_bind, idx_scope);
+                    }
+                } else {
+                    error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
+                    return nullptr;
                 }
-                if (data.index_bind) {
-                    auto idx_scope = scope.set_value_type(get_system_types()->uint32);
-                    resolve(data.index_bind, idx_scope);
-                }
-            } else {
-                error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
-                return nullptr;
-            }
 
             } // else (non-RangeExpr)
         }
@@ -3652,7 +3681,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             ChiType *ret_type = scope.value_type;
             for (auto scase : data.cases) {
-                if (!scase) continue;
+                if (!scase)
+                    continue;
 
                 if (!scase->data.case_expr.is_else) {
                     for (auto clause : scase->data.case_expr.clauses) {
@@ -3661,12 +3691,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         if (clause_type && clause_type->kind == TypeKind::TypeSymbol)
                             clause_type = clause_type->data.type_symbol.underlying_type;
                         // Verify the concrete type implements the interface
-                        auto clause_elem = clause_type ? (clause_type->is_pointer_like() ? clause_type->get_elem() : clause_type) : nullptr;
+                        auto clause_elem =
+                            clause_type ? (clause_type->is_pointer_like() ? clause_type->get_elem()
+                                                                          : clause_type)
+                                        : nullptr;
                         if (clause_elem && clause_elem->kind == TypeKind::Struct &&
                             !ChiTypeStruct::is_interface(clause_elem)) {
                             if (!clause_elem->data.struct_.interface_table.get(iface_elem)) {
                                 error(clause, "type '{}' does not implement interface '{}'",
-                                      format_type_display(clause_type), format_type_display(iface_elem));
+                                      format_type_display(clause_type),
+                                      format_type_display(iface_elem));
                             }
                         }
                         clause->resolved_type = clause_type;
@@ -3679,7 +3713,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             auto switch_expr = data.expr;
                             if (switch_expr->type == NodeType::Identifier ||
                                 switch_expr->type == NodeType::DotExpr) {
-                                auto var = create_narrowed_var(switch_expr, node, scope, clause_type);
+                                auto var =
+                                    create_narrowed_var(switch_expr, node, scope, clause_type);
                                 auto &block_data = scase->data.case_expr.body->data.block;
                                 block_data.implicit_vars.add(var);
                                 block_data.scope->put(var->name, var);
@@ -3719,7 +3754,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         check_assignment(clause, clause_comparator, expr_comparator);
 
                         if (!clause_comparator->is_int_like()) {
-                            error(clause, errors::INVALID_SWITCH_TYPE, format_type_display(clause_type));
+                            error(clause, errors::INVALID_SWITCH_TYPE,
+                                  format_type_display(clause_type));
                         }
                     }
                 }
@@ -3735,7 +3771,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             auto switch_expr = data.expr;
                             if (switch_expr->type == NodeType::Identifier ||
                                 switch_expr->type == NodeType::DotExpr) {
-                                auto var = create_narrowed_var(switch_expr, node, scope, clause_type);
+                                auto var =
+                                    create_narrowed_var(switch_expr, node, scope, clause_type);
                                 auto &block_data = scase->data.case_expr.body->data.block;
                                 block_data.implicit_vars.add(var);
                                 block_data.scope->put(var->name, var);
@@ -4715,8 +4752,8 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
                 auto new_type = member->is_method()
                                     ? member->resolved_type
                                     : make_recursive_call(member->resolved_type, subs);
-                auto new_member = dst->data.struct_.add_member(
-                    get_allocator(), member->get_name(), member->node, new_type);
+                auto new_member = dst->data.struct_.add_member(get_allocator(), member->get_name(),
+                                                               member->node, new_type);
                 // Preserve field_index override for variant fields with parent_member
                 if (member->parent_member) {
                     new_member->field_index = member->field_index;
@@ -5402,8 +5439,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto dot_lhs_type = node_get_type(dot.expr);
             if (dot_lhs_type && dot_lhs_type->kind == TypeKind::TypeSymbol) {
                 auto underlying = dot_lhs_type->data.type_symbol.underlying_type;
-                if (underlying->kind == TypeKind::Struct &&
-                    underlying->data.struct_.is_generic()) {
+                if (underlying->kind == TypeKind::Struct && underlying->data.struct_.is_generic()) {
                     // Specialize the struct with inferred type args
                     auto subtype = get_subtype(underlying, &type_args);
                     auto resolved = resolve_subtype(subtype);
@@ -5579,14 +5615,15 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
 
         // Look up the field in the struct
         auto member = get_struct_member_access(field_node, source_type, field_name, false, false);
-        if (!member) continue;
+        if (!member)
+            continue;
         field_data.resolved_field = member;
 
         if (field_data.nested) {
             // Nested destructuring: recurse
             auto &nested = field_data.nested->data.destructure_decl;
-            resolve_destructure_fields(field_data.nested, nested.fields,
-                                       member->resolved_type, scope, nested.generated_vars);
+            resolve_destructure_fields(field_data.nested, nested.fields, member->resolved_type,
+                                       scope, nested.generated_vars);
         } else {
             // Create a VarDecl for this binding
             auto binding_name = string(field_data.binding_name->str);
@@ -5629,13 +5666,15 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
     // Same as IndexExpr resolver: get the internal struct, look up index_mut
     auto struct_type = resolve_struct_type(source_type);
     if (!struct_type) {
-        error(parent, "cannot destructure non-indexable type '{}'", format_type_display(source_type));
+        error(parent, "cannot destructure non-indexable type '{}'",
+              format_type_display(source_type));
         return;
     }
 
     auto has_index = has_interface_impl(struct_type, "std.ops.IndexMut");
     if (!has_index) {
-        error(parent, "cannot destructure non-indexable type '{}'", format_type_display(source_type));
+        error(parent, "cannot destructure non-indexable type '{}'",
+              format_type_display(source_type));
         return;
     }
 
@@ -5697,13 +5736,13 @@ ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent
         if (name.empty() && expr_node->data.identifier.kind == ast::IdentifierKind::This)
             name = "this";
         auto decl = expr_node->data.identifier.decl;
-        kind = (decl && decl->type == NodeType::VarDecl)
-                   ? decl->data.var_decl.kind
-                   : ast::VarKind::Immutable;
+        kind = (decl && decl->type == NodeType::VarDecl) ? decl->data.var_decl.kind
+                                                         : ast::VarKind::Immutable;
     }
     ast::Node *var_expr = expr_node;
     if (!narrowed_type) {
-        narrowed_type = type->kind == TypeKind::Optional ? type->get_elem() : type->data.result.value;
+        narrowed_type =
+            type->kind == TypeKind::Optional ? type->get_elem() : type->data.result.value;
         auto expr = create_node(ast::NodeType::UnaryOpExpr);
         expr->token = expr_node->token;
         expr->data.unary_op_expr.is_suffix = true;
@@ -5736,7 +5775,7 @@ bool Resolver::always_terminates(ast::Node *node) {
         auto &stmts = node->data.block.statements;
         return stmts.len > 0 && always_terminates(stmts[stmts.len - 1]);
     }
-    case NodeType::IfStmt: {
+    case NodeType::IfExpr: {
         auto &d = node->data.if_stmt;
         return d.else_node && always_terminates(d.then_block) && always_terminates(d.else_node);
     }
@@ -6341,14 +6380,12 @@ ChiType *Resolver::get_enum_subtype(ChiType *generic, TypeList *type_args) {
                     node->data.fn_def.fn_proto = new_proto;
                     node->data.fn_def.fn_proto->data.fn_proto.fn_def_node = node;
 
-                    dst->data.struct_.add_member(
-                        get_allocator(), member->get_name(), node, type);
+                    dst->data.struct_.add_member(get_allocator(), member->get_name(), node, type);
                 } else {
                     // Substitute field types for T → concrete
-                    auto new_type =
-                        type_placeholders_sub(member->resolved_type, &subtype_data);
-                    dst->data.struct_.add_member(
-                        get_allocator(), member->get_name(), member->node, new_type);
+                    auto new_type = type_placeholders_sub(member->resolved_type, &subtype_data);
+                    dst->data.struct_.add_member(get_allocator(), member->get_name(), member->node,
+                                                 new_type);
                 }
             }
             concrete_enum->data.enum_.base_struct = dst;
@@ -6829,7 +6866,8 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
     case NodeType::FnCallExpr:
     case NodeType::ConstructExpr:
     case NodeType::SliceExpr:
-        // Function call/construct/slice results are temporaries, return nullptr to indicate no root decl
+        // Function call/construct/slice results are temporaries, return nullptr to indicate no root
+        // decl
         return nullptr;
     default:
         // Literals, casts, etc. — no root decl to track
