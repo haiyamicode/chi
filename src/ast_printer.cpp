@@ -309,6 +309,18 @@ void AstPrinter::print_node(Node *node) {
         }
         break;
     }
+    case NodeType::DestructureDecl: {
+        auto &data = node->data.destructure_decl;
+        switch (data.kind) {
+        case ast::VarKind::Mutable: emit("var "); break;
+        case ast::VarKind::Immutable: emit("let "); break;
+        case ast::VarKind::Constant: emit("const "); break;
+        }
+        print_destructure_pattern(node);
+        emit(" = ");
+        print_node(data.expr);
+        break;
+    }
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
         if (data.is_field) {
@@ -374,10 +386,17 @@ void AstPrinter::print_node(Node *node) {
                 emit(" = ");
                 if (etype) print_node(etype);
                 // Use wrapping for long construct expressions
-                if (cdata.items.len && !cdata.field_inits.len) {
+                if (cdata.items.len && !cdata.field_inits.len && !cdata.spread_expr) {
                     emit_wrapped_list(&cdata.items, "{", "}", ", ");
                 } else {
                     emit("{{");
+                    if (cdata.spread_expr) {
+                        emit("...");
+                        print_node(cdata.spread_expr);
+                        if (cdata.field_inits.len || cdata.items.len) {
+                            emit(", ");
+                        }
+                    }
                     print_node_list(&cdata.items);
                     if (cdata.items.len && cdata.field_inits.len) {
                         emit(", ");
@@ -540,13 +559,19 @@ void AstPrinter::print_node(Node *node) {
             print_node(data.type);
         }
         // For construct expressions, always try wrapping
-        if (data.items.len || data.field_inits.len) {
-            // If only items (no field_inits), use emit_wrapped_list
-            if (data.items.len && !data.field_inits.len) {
+        if (data.items.len || data.field_inits.len || data.spread_expr) {
+            // If only items (no field_inits, no spread), use emit_wrapped_list
+            if (data.items.len && !data.field_inits.len && !data.spread_expr) {
                 emit_wrapped_list(&data.items, "{", "}", ", ");
             } else {
-                // Complex case with field_inits - fall back to simple printing for now
                 emit("{{");
+                if (data.spread_expr) {
+                    emit("...");
+                    print_node(data.spread_expr);
+                    if (data.field_inits.len || data.items.len) {
+                        emit(", ");
+                    }
+                }
                 print_node_list(&data.items);
                 if (data.items.len && data.field_inits.len) {
                     emit(", ");
@@ -1121,6 +1146,23 @@ void AstPrinter::print_node_list(array<Node *> *list) {
             emit(", ");
         }
     }
+}
+
+void AstPrinter::print_destructure_pattern(Node *node) {
+    auto &data = node->data.destructure_decl;
+    emit("{{");
+    for (size_t i = 0; i < data.fields.len; i++) {
+        if (i > 0) emit(", ");
+        auto &field_data = data.fields[i]->data.destructure_field;
+        emit("{}", field_data.field_name->str);
+        if (field_data.nested) {
+            emit(": ");
+            print_destructure_pattern(field_data.nested);
+        } else if (field_data.binding_name != field_data.field_name) {
+            emit(": {}", field_data.binding_name->str);
+        }
+    }
+    emit("}}");
 }
 
 void AstPrinter::print_struct_members(StructDecl &data) {

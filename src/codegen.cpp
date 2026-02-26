@@ -1261,6 +1261,8 @@ static bool contains_await(ast::Node *node) {
     if (node->type == ast::NodeType::AwaitExpr) return true;
 
     switch (node->type) {
+    case ast::NodeType::DestructureDecl:
+        return contains_await(node->data.destructure_decl.expr);
     case ast::NodeType::VarDecl: {
         auto &data = node->data.var_decl;
         return contains_await(data.expr);
@@ -1290,6 +1292,8 @@ static ast::Node *find_await_expr(ast::Node *node) {
     if (node->type == ast::NodeType::AwaitExpr) return node;
 
     switch (node->type) {
+    case ast::NodeType::DestructureDecl:
+        return find_await_expr(node->data.destructure_decl.expr);
     case ast::NodeType::VarDecl:
         return find_await_expr(node->data.var_decl.expr);
     case ast::NodeType::ReturnStmt:
@@ -1324,6 +1328,9 @@ void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> 
         }
         break;
     }
+    case ast::NodeType::DestructureDecl:
+        collect_vars_used_in_node(node->data.destructure_decl.expr, vars);
+        break;
     case ast::NodeType::VarDecl:
         collect_vars_used_in_node(node->data.var_decl.expr, vars);
         break;
@@ -3216,21 +3223,17 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             return;
         }
 
-        // For structs without CopyFrom, check if any field needs special copying
-        // (has CopyFrom or destructor). If so, copy field-by-field.
+        // For structs without CopyFrom, check if any field needs destruction
+        // (transitively — handles nested structs with CopyFrom/destructor fields).
+        // If so, copy field-by-field to ensure proper deep copy semantics.
         if (type->kind == TypeKind::Struct) {
             auto &data = type->data.struct_;
             bool needs_field_copy = false;
 
             for (auto field : data.fields) {
-                auto field_sty = get_resolver()->resolve_struct_type(eval_type(field->resolved_type));
-                if (field_sty) {
-                    auto field_copy_fn = field_sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
-                    auto field_destructor = ChiTypeStruct::get_destructor(field->resolved_type);
-                    if (field_copy_fn || field_destructor) {
-                        needs_field_copy = true;
-                        break;
-                    }
+                if (get_resolver()->type_needs_destruction(field->resolved_type)) {
+                    needs_field_copy = true;
+                    break;
                 }
             }
 
@@ -3450,6 +3453,37 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             }
         }
 
+        if (expr->data.construct_expr.spread_expr) {
+            // Build set of target field names that have explicit overrides
+            std::set<int> overridden;
+            for (auto fi : expr->data.construct_expr.field_inits) {
+                if (fi->data.field_init_expr.resolved_field)
+                    overridden.insert(fi->data.field_init_expr.resolved_field->field_index);
+            }
+
+            auto spread_expr = expr->data.construct_expr.spread_expr;
+            auto spread_ref = compile_expr_ref(fn, spread_expr);
+            auto spread_type = get_chitype(spread_expr);
+            auto spread_type_l = compile_type(spread_type);
+            auto dest_type_l = compile_type(type);
+
+            // Iterate source fields, find matching target field by name
+            for (auto src_field : spread_type->data.struct_.fields) {
+                auto tgt_field = get_resolver()->get_struct_member(type, src_field->get_name());
+                if (!tgt_field) continue; // validated by resolver
+                if (overridden.count(tgt_field->field_index)) continue;
+
+                auto src_gep = builder.CreateStructGEP(spread_type_l, spread_ref.address,
+                                                       src_field->field_index);
+                auto dst_gep = builder.CreateStructGEP(dest_type_l, dest, tgt_field->field_index);
+                auto field_type_l = compile_type(src_field->resolved_type);
+                auto val = builder.CreateLoad(field_type_l, src_gep);
+                builder.CreateStore(val, dst_gep);
+                if (get_resolver()->type_needs_destruction(src_field->resolved_type))
+                    compile_copy(fn, val, dst_gep, src_field->resolved_type, spread_expr);
+            }
+        }
+
         for (auto field_init : expr->data.construct_expr.field_inits) {
             auto &data = field_init->data.field_init_expr;
             auto field_gep =
@@ -3490,6 +3524,37 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             {});
         break;
     }
+    }
+}
+
+void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fields,
+                                          llvm::Value *source_ptr, ChiType *source_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto struct_type_l = compile_type(source_type);
+    size_t var_idx = 0;
+
+    for (auto field_node : fields) {
+        auto &field_data = field_node->data.destructure_field;
+        auto member = field_data.resolved_field;
+        auto field_ptr = builder.CreateStructGEP(struct_type_l, source_ptr, member->field_index);
+
+        if (field_data.nested) {
+            // Nested destructuring: recurse
+            auto &nested = field_data.nested->data.destructure_decl;
+            compile_destructure_fields(fn, nested.fields, field_ptr, member->resolved_type);
+        } else {
+            // Allocate binding variable, copy field value into it
+            auto &gen_vars = field_node->parent->data.destructure_decl.generated_vars;
+            assert(var_idx < gen_vars.len);
+            auto var_node = gen_vars[var_idx++];
+            auto var_type = get_chitype(var_node);
+            auto var_type_l = compile_type(var_type);
+            auto var_ptr = compile_alloc(fn, var_node);
+            add_var(var_node, var_ptr);
+
+            auto field_value = builder.CreateLoad(var_type_l, field_ptr);
+            compile_store_or_copy(fn, field_value, var_ptr, var_type, field_node);
+        }
     }
 }
 
@@ -4608,6 +4673,23 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
 
     switch (stmt->type) {
+    case ast::NodeType::DestructureDecl: {
+        auto &data = stmt->data.destructure_decl;
+        auto &builder = *m_ctx->llvm_builder.get();
+
+        // Evaluate RHS and store in temp
+        auto source_type = get_chitype(data.expr);
+        auto temp_ptr = compile_alloc(fn, data.temp_var);
+        add_var(data.temp_var, temp_ptr);
+        auto rhs_value = compile_assignment_to_type(fn, data.expr, source_type);
+        if (rhs_value) {
+            compile_store_or_copy(fn, rhs_value, temp_ptr, source_type, data.expr);
+        }
+
+        // Extract fields
+        compile_destructure_fields(fn, data.fields, temp_ptr, source_type);
+        break;
+    }
     case ast::NodeType::VarDecl: {
         auto &data = stmt->data.var_decl;
         auto &llvm_builder = *m_ctx->llvm_builder.get();

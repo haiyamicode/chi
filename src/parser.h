@@ -161,6 +161,9 @@ class Parser {
 
     Node *parse_var_decl(bool as_field, DeclSpec *decl_spec = nullptr);
 
+    Node *parse_destructure_pattern(VarKind kind);
+    Node *parse_destructure_decl(VarKind kind);
+
     Node *parse_fn_proto(Token *iden, Node *fn_node);
 
     Node *parse_fn_type(Token *func);

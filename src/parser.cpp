@@ -816,6 +816,10 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
         }
     }
 
+    if (!as_field && next_is(TokenType::LBRACE)) {
+        return parse_destructure_decl(var_kind);
+    }
+
     bool is_embed = false;
     if (as_field && next_is(TokenType::ELLIPSIS)) {
         is_embed = true;
@@ -860,6 +864,73 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     if (!so || so->type != NodeType::StructDecl) {
         add_to_scope(node);
     }
+    return node;
+}
+
+Node *Parser::parse_destructure_pattern(VarKind kind) {
+    auto lbrace = expect(TokenType::LBRACE);
+    auto node = create_node(NodeType::DestructureDecl, lbrace);
+    node->data.destructure_decl.kind = kind;
+
+    for (;;) {
+        auto token = get();
+        if (token->type == TokenType::RBRACE || token->type == TokenType::END) break;
+
+        auto field_token = expect(TokenType::IDEN);
+        if (field_token->type != TokenType::IDEN) break;
+
+        auto field_node = create_node(NodeType::DestructureField, field_token);
+        field_node->data.destructure_field.field_name = field_token;
+        field_node->data.destructure_field.binding_name = field_token; // default: same name
+
+        if (next_is(TokenType::COLON)) {
+            consume(); // consume ':'
+            if (next_is(TokenType::LBRACE)) {
+                // Nested destructuring: field: {subfield1, subfield2}
+                field_node->data.destructure_field.nested = parse_destructure_pattern(kind);
+                field_node->data.destructure_field.binding_name = nullptr;
+            } else {
+                // Renaming: field: binding
+                auto binding_token = expect(TokenType::IDEN);
+                field_node->data.destructure_field.binding_name = binding_token;
+            }
+        }
+
+        node->data.destructure_decl.fields.add(field_node);
+        field_node->parent = node;
+
+        if (!at_comma(TokenType::RBRACE)) break;
+        consume(); // consume ','
+    }
+    expect(TokenType::RBRACE);
+    return node;
+}
+
+static void register_destructure_bindings(Parser *parser, ast::Node *pattern) {
+    for (auto field_node : pattern->data.destructure_decl.fields) {
+        auto &fd = field_node->data.destructure_field;
+        if (fd.nested) {
+            register_destructure_bindings(parser, fd.nested);
+        } else if (fd.binding_name) {
+            // Create a placeholder VarDecl so subsequent parsing can find the identifier
+            auto var = parser->create_node(NodeType::VarDecl, fd.binding_name);
+            var->name = fd.binding_name->get_name();
+            var->data.var_decl.kind = pattern->data.destructure_decl.kind;
+            var->data.var_decl.identifier = fd.binding_name;
+            parser->add_to_scope(var);
+        }
+    }
+}
+
+Node *Parser::parse_destructure_decl(VarKind kind) {
+    auto node = parse_destructure_pattern(kind);
+    node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
+    expect(TokenType::ASS); // = is required
+    node->data.destructure_decl.expr = parse_child_expr_construct(false, node);
+    expect(TokenType::SEMICOLON);
+
+    // Register bindings in parser scope so subsequent identifiers resolve
+    register_destructure_bindings(this, node);
     return node;
 }
 
@@ -2385,6 +2456,18 @@ Node *Parser::parse_construct_expr() {
         }
         if (token->type == TokenType::RBRACE) {
             break;
+        }
+
+        if (token->type == TokenType::ELLIPSIS) {
+            // spread: ...expr
+            consume();
+            if (node->data.construct_expr.spread_expr) {
+                error(token, "only one spread expression allowed");
+            }
+            node->data.construct_expr.spread_expr = parse_child_expr_construct(false, node);
+            if (!at_comma(TokenType::RBRACE)) break;
+            consume();
+            continue;
         }
 
         if (token->type == TokenType::IDEN && lookahead(1)->type == TokenType::COLON) {

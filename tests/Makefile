@@ -38,7 +38,8 @@ TESTS_LIST = 00_fib.test \
 		35_slice.test \
 		36_optional_ops.test \
 		37_pack_expansion.test \
-		38_never_type.test
+		38_never_type.test \
+		39_destructuring.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

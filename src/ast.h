@@ -25,7 +25,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt, TypeParam, LifetimeParam, PrefixExpr,
           ExternDecl, TryExpr, AwaitExpr, InferredType, ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier,
           SwitchExpr, CaseExpr, ImportSymbol, ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt,
-          ImplementBlock, PackExpansion);
+          ImplementBlock, PackExpansion, DestructureDecl, DestructureField);
 
 MAKE_ENUM(ModuleKind, XC, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
@@ -391,6 +391,21 @@ struct FieldInitExpr {
     void *compiled_field_address = nullptr;
 };
 
+struct DestructureField {
+    Token *field_name = nullptr;      // struct field to extract
+    Token *binding_name = nullptr;    // local variable name (default = field_name)
+    Node *nested = nullptr;           // for nested: points to DestructureDecl
+    ChiStructMember *resolved_field = nullptr;
+};
+
+struct DestructureDecl {
+    array<Node *> fields = {};        // DestructureField nodes
+    Node *expr = nullptr;             // RHS expression
+    VarKind kind = VarKind::Mutable;
+    array<Node *> generated_vars = {}; // resolver creates VarDecl nodes here
+    Node *temp_var = nullptr;          // temp to hold RHS value
+};
+
 // composite literal
 struct ConstructExpr {
     bool is_new = false;
@@ -399,6 +414,7 @@ struct ConstructExpr {
     array<Node *> field_inits = {};
     Node *type = nullptr;
     Node *resolved_outlet = nullptr;
+    Node *spread_expr = nullptr; // ...expr spread source
 };
 
 struct TypedefDecl {
@@ -675,6 +691,8 @@ struct Node {
         GeneratedFn generated_fn;
         ThrowStmt throw_stmt;
         ImplementBlockData implement_block;
+        DestructureDecl destructure_decl;
+        DestructureField destructure_field;
 
         NodeData() {}
 
@@ -711,6 +729,7 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(enum_decl, EnumDecl)
             _AST_CASE_INITIALIZE_FIELD(generated_fn, GeneratedFn)
             _AST_CASE_INITIALIZE_FIELD(lifetime_param, LifetimeParam)
+            _AST_CASE_INITIALIZE_FIELD(destructure_decl, DestructureDecl)
         default:
             break;
         }
@@ -742,6 +761,7 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(field_init_expr, FieldInitExpr)
             _AST_CASE_DESTROY_FIELD(enum_decl, EnumDecl)
             _AST_CASE_DESTROY_FIELD(generated_fn, GeneratedFn)
+            _AST_CASE_DESTROY_FIELD(destructure_decl, DestructureDecl)
         default:
             memset(&data, 0, sizeof(data));
             break;
@@ -784,6 +804,7 @@ struct Node {
             _AST_CASE_CLONE_FIELD(field_init_expr, FieldInitExpr)
             _AST_CASE_CLONE_FIELD(enum_decl, EnumDecl)
             _AST_CASE_CLONE_FIELD(generated_fn, GeneratedFn)
+            _AST_CASE_CLONE_FIELD(destructure_decl, DestructureDecl)
         default:
             memcpy(&b->data, &data, sizeof(data));
             break;

@@ -1,0 +1,147 @@
+-- Basic destructuring --
+x=1 y=2
+
+-- Rename --
+a=10 b=20
+
+-- Nested --
+x=3 y=4 label=hello
+
+-- Deep nested --
+x=5 y=6 label=deep id=42
+
+-- Spread copy --
+p2.x=1 p2.y=2
+
+-- Spread override --
+p2.x=10 p2.y=2
+
+-- Spread string --
+n2.name=hello n2.value=99
+n.name=hello n.value=42
+
+-- Spread all override --
+p2.x=100 p2.y=200
+
+-- Destructure string --
+name=world value=7
+n.name=world n.value=7
+
+-- Let destructure --
+x=50 y=60
+
+-- Lifecycle: destructure from var --
+Traced(1) created
+Traced(2) created
+before destructure
+Traced(1) copied
+Traced(2) copied
+Traced(1) copied
+Traced(2) copied
+a.id=1 b.id=2
+block exit
+Traced(2) destroyed
+Traced(1) destroyed
+Traced(2) destroyed
+Traced(1) destroyed
+after block
+pair.a.id=1 pair.b.id=2
+func exit
+Traced(2) destroyed
+Traced(1) destroyed
+
+-- Lifecycle: spread --
+Traced(10) created
+Traced(20) created
+before spread
+Traced(10) copied
+Traced(30) created
+p1.a.id=10 p1.b.id=20
+p2.a.id=10 p2.b.id=30
+func exit
+Traced(30) destroyed
+Traced(10) destroyed
+Traced(20) destroyed
+Traced(10) destroyed
+
+-- Lifecycle: nested destructure --
+Traced(100) created
+Traced(200) created
+before destructure
+Traced(100) copied
+Traced(200) copied
+Traced(100) copied
+Traced(200) copied
+a.id=100 b.id=200
+label=test
+func exit
+Traced(200) destroyed
+Traced(100) destroyed
+Traced(200) destroyed
+Traced(100) destroyed
+Traced(200) destroyed
+Traced(100) destroyed
+
+-- Lifecycle: destructure from temp --
+Traced(40) created
+Traced(50) created
+Traced(40) copied
+Traced(50) copied
+a.id=40 b.id=50
+func exit
+Traced(50) destroyed
+Traced(40) destroyed
+Traced(50) destroyed
+Traced(40) destroyed
+
+-- Lifecycle: spread full copy --
+Traced(60) created
+Traced(70) created
+before spread
+Traced(60) copied
+Traced(70) copied
+p1.a.id=60 p1.b.id=70
+p2.a.id=60 p2.b.id=70
+func exit
+Traced(70) destroyed
+Traced(60) destroyed
+Traced(70) destroyed
+Traced(60) destroyed
+
+-- Cross spread: basic --
+e.x=42 e.name=hello e.y=10 e.z=20
+b.x=42 b.name=hello
+
+-- Cross spread: defaults --
+e.x=7 e.name=world e.y=0 e.z=0
+
+-- Cross spread: override --
+e.x=1 e.name=new e.y=5 e.z=6
+b.name=old
+
+-- Cross spread: lifecycle --
+Traced(99) created
+before cross spread
+Traced(99) copied
+te.t.id=99 te.name=base te.extra=42
+tb.t.id=99 tb.name=base
+func exit
+Traced(99) destroyed
+Traced(99) destroyed
+
+-- Cross spread: discard --
+b.x=1 b.name=hello
+e.x=1 e.name=hello e.y=10 e.z=20
+
+-- Cross spread: discard override --
+b.x=1 b.name=new
+
+-- Cross spread: discard lifecycle --
+Traced(77) created
+before spread
+Traced(77) copied
+tb.t.id=77 tb.name=big
+te.t.id=77 te.name=big te.extra=42
+func exit
+Traced(77) destroyed
+Traced(77) destroyed

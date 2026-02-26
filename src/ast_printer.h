@@ -63,6 +63,8 @@ class AstPrinter {
 
     void print_struct_members(StructDecl &data);
 
+    void print_destructure_pattern(Node *node);
+
     // Returns true if there's at least one blank line between two nodes in the original source.
     // Used to preserve user-intentional blank lines during formatting.
     bool has_blank_line_between(Node *prev, Node *next);

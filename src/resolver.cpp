@@ -1198,6 +1198,41 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         return result;
     }
+    case NodeType::DestructureDecl: {
+        auto &data = node->data.destructure_decl;
+
+        // Create temp VarDecl BEFORE resolving — exactly like VarDecl sets move_outlet
+        // so ConstructExpr can RVO directly into the temp
+        auto temp_var = get_dummy_var("__destructure_tmp", data.expr);
+        temp_var->module = node->module;
+        temp_var->parent_fn = scope.parent_fn_node;
+        temp_var->data.var_decl.kind = ast::VarKind::Immutable;
+        temp_var->data.var_decl.initialized_at = node;
+        data.temp_var = temp_var;
+
+        // Resolve RHS with move_outlet set to temp — same as VarDecl
+        auto expr_scope = scope.set_move_outlet(temp_var);
+        auto expr_type = resolve(data.expr, expr_scope);
+        if (!expr_type) return nullptr;
+
+        temp_var->resolved_type = expr_type;
+
+        if (scope.parent_fn_node) {
+            temp_var->decl_order = scope.parent_fn_def()->next_decl_order++;
+        }
+
+        // Resolve each field pattern
+        resolve_destructure_fields(node, data.fields, expr_type, scope, data.generated_vars);
+
+        // Add temp to cleanup if needed
+        if (scope.parent_fn_node && scope.block && should_destroy(temp_var, expr_type) &&
+            !temp_var->escape.is_capture()) {
+            scope.block->cleanup_vars.add(temp_var);
+            scope.parent_fn_def()->has_cleanup = true;
+        }
+
+        return expr_type;
+    }
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
         ChiType *var_type = nullptr;
@@ -2258,6 +2293,38 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Can't construct in-place if dest type differs from construct type
         if (data.resolved_outlet && dest_type && dest_type != result_type) {
             data.resolved_outlet = nullptr;
+        }
+
+        if (data.spread_expr) {
+            auto spread_type = resolve(data.spread_expr, scope);
+            if (spread_type) {
+                // Same type — always OK
+                if (to_value_type(spread_type) != to_value_type(value_type)) {
+                    // Cross-type spread: shared fields must have matching types;
+                    // source-only fields are silently discarded, target-only fields keep defaults.
+                    auto spread_struct = resolve_struct_type(spread_type);
+                    if (!spread_struct) {
+                        error(data.spread_expr, "cannot spread non-struct type '{}'",
+                              format_type_display(spread_type));
+                    } else {
+                        for (auto src_field : spread_type->data.struct_.fields) {
+                            auto field_name = src_field->get_name();
+                            auto tgt_field = get_struct_member(value_type, field_name);
+                            if (!tgt_field) continue; // source-only field — discard
+                            if (to_value_type(src_field->resolved_type) !=
+                                to_value_type(tgt_field->resolved_type)) {
+                                error(data.spread_expr,
+                                      "field '{}' has type {} in {} but {} in {}",
+                                      field_name,
+                                      format_type_display(src_field->resolved_type),
+                                      format_type_display(spread_type),
+                                      format_type_display(tgt_field->resolved_type),
+                                      format_type_display(value_type));
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         for (auto field_init : data.field_inits) {
@@ -5401,6 +5468,62 @@ static string build_narrowing_path(ast::Node *expr) {
         return base + "." + string(data.field->str);
     }
     return "";
+}
+
+void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> &fields,
+                                          ChiType *source_type, ResolveScope &scope,
+                                          array<ast::Node *> &generated_vars) {
+    auto struct_type = resolve_struct_type(source_type);
+    if (!struct_type) {
+        error(parent, "cannot destructure non-struct type '{}'", format_type_display(source_type));
+        return;
+    }
+
+    auto kind = parent->data.destructure_decl.kind;
+
+    for (auto field_node : fields) {
+        auto &field_data = field_node->data.destructure_field;
+        auto field_name = string(field_data.field_name->str);
+
+        // Look up the field in the struct
+        auto member = get_struct_member_access(field_node, source_type, field_name, false, false);
+        if (!member) continue;
+        field_data.resolved_field = member;
+
+        if (field_data.nested) {
+            // Nested destructuring: recurse
+            auto &nested = field_data.nested->data.destructure_decl;
+            resolve_destructure_fields(field_data.nested, nested.fields,
+                                       member->resolved_type, scope, nested.generated_vars);
+        } else {
+            // Create a VarDecl for this binding
+            auto binding_name = string(field_data.binding_name->str);
+            auto var = get_dummy_var(binding_name);
+            var->module = parent->module;
+            var->parent_fn = scope.parent_fn_node;
+            var->resolved_type = member->resolved_type;
+            var->data.var_decl.kind = kind;
+            var->data.var_decl.initialized_at = parent;
+            var->token = field_data.binding_name;
+            var->name = binding_name;
+
+            if (scope.parent_fn_node) {
+                var->decl_order = scope.parent_fn_def()->next_decl_order++;
+            }
+
+            if (scope.block && scope.block->scope) {
+                scope.block->scope->put(binding_name, var);
+            }
+
+            if (scope.parent_fn_node && scope.block && should_destroy(var, member->resolved_type) &&
+                !var->escape.is_capture()) {
+                scope.block->cleanup_vars.add(var);
+                scope.parent_fn_def()->has_cleanup = true;
+            }
+
+            generated_vars.add(var);
+        }
+    }
 }
 
 ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent_stmt,
