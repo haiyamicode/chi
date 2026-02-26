@@ -725,6 +725,20 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
                 }
                 fn->pack_params[pack_name] = pack_allocas;
                 fn->pack_param_types[pack_name] = pack_types;
+
+                // Map original params to generated params in var_table
+                // The function body references original params, but var_table has generated params
+                for (size_t i = 0; i < orig_proto.params.len; i++) {
+                    auto orig_param = orig_proto.params[i];
+                    // For non-pack params, map to the corresponding generated param
+                    if (!orig_param->data.param_decl.is_pack_param && i < gen_proto.params.len) {
+                        auto gen_param = gen_proto.params[i];
+                        if (m_ctx->var_table.has_key(gen_param)) {
+                            m_ctx->var_table[orig_param] = m_ctx->var_table[gen_param];
+                        }
+                    }
+                    // For pack param, we don't add it directly - pack expansion handles it
+                }
             }
         }
     }

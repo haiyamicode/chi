@@ -26,7 +26,22 @@ func forward_homogeneous(...args: any) {
     print_count(args...);
 }
 
+// Struct with variadic type pack
+struct Wrapper<...T> {
+}
+
+// Mixed: regular type param + variadic pack
+func mixed<U, ...T>(prefix: U, args: ...T) {
+    forward_print(prefix, args...);
+}
+
 func main() {
+    // Struct variadic pack instantiation
+    var w1 = Wrapper<int>{};
+    var w2 = Wrapper<int, string>{};
+    var w3 = Wrapper<int, string, bool>{};
+
+
     // Direct forwarding
     forward_print("value: {}\n", 42);
     forward_print("{} + {} = {}\n", 1, 2, 3);
@@ -46,5 +61,8 @@ func main() {
 
     // Homogeneous variadic forwarding
     forward_homogeneous(1, 2, 3);
+
+    // Mixed type params (regular + pack)
+    mixed<string, int, bool>("mixed: {} {}\n", 42, true);
 }
 

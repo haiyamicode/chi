@@ -2190,8 +2190,16 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
             if (token->type == TokenType::GT) {
                 break;
             }
+            // Check for variadic type pack: ...T
+            bool is_variadic = false;
+            if (token->type == TokenType::ELLIPSIS) {
+                is_variadic = true;
+                consume();
+                token = get();
+            }
             auto param_iden = expect(TokenType::IDEN);
             auto param_node = create_node(NodeType::TypeParam, param_iden);
+            param_node->data.type_param.is_variadic = is_variadic;
 
             // Check for colon syntax for type bounds: T: Trait1 + Trait2 + ...
             if (next_is(TokenType::COLON)) {

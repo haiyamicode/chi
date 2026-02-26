@@ -2802,17 +2802,36 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         auto &params = *params_ptr;
         auto &decl_params = *decl_params_ptr;
-        if (data.args.len > params.len) {
-            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.len,
-                  data.args.len);
-            return nullptr;
+
+        // Check if last type param is variadic pack
+        bool has_variadic_pack = false;
+        if (params.len > 0) {
+            auto last_param = to_value_type(params[params.len - 1]);
+            if (last_param->kind == TypeKind::Placeholder && last_param->data.placeholder.is_variadic) {
+                has_variadic_pack = true;
+            }
         }
-        // Check that missing args all have defaults
-        for (auto i = data.args.len; i < params.len; i++) {
-            if (!decl_params[i]->data.type_param.default_type) {
+
+        if (has_variadic_pack) {
+            // Variadic pack: args must be >= (params.len - 1)
+            if (data.args.len < params.len - 1) {
+                error(node, "variadic type pack requires at least {} type arguments, got {}",
+                      params.len - 1, data.args.len);
+                return nullptr;
+            }
+        } else {
+            if (data.args.len > params.len) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.len,
                       data.args.len);
                 return nullptr;
+            }
+            // Check that missing args all have defaults
+            for (auto i = data.args.len; i < params.len; i++) {
+                if (!decl_params[i]->data.type_param.default_type) {
+                    error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.len,
+                          data.args.len);
+                    return nullptr;
+                }
             }
         }
         array<ChiType *> args;
@@ -4564,6 +4583,12 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         return type;
     }
 
+    case TypeKind::TypeSymbol: {
+        // Unwrap TypeSymbol and recursively substitute the underlying type
+        auto underlying = type->data.type_symbol.underlying_type;
+        return make_recursive_call(underlying, subs);
+    }
+
     default:
         return type;
     }
@@ -5097,9 +5122,19 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             if (i < pack_param_idx) {
                 expected = fn->params[i];
             } else if (has_explicit_type_args) {
+                // Find how many non-pack type params there are
+                size_t non_pack_type_params = 0;
+                for (size_t j = 0; j < fn->type_params.len; j++) {
+                    auto tp = to_value_type(fn->type_params[j]);
+                    if (tp->kind == TypeKind::Placeholder && tp->data.placeholder.is_variadic) {
+                        break;
+                    }
+                    non_pack_type_params++;
+                }
                 size_t pack_idx = i - pack_param_idx;
-                if (pack_idx < explicit_types.len) {
-                    expected = explicit_types[pack_idx];
+                size_t explicit_idx = non_pack_type_params + pack_idx;
+                if (explicit_idx < explicit_types.len) {
+                    expected = explicit_types[explicit_idx];
                 }
             }
             auto arg_scope = scope.set_value_type(expected).set_move_outlet(nullptr);
@@ -5123,15 +5158,28 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             type_args = explicit_types;
 
             // Validate actual arg types against the explicit type args
+            // Find how many non-pack type params there are
+            size_t non_pack_type_params = 0;
+            for (size_t j = 0; j < fn->type_params.len; j++) {
+                auto tp = to_value_type(fn->type_params[j]);
+                if (tp->kind == TypeKind::Placeholder && tp->data.placeholder.is_variadic) {
+                    break;
+                }
+                non_pack_type_params++;
+            }
+
             for (size_t i = 0; i < n_args; i++) {
                 ChiType *expected_type = nullptr;
                 if (i < pack_param_idx) {
-                    // Non-pack params: not covered by explicit type args here
-                    continue;
+                    // Non-pack params: validate against corresponding type param
+                    if (i < non_pack_type_params && i < explicit_types.len) {
+                        expected_type = explicit_types[i];
+                    }
                 } else {
                     size_t pack_idx = i - pack_param_idx;
-                    if (pack_idx < explicit_types.len) {
-                        expected_type = explicit_types[pack_idx];
+                    size_t explicit_idx = non_pack_type_params + pack_idx;
+                    if (explicit_idx < explicit_types.len) {
+                        expected_type = explicit_types[explicit_idx];
                     }
                 }
                 if (expected_type && !can_assign(arg_types[i], expected_type)) {
@@ -5210,6 +5258,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                         for (size_t j = 0; j < group.types.len && j < pack_count; j++) {
                             auto concrete = type_args[pack_start + j];
                             auto required = group.types[j];
+                            // Skip validation if either type is a placeholder - will be validated during specialization
+                            if (concrete->kind == TypeKind::Placeholder || required->kind == TypeKind::Placeholder) {
+                                continue;
+                            }
                             if (!can_assign(concrete, required)) {
                                 error(node,
                                       "pack expansion type mismatch at position {}: "
