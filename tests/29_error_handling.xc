@@ -193,7 +193,7 @@ func test_result_mode() {
     // try f() → Result<Unit, &Error> — error case (void fn → Result<Unit, &Error>)
     var result2 = try fail_with("oops");
     if result2.error {
-        printf("got error: {}\n", result2.error!.message());
+        printf("got error: {}\n", result2.error.message());
     } else {
         println("should not reach");
     }
@@ -207,7 +207,7 @@ func test_typed_result() {
     // Error case
     var result = try fail_with("typed result") catch MyError;
     if result.error {
-        printf("caught: {}\n", result.error!.message());
+        printf("caught: {}\n", result.error.message());
     } else {
         println("should not reach");
     }
@@ -294,14 +294,14 @@ func main() {
     // Re-throw propagates out — catch it here
     var rethrow_result = try test_rethrow() catch OtherError;
     if rethrow_result.error {
-        printf("re-caught: {}\n", rethrow_result.error!.message());
+        printf("re-caught: {}\n", rethrow_result.error.message());
     }
 
     // Branching catch: fallback vs re-throw
     printf("branch fallback = {}\n", branching_catch(false));
     var branch_result = try branching_catch(true) catch OtherError;
     if branch_result.error {
-        printf("branch rethrow: {}\n", branch_result.error!.message());
+        printf("branch rethrow: {}\n", branch_result.error.message());
     }
 
     // Return from catch exits the function

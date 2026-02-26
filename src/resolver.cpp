@@ -521,6 +521,8 @@ ChiType *Resolver::to_value_type(ChiType *type) {
     return type;
 }
 
+static string build_narrowing_path(ast::Node *expr);
+
 // Does lifetime 'a outlive 'b? True if a == b or 'a: 'b was declared (transitively).
 static bool lifetime_outlives(ChiLifetime *a, ChiLifetime *b) {
     if (a == b)
@@ -2097,6 +2099,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto result_type = member->resolved_type;
+
+        // Check for narrowing redirect (path-based lookup)
+        // Skip LHS of assignments — writes should go to the original optional field
+        if (scope.block && !member->is_method() && !scope.is_lhs) {
+            auto path = build_narrowing_path(node);
+            if (!path.empty()) {
+                auto narrowed = scope.block->scope->find_one(path);
+                if (narrowed && narrowed->type == NodeType::VarDecl &&
+                    narrowed->data.var_decl.is_generated && narrowed->data.var_decl.narrowed_from) {
+                    data.narrowed_var = narrowed;
+                    return narrowed->resolved_type;
+                }
+            }
+        }
+
         if (data.is_optional_chain && !member->is_method()) {
             return get_wrapped_type(result_type, TypeKind::Optional);
         }
@@ -5358,22 +5375,46 @@ ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
     return node;
 }
 
-ast::Node *Resolver::create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt,
+static string build_narrowing_path(ast::Node *expr) {
+    if (expr->type == NodeType::Identifier) {
+        return expr->name;
+    }
+    if (expr->type == NodeType::DotExpr) {
+        auto &data = expr->data.dot_expr;
+        auto base = build_narrowing_path(data.expr);
+        if (base.empty())
+            return "";
+        return base + "." + string(data.field->str);
+    }
+    return "";
+}
+
+ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent_stmt,
                                          ResolveScope &scope) {
-    auto type = node_get_type(identifier);
-    auto name = identifier->token->get_name();
+    auto type = node_get_type(expr_node);
+    string name;
+    ast::VarKind kind;
+    if (expr_node->type == NodeType::DotExpr) {
+        name = build_narrowing_path(expr_node);
+        kind = ast::VarKind::Immutable;
+    } else {
+        name = expr_node->token->get_name();
+        kind = expr_node->data.identifier.decl->data.var_decl.kind;
+    }
     auto unwrapped = type->kind == TypeKind::Optional ? type->get_elem() : type->data.result.value;
     auto expr = create_node(ast::NodeType::UnaryOpExpr);
-    expr->token = identifier->token;
+    expr->token = expr_node->token;
     expr->data.unary_op_expr.is_suffix = true;
     expr->data.unary_op_expr.op_type = TokenType::LNOT;
-    expr->data.unary_op_expr.op1 = identifier;
+    expr->data.unary_op_expr.op1 = expr_node;
     expr->resolved_type = unwrapped;
     auto var = get_dummy_var(name, expr);
-    var->token = identifier->token;
+    var->token = expr_node->token;
     var->parent_fn = scope.parent_fn_node;
     var->resolved_type = unwrapped;
     var->data.var_decl.initialized_at = parent_stmt;
+    var->data.var_decl.narrowed_from = expr_node;
+    var->data.var_decl.kind = kind;
     return var;
 }
 
@@ -5405,6 +5446,16 @@ void Resolver::collect_narrowables(ast::Node *expr, bool when_truthy, array<ast:
     }
 
     if (expr->type == NodeType::Identifier) {
+        if (when_truthy) {
+            auto type = node_get_type(expr);
+            if (type && (type->kind == TypeKind::Optional || type->kind == TypeKind::Result)) {
+                out.add(expr);
+            }
+        }
+        return;
+    }
+
+    if (expr->type == NodeType::DotExpr) {
         if (when_truthy) {
             auto type = node_get_type(expr);
             if (type && (type->kind == TypeKind::Optional || type->kind == TypeKind::Result)) {

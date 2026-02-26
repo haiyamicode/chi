@@ -3584,6 +3584,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
 
         auto &data = expr->data.dot_expr;
+
+        // Narrowing redirect: use the narrowed var's GEP alias
+        if (data.narrowed_var) {
+            return RefValue::from_address(get_var(data.narrowed_var));
+        }
+
         auto type = get_chitype(data.expr);
 
         llvm::Value *ptr = nullptr;
@@ -4600,6 +4606,18 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &llvm_builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
         auto &llvm_module = *m_ctx->llvm_module.get();
+
+        // Narrowed variable: GEP alias into original optional/result value field
+        if (data.narrowed_from) {
+            auto ref = compile_expr_ref(fn, data.narrowed_from);
+            if (ref.address) {
+                auto original_type_l = compile_type(get_chitype(data.narrowed_from));
+                auto value_ptr = llvm_builder.CreateStructGEP(original_type_l, ref.address, 1);
+                add_var(stmt, value_ptr);
+                break;
+            }
+        }
+
         auto var = compile_alloc(fn, stmt);
         add_var(stmt, var);
         auto var_type = get_chitype(stmt);

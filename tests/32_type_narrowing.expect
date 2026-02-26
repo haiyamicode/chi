@@ -71,3 +71,65 @@ truthiness_and(1,null)=false
 truthiness_or(1,2)=true
 truthiness_or(null,2)=true
 truthiness_or(null,null)=false
+
+-- Narrowing alias: destructible types --
+read_only:
+  construct(1)
+  read: 1
+  destroy(1)
+reassign:
+  construct(10)
+  before: 10
+  destroy(10)
+  construct(20)
+  after: 20
+  destroy(20)
+guard_read:
+  construct(100)
+  guard read: 100
+  destroy(100)
+guard_reassign:
+  construct(200)
+  before: 200
+  destroy(200)
+  construct(300)
+  after: 300
+  destroy(300)
+assert_reassign:
+  construct(400)
+  before: 400
+  destroy(400)
+  construct(500)
+  after: 500
+  destroy(500)
+compound:
+  construct(1000)
+  construct(2000)
+  a=1000 b=2000
+  destroy(2000)
+  destroy(1000)
+null_case:
+  null case done
+
+-- DotExpr narrowing --
+dot_positive=43
+dot_guard=null
+dot_assert=100
+dot_compound=10 hello
+dot_compound_guard=5 world
+  construct(42)
+positive:
+  positive: 42
+  destroy(42)
+  construct(100)
+guard:
+  guard: 100
+  destroy(100)
+null positive:
+  positive: null
+null guard:
+  guard: null
+  construct(200)
+assert:
+  assert: 200
+  destroy(200)

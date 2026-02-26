@@ -313,6 +313,7 @@ struct VarDecl {
     DeclSpec *decl_spec = {};
     bool is_generated = false;
     Node *initialized_at = nullptr;
+    Node *narrowed_from = nullptr;
 };
 
 struct BinOpExpr {
@@ -415,6 +416,7 @@ struct DotExpr {
     bool is_optional_chain = false;
     DotKind resolved_dot_kind = DotKind::Field;
     int resolved_index = -1;
+    Node *narrowed_var = nullptr;
 };
 
 struct SubtypeExpr {

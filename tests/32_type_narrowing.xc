@@ -163,6 +163,192 @@ func truthiness_or(a: ?int, b: ?int) bool {
     return a || b;
 }
 
+// === Narrowing alias correctness with destructible types ===
+
+struct Traced {
+    id: int = 0;
+
+    mut func new(id: int) {
+        this.id = id;
+        printf("  construct({})\n", id);
+    }
+
+    func delete() {
+        printf("  destroy({})\n", this.id);
+    }
+}
+
+// Positive narrowing: read-only (no copy, no extra destroy)
+func narrow_read_only() {
+    var x: ?Traced = Traced{1};
+    if x {
+        printf("  read: {}\n", x.id);
+    }
+}
+
+// Positive narrowing: mutable reassignment through alias
+// Previously broken: double-free of old value + leak of new value
+func narrow_reassign() {
+    var x: ?Traced = Traced{10};
+    if x {
+        printf("  before: {}\n", x.id);
+        x = Traced{20};
+        printf("  after: {}\n", x.id);
+    }
+}
+
+// Guard clause narrowing: read-only
+func narrow_guard_read() {
+    var x: ?Traced = Traced{100};
+    if !x {
+        return;
+    }
+    printf("  guard read: {}\n", x.id);
+}
+
+// Guard clause narrowing: mutable reassignment
+func narrow_guard_reassign() {
+    var x: ?Traced = Traced{200};
+    if !x {
+        return;
+    }
+    printf("  before: {}\n", x.id);
+    x = Traced{300};
+    printf("  after: {}\n", x.id);
+}
+
+// Assert narrowing: mutable reassignment
+func narrow_assert_reassign() {
+    var x: ?Traced = Traced{400};
+    assert(x);
+    printf("  before: {}\n", x.id);
+    x = Traced{500};
+    printf("  after: {}\n", x.id);
+}
+
+// Compound narrowing with destructible types
+func narrow_compound() {
+    var a: ?Traced = Traced{1000};
+    var b: ?Traced = Traced{2000};
+    if a && b {
+        printf("  a={} b={}\n", a.id, b.id);
+    }
+}
+
+// Null case: no construct/destroy for the value
+func narrow_null_case() {
+    var x: ?Traced = null;
+    if x {
+        printf("  should not print\n");
+    }
+    printf("  null case done\n");
+}
+
+// === DotExpr (field access) narrowing ===
+
+struct Container {
+    value: ?int = null;
+    name: ?string = null;
+}
+
+struct App {
+    service: ?Traced = null;
+
+    func test_positive() {
+        if this.service {
+            printf("  positive: {}\n", this.service.id);
+        } else {
+            println("  positive: null");
+        }
+    }
+
+    func test_guard() {
+        if !this.service {
+            println("  guard: null");
+            return;
+        }
+        printf("  guard: {}\n", this.service.id);
+    }
+
+    func test_assert() {
+        assert(this.service);
+        printf("  assert: {}\n", this.service.id);
+    }
+}
+
+func dot_positive() {
+    var c = Container{};
+    c.value = 42;
+    if c.value {
+        printf("dot_positive={}\n", c.value + 1);
+    }
+}
+
+func dot_guard() {
+    var c = Container{};
+    if !c.value {
+        println("dot_guard=null");
+        return;
+    }
+    printf("dot_guard={}\n", c.value + 1);
+}
+
+func dot_assert() {
+    var c = Container{};
+    c.value = 99;
+    assert(c.value);
+    printf("dot_assert={}\n", c.value + 1);
+}
+
+func dot_compound() {
+    var c = Container{};
+    c.value = 10;
+    c.name = "hello";
+    if c.value && c.name {
+        printf("dot_compound={} {}\n", c.value, c.name);
+    }
+}
+
+func dot_compound_guard() {
+    var c = Container{};
+    c.value = 5;
+    c.name = "world";
+    if !c.value || !c.name {
+        println("dot_compound_guard=null");
+        return;
+    }
+    printf("dot_compound_guard={} {}\n", c.value, c.name);
+}
+
+func dot_this_positive() {
+    var app = App{};
+    app.service = Traced{42};
+    println("positive:");
+    app.test_positive();
+}
+
+func dot_this_guard() {
+    var app = App{};
+    app.service = Traced{100};
+    println("guard:");
+    app.test_guard();
+}
+
+func dot_this_null() {
+    var app = App{};
+    println("null positive:");
+    app.test_positive();
+    println("null guard:");
+    app.test_guard();
+}
+
+func dot_this_assert() {
+    var app = App{};
+    app.service = Traced{200};
+    println("assert:");
+    app.test_assert();
+}
+
 func main() {
     println("-- Basic narrowing --");
     printf("basic_positive(5)={}\n", basic_positive(5));
@@ -236,5 +422,32 @@ func main() {
     printf("truthiness_or(1,2)={}\n", truthiness_or(1, 2));
     printf("truthiness_or(null,2)={}\n", truthiness_or(null, 2));
     printf("truthiness_or(null,null)={}\n", truthiness_or(null, null));
+
+    println("\n-- Narrowing alias: destructible types --");
+    println("read_only:");
+    narrow_read_only();
+    println("reassign:");
+    narrow_reassign();
+    println("guard_read:");
+    narrow_guard_read();
+    println("guard_reassign:");
+    narrow_guard_reassign();
+    println("assert_reassign:");
+    narrow_assert_reassign();
+    println("compound:");
+    narrow_compound();
+    println("null_case:");
+    narrow_null_case();
+
+    println("\n-- DotExpr narrowing --");
+    dot_positive();
+    dot_guard();
+    dot_assert();
+    dot_compound();
+    dot_compound_guard();
+    dot_this_positive();
+    dot_this_guard();
+    dot_this_null();
+    dot_this_assert();
 }
 

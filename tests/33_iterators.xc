@@ -15,7 +15,7 @@ struct LinkedListIterator<T> {
             if !this.current {
                 return null;
             }
-            var ptr = this.current!;
+            var ptr = this.current;
             this.current = ptr.next;
             unsafe {
                 return &mut ptr.value;
