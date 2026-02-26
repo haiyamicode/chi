@@ -17,6 +17,15 @@ func multi_forward<...T>(args: ...T) {
 func unused_pack<...T>(args: ...T) {
 }
 
+// Homogeneous variadic expansion
+func print_count(...args: any) {
+    printf("homogeneous count: {}\n", args.length);
+}
+
+func forward_homogeneous(...args: any) {
+    print_count(args...);
+}
+
 func main() {
     // Direct forwarding
     forward_print("value: {}\n", 42);
@@ -34,5 +43,8 @@ func main() {
     // Explicit type args (non-inference)
     forward_print<string, int>("explicit: {}\n", 100);
     forward_print<string, string, string>("{} {} {}\n", "x", "y");
+
+    // Homogeneous variadic forwarding
+    forward_homogeneous(1, 2, 3);
 }
 

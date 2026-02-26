@@ -4269,6 +4269,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         if (arg_node->type == ast::NodeType::PackExpansion) {
             auto pack_expr = arg_node->data.pack_expansion.expr;
             auto pack_name = pack_expr->name;
+
+            // Variadic type pack (args: ...T) - expand into individual values
             if (fn->pack_params.has_key(pack_name)) {
                 auto &pack_allocas = fn->pack_params[pack_name];
                 auto &pack_types = fn->pack_param_types[pack_name];
@@ -4276,6 +4278,10 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                     auto val = builder.CreateLoad(compile_type(pack_types[j]), pack_allocas[j]);
                     expanded_args.push_back({nullptr, val, pack_types[j]});
                 }
+            } else {
+                // Homogeneous variadic (...args: T) - keep as-is, will be handled specially
+                // when building the callee's variadic array (runtime merge)
+                expanded_args.push_back({arg_node, nullptr, nullptr});
             }
         } else {
             expanded_args.push_back({arg_node, nullptr, nullptr});
@@ -4297,6 +4303,66 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
                 builder.CreateStore(val, ptr);
             } else {
+                // Check if this is a PackExpansion of a homogeneous variadic
+                if (ea.node->type == ast::NodeType::PackExpansion) {
+                    auto pack_expr = ea.node->data.pack_expansion.expr;
+                    auto decl = pack_expr->get_decl();
+                    if (decl && decl->type == ast::NodeType::ParamDecl &&
+                        decl->data.param_decl.is_variadic) {
+                        // Runtime merge: iterate through source array and add each element
+                        emit_dbg_location(ea.node);
+                        auto src_type = get_chitype(pack_expr);
+                        assert(src_type->kind == TypeKind::Array);
+                        auto elem_type = src_type->data.array.elem;
+
+                        // Get pointer to the source array parameter
+                        auto src_array_val = compile_expr(fn, pack_expr);
+                        auto src_array_ptr = fn->entry_alloca(compile_type(src_type), "pack_src");
+                        builder.CreateStore(src_array_val, src_array_ptr);
+
+                        // Extract src array data and len
+                        auto src_llvm_type = compile_type(src_type);
+                        auto src_data_ptr = builder.CreateStructGEP(src_llvm_type, src_array_ptr, 0);
+                        auto src_len_ptr = builder.CreateStructGEP(src_llvm_type, src_array_ptr, 1);
+                        auto src_data = builder.CreateLoad(
+                            llvm::PointerType::get(compile_type(elem_type), 0), src_data_ptr);
+                        auto src_len = builder.CreateLoad(builder.getInt32Ty(), src_len_ptr);
+
+                        // Loop: for (int j = 0; j < src_len; j++) { add src_data[j] to va_ptr }
+                        auto loop_start = fn->new_label("pack_expand_loop");
+                        auto loop_body = fn->new_label("pack_expand_body");
+                        auto loop_end = fn->new_label("pack_expand_end");
+
+                        auto j_alloca = fn->entry_alloca(builder.getInt32Ty(), "pack_expand_j");
+                        builder.CreateStore(builder.getInt32(0), j_alloca);
+                        builder.CreateBr(loop_start);
+
+                        fn->use_label(loop_start);
+                        auto j_val = builder.CreateLoad(builder.getInt32Ty(), j_alloca);
+                        auto cond = builder.CreateICmpULT(j_val, src_len);
+                        builder.CreateCondBr(cond, loop_body, loop_end);
+
+                        fn->use_label(loop_body);
+                        auto elem_ptr = builder.CreateGEP(compile_type(elem_type), src_data, j_val);
+                        auto elem_val = builder.CreateLoad(compile_type(elem_type), elem_ptr);
+                        auto converted = compile_conversion(fn, elem_val, elem_type, va_type);
+                        auto add_fn = get_system_fn("cx_array_add");
+                        auto tsize = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(
+                            compile_type(va_type));
+                        auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
+                        auto dst_ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
+                        builder.CreateStore(converted, dst_ptr);
+                        auto j_next = builder.CreateAdd(j_val, builder.getInt32(1));
+                        builder.CreateStore(j_next, j_alloca);
+                        builder.CreateBr(loop_start);
+
+                        fn->use_label(loop_end);
+                        continue;
+                    } else {
+                        panic("PackExpansion in variadic section but not a variadic parameter");
+                    }
+                }
+
                 emit_dbg_location(ea.node);
                 auto add_fn = get_system_fn("cx_array_add");
                 auto arg = compile_assignment_to_type(fn, ea.node, va_type);

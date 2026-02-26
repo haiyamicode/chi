@@ -3267,11 +3267,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Pack expansion: args... — resolve the pack parameter
         auto &data = node->data.pack_expansion;
         auto type = resolve(data.expr, scope);
-        // Validate that the expression refers to a pack parameter
+        // Validate that the expression refers to a variadic parameter
+        // (either variadic type pack `args: ...T` or homogeneous variadic `...args: T`)
         auto decl = data.expr->get_decl();
-        if (!decl || decl->type != NodeType::ParamDecl ||
-            !decl->data.param_decl.is_pack_param) {
-            error(node, "pack expansion '...' can only be used on a variadic type pack parameter");
+        if (!decl || decl->type != NodeType::ParamDecl) {
+            error(node, "pack expansion '...' can only be used on a variadic parameter");
+            return type;
+        }
+        auto &param = decl->data.param_decl;
+        if (!param.is_pack_param && !param.is_variadic) {
+            error(node, "pack expansion '...' can only be used on a variadic parameter");
             return type;
         }
         return type;
@@ -5441,40 +5446,76 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             auto param_type = fn->get_param_at(i);
             auto arg = args->at(i);
 
-            // Pack expansion (args...) — unify pack placeholder against callee params
+            // Pack expansion (args...) — either variadic type pack or homogeneous variadic
             if (arg->type == ast::NodeType::PackExpansion) {
                 auto inner = arg->data.pack_expansion.expr;
                 auto arg_scope = scope.set_value_type(nullptr).set_move_outlet(nullptr);
                 auto arg_type = resolve(inner, arg_scope);
                 arg->resolved_type = arg_type;
 
-                // Validate: must be a pack parameter
+                // Validate: must be a variadic parameter
                 auto decl = inner->get_decl();
-                if (!decl || decl->type != NodeType::ParamDecl ||
-                    !decl->data.param_decl.is_pack_param) {
-                    error(arg, "pack expansion '...' can only be used on a variadic type pack parameter");
+                if (!decl || decl->type != NodeType::ParamDecl) {
+                    error(arg, "pack expansion '...' can only be used on a variadic parameter");
+                    continue;
+                }
+                auto &param_decl = decl->data.param_decl;
+                if (!param_decl.is_pack_param && !param_decl.is_variadic) {
+                    error(arg, "pack expansion '...' can only be used on a variadic parameter");
                     continue;
                 }
 
-                // Infer pack constraints from the callee's param types via unification.
-                // The pack fills params from position i onward. Non-variadic params
-                // become type constraints; if the callee is variadic, the pack can
-                // carry additional args beyond the required ones.
-                auto unwrapped = to_value_type(arg_type);
-                if (unwrapped->kind == TypeKind::Placeholder &&
-                    unwrapped->data.placeholder.is_variadic) {
-                    auto &ph = unwrapped->data.placeholder;
-                    auto va_start = fn->get_va_start();
-                    // Create a constraint group for this call site
-                    ChiTypePlaceholder::PackConstraintGroup group;
-                    for (size_t j = i; j < (size_t)va_start; j++) {
-                        auto p = fn->get_param_at(j);
-                        if (p) {
-                            group.types.add(p);
+                // For variadic type packs (args: ...T), infer constraints from callee params.
+                if (param_decl.is_pack_param) {
+                    auto unwrapped = to_value_type(arg_type);
+                    if (unwrapped->kind == TypeKind::Placeholder &&
+                        unwrapped->data.placeholder.is_variadic) {
+                        auto &ph = unwrapped->data.placeholder;
+                        auto va_start = fn->get_va_start();
+                        // Create a constraint group for this call site
+                        ChiTypePlaceholder::PackConstraintGroup group;
+                        for (size_t j = i; j < (size_t)va_start; j++) {
+                            auto p = fn->get_param_at(j);
+                            if (p) {
+                                group.types.add(p);
+                            }
                         }
+                        group.allows_more = fn->is_variadic || fn->is_extern;
+                        ph.pack_constraint_groups.add(group);
                     }
-                    group.allows_more = fn->is_variadic || fn->is_extern;
-                    ph.pack_constraint_groups.add(group);
+                }
+                // For homogeneous variadics (...args: T), check callee accepts homogeneous variadic
+                else if (param_decl.is_variadic) {
+                    // arg_type is Array<T>
+                    if (!fn->is_variadic) {
+                        error(arg, "cannot expand homogeneous variadic into non-variadic function");
+                        continue;
+                    }
+                    // Homogeneous variadic expansion can only be used when calling a function
+                    // with ONLY a variadic param (no other required params)
+                    auto va_start = fn->get_va_start();
+                    if (va_start != 0) {
+                        error(arg, "cannot expand homogeneous variadic into function with non-variadic parameters (position {} requires type {})",
+                              va_start, format_type_display(fn->params[0]));
+                        continue;
+                    }
+                    // Check that Array element type matches callee's variadic param type
+                    auto array_type = to_value_type(arg_type);
+                    if (array_type->kind != TypeKind::Array) {
+                        error(arg, "expected Array type for homogeneous variadic parameter");
+                        continue;
+                    }
+                    auto elem_type = array_type->data.array.elem;
+                    auto callee_va_param = fn->params.last();
+                    auto callee_va_elem = callee_va_param->kind == TypeKind::Array
+                        ? callee_va_param->data.array.elem
+                        : nullptr;
+                    if (!callee_va_elem || !can_assign(elem_type, callee_va_elem)) {
+                        error(arg, "cannot expand Array<{}> into variadic parameter of type Array<{}>",
+                              format_type_display(elem_type),
+                              callee_va_elem ? format_type_display(callee_va_elem) : "?");
+                        continue;
+                    }
                 }
                 continue;
             }
