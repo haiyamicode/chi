@@ -48,8 +48,8 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 
 %.test: %.expect
 	echo Test: $*...
-	@if [ -f $*.xc ]; then \
-		$(CHI) -o $(TMP).$* -c $*.xc && $(TMP).$* 2>&1 >$*.output; \
+	@if [ -f $*.xs ]; then \
+		$(CHI) -o $(TMP).$* -c $*.xs && $(TMP).$* 2>&1 >$*.output; \
 	elif [ -f $*.x ]; then \
 		$(CHI) -o $(TMP).$* -c $*.x && $(TMP).$* 2>&1 >$*.output; \
 	else \
@@ -67,7 +67,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for trait bounds test — also tests rejection cases
 21_trait_bounds.test: 21_trait_bounds.expect
 	echo Test: 21_trait_bounds...
-	@$(CHI) -o $(TMP).21_trait_bounds -c 21_trait_bounds.xc && $(TMP).21_trait_bounds 2>&1 >21_trait_bounds.output
+	@$(CHI) -o $(TMP).21_trait_bounds -c 21_trait_bounds.xs && $(TMP).21_trait_bounds 2>&1 >21_trait_bounds.output
 	@if [ "x`diff -qbu 21_trait_bounds.expect 21_trait_bounds.output`" != "x" ]; \
 	then \
 		echo "error in test 21_trait_bounds (output mismatch)"; \
@@ -77,7 +77,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	fi; \
 	rm -f 21_trait_bounds.output
 	@failed=0; \
-	for f in testdata/21_trait_bound_errors/*.xc; do \
+	for f in testdata/21_trait_bound_errors/*.xs; do \
 		name=$$(basename $$f); \
 		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_trait 2>&1); \
 		if [ $$? -eq 0 ]; then \
@@ -98,7 +98,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Also tests error cases: each file in testdata/30_safe_errors/ must fail to compile.
 30_safe_lifetime.test: 30_safe_lifetime.expect
 	echo Test: 30_safe_lifetime...
-	@$(CHI) -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xc && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
+	@$(CHI) -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xs && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
 	@if [ "x`diff -qbu 30_safe_lifetime.expect 30_safe_lifetime.output`" != "x" ]; \
 	then \
 		echo "error in test 30_safe_lifetime (output mismatch)"; \
@@ -108,7 +108,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	fi; \
 	rm -f 30_safe_lifetime.output
 	@failed=0; \
-	for f in testdata/30_safe_errors/*.xc testdata/30_safe_errors/*.x; do \
+	for f in testdata/30_safe_errors/*.xs testdata/30_safe_errors/*.x; do \
 		name=$$(basename $$f); \
 		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_safe 2>&1); \
 		if [ $$? -eq 0 ]; then \
@@ -172,7 +172,7 @@ formatter_test:
 	@echo "Formatter idempotency test..."
 	@fail=0; \
 	for t in $(FORMAT_TESTS); do \
-		src=$$t.xc; [ -f $$src ] || src=$$t.x; \
+		src=$$t.xs; [ -f $$src ] || src=$$t.x; \
 		$(CHI) -f -c $$src > $(TMP).$$t.fmt 2>/dev/null; \
 		if ! diff -q $$src $(TMP).$$t.fmt >/dev/null 2>&1; then \
 			echo "FAIL $$t (formatter output differs from source)"; \
@@ -186,7 +186,7 @@ formatter_test:
 # Formatter collapse test: verify formatting collapses redundant syntax
 formatter_collapse_test:
 	@echo "Formatter collapse test..."
-	@$(CHI) -f -c formatter_collapse.xc > $(TMP).formatter_collapse.fmt 2>/dev/null; \
+	@$(CHI) -f -c formatter_collapse.xs > $(TMP).formatter_collapse.fmt 2>/dev/null; \
 	if ! diff -q formatter_collapse.expected $(TMP).formatter_collapse.fmt >/dev/null 2>&1; then \
 		echo "FAIL formatter_collapse (output differs from expected)"; \
 		diff -u formatter_collapse.expected $(TMP).formatter_collapse.fmt; \
@@ -204,7 +204,7 @@ stress:
 	@echo "Stress testing ($(N) iterations)..."
 	@for i in $$(seq 1 $(N)); do \
 		for t in $(STRESS_TESTS); do \
-			src=$$t.xc; [ -f $$src ] || src=$$t.x; \
+			src=$$t.xs; [ -f $$src ] || src=$$t.x; \
 			$(CHI) -o $(TMP).$$t -c $$src && $(TMP).$$t >$(TMP).$$t.out 2>&1 || { echo "FAIL $$t at iteration $$i (compile/run)"; exit 1; }; \
 			diff -qbu $$t.expect $(TMP).$$t.out >/dev/null || { echo "FAIL $$t at iteration $$i (output mismatch)"; diff -u $$t.expect $(TMP).$$t.out; exit 1; }; \
 		done; \

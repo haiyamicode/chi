@@ -77,7 +77,7 @@ int main(int argc, char *argv[]) {
         print("  -f --format: format source code\n");
         print("  -w --working-dir <dir>: working directory\n");
         print("  --analyzer: analyzer mode\n");
-        print("  -s --safe: safe mode (enable managed memory for .xc files)\n");
+        print("  -s --safe: safe mode (enable managed memory for .xs files)\n");
         print("  -v --verbose: verbose mode (print lifetime analysis details)\n");
         print("  -h --help: help\n");
     };
@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
             processing_mode = ProcessingMode::Analyzer;
             break;
         case FlagId::Safe:
-            // Safe mode is now automatic for .xc files
+            // Safe mode is now automatic for .xs files
             break;
         case FlagId::Verbose:
             bld.verbose = true;

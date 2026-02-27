@@ -3,7 +3,7 @@
 # Each test simulates what the user's editor sends mid-keystroke
 
 CHI=../build/src/bin/chi
-TMPFILE=/tmp/chi_fuzz_test.xc
+TMPFILE=/tmp/chi_fuzz_test.xs
 PASSED=0
 FAILED=0
 CRASHES=""

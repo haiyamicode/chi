@@ -27,7 +27,7 @@ struct CompilationContext : public Context {
     array<box<InterfaceImpl>> interface_impls = {};
     array<box<WhereCondition>> where_conditions = {};
     uint32_t flags = 0;
-    array<string> file_extensions = {"xc", "x"};
+    array<string> file_extensions = {"xs", "x"};
     string root_path = "";
     array<box<ast::Package>> packages = {};
     map<string, ast::Package *> package_map = {};

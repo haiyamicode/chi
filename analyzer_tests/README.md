@@ -19,4 +19,4 @@ make analyzer_test
 
 ## Test Cases
 
-Each `.xc` file contains intentionally broken Chi code that should produce proper error messages instead of crashing.
+Each `.xs` file contains intentionally broken Chi code that should produce proper error messages instead of crashing.

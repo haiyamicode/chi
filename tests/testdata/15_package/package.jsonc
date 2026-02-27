@@ -1,6 +1,6 @@
 {
   // Entry point for the Chi package
-  "entry_file": "main.xc",
+  "entry_file": "main.xs",
 
   /* C interoperability configuration
      This allows the package to compile and link C code */

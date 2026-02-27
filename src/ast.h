@@ -28,7 +28,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt, ImplementBlock,
           PackExpansion, DestructureDecl, DestructureField);
 
-MAKE_ENUM(ModuleKind, XC, XM);
+MAKE_ENUM(ModuleKind, XS, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
 
 enum FnParsingFlags : uint32_t {
@@ -49,7 +49,7 @@ enum DeclFlag : uint32_t {
 };
 
 struct Module {
-    ModuleKind kind = ModuleKind::XC;
+    ModuleKind kind = ModuleKind::XS;
     Node *root = nullptr;
     Package *package = nullptr;
     string path = "";
@@ -74,14 +74,14 @@ struct Module {
     string global_id() const;
 
     static ModuleKind kind_from_extension(const string &ext) {
-        if (ext == ".xc") {
-            return ModuleKind::XC;
+        if (ext == ".xs") {
+            return ModuleKind::XS;
         } else if (ext == ".x") {
             return ModuleKind::XM;
         } else {
             panic("unknown module extension: {}", ext);
         }
-        return ModuleKind::XC;
+        return ModuleKind::XS;
     }
 
     LANG_FLAG get_lang_flags() const {

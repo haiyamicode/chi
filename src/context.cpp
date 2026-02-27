@@ -110,7 +110,7 @@ string CompilationContext::init_rt_stdlib() {
     // initialize runtime package
     auto rt = add_package("");
     rt->kind = PackageKind::BUILTIN;
-    auto rt_path = get_stdlib_path("runtime.xc");
+    auto rt_path = get_stdlib_path("runtime.xs");
     rt->src_path = fs::path(rt_path).parent_path().string();
     rt_package = rt;
     return rt_path;

@@ -100,7 +100,7 @@ void Resolver::context_init_primitives() {
     system_types.array = create_type(TypeKind::Array);
     system_types.optional = create_type(TypeKind::Optional);
     system_types.result = create_type(TypeKind::Result);
-    // Promise is now defined as a Chi-native struct in runtime.xc
+    // Promise is now defined as a Chi-native struct in runtime.xs
     // system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
     system_types.zeroinit = create_type(TypeKind::ZeroInit);
@@ -141,7 +141,7 @@ void Resolver::context_init_primitives() {
 
     // non-primitive builtins
     add_primitive("Result", system_types.result);
-    // Promise is now defined as a Chi-native struct in runtime.xc
+    // Promise is now defined as a Chi-native struct in runtime.xs
     // add_primitive("Promise", system_types.promise);
 
     // intrinsic symbols
@@ -5648,7 +5648,7 @@ ChiType *Resolver::get_promise_type(ChiType *value) {
         return *cached;
     }
 
-    // Use the Chi-native Promise<T> struct from runtime.xc
+    // Use the Chi-native Promise<T> struct from runtime.xs
     auto promise = m_ctx->rt_promise_type;
     assert(promise && "Promise struct not found in runtime");
 
@@ -6139,7 +6139,7 @@ ChiType *Resolver::get_lambda_for_fn(ChiType *fn_type) {
     // Check if __CxLambda is fully resolved
     if (rt_lambda->data.struct_.resolve_status < ResolveStatus::MemberTypesKnown) {
         // Not resolved yet - defer instantiation by returning placeholder
-        // This happens when resolving runtime.xc itself, before __CxLambda is fully resolved
+        // This happens when resolving runtime.xs itself, before __CxLambda is fully resolved
         lambda->data.fn_lambda.internal = nullptr;
         lambda->is_placeholder = true;
         return lambda;

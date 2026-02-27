@@ -2,7 +2,7 @@ BUILD_DIR=build
 BASE=$(shell pwd)
 LOCAL_DIR=local
 CHI = $(BUILD_DIR)/src/bin/chi
-INPUT_FILE ?= $(LOCAL_DIR)/test.xc
+INPUT_FILE ?= $(LOCAL_DIR)/test.xs
 INPUT_PACKAGE ?= $(LOCAL_DIR)/test_package
 BUILD_MODE ?= Debug
 export CHI_ROOT=$(BASE)
@@ -76,9 +76,9 @@ format_example: build install
 	$(CHI) -f -c $(INPUT_FILE)
 
 format_all: build install
-	@echo "Formatting all .xc and .x files in src/stdlib and tests..."
-	@find src/stdlib tests -type f \( -name "*.xc" -o -name "*.x" \) -print0 | while IFS= read -r -d '' file; do \
-		if [ "$$file" = "tests/formatter_collapse.xc" ]; then \
+	@echo "Formatting all .xs and .x files in src/stdlib and tests..."
+	@find src/stdlib tests -type f \( -name "*.xs" -o -name "*.x" \) -print0 | while IFS= read -r -d '' file; do \
+		if [ "$$file" = "tests/formatter_collapse.xs" ]; then \
 			echo "Skipping $$file (formatter test input)..."; \
 			continue; \
 		fi; \

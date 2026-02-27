@@ -469,7 +469,7 @@ ast::Module* create_native_module(
     auto* module = new ast::Module();
     module->name = module_name;
     module->id_path = module_name;
-    module->kind = ast::ModuleKind::XC;  // Manual memory
+    module->kind = ast::ModuleKind::XS;  // Manual memory
     module->path = "<virtual:" + module_name + ">";
     module->filename = "<virtual:" + module_name + ">";
 
@@ -531,7 +531,7 @@ ast::Module* get_or_create_c_module(
     auto* module = new ast::Module();
     module->name = "C";
     module->id_path = module_key;  // Use namespaced key as id_path
-    module->kind = ast::ModuleKind::XC;  // Manual memory
+    module->kind = ast::ModuleKind::XS;  // Manual memory
     module->path = "<virtual:" + module_key + ">";
     module->filename = "<virtual:" + module_key + ">";
 

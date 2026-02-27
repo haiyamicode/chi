@@ -1,4 +1,4 @@
-MALFORMED_FILES := $(wildcard *.xc)
+MALFORMED_FILES := $(wildcard *.xs)
 CHI_COMPILER := ../build/src/bin/chi
 
 .PHONY: all clean test

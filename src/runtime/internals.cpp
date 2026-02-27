@@ -625,7 +625,7 @@ static CxHash get_hbytes(CxAny *v) {
 
 void cx_hbytes(CxAny *v, CxHash *result) { *result = get_hbytes(v); }
 
-// DEPRECATED: Promise is now a Chi-native struct in runtime.xc
+// DEPRECATED: Promise is now a Chi-native struct in runtime.xs
 // void cx_promise_init(CxPromise *promise) { ... }
 // void cx_promise_resolve(CxPromise *promise, void *value) { ... }
 // void cx_promise_reject(CxPromise *promise, void *error) { ... }
