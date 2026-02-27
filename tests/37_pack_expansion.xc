@@ -6,7 +6,7 @@ func print_count(...values: any) {
 }
 
 func forward(...args: any) {
-    print_count(args...);
+    print_count(...args);
 }
 
 // Multiple levels of forwarding
@@ -15,11 +15,11 @@ func level3(...args: any) {
 }
 
 func level2(...args: any) {
-    level3(args...);
+    level3(...args);
 }
 
 func level1(...args: any) {
-    level2(args...);
+    level2(...args);
 }
 
 // Mix regular args with pack expansion
@@ -35,12 +35,12 @@ func print_all(...values: any) {
 
 func prefix_and_forward(msg: string, ...args: any) {
     printf("{}: ", msg);
-    print_all(args...);
+    print_all(...args);
 }
 
 // Empty pack expansion
 func empty_forward(...args: any) {
-    print_count(args...);
+    print_count(...args);
 }
 
 // Pack expansion with different types
@@ -49,7 +49,7 @@ func mixed_types(...values: any) {
 }
 
 func test_mixed(...args: any) {
-    mixed_types(args...);
+    mixed_types(...args);
 }
 
 func main() {

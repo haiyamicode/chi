@@ -1754,15 +1754,16 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
         if (tok->type == TokenType::RPAREN) {
             break;
         } else {
-            auto arg = parse_child_expr_construct(lhs, parent);
-            // Check for pack expansion: expr...
+            // Check for pack expansion: ...expr
             if (next_is(TokenType::ELLIPSIS)) {
                 auto ellipsis = get();
                 consume();
+                auto arg = parse_child_expr_construct(lhs, parent);
                 auto expansion = create_node(NodeType::PackExpansion, ellipsis);
                 expansion->data.pack_expansion.expr = arg;
                 node->data.fn_call_expr.args.add(expansion);
             } else {
+                auto arg = parse_child_expr_construct(lhs, parent);
                 node->data.fn_call_expr.args.add(arg);
             }
         }
