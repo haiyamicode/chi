@@ -41,3 +41,24 @@ cat: cat
 ant: other
 Rect.delete(5x3)
 Circle.delete(r=8)
+=== default methods ===
+person greet: Hello, Alice!
+person shout: Hello, Alice!!!
+robot greet: Beep, I am R2D2
+robot shout: Beep, I am R2D2!!
+alien greet: Hello, Zorg!
+alien shout: Zorg says GREETINGS
+ref person greet: Hello, Alice!
+ref person shout: Hello, Alice!!!
+ref robot greet: Beep, I am R2D2
+ref robot shout: Beep, I am R2D2!!
+ref alien greet: Hello, Zorg!
+ref alien shout: Zorg says GREETINGS
+fn person: Hello, Alice!
+fn robot: Beep, I am R2D2
+fn alien shout: Zorg says GREETINGS
+=== default + multi-interface ===
+label: [sword]
+desc: Item(sword)
+ref label: [sword]
+ref desc: Item(sword)

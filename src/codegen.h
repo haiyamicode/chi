@@ -66,6 +66,7 @@ struct Function {
     label_t *cleanup_landing_label = nullptr;
     label_t *return_label = nullptr;
     ChiType *container_type = nullptr;
+    ChiType *default_method_struct = nullptr; // Non-null when compiling an inherited default method
     ChiTypeSubtype *container_subtype = nullptr;
     ChiType *fn_type = nullptr;
     ChiType *specialized_subtype = nullptr; // For specialized generic functions
@@ -352,6 +353,7 @@ class Compiler {
     llvm::Value *compile_c_string_literal(const string &str);
 
     Function *get_fn(ast::Node *node);
+    Function *get_fn(ast::Node *node, ChiType *struct_type);
 
     Function *add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn_type = nullptr);
 
@@ -463,7 +465,8 @@ class Compiler {
 
     llvm::Value *compile_reflection_vtable();
 
-    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "");
+    Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "",
+                              ChiType *fn_type_override = nullptr);
     Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 
     Function *get_system_fn(const string &name);

@@ -376,6 +376,35 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         }
     }
 
+    // Compile inherited default methods from interfaces
+    for (auto member : struct_type->data.struct_.members) {
+        if (!member->is_method() || !member->orig_parent || !member->node->data.fn_def.body)
+            continue;
+        // Skip if the struct already has its own implementation (override)
+        bool has_own_impl = false;
+        for (auto m : fn_members) {
+            if (m->name == member->node->name) {
+                has_own_impl = true;
+                break;
+            }
+        }
+        if (has_own_impl)
+            continue;
+
+        auto fn_node = member->node;
+        auto struct_name = get_resolver()->format_type_display(struct_type);
+        auto name = struct_name + "." + fn_node->name;
+        auto fn =
+            compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node, name, member->resolved_type);
+        fn->container_type = type;
+        fn->default_method_struct = struct_type;
+        // Register under struct-qualified key so multiple structs can inherit
+        // the same default method without colliding
+        auto key = fn_node->module->global_id() + "." + struct_name + "." + fn_node->name;
+        m_ctx->function_table[key] = fn;
+        m_ctx->pending_fns.add(fn);
+    }
+
     // Generate __delete and __copy before vtables (vtable needs these fn ptrs)
     if (get_resolver()->type_needs_destruction(type)) {
         generate_destructor(type, nullptr);
@@ -390,7 +419,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
 
     for (auto member : struct_type->data.struct_.members) {
         if (member->is_method() && !member->resolved_type->is_placeholder) {
-            auto method_fn = get_fn(member->node);
+            auto method_fn = get_fn(member->node, struct_type);
             member->vtable_index = m_ctx->reflection_vtable.size();
             m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);
         }
@@ -964,7 +993,7 @@ void Compiler::compile_struct_vtables(ChiType *type) {
 
         for (auto &method : impl->impl_members) {
             if (method->is_method()) {
-                auto method_fn = get_fn(method->node);
+                auto method_fn = get_fn(method->node, type);
                 methods.push_back(method_fn->llvm_fn);
                 count++;
             }
@@ -2807,9 +2836,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         // FixedArray .length -> compile-time constant
         if (get_chitype(dot_data.expr)->kind == TypeKind::FixedArray) {
-            return llvm::ConstantInt::get(
-                llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
-                dot_data.resolved_value);
+            return llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
+                                          dot_data.resolved_value);
         }
 
         if (dot_data.is_optional_chain) {
@@ -3841,7 +3869,14 @@ llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
         return compile_expr(fn, expr);
     }
     auto ref = compile_expr_ref(fn, expr);
-    return ref.address ? ref.address : ref.value;
+    if (ref.address)
+        return ref.address;
+
+    // Temporary value — create alloca so methods get a ptr
+    auto &builder = *m_ctx->llvm_builder;
+    auto tmp = fn->entry_alloca(ref.value->getType(), "dot_tmp");
+    builder.CreateStore(ref.value, tmp);
+    return tmp;
 }
 
 llvm::Value *Compiler::compile_optional_branch(
@@ -4102,15 +4137,15 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto arr_type_l = compile_type(type);
             auto fa_size = type->data.fixed_array.size;
             // Bounds check
-            auto size_val = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), fa_size);
+            auto size_val =
+                llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), fa_size);
             auto cond = builder.CreateICmpULT(subscript, size_val);
             auto assert_fn = get_system_fn("assert");
-            auto msg = compile_string_literal(
-                fmt::format("index out of bounds (size {})", fa_size));
-            auto opt_msg =
-                compile_conversion(fn, msg, get_system_types()->string,
-                                   get_resolver()->get_wrapped_type(
-                                       get_system_types()->string, TypeKind::Optional));
+            auto msg =
+                compile_string_literal(fmt::format("index out of bounds (size {})", fa_size));
+            auto opt_msg = compile_conversion(
+                fn, msg, get_system_types()->string,
+                get_resolver()->get_wrapped_type(get_system_types()->string, TypeKind::Optional));
             builder.CreateCall(assert_fn->llvm_fn, {cond, opt_msg});
             emit_dbg_location(expr);
             auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), 0);
@@ -4508,7 +4543,27 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto ctn_type_l = compile_type(ctn_type);
         auto ptr = compile_dot_ptr(fn, dot_expr.expr);
 
-        if (!fn_decl->data.fn_def.body) {
+        // Check if receiver is an interface reference (fat pointer dispatch)
+        bool receiver_is_interface = false;
+        if (ctn_type->is_pointer_like()) {
+            auto elem = ctn_type->get_elem();
+            receiver_is_interface = elem && ChiTypeStruct::is_interface(elem);
+        }
+
+        bool redirected = false;
+        if (fn->default_method_struct) {
+            // Inside a default method body: redirect interface method calls on
+            // 'this' to the concrete struct's implementation (direct call)
+            auto concrete_struct = get_resolver()->resolve_struct_type(fn->default_method_struct);
+            auto concrete_member = concrete_struct->find_member(dot_expr.field->get_name());
+            if (concrete_member) {
+                fn_decl = concrete_member->node;
+                fn_type = concrete_member->resolved_type;
+                ctn_ptr = ptr; // thin pointer to concrete struct
+                redirected = true;
+            }
+        }
+        if (!redirected && receiver_is_interface) {
             // handle interface — ctn_type is &Interface, fat pointer {data_ptr, vtable_ptr}
             auto data_gep = builder.CreateStructGEP(ctn_type_l, ptr, 0);
             auto vtable_gep = builder.CreateStructGEP(ctn_type_l, ptr, 1);
@@ -4550,7 +4605,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         if (data.generated_fn) {
             callee_fn = get_fn(data.generated_fn);
         } else {
-            callee_fn = get_fn(fn_decl);
+            callee_fn = get_fn(fn_decl, ctn_type);
         }
 
         callee = callee_fn->llvm_fn;
@@ -5222,10 +5277,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->pop_loop();
 
         } else if (data.expr && get_chitype(data.expr) && ({
-            auto t = get_chitype(data.expr);
-            (t->kind == TypeKind::FixedArray) ||
-            (t->is_reference() && t->get_elem()->kind == TypeKind::FixedArray);
-        })) {
+                       auto t = get_chitype(data.expr);
+                       (t->kind == TypeKind::FixedArray) ||
+                           (t->is_reference() && t->get_elem()->kind == TypeKind::FixedArray);
+                   })) {
             auto expr_type = get_chitype(data.expr);
             auto arr_type = expr_type->is_reference() ? expr_type->get_elem() : expr_type;
             auto elem_type = arr_type->data.fixed_array.elem;
@@ -5234,9 +5289,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             auto elem_type_l = compile_type(elem_type);
             auto arr_ref = compile_expr_ref(fn, data.expr);
             // If expr is a reference, load through it to get the array address
-            auto arr_addr = expr_type->is_reference()
-                ? builder.CreateLoad(compile_type(expr_type), arr_ref.address, "_fa_deref")
-                : arr_ref.address;
+            auto arr_addr =
+                expr_type->is_reference()
+                    ? builder.CreateLoad(compile_type(expr_type), arr_ref.address, "_fa_deref")
+                    : arr_ref.address;
             auto i32_ty = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
 
             // Allocate counter (entry block for domination in cleanup paths)
@@ -5245,8 +5301,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
             llvm::Value *item_var = nullptr;
             if (data.bind) {
-                item_var = fn->entry_alloca(compile_type(data.bind->resolved_type),
-                                            "_bind_item_var");
+                item_var =
+                    fn->entry_alloca(compile_type(data.bind->resolved_type), "_bind_item_var");
                 add_var(data.bind, item_var);
             }
             llvm::Value *index_var = nullptr;
@@ -7006,18 +7062,50 @@ Function *Compiler::get_fn(ast::Node *node) {
         entry = m_ctx->function_table.get(get_resolver()->resolve_global_id(variant));
     }
 
+    // Fallback for inherited default interface methods: try struct-qualified key
+    if (!entry && node->data.fn_def.body && node->resolved_type &&
+        node->resolved_type->kind == TypeKind::Fn) {
+        auto container_ref = node->resolved_type->data.fn.container_ref;
+        if (container_ref) {
+            auto container = container_ref->get_elem();
+            if (container && ChiTypeStruct::is_interface(container) && m_fn &&
+                m_fn->container_type) {
+                auto struct_type = m_fn->container_type;
+                if (struct_type->kind == TypeKind::Subtype)
+                    struct_type = struct_type->data.subtype.final_type;
+                auto key =
+                    fmt::format("{}.{}.{}", node->module->global_id(),
+                                get_resolver()->format_type_display(struct_type), node->name);
+                entry = m_ctx->function_table.get(key);
+            }
+        }
+    }
+
     if (!entry) {
         panic("Function not found: {}", id);
     }
     return *entry;
 }
 
-Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name) {
+Function *Compiler::get_fn(ast::Node *node, ChiType *struct_type) {
+    // Try struct-qualified key first (for both concrete methods and inherited defaults)
+    if (struct_type) {
+        auto key = fmt::format("{}.{}.{}", node->module->global_id(),
+                               get_resolver()->format_type_display(struct_type), node->name);
+        auto entry = m_ctx->function_table.get(key);
+        if (entry)
+            return *entry;
+    }
+    return get_fn(node);
+}
+
+Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name,
+                                     ChiType *fn_type_override) {
     auto declspec = fn->declspec_ref();
     auto subtype =
         fn->type == ast::NodeType::GeneratedFn ? fn->data.generated_fn.fn_subtype : nullptr;
     m_fn_eval_subtype = subtype;
-    auto ftype = get_chitype(fn);
+    auto ftype = fn_type_override ? fn_type_override : get_chitype(fn);
 
     // Determine bind parameter information
     bool has_bind = false;

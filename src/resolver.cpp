@@ -4311,8 +4311,16 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
 
             if (node->data.fn_def.body) {
                 if (!child_method) {
+                    // Create a new fn type with container_ref pointing to the
+                    // implementing struct so codegen compiles it with the correct
+                    // 'this' type (thin pointer to concrete struct, not fat
+                    // interface pointer).
+                    auto &base_fn = base_member->resolved_type->data.fn;
+                    auto concrete_fn_type =
+                        get_fn_type(base_fn.return_type, &base_fn.params, base_fn.is_variadic,
+                                    derived_type, base_fn.is_extern, nullptr);
                     child_method = derived.add_member(get_allocator(), node->name, node,
-                                                      base_member->resolved_type);
+                                                      concrete_fn_type);
                     child_method->orig_parent = base_type;
                 }
             } else if (!child_method) {

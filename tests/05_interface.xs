@@ -251,6 +251,148 @@ func test_type_switch() {
     printf("ant: {}\n", describe_animal(&ant));
 }
 
+// --- Default interface methods ---
+
+interface Greeter {
+    func name() string;
+
+    // Default method calling abstract method
+    func greet() string {
+        return "Hello, " + this.name() + "!";
+    }
+
+    // Default method calling another default method
+    func shout() string {
+        return this.greet() + "!!";
+    }
+}
+
+struct Person {
+    _name: string = "";
+
+    impl Greeter {
+        func name() string {
+            return this._name;
+        }
+    }
+}
+
+// inherits greet() and shout() defaults
+
+struct Robot {
+    _name: string = "";
+
+    impl Greeter {
+        func name() string {
+            return this._name;
+        }
+
+        // override greet() but inherit shout()
+        func greet() string {
+            return "Beep, I am " + this.name();
+        }
+    }
+}
+
+struct Alien {
+    _name: string = "";
+
+    impl Greeter {
+        func name() string {
+            return this._name;
+        }
+
+        // override shout() but inherit greet()
+        func shout() string {
+            return this.name() + " says GREETINGS";
+        }
+    }
+}
+
+func greet_via_ref(g: &Greeter) string {
+    return g.greet();
+}
+
+func shout_via_ref(g: &Greeter) string {
+    return g.shout();
+}
+
+func test_default_methods() {
+    println("=== default methods ===");
+
+    // Direct calls — Person uses both defaults
+    var p = Person{_name: "Alice"};
+    printf("person greet: {}\n", p.greet());
+    printf("person shout: {}\n", p.shout());
+
+    // Direct calls — Robot overrides greet, inherits shout (which calls greet)
+    var r = Robot{_name: "R2D2"};
+    printf("robot greet: {}\n", r.greet());
+    printf("robot shout: {}\n", r.shout());
+
+    // Direct calls — Alien inherits greet, overrides shout
+    var a = Alien{_name: "Zorg"};
+    printf("alien greet: {}\n", a.greet());
+    printf("alien shout: {}\n", a.shout());
+
+    // Vtable dispatch through &Greeter
+    var g: &Greeter = &p;
+    printf("ref person greet: {}\n", g.greet());
+    printf("ref person shout: {}\n", g.shout());
+
+    g = &r;
+    printf("ref robot greet: {}\n", g.greet());
+    printf("ref robot shout: {}\n", g.shout());
+
+    g = &a;
+    printf("ref alien greet: {}\n", g.greet());
+    printf("ref alien shout: {}\n", g.shout());
+
+    // Through function taking &Greeter
+    printf("fn person: {}\n", greet_via_ref(&p));
+    printf("fn robot: {}\n", greet_via_ref(&r));
+    printf("fn alien shout: {}\n", shout_via_ref(&a));
+}
+
+// Default method with multiple interfaces
+interface Named {
+    func label() string;
+
+    func full_label() string {
+        return "[" + this.label() + "]";
+    }
+}
+
+struct Item {
+    tag: string = "";
+
+    impl Named, Describable {
+        func label() string {
+            return this.tag;
+        }
+
+        func describe() string {
+            return stringf("Item({})", this.tag);
+        }
+    }
+}
+
+func test_default_multi_interface() {
+    println("=== default + multi-interface ===");
+    var item = Item{tag: "sword"};
+
+    // Direct: default from Named, concrete from Describable
+    printf("label: {}\n", item.full_label());
+    printf("desc: {}\n", item.describe());
+
+    // Dispatch through each interface
+    var n: &Named = &item;
+    printf("ref label: {}\n", n.full_label());
+
+    var d: &Describable = &item;
+    printf("ref desc: {}\n", d.describe());
+}
+
 func main() {
     test_basic();
     test_heap_and_delete();
@@ -259,5 +401,7 @@ func main() {
     test_box();
     test_multi_interface();
     test_type_switch();
+    test_default_methods();
+    test_default_multi_interface();
 }
 
