@@ -12,6 +12,7 @@
 #include <uv.h>
 
 #include "internals.h"
+#include "format.h"
 #include "sema.h"
 
 extern "C" {
@@ -214,7 +215,7 @@ static std::string encode_utf8(uint32_t codepoint) {
     return result;
 }
 
-static std::string get_value_display(const CxAny &v) {
+std::string get_value_display(const CxAny &v) {
     switch ((TypeKind)v.type->kind) {
     case TypeKind::String: {
         auto data_p = get_any_data(&v);
@@ -317,36 +318,45 @@ void cx_print_number(uint64_t value) { fmt::print("{}\n", value); }
 
 static string format_cstr(CxString &format, const CxSlice &values) {
     int val_i = 0;
-    int state = 0;
     std::stringstream ss;
-    for (int i = 0; i < format.size; i++) {
+    char spec_buf[64];
+
+    for (int i = 0; i < (int)format.size; i++) {
         auto c = format.data[i];
-        switch (c) {
-        case '{':
-            if (state == 1) {
+        if (c == '{') {
+            // Check for '{{' escape
+            if (i + 1 < (int)format.size && format.data[i + 1] == '{') {
                 ss.write("{", 1);
-                state = 0;
-            } else {
-                state = 1;
+                i++;
+                continue;
             }
-            break;
-        case '}':
-            if (state == 1) {
-                if (val_i < values.size) {
-                    ss << get_value_display(((CxAny *)values.data)[val_i++]);
+            // Collect everything until '}'
+            int spec_len = 0;
+            i++;
+            while (i < (int)format.size && format.data[i] != '}') {
+                if (spec_len < (int)sizeof(spec_buf) - 1) {
+                    spec_buf[spec_len++] = format.data[i];
                 }
-                state = 0;
-            } else if (state == 2) {
-                ss.write(&c, 1);
-                state = 0;
-            } else {
-                state = 2;
+                i++;
             }
-            break;
-        default:
-            state = 0;
+            // i now points at '}' (or past end)
+            if (val_i < values.size) {
+                auto &val = ((CxAny *)values.data)[val_i++];
+                if (spec_len > 0 && spec_buf[0] == ':') {
+                    auto fs = parse_format_spec(spec_buf + 1, spec_len - 1);
+                    ss << apply_format(val, fs);
+                } else {
+                    ss << get_value_display(val);
+                }
+            }
+        } else if (c == '}') {
+            // Check for '}}' escape
+            if (i + 1 < (int)format.size && format.data[i + 1] == '}') {
+                ss.write("}", 1);
+                i++;
+            }
+        } else {
             ss.write(&c, 1);
-            break;
         }
     }
     return ss.str();

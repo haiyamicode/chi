@@ -16,8 +16,8 @@ else()
     message(WARNING "libclang not found - C interop will be disabled")
 endif()
 
-set(RUNTIME_SOURCE_FILES runtime/internals.cpp runtime/trace.cpp)
-set(RUNTIME_HEADER_FILES runtime/internals.h runtime/trace.h)
+set(RUNTIME_SOURCE_FILES runtime/internals.cpp runtime/format.cpp runtime/trace.cpp)
+set(RUNTIME_HEADER_FILES runtime/internals.h runtime/format.h runtime/trace.h)
 
 set(HEADER_FILES builder.h codegen.h ${RUNTIME_HEADER_FILES} util.h sema.h resolver.h lexer.h parser.h include/enum.h ast.h errors.h ast_printer.h include/optional.h include/variant.h include/tgc/tgc.h include/hashdict/hashdict.h package_config.h c_importer.h)
 set(SOURCE_FILES analyzer.cpp builder.cpp ${RUNTIME_SOURCE_FILES} context.cpp codegen.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast.cpp ast_printer.cpp include/tgc/tgc.c include/hashdict/hashdict.c package_config.cpp c_importer.cpp)
