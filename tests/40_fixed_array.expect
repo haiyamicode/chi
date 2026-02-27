@@ -1,0 +1,90 @@
+=== basic ===
+10
+20
+30
+3
+=== mutation ===
+42
+=== literal syntax ===
+1
+2
+3
+=== for-in ===
+10
+20
+30
+=== for-in with index ===
+0: 1
+1: 2
+2: 3
+=== ref bind ===
+110
+120
+130
+=== strings ===
+hello
+world
+chi
+=== copy ===
+changed
+hello
+=== partial init ===
+1
+2
+0
+0
+0
+=== struct array ===
+a (1, 2)
+b (3, 4)
+=== struct copy ===
+a
+modified
+=== lifecycle: construct + destroy ===
+Traced(1) created
+Traced(2) created
+Traced(3) created
+before scope exit
+Traced(3) destroyed
+Traced(2) destroyed
+Traced(1) destroyed
+=== lifecycle: partial init ===
+Traced(10) created
+before scope exit
+Traced(10) destroyed
+=== lifecycle: copy ===
+Traced(1) created
+Traced(2) created
+Traced(3) created
+copying...
+Traced(1) copied
+Traced(2) copied
+Traced(3) copied
+original[0] = 1
+copy[0] = 99
+before scope exit
+Traced(3) destroyed
+Traced(2) destroyed
+Traced(99) destroyed
+Traced(3) destroyed
+Traced(2) destroyed
+Traced(1) destroyed
+=== lifecycle: for-in value copy ===
+Traced(1) created
+Traced(2) created
+iterating...
+Traced(1) copied
+item: 1
+Traced(2) copied
+item: 2
+before scope exit
+Traced(2) destroyed
+Traced(2) destroyed
+Traced(1) destroyed
+=== ref iteration ===
+10
+20
+30
+20
+40
+60

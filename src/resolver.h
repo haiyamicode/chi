@@ -101,6 +101,7 @@ struct ResolveContext {
     SystemTypes system_types = {};
     array<ast::Node *> internal_methods = {};
     map<ChiType *, ChiType *> array_of = {};
+    map<string, ChiType *> fixed_array_of = {};
     map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
     optional<ErrorHandler> error_handler = {};
     uint32_t lang_flags = 0;
@@ -328,6 +329,7 @@ class Resolver {
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
 
     ChiType *get_array_type(ChiType *elem);
+    ChiType *get_fixed_array_type(ChiType *elem, uint32_t size);
 
     ChiType *get_promise_type(ChiType *value);
 

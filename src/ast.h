@@ -399,7 +399,7 @@ struct FieldInitExpr {
     void *compiled_field_address = nullptr;
 };
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move, FixedArray)
 
 struct DestructureField {
     Token *field_name = nullptr;   // struct field to extract
@@ -528,7 +528,8 @@ struct TypeSigil {
     Node *type = nullptr;
     SigilKind sigil = SigilKind::None;
     Node *etype = nullptr;
-    string lifetime; // e.g. "this" from &'this int
+    string lifetime;            // e.g. "this" from &'this int
+    uint32_t fixed_size = 0;    // for SigilKind::FixedArray
 };
 
 struct EnumVariant {

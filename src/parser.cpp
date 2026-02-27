@@ -519,6 +519,19 @@ Node *Parser::parse_type_expr(bool type_only) {
     array<Node *> sigil_nodes;
     for (;;) {
         auto token = get();
+        // [N]T fixed-size array type
+        if (token->type == TokenType::LBRACK && lookahead(1)->type == TokenType::INT) {
+            consume(); // [
+            auto size_token = get();
+            uint32_t size = (uint32_t)size_token->val.i;
+            consume(); // INT
+            expect(TokenType::RBRACK);
+            auto node = create_node(NodeType::TypeSigil, token);
+            node->data.sigil_type.sigil = SigilKind::FixedArray;
+            node->data.sigil_type.fixed_size = size;
+            sigil_nodes.add(node);
+            continue;
+        }
         if (auto sigil_kind = get_sigil_kind(token->type)) {
             consume();
 
@@ -1675,6 +1688,30 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
         return parse_construct_expr();
     }
     case TokenType::LBRACK: {
+        // [N]Type{...} fixed-size array construct
+        if (lookahead(1)->type == TokenType::INT && lookahead(2)->type == TokenType::RBRACK) {
+            auto type_node = parse_type_expr(true);
+            auto node = create_node(NodeType::ConstructExpr, token);
+            node->data.construct_expr.type = type_node;
+            expect(TokenType::LBRACE);
+            for (;;) {
+                auto tok = get();
+                if (tok->type == TokenType::END) {
+                    error(tok, errors::UNEXPECTED_EOF);
+                    return node;
+                }
+                if (tok->type == TokenType::RBRACE) {
+                    break;
+                }
+                node->data.construct_expr.items.add(
+                    parse_child_expr_construct(false, node));
+                if (!at_comma(TokenType::RBRACE))
+                    break;
+                consume();
+            }
+            expect(TokenType::RBRACE);
+            return node;
+        }
         // Array literal: [expr, expr, ...]
         consume();
         auto node = create_node(NodeType::ConstructExpr, token);
@@ -1943,6 +1980,18 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
     auto token = lookahead(pos);
     if (token->type == TokenType::END) {
         return false;
+    }
+
+    // Handle [N]T fixed-size array type
+    if (token->type == TokenType::LBRACK) {
+        pos++;
+        if (lookahead(pos)->type != TokenType::INT)
+            return false;
+        pos++;
+        if (lookahead(pos)->type != TokenType::RBRACK)
+            return false;
+        pos++;
+        return try_parse_type_expr_lookahead(pos, struct_only);
     }
 
     // Handle pointer sigil
@@ -2600,11 +2649,11 @@ Node *Parser::parse_construct_expr() {
                 break; // Stop processing this construct expression
             }
 
-            auto expr = parse_expr();
+            auto expr = parse_child_expr_construct(false, node);
             if (expr && expr->type != NodeType::Error) {
                 node->data.construct_expr.items.add(expr);
             } else {
-                // If parse_expr failed, consume token and continue
+                // If parse failed, consume token and continue
                 if (get()->type != TokenType::RBRACE && get()->type != TokenType::END) {
                     consume();
                 }

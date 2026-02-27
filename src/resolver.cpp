@@ -1159,6 +1159,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         auto type = resolve_value(data.type, scope);
+        if (data.sigil == ast::SigilKind::FixedArray) {
+            return get_fixed_array_type(type, data.fixed_size);
+        }
         auto kind = get_sigil_type_kind(data.sigil);
         ChiType *final_type;
         if (!data.lifetime.empty()) {
@@ -2056,6 +2059,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        // FixedArray: only .length is supported
+        if (expr_type->kind == TypeKind::FixedArray) {
+            if (field_name == "length") {
+                data.resolved_value = (int64_t)expr_type->data.fixed_array.size;
+                return get_system_types()->uint32;
+            }
+            error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(expr_type));
+            return nullptr;
+        }
+
         auto stype = eval_struct_type(expr_type);
         if (!stype) {
             error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(expr_type));
@@ -2204,9 +2217,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             result_type =
                 data.is_new ? get_pointer_type(value_type, TypeKind::MoveRef) : value_type;
         } else {
-            if (!scope.value_type) {
+            if (!scope.value_type ||
+                (scope.value_type->kind == TypeKind::FixedArray && data.is_array_literal)) {
                 // Array literals: infer Array<T> from first element type
-                if (data.is_array_literal && data.items.len > 0) {
+                if (data.is_array_literal && scope.value_type &&
+                    scope.value_type->kind == TypeKind::FixedArray) {
+                    // [1, 2, 3] assigned to [N]T — treat as fixed array init
+                    result_type = scope.value_type;
+                    value_type = result_type;
+                } else if (data.is_array_literal && data.items.len > 0) {
                     auto elem_type = resolve(data.items[0], scope);
                     if (!elem_type)
                         return nullptr;
@@ -2256,6 +2275,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 value_type = data.is_new ? result_type->get_elem() : result_type;
             }
         }
+        // FixedArray construct: [N]T{items...} or array literal assigned to [N]T
+        if (value_type->kind == TypeKind::FixedArray) {
+            auto elem_type = value_type->data.fixed_array.elem;
+            auto fa_size = value_type->data.fixed_array.size;
+            if ((uint32_t)data.items.len > fa_size) {
+                error(node, "too many items for [{}]{}: got {}, max {}",
+                      fa_size, format_type_display(elem_type), data.items.len, fa_size);
+            }
+            auto item_scope = scope.set_value_type(elem_type);
+            item_scope.move_outlet = nullptr; // Items need separate temporaries
+            for (auto item : data.items) {
+                auto item_type = resolve(item, item_scope);
+                if (item_type) {
+                    check_assignment(item, item_type, elem_type);
+                }
+            }
+            return result_type;
+        }
+
         auto struct_type = resolve_struct_type(value_type);
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
         if (constructor) {
@@ -3017,6 +3055,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *expected_index_type = nullptr;
         switch (expr_type->kind) {
         case TypeKind::Pointer:
+        case TypeKind::FixedArray:
             expected_index_type = get_system_types()->uint32;
             break;
         case TypeKind::Struct:
@@ -3048,7 +3087,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         check_assignment(data.subscript, subscript_type, expected_index_type);
 
-        if (expr_type->kind == TypeKind::Pointer) {
+        if (expr_type->kind == TypeKind::Pointer || expr_type->kind == TypeKind::FixedArray) {
             return expr_type->get_elem();
         } else {
             return data.resolved_method->resolved_type->data.fn.return_type->get_elem();
@@ -3227,6 +3266,37 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
 
                 auto expr_type = resolve(data.expr, scope);
+
+                // FixedArray iteration (also handles &[N]T and &mut [N]T)
+                auto fa_type = expr_type;
+                if (fa_type && fa_type->is_reference()) {
+                    fa_type = fa_type->get_elem();
+                }
+                if (fa_type && fa_type->kind == TypeKind::FixedArray) {
+                    if (data.bind) {
+                        auto elem_type = fa_type->data.fixed_array.elem;
+                        ChiType *value_type = elem_type;
+                        switch (data.bind_sigil) {
+                        case ast::SigilKind::Reference:
+                            value_type = get_pointer_type(value_type, TypeKind::Reference);
+                            break;
+                        case ast::SigilKind::MutRef:
+                            value_type = get_pointer_type(value_type, TypeKind::MutRef);
+                            break;
+                        default:
+                            break;
+                        }
+                        auto bind_scope = scope.set_value_type(value_type);
+                        resolve(data.bind, bind_scope);
+                    }
+                    if (data.index_bind) {
+                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        resolve(data.index_bind, idx_scope);
+                    }
+                    resolve(data.body, scope);
+                    return nullptr;
+                }
+
                 auto sty = resolve_struct_type(expr_type);
                 if (!sty) {
                     error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
@@ -3953,6 +4023,9 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "?" + format_type(type->get_elem(), for_display);
     case TypeKind::Array:
         return fmt::format("Array<{}>", format_type(type->get_elem(), for_display));
+    case TypeKind::FixedArray:
+        return fmt::format("[{}]{}", type->data.fixed_array.size,
+                           format_type(type->data.fixed_array.elem, for_display));
     case TypeKind::Result:
         return fmt::format("Result<{},{}>", format_type(type->get_elem(), for_display),
                            format_type(type->data.result.error, for_display));
@@ -4460,6 +4533,11 @@ bool Resolver::type_needs_destruction(ChiType *type) {
     if (type->kind == TypeKind::Optional) {
         auto elem_type = type->get_elem();
         return elem_type && type_needs_destruction(elem_type);
+    }
+
+    // FixedArray needs destruction if its element type needs destruction
+    if (type->kind == TypeKind::FixedArray) {
+        return type_needs_destruction(type->data.fixed_array.elem);
     }
 
     // Result always needs destruction — it owns the error object's heap allocation
@@ -5545,6 +5623,21 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     return type;
 }
 
+ChiType *Resolver::get_fixed_array_type(ChiType *elem, uint32_t size) {
+    auto elem_str = elem->global_id.empty() ? format_type_id(elem) : elem->global_id;
+    auto key = fmt::format("[{}]{}", size, elem_str);
+    if (auto cached = m_ctx->fixed_array_of.get(key)) {
+        return *cached;
+    }
+    auto type = create_type(TypeKind::FixedArray);
+    type->data.fixed_array.elem = elem;
+    type->data.fixed_array.size = size;
+    type->global_id = key;
+    type->is_placeholder = elem->is_placeholder;
+    m_ctx->fixed_array_of[key] = type;
+    return type;
+}
+
 ChiType *Resolver::get_promise_type(ChiType *value) {
     if (auto cached = m_ctx->promise_of.get(value)) {
         return *cached;
@@ -6274,6 +6367,11 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
             a->kind == TypeKind::MutRef || a->kind == TypeKind::MoveRef ||
             a->kind == TypeKind::Optional) {
             return is_same_type(a->get_elem(), b->get_elem());
+        }
+        // Structural comparison for fixed arrays
+        if (a->kind == TypeKind::FixedArray) {
+            return a->data.fixed_array.size == b->data.fixed_array.size &&
+                   is_same_type(a->data.fixed_array.elem, b->data.fixed_array.elem);
         }
     }
 

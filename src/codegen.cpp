@@ -2802,6 +2802,13 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::DotExpr: {
         auto &dot_data = expr->data.dot_expr;
 
+        // FixedArray .length -> compile-time constant
+        if (get_chitype(dot_data.expr)->kind == TypeKind::FixedArray) {
+            return llvm::ConstantInt::get(
+                llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
+                dot_data.resolved_value);
+        }
+
         if (dot_data.is_optional_chain) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto opt_type = get_chitype(dot_data.expr);
@@ -3427,6 +3434,23 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         }
         break;
     }
+    case TypeKind::FixedArray: {
+        auto copier = generate_copier_fixed_array(type);
+        if (copier) {
+            if (destruct_old) {
+                compile_destruction_for_type(fn, dest, type);
+            }
+            auto from_address = src.address;
+            if (!from_address) {
+                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_fa_copy_src");
+                builder.CreateStore(ensure_value(), from_address);
+            }
+            builder.CreateCall(copier->llvm_fn, {dest, from_address});
+            return;
+        }
+        // Trivially-copyable elements: fall through to default store
+        break;
+    }
     case TypeKind::Any: {
         if (destruct_old) {
             compile_destruction_for_type(fn, dest, type);
@@ -3570,6 +3594,20 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
     case TypeKind::Array: {
         auto array_struct_type = get_resolver()->eval_struct_type(type);
         return compile_construction(fn, dest, array_struct_type, expr);
+    }
+    case TypeKind::FixedArray: {
+        auto &items = expr->data.construct_expr.items;
+        auto elem_type = type->data.fixed_array.elem;
+        auto arr_type_l = compile_type(type);
+        auto i32_ty = llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx);
+        auto zero = llvm::ConstantInt::get(i32_ty, 0);
+        for (uint32_t i = 0; i < items.len; i++) {
+            auto idx = llvm::ConstantInt::get(i32_ty, i);
+            auto elem_ptr = builder.CreateGEP(arr_type_l, dest, {zero, idx});
+            auto value = compile_assignment_to_type(fn, items[i], elem_type);
+            builder.CreateStore(value, elem_ptr);
+        }
+        break;
     }
     case TypeKind::Subtype: {
         // Resolve generic struct instantiation to its concrete struct type
@@ -4055,6 +4093,26 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), 0);
             return RefValue::from_address(
                 builder.CreateGEP(compile_type(type->get_elem()), ptr, {subscript}));
+        }
+        case TypeKind::FixedArray: {
+            auto ref = compile_expr_ref(fn, data.expr);
+            auto arr_type_l = compile_type(type);
+            auto fa_size = type->data.fixed_array.size;
+            // Bounds check
+            auto size_val = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), fa_size);
+            auto cond = builder.CreateICmpULT(subscript, size_val);
+            auto assert_fn = get_system_fn("assert");
+            auto msg = compile_string_literal(
+                fmt::format("index out of bounds (size {})", fa_size));
+            auto opt_msg =
+                compile_conversion(fn, msg, get_system_types()->string,
+                                   get_resolver()->get_wrapped_type(
+                                       get_system_types()->string, TypeKind::Optional));
+            builder.CreateCall(assert_fn->llvm_fn, {cond, opt_msg});
+            emit_dbg_location(expr);
+            auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), 0);
+            return RefValue::from_address(
+                builder.CreateGEP(arr_type_l, ref.address, {zero, subscript}));
         }
         case TypeKind::Struct: {
             auto ref = compile_expr_ref(fn, data.expr);
@@ -5160,6 +5218,83 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop->end);
             fn->pop_loop();
 
+        } else if (data.expr && get_chitype(data.expr) && ({
+            auto t = get_chitype(data.expr);
+            (t->kind == TypeKind::FixedArray) ||
+            (t->is_reference() && t->get_elem()->kind == TypeKind::FixedArray);
+        })) {
+            auto expr_type = get_chitype(data.expr);
+            auto arr_type = expr_type->is_reference() ? expr_type->get_elem() : expr_type;
+            auto elem_type = arr_type->data.fixed_array.elem;
+            auto fa_size = arr_type->data.fixed_array.size;
+            auto arr_type_l = compile_type(arr_type);
+            auto elem_type_l = compile_type(elem_type);
+            auto arr_ref = compile_expr_ref(fn, data.expr);
+            // If expr is a reference, load through it to get the array address
+            auto arr_addr = expr_type->is_reference()
+                ? builder.CreateLoad(compile_type(expr_type), arr_ref.address, "_fa_deref")
+                : arr_ref.address;
+            auto i32_ty = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
+
+            // Allocate counter (entry block for domination in cleanup paths)
+            auto it = fn->entry_alloca(i32_ty, "_fa_iter");
+            builder.CreateStore(llvm::ConstantInt::get(i32_ty, 0), it);
+
+            llvm::Value *item_var = nullptr;
+            if (data.bind) {
+                item_var = fn->entry_alloca(compile_type(data.bind->resolved_type),
+                                            "_bind_item_var");
+                add_var(data.bind, item_var);
+            }
+            llvm::Value *index_var = nullptr;
+            if (data.index_bind) {
+                index_var = fn->entry_alloca(i32_ty, "_bind_index_var");
+                add_var(data.index_bind, index_var);
+            }
+
+            auto loop = fn->push_loop();
+            loop->start = fn->new_label("_for_start");
+            loop->end = fn->new_label("_for_end");
+            auto loop_main = fn->new_label("_for_main");
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->start);
+            auto size_val = llvm::ConstantInt::get(i32_ty, fa_size);
+            auto cur_idx = builder.CreateLoad(i32_ty, it);
+            auto cond = builder.CreateICmpULT(cur_idx, size_val);
+            builder.CreateCondBr(cond, loop_main, loop->end);
+
+            fn->use_label(loop_main);
+            auto loop_post = fn->new_label("_for_post");
+            loop->continue_target = loop_post;
+
+            if (index_var) {
+                builder.CreateStore(builder.CreateLoad(i32_ty, it), index_var);
+            }
+            if (item_var) {
+                auto zero = llvm::ConstantInt::get(i32_ty, 0);
+                auto idx = builder.CreateLoad(i32_ty, it);
+                auto elem_ptr = builder.CreateGEP(arr_type_l, arr_addr, {zero, idx});
+                if (data.bind_sigil != ast::SigilKind::None) {
+                    // Reference bind: store pointer to element
+                    builder.CreateStore(elem_ptr, item_var);
+                } else {
+                    // Value bind: copy element
+                    auto value = builder.CreateLoad(elem_type_l, elem_ptr, "_item_value");
+                    compile_copy_with_ref(fn, RefValue{elem_ptr, value}, item_var,
+                                          get_chitype(data.bind));
+                }
+            }
+            compile_block(fn, stmt, data.body, loop_post);
+
+            fn->use_label(loop_post);
+            auto cur = builder.CreateLoad(i32_ty, it);
+            builder.CreateStore(builder.CreateAdd(cur, llvm::ConstantInt::get(i32_ty, 1)), it);
+            builder.CreateBr(loop->start);
+
+            fn->use_label(loop->end);
+            fn->pop_loop();
+
         } else if (data.kind == ast::ForLoopKind::Range) {
             auto ptr = compile_dot_ptr(fn, data.expr);
             assert(ptr);
@@ -5567,6 +5702,15 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
+    // Handle FixedArray via generated destructor
+    if (type->kind == TypeKind::FixedArray) {
+        auto dtor = generate_destructor(type, nullptr);
+        if (dtor) {
+            builder.CreateCall(dtor->llvm_fn, {address});
+        }
+        return;
+    }
+
     // Handle optionals, structs, results, and enum values via generated __delete
     if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct &&
         type->kind != TypeKind::Result && type->kind != TypeKind::EnumValue) {
@@ -5810,6 +5954,64 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     // Handle EnumValue types — switch on discriminator to destroy variant fields
     if (resolved_type->kind == TypeKind::EnumValue) {
         return generate_destructor_enum(type, resolved_type);
+    }
+
+    // Handle FixedArray types — reverse loop destroying each element
+    if (resolved_type->kind == TypeKind::FixedArray) {
+        auto elem = resolved_type->data.fixed_array.elem;
+        if (!get_resolver()->type_needs_destruction(elem)) {
+            return nullptr;
+        }
+        auto ptr_type = get_llvm_ptr_type();
+        auto fn_type_l =
+            llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+        auto type_name = get_resolver()->format_type_display(type);
+        auto fn_name = fmt::format("{}.__delete", type_name);
+        auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                              m_ctx->llvm_module.get());
+        auto fn = new Function(m_ctx, llvm_fn, nullptr);
+        fn->qualified_name = fn_name;
+        m_ctx->functions.emplace(fn);
+        m_ctx->destructor_table[type] = fn;
+
+        auto saved_block = builder.GetInsertBlock();
+        auto saved_point = builder.GetInsertPoint();
+
+        auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
+        auto fa_size = resolved_type->data.fixed_array.size;
+        auto arr_type_l = compile_type(resolved_type);
+
+        auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+        auto loop_bb = llvm::BasicBlock::Create(llvm_ctx, "loop", llvm_fn);
+        auto body_bb = llvm::BasicBlock::Create(llvm_ctx, "body", llvm_fn);
+        auto end_bb = llvm::BasicBlock::Create(llvm_ctx, "end", llvm_fn);
+
+        builder.SetInsertPoint(entry_bb);
+        auto this_ptr = llvm_fn->getArg(0);
+        auto counter = builder.CreateAlloca(i32_ty, nullptr, "i");
+        builder.CreateStore(llvm::ConstantInt::get(i32_ty, fa_size), counter);
+        builder.CreateBr(loop_bb);
+
+        builder.SetInsertPoint(loop_bb);
+        auto cur = builder.CreateLoad(i32_ty, counter);
+        auto cond = builder.CreateICmpUGT(cur, llvm::ConstantInt::get(i32_ty, 0));
+        builder.CreateCondBr(cond, body_bb, end_bb);
+
+        builder.SetInsertPoint(body_bb);
+        auto idx = builder.CreateSub(cur, llvm::ConstantInt::get(i32_ty, 1));
+        builder.CreateStore(idx, counter);
+        auto zero = llvm::ConstantInt::get(i32_ty, 0);
+        auto elem_ptr = builder.CreateGEP(arr_type_l, this_ptr, {zero, idx});
+        compile_destruction_for_type(fn, elem_ptr, elem);
+        builder.CreateBr(loop_bb);
+
+        builder.SetInsertPoint(end_bb);
+        builder.CreateRetVoid();
+
+        if (saved_block) {
+            builder.SetInsertPoint(saved_block, saved_point);
+        }
+        return fn;
     }
 
     if (resolved_type->kind != TypeKind::Struct) {
@@ -6473,6 +6675,75 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
     return fn;
 }
 
+Function *Compiler::generate_copier_fixed_array(ChiType *type) {
+    auto existing = m_ctx->copier_table.get(type);
+    if (existing)
+        return *existing;
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    auto elem = type->data.fixed_array.elem;
+    if (!get_resolver()->type_needs_destruction(elem)) {
+        return nullptr;
+    }
+
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__copy_from", type_name);
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->copier_table[type] = fn;
+
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
+    auto fa_size = type->data.fixed_array.size;
+    auto arr_type_l = compile_type(type);
+    auto elem_type_l = compile_type(elem);
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    auto loop_bb = llvm::BasicBlock::Create(llvm_ctx, "loop", llvm_fn);
+    auto body_bb = llvm::BasicBlock::Create(llvm_ctx, "body", llvm_fn);
+    auto end_bb = llvm::BasicBlock::Create(llvm_ctx, "end", llvm_fn);
+
+    builder.SetInsertPoint(entry_bb);
+    auto dest_ptr = llvm_fn->getArg(0);
+    auto src_ptr = llvm_fn->getArg(1);
+    auto counter = builder.CreateAlloca(i32_ty, nullptr, "i");
+    builder.CreateStore(llvm::ConstantInt::get(i32_ty, 0), counter);
+    builder.CreateBr(loop_bb);
+
+    builder.SetInsertPoint(loop_bb);
+    auto cur = builder.CreateLoad(i32_ty, counter);
+    auto cond = builder.CreateICmpULT(cur, llvm::ConstantInt::get(i32_ty, fa_size));
+    builder.CreateCondBr(cond, body_bb, end_bb);
+
+    builder.SetInsertPoint(body_bb);
+    auto zero = llvm::ConstantInt::get(i32_ty, 0);
+    auto src_elem = builder.CreateGEP(arr_type_l, src_ptr, {zero, cur});
+    auto dst_elem = builder.CreateGEP(arr_type_l, dest_ptr, {zero, cur});
+    auto val = builder.CreateLoad(elem_type_l, src_elem);
+    compile_copy(fn, val, dst_elem, elem, nullptr);
+    auto next = builder.CreateAdd(cur, llvm::ConstantInt::get(i32_ty, 1));
+    builder.CreateStore(next, counter);
+    builder.CreateBr(loop_bb);
+
+    builder.SetInsertPoint(end_bb);
+    builder.CreateRetVoid();
+
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    return fn;
+}
+
 Function *
 Compiler::generate_destructor_continuation(llvm::StructType *capture_struct_type,
                                            ChiType *promise_type,
@@ -7014,6 +7285,10 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     }
     case TypeKind::Array: {
         return compile_type(type->data.array.internal);
+    }
+    case TypeKind::FixedArray: {
+        auto elem_type_l = compile_type(type->data.fixed_array.elem);
+        return llvm::ArrayType::get(elem_type_l, type->data.fixed_array.size);
     }
     case TypeKind::Any: {
         std::vector<llvm::Type *> members;

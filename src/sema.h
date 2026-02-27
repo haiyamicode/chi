@@ -23,7 +23,7 @@ struct ChiTypeEnum;
 struct ChiLifetime;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Char, Rune, String, Struct, Pointer,
-          Reference, MutRef, MoveRef, Array, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
+          Reference, MutRef, MoveRef, Array, FixedArray, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
           Undefined, Never)
 
@@ -184,6 +184,11 @@ struct ChiTypeArray {
     ChiType *internal = nullptr;
 };
 
+struct ChiTypeFixedArray {
+    ChiType *elem = nullptr;
+    uint32_t size = 0;
+};
+
 struct ChiTypeResult {
     ChiType *value = nullptr;
     ChiType *error = nullptr;
@@ -295,6 +300,7 @@ struct ChiType {
         ChiTypeStruct struct_;
         ChiTypePointer pointer;
         ChiTypeArray array;
+        ChiTypeFixedArray fixed_array;
         ChiTypeInt int_;
         ChiTypeFloat float_;
         ChiTypeSubtype subtype;
@@ -328,6 +334,7 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(struct_, Struct, ChiTypeStruct)
             CHITYPE_CASE_INIT_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_INIT_FIELD(array, Array, ChiTypeArray)
+            CHITYPE_CASE_INIT_FIELD(fixed_array, FixedArray, ChiTypeFixedArray)
             CHITYPE_CASE_INIT_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
         case TypeKind::Reference:
@@ -362,6 +369,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(struct_, Struct, ChiTypeStruct)
             CHITYPE_CASE_DESTROY_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_DESTROY_FIELD(array, Array, ChiTypeArray)
+            CHITYPE_CASE_DESTROY_FIELD(fixed_array, FixedArray, ChiTypeFixedArray)
             CHITYPE_CASE_DESTROY_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
         case TypeKind::Reference:
@@ -402,6 +410,7 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(struct_, Struct, ChiTypeStruct)
             CHITYPE_CASE_CLONE_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_CLONE_FIELD(array, Array, ChiTypeArray)
+            CHITYPE_CASE_CLONE_FIELD(fixed_array, FixedArray, ChiTypeFixedArray)
             CHITYPE_CASE_CLONE_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
         case TypeKind::Reference:

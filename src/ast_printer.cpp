@@ -22,6 +22,8 @@ string get_sigil_symbol(SigilKind sigil) {
         return "&mut";
     case SigilKind::Move:
         return "&move";
+    case SigilKind::FixedArray:
+        return ""; // handled specially in TypeSigil printer
     default:
         panic("unknown sigil {}", PRINT_ENUM(sigil));
         return "";
@@ -769,6 +771,11 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
+        if (data.sigil == SigilKind::FixedArray) {
+            emit("[{}]", data.fixed_size);
+            print_node(data.type);
+            break;
+        }
         bool has_lifetime = !data.lifetime.empty();
         bool is_mut = data.sigil == SigilKind::MutRef;
         bool is_move = data.sigil == SigilKind::Move;
@@ -789,7 +796,8 @@ void AstPrinter::print_node(Node *node) {
         bool needs_parens =
             inner_sigil != SigilKind::None && inner_sigil != data.sigil &&
             !(data.sigil == SigilKind::Optional &&
-              (inner_sigil == SigilKind::Reference || inner_sigil == SigilKind::Pointer));
+              (inner_sigil == SigilKind::Reference || inner_sigil == SigilKind::Pointer)) &&
+            inner_sigil != SigilKind::FixedArray;
         if (needs_parens)
             emit("(");
         print_node(data.type);
@@ -1456,6 +1464,12 @@ bool AstPrinter::types_match(Node *a, Node *b) {
         return true;
     }
     case NodeType::TypeSigil:
+        if (a->data.sigil_type.sigil == SigilKind::FixedArray ||
+            b->data.sigil_type.sigil == SigilKind::FixedArray) {
+            return a->data.sigil_type.sigil == b->data.sigil_type.sigil &&
+                   a->data.sigil_type.fixed_size == b->data.sigil_type.fixed_size &&
+                   types_match(a->data.sigil_type.type, b->data.sigil_type.type);
+        }
         return a->data.sigil_type.sigil == b->data.sigil_type.sigil &&
                types_match(a->data.sigil_type.type, b->data.sigil_type.type);
     case NodeType::DotExpr:
