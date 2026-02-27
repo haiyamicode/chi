@@ -178,6 +178,17 @@ func test_ref_iteration() {
     print_arr(&a);
 }
 
+func test_zeroinit() {
+    println("=== zeroinit ===");
+    var a: [5]int = zeroinit;
+    for item in a {
+        println(item);
+    }
+    // struct zeroinit skips constructor (default x=0, y=0, not field defaults)
+    var p: Point = zeroinit;
+    printf("{} {} {}\n", p.x, p.y, p.name);
+}
+
 func main() {
     test_basic();
     test_mutation();
@@ -195,5 +206,6 @@ func main() {
     test_lifecycle_copy();
     test_lifecycle_for_in_value();
     test_ref_iteration();
+    test_zeroinit();
 }
 

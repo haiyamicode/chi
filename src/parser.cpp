@@ -1658,6 +1658,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
     case TokenType::BOOL:
     case TokenType::NULLP:
     case TokenType::KW_UNDEFINED:
+    case TokenType::KW_ZEROINIT:
     case TokenType::FLOAT:
     case TokenType::CHAR:
     case TokenType::STRING:

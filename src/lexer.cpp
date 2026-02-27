@@ -74,6 +74,7 @@ void Lexer::setup_keywords() {
     s_keywords["move"] = TokenType::KW_MOVE;
     s_keywords["in"] = TokenType::KW_IN;
     s_keywords["undefined"] = TokenType::KW_UNDEFINED;
+    s_keywords["zeroinit"] = TokenType::KW_ZEROINIT;
     s_keywords["async"] = TokenType::KW_ASYNC;
     s_keywords["await"] = TokenType::KW_AWAIT;
     s_keywords["throw"] = TokenType::KW_THROW;
@@ -1121,6 +1122,8 @@ string Token::to_string() const {
         return "null";
     case TokenType::KW_UNDEFINED:
         return "undefined";
+    case TokenType::KW_ZEROINIT:
+        return "zeroinit";
     default:
         if (type >= TokenType::KW_BREAK && type < TokenType::BOOL) {
             return str;

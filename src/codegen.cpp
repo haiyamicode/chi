@@ -895,6 +895,9 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
     if (src_type->kind == TypeKind::Undefined) {
         return nullptr;
     }
+    if (src_type->kind == TypeKind::ZeroInit) {
+        return llvm::Constant::getNullValue(compile_type(dest_type));
+    }
     if (expr->type == ast::NodeType::ConstructExpr && src_type == dest_type) {
         return src_value;
     }
@@ -7372,7 +7375,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
                                                std::max(enum_->compiled_data_size, 1)));
         return llvm::StructType::create(members, get_resolver()->format_type_display(type));
     }
-    case TypeKind::Undefined: {
+    case TypeKind::Undefined:
+    case TypeKind::ZeroInit: {
         return get_llvm_ptr_type();
     }
     default:

@@ -103,6 +103,7 @@ void Resolver::context_init_primitives() {
     // Promise is now defined as a Chi-native struct in runtime.xc
     // system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
+    system_types.zeroinit = create_type(TypeKind::ZeroInit);
     system_types.never_ = create_type(TypeKind::Never);
 
     // Create a system lambda type for LLVM compatibility
@@ -1277,7 +1278,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             track_move_sink(scope.parent_fn_node, data.expr, expr_type, node,
                             var_type ? var_type : expr_type);
             if (var_type) {
-                if (expr_type->kind == TypeKind::Undefined) {
+                if (expr_type->kind == TypeKind::Undefined || expr_type->kind == TypeKind::ZeroInit) {
                     return var_type;
                 }
                 if (data.expr->type != NodeType::ConstructExpr ||
@@ -1780,6 +1781,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_system_types()->float_;
         case TokenType::KW_UNDEFINED:
             return get_system_types()->undefined;
+        case TokenType::KW_ZEROINIT:
+            return get_system_types()->zeroinit;
         case TokenType::CHAR: {
             auto codepoint = token->val.i;
             if (codepoint > 127) {
@@ -4033,6 +4036,8 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "unknown";
     case TypeKind::Undefined:
         return "undefined";
+    case TypeKind::ZeroInit:
+        return "zeroinit";
     case TypeKind::Never:
         return "never";
     default:
@@ -6217,6 +6222,7 @@ optional<ConstantValue> Resolver::resolve_constant_value(ast::Node *node) {
             return {(int64_t)0};
         }
         case TokenType::KW_UNDEFINED:
+        case TokenType::KW_ZEROINIT:
             return {(int64_t)0};
         default:
             break;

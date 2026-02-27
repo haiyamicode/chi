@@ -64,6 +64,7 @@ struct SystemTypes {
     ChiType *result = nullptr;
     ChiType *promise = nullptr;
     ChiType *undefined = nullptr;
+    ChiType *zeroinit = nullptr;
     ChiType *never_ = nullptr;
     ChiType *lambda = nullptr;
 };
