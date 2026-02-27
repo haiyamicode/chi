@@ -118,7 +118,7 @@ func sequential_guards(a: ?int, b: ?int) int {
 
 func and_else_branch(a: ?int, b: ?int) string {
     if a && b {
-        return string.format("sum={}", a + b);
+        return stringf("sum={}", a + b);
     } else {
         return "missing";
     }

@@ -183,7 +183,7 @@ struct Widget {
 
     impl Describable, Measurable {
         func describe() string {
-            return string.format("Widget({})", this.label);
+            return stringf("Widget({})", this.label);
         }
 
         func measure() int {

@@ -148,12 +148,12 @@ func test_escapes() {
     printf("{{}} {}\n", "b");
 }
 
-func test_string_format() {
-    println("=== string.format ===");
-    var s1 = string.format("{:x}", 255);
-    var s2 = string.format("{:#010x}", 4095);
-    var s3 = string.format("{:.2}", 3.14159);
-    var s4 = string.format("[{:>10}]", "hello");
+func test_stringf() {
+    println("=== stringf ===");
+    var s1 = stringf("{:x}", 255);
+    var s2 = stringf("{:#010x}", 4095);
+    var s3 = stringf("{:.2}", 3.14159);
+    var s4 = stringf("[{:>10}]", "hello");
     println(s1);
     println(s2);
     println(s3);
@@ -172,5 +172,5 @@ func main() {
     test_combinations();
     test_different_int_types();
     test_escapes();
-    test_string_format();
+    test_stringf();
 }

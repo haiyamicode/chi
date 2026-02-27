@@ -15,7 +15,7 @@ struct OtherError {
 
     impl Error {
         func message() string {
-            return string.format("error code {}", this.code);
+            return stringf("error code {}", this.code);
         }
     }
 }

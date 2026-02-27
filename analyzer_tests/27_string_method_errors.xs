@@ -1,7 +1,7 @@
 // Test malformed string operations and method calls
 func main() {
-    // Incomplete string.format call
-    var s1 = string.format(
+    // Incomplete stringf call
+    var s1 = stringf(
 
     // String method on invalid receiver
     var s2 = 123.is_empty();
@@ -13,7 +13,7 @@ func main() {
     var s4 = "test".add(.is_empty();
 
     // format with malformed arguments
-    var s5 = string.format("test", ,, );
+    var s5 = stringf("test", ,, );
 
     // Invalid escape sequence leading to incomplete string
     var s6 = "test\

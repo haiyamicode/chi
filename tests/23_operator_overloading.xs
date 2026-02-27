@@ -21,7 +21,7 @@ struct Point {
 
     impl ops.Display {
         func display() string {
-            return string.format("({}, {})", this.x, this.y);
+            return stringf("({}, {})", this.x, this.y);
         }
     }
 

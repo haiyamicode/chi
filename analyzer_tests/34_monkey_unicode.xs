@@ -20,7 +20,7 @@ struct ∆∆∆Point {
     y: int≈≈≈;
 
     func ƒƒƒdisplay() string {
-        return string.format("({}, {})"«»«», this.x, this.y);
+        return stringf("({}, {})"«»«», this.x, this.y);
     }
 }
 

@@ -10,7 +10,7 @@ struct Point {
 
     impl Show {
         func show() string {
-            return string.format("({}, {})", this.x, this.y);
+            return stringf("({}, {})", this.x, this.y);
         }
     }
 }
@@ -20,7 +20,7 @@ struct Number {
 
     impl Show {
         func show() string {
-            return string.format("Number({})", this.value);
+            return stringf("Number({})", this.value);
         }
     }
 }
@@ -38,7 +38,7 @@ struct Container<T: Show + ops.Construct> {
     name: string = "";
 
     func show_container() string {
-        return string.format("Container[{}]: {}", this.name, this.item.show());
+        return stringf("Container[{}]: {}", this.name, this.item.show());
     }
 
     func get_item() T {
@@ -51,7 +51,7 @@ struct Pair<T: Show + ops.Construct, U: Show + ops.Construct> {
     second: U = {};
 
     func show_both() string {
-        return string.format("Pair({}, {})", this.first.show(), this.second.show());
+        return stringf("Pair({}, {})", this.first.show(), this.second.show());
     }
 }
 
@@ -75,7 +75,7 @@ struct WherePair<T: ops.Construct, U: ops.Construct> {
 
     impl where T: Show, U: Show {
         func show_both() string {
-            return string.format("({}, {})", this.first.show(), this.second.show());
+            return stringf("({}, {})", this.first.show(), this.second.show());
         }
     }
 
@@ -93,7 +93,7 @@ struct ImplWhereBox<T: ops.Construct> {
         }
 
         static func describe(val: T) string {
-            return string.format("ImplWhereBox[{}]", val.show());
+            return stringf("ImplWhereBox[{}]", val.show());
         }
     }
 

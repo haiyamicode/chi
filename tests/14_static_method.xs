@@ -52,7 +52,7 @@ struct Color {
 
     impl ops.Display {
         func display() string {
-            return string.format("rgb({},{},{})", this.r, this.g, this.b);
+            return stringf("rgb({},{},{})", this.r, this.g, this.b);
         }
     }
 

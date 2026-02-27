@@ -3,7 +3,7 @@ func test_string_pass(str: string) {
 }
 
 func test_string() {
-    var s = string.format("hello {}", "world");
+    var s = stringf("hello {}", "world");
     var t = s;
     println(t);
     test_string_pass(s);

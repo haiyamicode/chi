@@ -15,7 +15,7 @@ struct Showable {
 
     impl Show {
         func show() string {
-            return string.format("{}", this.x);
+            return stringf("{}", this.x);
         }
     }
 }

@@ -11,7 +11,7 @@ enum Node (type: uint64) {
         name: string = "";
 
         func greeting() string {
-            return string.format("hello, {}", this.name);
+            return stringf("hello, {}", this.name);
         }
 
         func is_callable() bool {
@@ -148,11 +148,11 @@ func test_generic_enum() {
 
 func test_enum_string_copy() {
     println("=== Test: Enum string copy ===");
-    var s = TaggedValue.Named{id: 1, label: string.format("name_{}", 42)};
+    var s = TaggedValue.Named{id: 1, label: stringf("name_{}", 42)};
     printf("s.label={}\n", s.label);
     var t = s;
     printf("t.label={}\n", t.label);
-    s = {id: 2, label: string.format("name_{}", 99)};
+    s = {id: 2, label: stringf("name_{}", 99)};
     printf("s.label={}, t.label={}\n", s.label, t.label);
     println("--- scope exit ---");
 }
@@ -184,9 +184,9 @@ func test_enum_trivial_copy() {
 
 func test_enum_string_reassign() {
     println("=== Test: Enum string reassign ===");
-    var a = TaggedValue.Named{id: 1, label: string.format("name_{}", 55)};
+    var a = TaggedValue.Named{id: 1, label: stringf("name_{}", 55)};
     printf("a.label={}\n", a.label);
-    a = {id: 2, label: string.format("name_{}", 77)};
+    a = {id: 2, label: stringf("name_{}", 77)};
     printf("a.label={}\n", a.label);
     println("--- scope exit ---");
 }

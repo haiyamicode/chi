@@ -3,7 +3,7 @@
 
 func main((((( {
     ////****\\\\****////
-    var s = string.format("""""""
+    var s = stringf("""""""
     var x = {{{{{}}}}};
 
     while while while {

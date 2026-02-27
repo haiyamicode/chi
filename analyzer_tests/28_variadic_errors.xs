@@ -18,11 +18,11 @@ func main() {
     // printf with malformed format string and args
     printf("test %d %s",
 
-    // string.format incomplete
-    var s = string.format("{}",
+    // stringf incomplete
+    var s = stringf("{}",
 
     // Nested incomplete variadic
-    printf(string.format("{}",
+    printf(stringf("{}",
 
     // Empty variadic call with trailing comma
     test_variadic(1, 2, 3,,,);

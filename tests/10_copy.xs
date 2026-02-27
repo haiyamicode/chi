@@ -23,7 +23,7 @@ struct Foo {
 
     impl ops.CopyFrom<Foo> {
         mut func copy_from(b: &Foo) {
-            this.new(string.format("{}_copy", b.id));
+            this.new(stringf("{}_copy", b.id));
             unsafe {
                 *this.p = *b.p;
                 printf("copied {}, p = {}\n", this.id, *b.p);
@@ -118,7 +118,7 @@ func test_any_move() {
 
 func test_any_string() {
     println("=== Test 11: Any with string ===");
-    var s = string.format("hello {}", "world");
+    var s = stringf("hello {}", "world");
     var a: any = s;
     var b: any = a;
     printf("s={}\n", s);

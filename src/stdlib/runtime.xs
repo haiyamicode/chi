@@ -26,7 +26,12 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    private unsafe func cx_throw(
+        type_info: *void,
+        data_ptr: *void,
+        vtable_ptr: *void,
+        type_id: uint32
+    );
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -70,7 +75,7 @@ struct __CxEnumBase<T> {
         func display() string {
             unsafe {
                 var s = *this.__display_name;
-                return string.format("{}", s);
+                return stringf("{}", s);
             }
         }
     }
@@ -150,7 +155,7 @@ struct Shared<T> {
 
     impl ops.Display {
         func display() string {
-            return string.display(this.as_ref());
+            return stringf("{}", this.as_ref());
         }
     }
 }
@@ -216,7 +221,7 @@ struct Box<T: ops.AllowUnsized> {
     impl ops.Display {
         func display() string {
             unsafe {
-                return string.display(*this._ptr);
+                return stringf("{}", *this._ptr);
             }
         }
     }
@@ -308,7 +313,13 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(string.format("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
+            panic(
+                stringf(
+                    "expected {}, got {}",
+                    json_kind_display(kind),
+                    json_kind_display(this.kind)
+                )
+            );
         }
     }
 
@@ -394,12 +405,6 @@ func gc_alloc(size: uint32) *void {
     }
 }
 
-func print_int(value: uint64) {
-    unsafe {
-        cx_print_number(value);
-    }
-}
-
 func printf(format: string, ...values: any) {
     unsafe {
         cx_printf(&format, &values);
@@ -428,7 +433,7 @@ func stringf(format: string, ...values: any) string {
 
 func assert(cond: bool, message: ?string) {
     if !cond => if message {
-        panic(string.format("assertion failed: {}", message));
+        panic(stringf("assertion failed: {}", message));
     } else {
         panic("assertion failed");
     }
@@ -548,7 +553,7 @@ struct Array<T> {
                 if i > 0 {
                     buf.write(", ");
                 }
-                buf.write(string.format("{}", item));
+                buf.write(stringf("{}", item));
             }
             buf.write("]");
             return buf.to_string();
@@ -611,18 +616,6 @@ struct __CxString {
     private data: *char = null;
     protected length: uint32 = 0;
     private is_static: uint32 = 0;
-
-    static func format(fmt: string, ...values: any) string {
-        var result: string = "";
-        unsafe {
-            cx_string_format(&fmt, &values, &result);
-        }
-        return result;
-    }
-
-    static func display(value: any) string {
-        return string.format("{}", value);
-    }
 
     static unsafe func from_char_ptr(data: *char, size: uint32) string {
         var result: string = "";
@@ -814,10 +807,12 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
+    return Promise<Unit>.make(
+        func (resolve) {
+            timeout(ms, func [resolve] () {
+                resolve({});
+            });
+        }
+    );
 }
 
