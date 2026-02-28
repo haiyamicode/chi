@@ -750,7 +750,7 @@ Node *Parser::parse_fn_lambda() {
             }
 
             // Parse expression and wrap in return statement
-            auto expr = parse_expr();
+            auto expr = parse_child_expr_construct(false, fn);
             auto ret = create_node(NodeType::ReturnStmt, arrow);
             ret->data.return_stmt.expr = expr;
 
@@ -1208,7 +1208,7 @@ Node *Parser::parse_fn_param() {
     // Check for default value
     if (next_is(TokenType::ASS)) {
         consume(); // consume '='
-        param->data.param_decl.default_value = parse_expr();
+        param->data.param_decl.default_value = parse_child_expr_construct(false, param);
     }
 
     return param;
@@ -1726,7 +1726,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
             if (tok->type == TokenType::RBRACK) {
                 break;
             }
-            node->data.construct_expr.items.add(parse_expr());
+            node->data.construct_expr.items.add(parse_child_expr_construct(false, node));
             if (!at_comma(TokenType::RBRACK))
                 break;
             consume();
@@ -2691,7 +2691,7 @@ Node *Parser::parse_prefix_expr() {
             node->data.prefix_expr.expr = parse_type_expr(true);
         }
     } else {
-        node->data.prefix_expr.expr = parse_expr();
+        node->data.prefix_expr.expr = parse_child_expr_construct(false, node);
     }
     return node;
 }
@@ -2723,13 +2723,13 @@ Node *Parser::parse_index_expr(Node *expr) {
         auto node = create_node(NodeType::SliceExpr, lb);
         node->data.slice_expr.expr = expr;
         if (!next_is(TokenType::RBRACK)) {
-            node->data.slice_expr.end = parse_expr();
+            node->data.slice_expr.end = parse_child_expr_construct(false, node);
         }
         expect(TokenType::RBRACK);
         return node;
     }
 
-    auto first = parse_expr();
+    auto first = parse_child_expr_construct(false, nullptr);
 
     // Check for slice syntax: a[start..end] or a[start..]
     if (next_is(TokenType::DOT_DOT)) {
@@ -2738,7 +2738,7 @@ Node *Parser::parse_index_expr(Node *expr) {
         node->data.slice_expr.expr = expr;
         node->data.slice_expr.start = first;
         if (!next_is(TokenType::RBRACK)) {
-            node->data.slice_expr.end = parse_expr();
+            node->data.slice_expr.end = parse_child_expr_construct(false, node);
         }
         expect(TokenType::RBRACK);
         return node;
