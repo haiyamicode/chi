@@ -1242,7 +1242,8 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
 
     if (!has_braces) {
         auto start_token = token;
-        auto expr = parse_expr();
+        // Use parse_child_expr_construct so T{} is valid in arrow positions (=> T{})
+        auto expr = parse_child_expr_construct(false, node);
         node->data.block.return_expr = expr;
         expr->start_token = start_token;
         expr->end_token = lookahead(-1);
@@ -1758,12 +1759,14 @@ Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
             if (next_is(TokenType::ELLIPSIS)) {
                 auto ellipsis = get();
                 consume();
-                auto arg = parse_child_expr_construct(lhs, parent);
+                // Inside parens, '{' is unambiguous — always allow construct exprs
+                auto arg = parse_child_expr_construct(false, parent);
                 auto expansion = create_node(NodeType::PackExpansion, ellipsis);
                 expansion->data.pack_expansion.expr = arg;
                 node->data.fn_call_expr.args.add(expansion);
             } else {
-                auto arg = parse_child_expr_construct(lhs, parent);
+                // Inside parens, '{' is unambiguous — always allow construct exprs
+                auto arg = parse_child_expr_construct(false, parent);
                 node->data.fn_call_expr.args.add(arg);
             }
         }
