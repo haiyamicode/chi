@@ -5537,66 +5537,46 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             }
         }
 
-        // Create or get the specialized function type
+        // Create or get the specialized function, then delegate to the normal path.
+        // This ensures outlets, check_assignment, and track_move_sink are handled uniformly.
         auto &fn_call_data = node->data.fn_call_expr;
-        ChiType *specialized_return_type = nullptr;
 
-        // Check if this is a static method call on a bare generic struct
-        // (struct type params were promoted to function type params by DotExpr)
+        // Path A: static method call on a bare generic struct
         if (fn_call_data.fn_ref_expr->type == NodeType::DotExpr) {
             auto &dot = fn_call_data.fn_ref_expr->data.dot_expr;
             auto dot_lhs_type = node_get_type(dot.expr);
             if (dot_lhs_type && dot_lhs_type->kind == TypeKind::TypeSymbol) {
                 auto underlying = dot_lhs_type->data.type_symbol.underlying_type;
                 if (underlying->kind == TypeKind::Struct && underlying->data.struct_.is_generic()) {
-                    // Specialize the struct with inferred type args
                     auto subtype = get_subtype(underlying, &type_args);
                     auto resolved = resolve_subtype(subtype);
                     auto member_name = dot.field->get_name();
                     auto member = resolved->data.struct_.find_static_member(member_name);
                     if (member) {
-                        // Update DotExpr to point to the specialized method
                         dot.resolved_decl = member->node;
                         dot.field->node = member->node;
-                        specialized_return_type = member->resolved_type->data.fn.return_type;
+                        auto &spec_fn = member->resolved_type->data.fn;
+                        return resolve_fn_call(node, scope, &spec_fn, args, member->node);
                     }
                 }
             }
         }
 
-        if (!specialized_return_type) {
-            // Normal path: function-level generics
-            auto fn_decl_node = fn_call_data.fn_ref_expr->get_decl();
-            assert(fn_decl_node && fn_decl_node->type == ast::NodeType::FnDef);
-            auto original_fn_type = node_get_type(fn_decl_node);
-            assert(original_fn_type && original_fn_type->kind == TypeKind::Fn);
+        // Path B: function-level generics — get specialized variant, delegate to normal path
+        auto fn_decl_node = fn_call_data.fn_ref_expr->get_decl();
+        assert(fn_decl_node && fn_decl_node->type == ast::NodeType::FnDef);
+        auto original_fn_type = node_get_type(fn_decl_node);
+        assert(original_fn_type && original_fn_type->kind == TypeKind::Fn);
 
-            auto fn_variant = get_fn_variant(original_fn_type, &type_args, fn_decl_node);
+        auto fn_variant = get_fn_variant(original_fn_type, &type_args, fn_decl_node);
+        node->data.fn_call_expr.generated_fn = fn_variant;
 
-            // Store the specialized function for codegen to use
-            node->data.fn_call_expr.generated_fn = fn_variant;
-            specialized_return_type = fn_variant->resolved_type->data.fn.return_type;
-        }
+        auto &spec_fn = fn_variant->resolved_type->data.fn;
+        return resolve_fn_call(node, scope, &spec_fn, args, fn_variant);
+    }
 
-        // Check argument types against substituted parameter types
-        // Also update argument resolved_type to substitute any Infer types
-        for (size_t i = 0; i < n_args; i++) {
-            auto param_type = fn->get_param_at(i);
-            auto arg_type = arg_types[i];
-            auto concrete_param_type = type_placeholders_sub_map(param_type, &type_substitutions);
-            check_assignment(args->at(i), arg_type, concrete_param_type);
-
-            // Substitute Infer types in the argument's resolved_type so codegen sees concrete types
-            // Check for FnLambda since it may contain Infer types even when is_placeholder is false
-            if (arg_type->is_placeholder || arg_type->kind == TypeKind::FnLambda) {
-                args->at(i)->resolved_type =
-                    type_placeholders_sub_map(arg_type, &type_substitutions);
-            }
-        }
-
-        return specialized_return_type;
-    } else {
-        // Regular function call - check types normally
+    // Normal path — shared by regular calls and delegated-from-generic calls
+    {
         for (size_t i = 0; i < n_args; i++) {
             auto param_type = fn->get_param_at(i);
             auto arg = args->at(i);
