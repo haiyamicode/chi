@@ -532,6 +532,38 @@ ChiType *Resolver::to_value_type(ChiType *type) {
 
 static string build_narrowing_path(ast::Node *expr);
 
+// Helpers for expression-statement outlet tracking.
+// Returns {supported, current_outlet}: supported=false for node types that don't carry the field
+// (e.g. VarDecl, ReturnStmt), so callers can distinguish "unsupported" from "supported but null".
+static std::pair<bool, ast::Node *> get_resolved_outlet(ast::Node *node) {
+    switch (node->type) {
+    case ast::NodeType::FnCallExpr:    return {true, node->data.fn_call_expr.resolved_outlet};
+    case ast::NodeType::ConstructExpr: return {true, node->data.construct_expr.resolved_outlet};
+    case ast::NodeType::IfExpr:        return {true, node->data.if_expr.resolved_outlet};
+    case ast::NodeType::SwitchExpr:    return {true, node->data.switch_expr.resolved_outlet};
+    case ast::NodeType::TryExpr:       return {true, node->data.try_expr.resolved_outlet};
+    case ast::NodeType::AwaitExpr:     return {true, node->data.await_expr.resolved_outlet};
+    case ast::NodeType::BinOpExpr:     return {true, node->data.bin_op_expr.resolved_outlet};
+    case ast::NodeType::UnaryOpExpr:   return {true, node->data.unary_op_expr.resolved_outlet};
+    default:                           return {false, nullptr};
+    }
+}
+
+// Sets the resolved_outlet on a node that supports the field. No-op otherwise.
+static void set_resolved_outlet(ast::Node *node, ast::Node *outlet) {
+    switch (node->type) {
+    case ast::NodeType::FnCallExpr:    node->data.fn_call_expr.resolved_outlet = outlet;    break;
+    case ast::NodeType::ConstructExpr: node->data.construct_expr.resolved_outlet = outlet;  break;
+    case ast::NodeType::IfExpr:        node->data.if_expr.resolved_outlet = outlet;         break;
+    case ast::NodeType::SwitchExpr:    node->data.switch_expr.resolved_outlet = outlet;     break;
+    case ast::NodeType::TryExpr:       node->data.try_expr.resolved_outlet = outlet;        break;
+    case ast::NodeType::AwaitExpr:     node->data.await_expr.resolved_outlet = outlet;      break;
+    case ast::NodeType::BinOpExpr:     node->data.bin_op_expr.resolved_outlet = outlet;     break;
+    case ast::NodeType::UnaryOpExpr:   node->data.unary_op_expr.resolved_outlet = outlet;   break;
+    default: break;
+    }
+}
+
 // Does lifetime 'a outlive 'b? True if a == b or 'a: 'b was declared (transitively).
 static bool lifetime_outlives(ChiLifetime *a, ChiLifetime *b) {
     if (a == b)
@@ -1508,6 +1540,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                                                data.op2, node, scope);
                 if (method_call.has_value()) {
                     data.resolved_call = method_call->call_node;
+                    if (scope.move_outlet) {
+                        data.resolved_outlet = scope.move_outlet;
+                    }
                     return method_call->return_type;
                 }
             }
@@ -1587,6 +1622,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                     if (method_call) {
                         data.resolved_call = method_call->call_node;
+                        if (scope.move_outlet) {
+                            data.resolved_outlet = scope.move_outlet;
+                        }
                         auto ret = method_call->return_type;
                         if (ret && ret->is_reference())
                             return ret->get_elem();
@@ -1673,7 +1711,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::TryExpr: {
         auto &data = node->data.try_expr;
-        auto expr_type = resolve(data.expr, scope);
+        if (scope.move_outlet) {
+            data.resolved_outlet = scope.move_outlet;
+        }
+        // TryExpr intercepts the result — clear move_outlet so the inner FnCallExpr
+        // doesn't claim the outer outlet directly (TryExpr owns the outlet itself)
+        auto inner_scope = scope.set_move_outlet(nullptr);
+        auto expr_type = resolve(data.expr, inner_scope);
         if (data.expr->type != NodeType::FnCallExpr) {
             error(data.expr, errors::TRY_NOT_CALL);
         }
@@ -1735,7 +1779,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::AwaitExpr: {
         auto &data = node->data.await_expr;
-        auto expr_type = resolve(data.expr, scope);
+        if (scope.move_outlet) {
+            data.resolved_outlet = scope.move_outlet;
+        }
+        // AwaitExpr unwraps the promise — clear move_outlet so the inner expression
+        // doesn't claim the outer outlet directly (AwaitExpr owns the outlet itself)
+        auto await_inner_scope = scope.set_move_outlet(nullptr);
+        auto expr_type = resolve(data.expr, await_inner_scope);
         // Check that we're inside an async function
         auto parent_fn = scope.parent_fn_def();
         if (!parent_fn->is_async()) {
@@ -2481,6 +2531,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(node, errors::UNSAFE_CALL_IN_SAFE_MODE, fn_decl->name);
         }
 
+        if (scope.move_outlet) {
+            data.resolved_outlet = scope.move_outlet;
+        }
+
         auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
 
         // Annotation-driven edge creation: for method calls where a param has
@@ -2593,7 +2647,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             child_scope = child_scope.set_is_unsafe_block(true);
         }
         for (auto stmt : data.statements) {
-            resolve(stmt, child_scope);
+            auto stmt_type = resolve(stmt, child_scope);
+            // Orphaned expression statement: produces a destructible struct with no outlet.
+            // Unwrap all ParenExpr layers so ((f())); etc. are also covered.
+            auto expr_stmt = stmt;
+            while (expr_stmt->type == ast::NodeType::ParenExpr)
+                expr_stmt = expr_stmt->data.child_expr;
+            auto [outlet_supported, existing_outlet] = get_resolved_outlet(expr_stmt);
+            if (stmt_type && outlet_supported && !existing_outlet &&
+                child_scope.parent_fn_node && child_scope.block &&
+                should_destroy(stmt, stmt_type)) {
+                auto temp = get_dummy_var("__stmt_tmp", stmt);
+                temp->module = stmt->module;
+                temp->parent_fn = child_scope.parent_fn_node;
+                temp->data.var_decl.kind = ast::VarKind::Immutable;
+                temp->data.var_decl.initialized_at = stmt;
+                temp->resolved_type = stmt_type;
+                temp->decl_order = child_scope.parent_fn_def()->next_decl_order++;
+                set_resolved_outlet(expr_stmt, temp);
+                data.cleanup_vars.add(temp);
+                child_scope.parent_fn_def()->has_cleanup = true;
+            }
         }
         if (data.return_expr) {
             return resolve(data.return_expr, child_scope);
@@ -5580,9 +5654,18 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         for (size_t i = 0; i < n_args; i++) {
             auto param_type = fn->get_param_at(i);
             auto arg = args->at(i);
-            // Clear move_outlet for function args - they're passed by value,
-            // not written directly to any outer destination
-            auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
+            // Use the callee's param node as move_outlet so that temporaries
+            // produced by arg expressions are owned by the param, not the caller.
+            ast::Node *param_node = nullptr;
+            if (fn_decl && fn_decl->type == ast::NodeType::FnDef) {
+                auto &fn_proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
+                if (i < fn_proto.params.len) {
+                    auto *p = fn_proto.params[i];
+                    if (p->resolved_type && !p->resolved_type->is_placeholder)
+                        param_node = p;
+                }
+            }
+            auto arg_scope = scope.set_value_type(param_type).set_move_outlet(param_node);
             auto arg_type = resolve(arg, arg_scope);
 
             // For C variadic functions, param_type is nullptr for variadic args (any type allowed)

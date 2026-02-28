@@ -328,6 +328,7 @@ struct BinOpExpr {
     Node *op1 = nullptr;
     Node *op2 = nullptr;
     Node *resolved_call = nullptr;
+    Node *resolved_outlet = nullptr;
     bool is_initializing = false; // true when this assignment is the first write to the target
 };
 
@@ -336,6 +337,7 @@ struct UnaryOpExpr {
     Node *op1 = nullptr;
     bool is_suffix = false;
     Node *resolved_call = nullptr; // for Unwrap/UnwrapMut operator methods
+    Node *resolved_outlet = nullptr;
 };
 
 struct TryExpr {
@@ -343,10 +345,12 @@ struct TryExpr {
     Node *catch_expr = nullptr;    // catch type (FileError) — null for catch-all
     Node *catch_block = nullptr;   // the { ... } block — null means no catch (Result mode)
     Node *catch_err_var = nullptr; // implicit VarDecl for err binding
+    Node *resolved_outlet = nullptr;
 };
 
 struct AwaitExpr {
     Node *expr = nullptr;
+    Node *resolved_outlet = nullptr;
 };
 
 struct FnCallExpr {
@@ -356,6 +360,7 @@ struct FnCallExpr {
     bool is_builtin = false;
     Node *generated_fn = nullptr;
     array<Node *> post_narrow_vars = {}; // narrowed vars emitted after call
+    Node *resolved_outlet = nullptr;
 };
 
 struct IfExpr {
