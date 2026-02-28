@@ -422,6 +422,13 @@ void cx_array_write_str(CxArray *dest, CxString *str) {
     dest->size = (uint32_t)new_size;
 }
 
+void cx_array_append(CxArray *dest, CxArray *src, uint32_t elem_size) {
+    auto new_size = dest->size + src->size;
+    cx_array_reserve(dest, elem_size, new_size);
+    memcpy(((char *)dest->data) + dest->size * elem_size, src->data, src->size * elem_size);
+    dest->size = (uint32_t)new_size;
+}
+
 void cx_string_from_chars(const char *data, uint32_t size, CxString *str) {
     auto &s = *str;
     s.size = size;

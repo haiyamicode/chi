@@ -3,9 +3,6 @@ creating local
 creating local_copy
 copied local_copy, p = 42
 return_local() done
-creating local_b_copy
-copied local_b_copy, p = 42
-deleting local_b
 deleting local
 result: 42
 === Test 2: RVO - return ConstructExpr ===
@@ -63,4 +60,4 @@ s=hello world
 === Test 12: Any with int (trivial) ===
 --- scope exit ---
 deleting direct
-deleting local_b_copy
+deleting local_b

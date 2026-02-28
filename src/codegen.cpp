@@ -946,6 +946,17 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
         compile_construction(fn, dest, dest_type, expr);
         return;
     }
+    // RVO: forward dest as sret for function calls (non-lambda, non-optional-chain)
+    if (expr->type == ast::NodeType::FnCallExpr && src_type == dest_type) {
+        auto &fn_call_data = expr->data.fn_call_expr;
+        bool is_lambda = fn_call_data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda;
+        bool is_optional_chain = fn_call_data.fn_ref_expr->type == ast::NodeType::DotExpr &&
+                                 fn_call_data.fn_ref_expr->data.dot_expr.is_optional_chain;
+        if (!is_lambda && !is_optional_chain) {
+            compile_fn_call(fn, expr, nullptr, dest);
+            return;
+        }
+    }
     auto value = compile_assignment_to_type(fn, expr, dest_type);
     if (value) {
         compile_store_or_copy(fn, value, dest, dest_type, expr);
@@ -5183,9 +5194,15 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
             }
         }
+        // If return expression was a moved local, skip its destruction
+        ast::Node *move_returned_var = nullptr;
+        if (data.expr && data.expr->escape.moved &&
+            data.expr->type == ast::NodeType::Identifier) {
+            move_returned_var = data.expr->data.identifier.decl;
+        }
         // Destroy all active block-local vars (inner to outer) before returning
         for (int i = fn->active_blocks.size() - 1; i >= 0; i--) {
-            compile_block_cleanup(fn, fn->active_blocks[i]);
+            compile_block_cleanup(fn, fn->active_blocks[i], move_returned_var);
         }
         llvm_builder.CreateBr(fn->return_label);
         scope->branched = true;
@@ -5608,10 +5625,12 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
 }
 
-void Compiler::compile_block_cleanup(Function *fn, ast::Block *block) {
+void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node *skip_var) {
     auto *fn_def = fn->get_def();
     for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
         auto var = block->cleanup_vars[i];
+        if (var == skip_var)
+            continue; // Move-returned: skip destruction
         if (fn_def->is_sunk(var))
             continue;
         // Skip variables not yet compiled (e.g. early return before var decl)

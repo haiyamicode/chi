@@ -14,6 +14,7 @@ extern "C" {
     private unsafe func cx_array_add(dest: *void, size: uint32) *void;
     private unsafe func cx_array_write_str(dest: *void, str: *string);
     private unsafe func cx_array_reserve(dest: *void, elem_size: uint32, new_cap: uint32);
+    private unsafe func cx_array_append(dest: *void, src: *void, elem_size: uint32);
     private unsafe func cx_print_any(value: *void);
     private unsafe func cx_print_number(value: uint64);
     private unsafe func cx_print_string(str: *string);
@@ -26,7 +27,12 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    private unsafe func cx_throw(
+        type_info: *void,
+        data_ptr: *void,
+        vtable_ptr: *void,
+        type_id: uint32
+    );
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -308,7 +314,13 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(stringf("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
+            panic(
+                stringf(
+                    "expected {}, got {}",
+                    json_kind_display(kind),
+                    json_kind_display(this.kind)
+                )
+            );
         }
     }
 
@@ -476,6 +488,12 @@ struct Array<T> {
         }
     }
 
+    func reserve(n: uint32) {
+        unsafe {
+            cx_array_reserve(&this, sizeof T, this.length + n);
+        }
+    }
+
     func clear() {
         unsafe {
             if this.data {
@@ -537,14 +555,14 @@ struct Array<T> {
     impl ops.Display {
         func display() string {
             var buf = Buffer{};
-            buf.write("[");
+            buf.write_string("[");
             for item, i in this {
                 if i > 0 {
-                    buf.write(", ");
+                    buf.write_string(", ");
                 }
-                buf.write(stringf("{}", item));
+                buf.write_string(stringf("{}", item));
             }
-            buf.write("]");
+            buf.write_string("]");
             return buf.to_string();
         }
     }
@@ -705,7 +723,25 @@ struct Buffer {
         this.bytes = {};
     }
 
-    func write(str: string) {
+    static func from_chars(data: Array<char>) Buffer {
+        var buf = Buffer{};
+        buf.write(data);
+        return buf;
+    }
+
+    static func from_string(str: string) Buffer {
+        var buf = Buffer{};
+        buf.write_string(str);
+        return buf;
+    }
+
+    func write(data: Array<char>) {
+        unsafe {
+            cx_array_append(&this.bytes, &data, sizeof char);
+        }
+    }
+
+    func write_string(str: string) {
         unsafe {
             cx_array_write_str(&this.bytes, &str);
         }
@@ -796,10 +832,12 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
+    return Promise<Unit>.make(
+        func (resolve) {
+            timeout(ms, func [resolve] () {
+                resolve({});
+            });
+        }
+    );
 }
 
