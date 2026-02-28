@@ -1338,7 +1338,12 @@ Node *Parser::parse_stmt(bool *as_expr) {
             return parse_var_decl(false);
         }
 
-        auto expr = parse_expr();
+        Node *expr;
+        if (is_construct_expr_with_type()) {
+            expr = parse_construct_expr();
+        } else {
+            expr = parse_expr();
+        }
         if (next_is(TokenType::SEMICOLON)) {
             consume();
         } else {
