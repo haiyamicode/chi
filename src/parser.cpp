@@ -1296,7 +1296,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::KW_IF: {
         auto node = parse_if_expr();
         // If-expression: if with else as last expr in block
-        if (node->data.if_stmt.else_node && next_is(TokenType::RBRACE))
+        if (node->data.if_expr.else_node && next_is(TokenType::RBRACE))
             *as_expr = true;
         return node;
     }
@@ -1704,8 +1704,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
                 if (tok->type == TokenType::RBRACE) {
                     break;
                 }
-                node->data.construct_expr.items.add(
-                    parse_child_expr_construct(false, node));
+                node->data.construct_expr.items.add(parse_child_expr_construct(false, node));
                 if (!at_comma(TokenType::RBRACE))
                     break;
                 consume();
@@ -2152,20 +2151,20 @@ Node *Parser::parse_if_expr() {
     auto kw = expect(TokenType::KW_IF);
     auto node = create_node(NodeType::IfExpr, kw);
     auto scope = m_ctx->resolver->push_scope(node);
-    node->data.if_stmt.condition = parse_expr();
+    node->data.if_expr.condition = parse_expr();
     // Then block: { ... } or => expr
     Token *then_arrow = next_is(TokenType::ARROW) ? read() : nullptr;
-    node->data.if_stmt.then_block = parse_block(scope, then_arrow);
+    node->data.if_expr.then_block = parse_block(scope, then_arrow);
     auto token = get();
     if (token->type == TokenType::KW_ELSE) {
         consume();
         token = get();
         if (token->type == TokenType::KW_IF) {
-            node->data.if_stmt.else_node = parse_if_expr();
+            node->data.if_expr.else_node = parse_if_expr();
         } else if (token->type == TokenType::ARROW) {
-            node->data.if_stmt.else_node = parse_block(nullptr, read());
+            node->data.if_expr.else_node = parse_block(nullptr, read());
         } else if (token->type == TokenType::LBRACE) {
-            node->data.if_stmt.else_node = parse_block();
+            node->data.if_expr.else_node = parse_block();
         } else {
             error(token, "expecting if statement or block");
         }

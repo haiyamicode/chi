@@ -2526,7 +2526,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         return result;
     }
     case NodeType::IfExpr: {
-        auto &data = node->data.if_stmt;
+        auto &data = node->data.if_expr;
 
         if (scope.move_outlet) {
             data.resolved_outlet = scope.move_outlet;
@@ -5900,7 +5900,7 @@ bool Resolver::always_terminates(ast::Node *node) {
         return stmts.len > 0 && always_terminates(stmts[stmts.len - 1]);
     }
     case NodeType::IfExpr: {
-        auto &d = node->data.if_stmt;
+        auto &d = node->data.if_expr;
         return d.else_node && always_terminates(d.then_block) && always_terminates(d.else_node);
     }
     default:

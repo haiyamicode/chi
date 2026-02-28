@@ -663,7 +663,7 @@ void AstPrinter::print_node(Node *node) {
         break;
     }
     case NodeType::IfExpr: {
-        auto &data = node->data.if_stmt;
+        auto &data = node->data.if_expr;
         emit("if ");
         auto *cond = data.condition;
         if (cond && cond->type == NodeType::ParenExpr)

@@ -358,7 +358,7 @@ struct FnCallExpr {
     array<Node *> post_narrow_vars = {}; // narrowed vars emitted after call
 };
 
-struct IfStmt {
+struct IfExpr {
     Node *condition = nullptr;
     Node *then_block = nullptr;
     Node *else_node = nullptr; // can be null, block node, or another if node
@@ -673,7 +673,7 @@ struct Node {
         AwaitExpr await_expr;
         Node *child_expr;
         Identifier identifier;
-        IfStmt if_stmt;
+        IfExpr if_expr;
         StructDecl struct_decl;
         ConstructExpr construct_expr;
         DotExpr dot_expr;

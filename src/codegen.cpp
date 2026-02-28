@@ -3013,7 +3013,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return compile_expr(fn, expr->data.child_expr);
     }
     case ast::NodeType::IfExpr: {
-        auto &data = expr->data.if_stmt;
+        auto &data = expr->data.if_expr;
         auto ret_type = expr->resolved_type ? get_chitype(expr) : nullptr;
         auto &builder = *m_ctx->llvm_builder;
 
@@ -5196,8 +5196,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         }
         // If return expression was a moved local, skip its destruction
         ast::Node *move_returned_var = nullptr;
-        if (data.expr && data.expr->escape.moved &&
-            data.expr->type == ast::NodeType::Identifier) {
+        if (data.expr && data.expr->escape.moved && data.expr->type == ast::NodeType::Identifier) {
             move_returned_var = data.expr->data.identifier.decl;
         }
         // Destroy all active block-local vars (inner to outer) before returning

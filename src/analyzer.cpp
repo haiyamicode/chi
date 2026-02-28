@@ -255,11 +255,11 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
     case ast::NodeType::PrefixExpr:
         return find_dot_expr(node->data.prefix_expr.expr, cursor_pos);
     case ast::NodeType::IfExpr: {
-        auto r = find_dot_expr(node->data.if_stmt.condition, cursor_pos);
+        auto r = find_dot_expr(node->data.if_expr.condition, cursor_pos);
         if (r)
             return r;
-        r = find_dot_expr(node->data.if_stmt.then_block, cursor_pos);
-        return r ? r : find_dot_expr(node->data.if_stmt.else_node, cursor_pos);
+        r = find_dot_expr(node->data.if_expr.then_block, cursor_pos);
+        return r ? r : find_dot_expr(node->data.if_expr.else_node, cursor_pos);
     }
     case ast::NodeType::ConstructExpr: {
         for (auto item : node->data.construct_expr.field_inits) {
@@ -375,9 +375,9 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
     case ast::NodeType::PrefixExpr:
         return find_fn_call(node->data.prefix_expr.expr, cursor_pos, result);
     case ast::NodeType::IfExpr:
-        return find_fn_call(node->data.if_stmt.condition, cursor_pos, result) ||
-               find_fn_call(node->data.if_stmt.then_block, cursor_pos, result) ||
-               find_fn_call(node->data.if_stmt.else_node, cursor_pos, result);
+        return find_fn_call(node->data.if_expr.condition, cursor_pos, result) ||
+               find_fn_call(node->data.if_expr.then_block, cursor_pos, result) ||
+               find_fn_call(node->data.if_expr.else_node, cursor_pos, result);
     case ast::NodeType::ConstructExpr:
         for (auto item : node->data.construct_expr.field_inits) {
             if (find_fn_call(item, cursor_pos, result))
