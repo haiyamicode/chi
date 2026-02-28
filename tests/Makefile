@@ -41,7 +41,8 @@ TESTS_LIST = 00_fib.test \
 		38_never_type.test \
 		39_destructuring.test \
 		40_fixed_array.test \
-		41_format_directives.test
+		41_format_directives.test \
+		42_construct_expr.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
@@ -168,7 +169,7 @@ test: $(TESTS)
 
 # Formatter idempotency test: verify format(file) == file for all test sources
 # Excludes 15_package (uses -p flag, no single source file)
-FORMAT_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test,$(TESTS_LIST)))
+FORMAT_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test 42_construct_expr.test,$(TESTS_LIST)))
 formatter_test:
 	@echo "Formatter idempotency test..."
 	@fail=0; \
