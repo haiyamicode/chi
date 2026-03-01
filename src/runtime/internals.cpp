@@ -652,15 +652,7 @@ void cx_hbytes(CxAny *v, CxHash *result) { *result = get_hbytes(v); }
 void *cx_map_new() { return dic_new(0); }
 
 void cx_map_delete(void *data) {
-    auto dict = (dictionary *)data;
-    dic_forEach(
-        dict,
-        [](void *key, int count, void **value, void *user) -> int {
-            free(*value);
-            return true;
-        },
-        NULL);
-    dic_delete(dict);
+    dic_delete((dictionary *)data);
 }
 
 void *cx_map_find(void *data, CxHash *key) {
@@ -679,6 +671,30 @@ void cx_map_add(void *data, CxHash *key, void *value) {
 }
 
 void cx_map_remove(void *data, CxHash *key) {}
+
+struct MapKeysCtx {
+    void *dest_array;
+    uint32_t key_size;
+    bool is_string;
+};
+
+static int collect_map_key(void *key, int count, void **value, void *user) {
+    auto ctx = (MapKeysCtx *)user;
+    auto slot = cx_array_add((CxArray *)ctx->dest_array, ctx->key_size);
+    if (ctx->is_string) {
+        cx_string_from_chars((const char *)key, (uint32_t)count, (CxString *)slot);
+    } else {
+        memcpy(slot, key, ctx->key_size);
+    }
+    return true;
+}
+
+void cx_map_keys(void *data, void *dest_array, uint32_t key_size, CxAny *key_type) {
+    auto dict = (dictionary *)data;
+    bool is_string = (TypeKind)key_type->type->kind == TypeKind::String;
+    MapKeysCtx ctx = {dest_array, key_size, is_string};
+    dic_forEach(dict, collect_map_key, &ctx);
+}
 
 static void create_cx_json_result(boost::json::value *data, void *result) {
     auto result_p = (CxJsonValue *)result;

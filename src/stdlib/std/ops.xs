@@ -2,6 +2,10 @@ interface Display {
     func display() string;
 }
 
+interface Index<K, V> {
+    func index(key: K) &V;
+}
+
 interface IndexMut<K, V> {
     func index_mut(index: K) &mut V;
 }

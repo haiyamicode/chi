@@ -27,7 +27,12 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    private unsafe func cx_throw(
+        type_info: *void,
+        data_ptr: *void,
+        vtable_ptr: *void,
+        type_id: uint32
+    );
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -47,6 +52,7 @@ extern "C" {
     private unsafe func cx_map_find(data: *void, key: *HashBytes) *void;
     private unsafe func cx_map_add(data: *void, key: *HashBytes, value: *void);
     private unsafe func cx_map_remove(data: *void, key: *HashBytes);
+    private unsafe func cx_map_keys(data: *void, dest_array: *void, key_size: uint32, key_type: *any);
     private unsafe func cx_parse_json(str: *string, result: *void);
     private unsafe func cx_json_value_delete(data: *void);
     private unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
@@ -309,7 +315,13 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(stringf("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
+            panic(
+                stringf(
+                    "expected {}, got {}",
+                    json_kind_display(kind),
+                    json_kind_display(this.kind)
+                )
+            );
         }
     }
 
@@ -679,61 +691,6 @@ struct __CxString {
     }
 }
 
-struct Map<K, V> {
-    private data: *void;
-
-    mut func new() {
-        unsafe {
-            this.data = cx_map_new();
-        }
-    }
-
-    mut func delete() {
-        unsafe {
-            cx_map_delete(this.data);
-        }
-        this.data = null;
-    }
-
-    func remove(key: K) {
-        var k: any = key;
-        var h = HashBytes{};
-        unsafe {
-            cx_hbytes(&k, &h);
-            cx_map_remove(this.data, &h);
-        }
-    }
-
-    func find(key: K) ?&V {
-        var k: any = key;
-        var h = HashBytes{};
-        unsafe {
-            cx_hbytes(&k, &h);
-            var p = cx_map_find(this.data, &h) as *V;
-            if p {
-                return {p};
-            }
-        }
-        return null;
-    }
-
-    impl ops.IndexMut<K, V> {
-        func index_mut(key: K) &mut V {
-            var k: any = key;
-            var h = HashBytes{};
-            unsafe {
-                cx_hbytes(&k, &h);
-                var p = cx_map_find(this.data, &h) as *V;
-                if !p {
-                    p = new V{};
-                    cx_map_add(this.data, &h, p);
-                }
-                return p;
-            }
-        }
-    }
-}
-
 struct Buffer {
     protected bytes: Array<char>;
 
@@ -846,10 +803,156 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
+    return Promise<Unit>.make(
+        func (resolve) {
+            timeout(ms, func [resolve] () {
+                resolve({});
+            });
+        }
+    );
+}
+
+struct MapIterator<K, V> {
+    map: *Map<K, V> = null;
+    keys: Array<K> = [];
+    index: uint32 = 0;
+
+    impl ops.MutIterator<V> {
+        func next() ?(&mut V) {
+            if this.index >= this.keys.length {
+                return null;
+            }
+            var k = this.keys[this.index];
+            this.index = this.index + 1;
+            unsafe {
+                var k_any: any = k;
+                var h = HashBytes{};
+                cx_hbytes(&k_any, &h);
+                var p = cx_map_find((*this.map).data, &h) as *V;
+                if p {
+                    return {p};
+                }
+            }
+            return null;
+        }
+    }
+}
+
+struct Map<K: ops.Construct, V> {
+    protected data: *void = null;
+
+    mut func new() {
+        unsafe {
+            this.data = cx_map_new();
+        }
+    }
+
+    func delete() {
+        if this.data != null {
+            var ks = this.keys();
+            for k in ks {
+                unsafe {
+                    var k_any: any = k;
+                    var h = HashBytes{};
+                    cx_hbytes(&k_any, &h);
+                    var p = cx_map_find(this.data, &h) as *V;
+                    if p {
+                        delete p;
+                    }
+                }
+            }
+            unsafe {
+                cx_map_delete(this.data);
+            }
+        }
+    }
+
+    func get(key: K) ?&V {
+        var k: any = key;
+        var h = HashBytes{};
+        unsafe {
+            cx_hbytes(&k, &h);
+            var p = cx_map_find(this.data, &h) as *V;
+            if p {
+                return {p};
+            }
+        }
+        return null;
+    }
+
+    func remove(key: K) {
+        var k: any = key;
+        var h = HashBytes{};
+        unsafe {
+            cx_hbytes(&k, &h);
+            var p = cx_map_find(this.data, &h) as *V;
+            if p {
+                delete p;
+            }
+            cx_map_remove(this.data, &h);
+        }
+    }
+
+    func keys() Array<K> {
+        var result: Array<K> = [];
+        var probe: any = K{};
+        unsafe {
+            cx_map_keys(this.data, &result, sizeof K, &probe);
+        }
+        return result;
+    }
+
+    impl ops.Index<K, V> {
+        func index(key: K) &V {
+            var k: any = key;
+            var h = HashBytes{};
+            unsafe {
+                cx_hbytes(&k, &h);
+                var p = cx_map_find(this.data, &h) as *V;
+                if !p {
+                    panic("map: key not found");
+                }
+                return p;
+            }
+        }
+    }
+
+    func set(key: K, value: V) {
+        var k: any = key;
+        var h = HashBytes{};
+        unsafe {
+            cx_hbytes(&k, &h);
+            var p = cx_map_find(this.data, &h) as *V;
+            if p {
+                *p = value;
+                return;
+            }
+            p = mem.copy_from<V>(&value) as *V;
+            cx_map_add(this.data, &h, p);
+        }
+    }
+
+    impl ops.MutIterable<V> {
+        func to_iter_mut() MapIterator<K, V> {
+            unsafe {
+                return {map: &this as *Map<K, V>, keys: this.keys(), index: 0};
+            }
+        }
+    }
+
+    impl ops.CopyFrom<Map<K, V>> {
+        func copy_from(source: &Map<K, V>) {
+            unsafe {
+                this.data = cx_map_new();
+            }
+            var ks = source.keys();
+            for k in ks {
+                var v = source.get(k);
+                if v {
+                    this.set(k, *v);
+                }
+            }
+        }
+    }
 }
 

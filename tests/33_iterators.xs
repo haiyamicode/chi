@@ -2,7 +2,7 @@ import "std/ops" as ops;
 
 // --- Linked list data structure ---
 
-struct Node<T> {
+struct Node<T: ops.Construct> {
     value: T = T{};
     next: ?*Node<T> = null;
 }

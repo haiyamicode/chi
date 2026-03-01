@@ -46,15 +46,30 @@ func test_array() {
 func test_map() {
     println("testing map:");
     var m = Map<string, int>{};
-    m["abc"] = 1;
-    m["d"] = 2;
+    m.set("abc", 1);
+    m.set("d", 2);
     printf("m[\"abc\"] = {}\n", m["abc"]);
     printf("m[\"d\"] = {}\n", m["d"]);
-    printf("m[\"ef\"] = {}\n", m["ef"]);
-    var it1 = m.find("abc");
-    printf("m.find(\"abc\")! = {}\n", it1!);
-    var it2 = m.find("invalid");
-    printf("m.find(\"invalid\") = {}\n", it2);
+    printf("m.get(\"ef\") = {}\n", m.get("ef"));
+    var it1 = m.get("abc");
+    printf("m.get(\"abc\")! = {}\n", it1!);
+    var it2 = m.get("invalid");
+    printf("m.get(\"invalid\") = {}\n", it2);
+    // test keys
+    var ks = m.keys();
+    printf("keys.length = {}\n", ks.length);
+    // test overwrite
+    m.set("abc", 99);
+    printf("m[\"abc\"] after overwrite = {}\n", m["abc"]);
+    // test copy
+    var m2: Map<string, int> = m;
+    printf("m2[\"abc\"] = {}\n", m2["abc"]);
+    printf("m2[\"d\"] = {}\n", m2["d"]);
+    // test iteration
+    println("iterating m2:");
+    for v in m2 {
+        printf("  v={}\n", *v);
+    }
     println("");
 }
 
@@ -122,6 +137,32 @@ struct Traced {
     }
 }
 
+struct TracedValue {
+    id: int = 0;
+
+    func delete() {
+        if this.id != 0 {
+            printf("  TracedValue.delete({})\n", this.id);
+        }
+    }
+}
+
+func test_map_lifecycle_helper() Map<string, TracedValue> {
+    var m = Map<string, TracedValue>{};
+    m.set("a", TracedValue{id: 10});
+    m.set("b", TracedValue{id: 20});
+    printf("m[\"a\"].id={}\n", m["a"].id);
+    printf("m[\"b\"].id={}\n", m["b"].id);
+    return m;
+}
+
+func test_map_lifecycle() {
+    println("testing map lifecycle:");
+    var m = test_map_lifecycle_helper();
+    printf("after return: m[\"a\"].id={}\n", m["a"].id);
+    println("before scope exit:");
+}
+
 func test_box_helper() {
     println("creating box:");
     var t = new Traced{1};
@@ -148,6 +189,7 @@ func main() {
     test_optional();
     test_array();
     test_map();
+    test_map_lifecycle();
     test_shared();
     test_nested_shared();
     test_string();

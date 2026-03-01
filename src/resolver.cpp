@@ -145,6 +145,7 @@ void Resolver::context_init_primitives() {
     // add_primitive("Promise", system_types.promise);
 
     // intrinsic symbols
+    m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
@@ -338,6 +339,11 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
             from_type->kind == TypeKind::MutRef || from_type->kind == TypeKind::MoveRef) {
 
+            // Explicit cast: allow any reference/pointer → pointer conversion regardless of element types
+            if (is_explicit && to_type->kind == TypeKind::Pointer) {
+                return true;
+            }
+
             auto from_elem = from_type->get_elem();
             auto to_elem = to_type->get_elem();
 
@@ -416,6 +422,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         if (from_type->is_int_like()) {
             return is_explicit;
         }
+
 
         return false;
     }
@@ -1021,7 +1028,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             auto type = create_type(TypeKind::This);
             auto is_mut = declspec.is_mutable();
-            type->data.pointer.elem = scope.parent_struct;
+            auto this_type = scope.parent_struct;
+            if (this_type->data.struct_.is_generic()) {
+                auto &tparams = this_type->data.struct_.type_params;
+                TypeList placeholders;
+                for (auto tp : tparams) {
+                    placeholders.add(to_value_type(tp));
+                }
+                this_type = get_subtype(this_type, &placeholders);
+            }
+            type->data.pointer.elem = this_type;
             // Attach 'this lifetime so satisfies_lifetime_constraint can check it
             auto &st = scope.parent_struct->data.struct_;
             if (!st.this_lifetime) {
@@ -1265,6 +1281,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                       format_type_display(var_type));
             }
         }
+        // Struct fields must have explicit types
+        if (data.is_field && !data.type) {
+            error(node, "struct field '{}' must have an explicit type", node->name);
+            return get_system_types()->void_;
+        }
+        // Defer field default expression resolution to the body pass,
+        // so that other structs' interfaces are fully resolved first
+        if (data.is_field && data.expr && var_type) {
+            return var_type;
+        }
         if (data.expr) {
             // Use explicit type, or scope.value_type as hint for type inference
             auto type_hint = var_type ? var_type : scope.value_type;
@@ -1362,6 +1388,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (is_first) {
                     data.is_initializing = true;
                     vd.initialized_at = node;
+                    if (var->root_node) {
+                        var->root_node->data.var_decl.initialized_at = node;
+                    }
                 }
             }
             auto var_scope = scope.set_value_type(t1).set_move_outlet(data.op1);
@@ -2253,6 +2282,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *result_type;
         if (data.type) {
             value_type = resolve_value(data.type, scope);
+            if (data.items.len == 0 && value_type->kind == TypeKind::Placeholder) {
+                bool has_construct_bound = false;
+                for (auto t : value_type->data.placeholder.traits) {
+                    if (!t || t->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(t))
+                        continue;
+                    auto *new_member = t->data.struct_.find_member("new");
+                    if (new_member && new_member->node &&
+                        new_member->node->data.fn_def.fn_kind == ast::FnKind::Constructor &&
+                        new_member->node->data.fn_def.fn_proto->data.fn_proto.params.len == 0) {
+                        has_construct_bound = true;
+                        break;
+                    }
+                }
+                if (!has_construct_bound) {
+                    error(node,
+                          "cannot default-construct '{}': type parameter requires "
+                          "'Construct' bound",
+                          format_type_display(value_type));
+                    return nullptr;
+                }
+            }
             result_type =
                 data.is_new ? get_pointer_type(value_type, TypeKind::MoveRef) : value_type;
         } else {
@@ -2278,7 +2328,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             } else {
                 result_type = scope.value_type;
-                if (!data.is_new) {
+                {
                     // Empty construct on placeholder (= {}) requires a constructor
                     // interface bound whose new() has zero params
                     if (data.items.len == 0 && result_type->kind == TypeKind::Placeholder) {
@@ -2924,7 +2974,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
         } else {
-            // fourth pass - resolve method bodies
+            // fourth pass - resolve field defaults and method bodies
+            for (auto member : data.members) {
+                if (member->type == NodeType::VarDecl && member->data.var_decl.is_field &&
+                    member->data.var_decl.expr && member->data.var_decl.type) {
+                    auto &vd = member->data.var_decl;
+                    auto field_type = member->resolved_type;
+                    auto field_scope = struct_scope.set_value_type(field_type);
+                    auto expr_type = resolve(vd.expr, field_scope);
+                    if (expr_type && expr_type->kind != TypeKind::Undefined &&
+                        expr_type->kind != TypeKind::ZeroInit) {
+                        if (vd.expr->type != NodeType::ConstructExpr ||
+                            vd.expr->data.construct_expr.type) {
+                            check_assignment(vd.expr, expr_type, field_type);
+                        }
+                    }
+                }
+            }
             auto resolve_fn_body = [&](ast::Node *fn_member) {
                 if (fn_member->type != NodeType::FnDef)
                     return;
@@ -3101,15 +3167,30 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TypeKind::FixedArray:
             expected_index_type = get_system_types()->uint32;
             break;
+        case TypeKind::This:
         case TypeKind::Struct:
         case TypeKind::Subtype: {
             auto struct_ = resolve_struct_type(expr_type);
-            auto has_index = has_interface_impl(struct_, "std.ops.IndexMut");
-            if (!has_index) {
-                error(node, errors::CANNOT_SUBSCRIPT, format_type_display(expr_type));
-                return nullptr;
+            // LHS (write): require IndexMut
+            // RHS (read): prefer Index, fall back to IndexMut
+            const char *method_name = nullptr;
+            if (scope.is_lhs) {
+                if (!has_interface_impl(struct_, "std.ops.IndexMut")) {
+                    error(node, errors::CANNOT_SUBSCRIPT, format_type_display(expr_type));
+                    return nullptr;
+                }
+                method_name = "index_mut";
+            } else {
+                if (has_interface_impl(struct_, "std.ops.Index")) {
+                    method_name = "index";
+                } else if (has_interface_impl(struct_, "std.ops.IndexMut")) {
+                    method_name = "index_mut";
+                } else {
+                    error(node, errors::CANNOT_SUBSCRIPT, format_type_display(expr_type));
+                    return nullptr;
+                }
             }
-            auto method_p = struct_->member_table.get("index_mut");
+            auto method_p = struct_->member_table.get(method_name);
             assert(method_p);
             auto method = *method_p;
             expected_index_type = method->resolved_type->data.fn.get_param_at(0);
@@ -3979,9 +4060,16 @@ string Resolver::resolve_global_id(ast::Node *node) {
 }
 
 bool Resolver::has_interface_impl(ChiTypeStruct *struct_type, string interface_id) {
+    auto sym_p = m_ctx->intrinsic_symbols.get(interface_id);
+    if (!sym_p)
+        return false;
+    auto sym = *sym_p;
+    // Sized is structural: everything is Sized except interfaces
+    if (sym == IntrinsicSymbol::Sized) {
+        return struct_type->kind != ContainerKind::Interface;
+    }
     for (auto &i : struct_type->interfaces) {
-        if (i->inteface_symbol == IntrinsicSymbol::IndexMut ||
-            i->inteface_symbol == IntrinsicSymbol::IndexMutIterable) {
+        if (i->inteface_symbol == sym) {
             return true;
         }
     }

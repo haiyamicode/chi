@@ -150,6 +150,7 @@ CHI_RT_EXPORT void cx_map_delete(void *data);
 CHI_RT_EXPORT void *cx_map_find(void *data, CxHash *key);
 CHI_RT_EXPORT void cx_map_add(void *data, CxHash *key, void *value);
 CHI_RT_EXPORT void cx_map_remove(void *data, CxHash *key);
+CHI_RT_EXPORT void cx_map_keys(void *data, void *dest_array, uint32_t key_size, CxAny *key_type);
 
 CHI_RT_EXPORT void cx_parse_json(CxString *str, void *result);
 CHI_RT_EXPORT void cx_json_value_delete(void *data);
