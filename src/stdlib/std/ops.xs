@@ -119,6 +119,7 @@ interface Eq {
 interface Ord {
     func cmp(other: This) int;
 }
+
 // // Integer trait combining all common integer operations
 // interface Int<T=This> {
 //   // Inherit arithmetic operations

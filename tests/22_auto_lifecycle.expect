@@ -24,8 +24,8 @@ After helper returned
 === Test 4: Shared<T> field auto-destruction ===
 HoldsShared.new
   RefCountedData.new(42)
-  RefCountedData.delete(42)
   ref_count after construction: 1
+  RefCountedData.delete(42)
 Before function exit
   RefCountedData.delete(42)
 After helper - RefCountedData should be deleted
@@ -40,8 +40,8 @@ After helper returned
 === Test 6: Optional<Shared<T>> field auto-destruction ===
 HoldsOptionalShared.new
   OptionalData.new(99)
-  OptionalData.delete(99)
   ref_count: 1
+  OptionalData.delete(99)
 Before function exit (with value)
   OptionalData.delete(99)
 After helper - OptionalData should be deleted

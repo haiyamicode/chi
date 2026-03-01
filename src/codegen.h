@@ -402,8 +402,7 @@ class Compiler {
     RefValue compile_iden_ref(Function *fn, ast::Node *iden);
 
     std::vector<llvm::Value *> compile_fn_args(
-        Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call,
-        std::vector<std::pair<llvm::Value *, ast::Node *>> *out_temporaries = nullptr);
+        Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call);
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr,
                                  llvm::Value *sret_dest = nullptr);
 

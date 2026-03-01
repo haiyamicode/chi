@@ -668,8 +668,12 @@ struct __CxString {
             if result != 0 {
                 return result;
             }
-            if this.length < other.length { return -1; }
-            if this.length > other.length { return 1; }
+            if this.length < other.length {
+                return -1;
+            }
+            if this.length > other.length {
+                return 1;
+            }
             return 0;
         }
     }

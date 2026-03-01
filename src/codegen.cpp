@@ -3697,10 +3697,8 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto constructor_fn = *entry;
             auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
             auto args = std::vector<llvm::Value *>{dest};
-            // Track temporaries created for constructor arguments
-            std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
             auto remaining_args = compile_fn_args(
-                fn, constructor_fn, expr->data.construct_expr.items, expr, &arg_temporaries);
+                fn, constructor_fn, expr->data.construct_expr.items, expr);
             args.insert(args.end(), remaining_args.begin(), remaining_args.end());
 
             // Compile default args for missing params (e.g. = {} on generic field)
@@ -3717,10 +3715,6 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             }
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
             emit_dbg_location(expr);
-            // Destroy temporaries after the constructor call completes
-            for (auto &[temp_ptr, temp_node] : arg_temporaries) {
-                compile_destruction(fn, temp_ptr, temp_node);
-            }
         }
 
         if (expr->data.construct_expr.spread_expr) {
@@ -4321,8 +4315,7 @@ normal:
 
 std::vector<llvm::Value *>
 Compiler::compile_fn_args(Function *fn, Function *callee, array<ast::Node *> args,
-                          ast::Node *fn_call,
-                          std::vector<std::pair<llvm::Value *, ast::Node *>> *out_temporaries) {
+                          ast::Node *fn_call) {
     std::vector<llvm::Value *> call_args = {};
     auto &builder = *m_ctx->llvm_builder.get();
     llvm::Value *va_ptr = nullptr;
@@ -4365,26 +4358,6 @@ Compiler::compile_fn_args(Function *fn, Function *callee, array<ast::Node *> arg
         auto arg_node = args[i];
         auto param_type = fn_spec.get_param_at(i);
 
-        // Check if this argument is a ConstructExpr that will create a temporary
-        // that needs destruction after the call
-        if (out_temporaries && arg_node->type == ast::NodeType::ConstructExpr) {
-            auto &construct_data = arg_node->data.construct_expr;
-            // Only track non-new constructs without an outlet (these create temporaries)
-            if (!construct_data.is_new && !arg_node->resolved_outlet) {
-                auto arg_type = get_chitype(arg_node);
-                auto destructor = ChiTypeStruct::get_destructor(arg_type);
-                if (destructor) {
-                    // Compile the construct expr to get temporary address
-                    auto temp_ptr = compile_alloc(fn, arg_node, false, arg_type);
-                    compile_construction(fn, temp_ptr, arg_type, arg_node);
-                    auto value = builder.CreateLoad(compile_type(arg_type), temp_ptr);
-                    call_args.push_back(value);
-                    // Track for destruction after call
-                    out_temporaries->push_back({temp_ptr, arg_node});
-                    continue;
-                }
-            }
-        }
         // For C variadic args (param_type is nullptr), compile the expression directly
         if (param_type) {
             call_args.push_back(compile_assignment_to_type(fn, arg_node, param_type));
@@ -4648,9 +4621,6 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         callee = callee_fn->llvm_fn;
     }
 
-    // Track temporaries created for struct arguments that need destruction after the call
-    std::vector<std::pair<llvm::Value *, ast::Node *>> arg_temporaries;
-
     for (int i = 0; i < data.args.len; i++) {
         if (is_variadic && !is_extern && i >= va_start) {
             emit_dbg_location(data.args[i]);
@@ -4691,26 +4661,6 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto arg = data.args[i];
         auto param_type = fn_spec.get_param_at(i);
 
-        // Check if this argument is a ConstructExpr that will create a temporary
-        // that needs destruction after the call
-        if (arg->type == ast::NodeType::ConstructExpr) {
-            auto &construct_data = arg->data.construct_expr;
-            // Only track non-new constructs without an outlet (these create temporaries)
-            if (!construct_data.is_new && !arg->resolved_outlet) {
-                auto arg_type = get_chitype(arg);
-                auto destructor = ChiTypeStruct::get_destructor(arg_type);
-                if (destructor) {
-                    // Compile the construct expr to get temporary address
-                    auto temp_ptr = compile_alloc(fn, arg, false, arg_type);
-                    compile_construction(fn, temp_ptr, arg_type, arg);
-                    auto value = builder.CreateLoad(compile_type(arg_type), temp_ptr);
-                    args.push_back(value);
-                    // Track for destruction after call
-                    arg_temporaries.push_back({temp_ptr, arg});
-                    continue;
-                }
-            }
-        }
         // For C variadic args (param_type is nullptr), compile the expression directly
         if (param_type) {
             args.push_back(compile_assignment_to_type(fn, arg, param_type));
@@ -4739,18 +4689,6 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto return_type = fn_type->data.fn.return_type;
     auto sret_type = fn_type->data.fn.should_use_sret() ? compile_type(return_type) : nullptr;
     auto result = create_fn_call_invoke(callee, args, sret_type, invoke, sret_dest);
-
-    // Destroy temporaries after the call completes.
-    // When using invoke, the invoke terminates the current block, so we must
-    // switch to the normal continuation block before emitting destruction code.
-    if (!arg_temporaries.empty()) {
-        if (invoke) {
-            fn->use_label(invoke->normal);
-        }
-        for (auto &[temp_ptr, temp_node] : arg_temporaries) {
-            compile_destruction(fn, temp_ptr, temp_node);
-        }
-    }
 
     return result;
 }

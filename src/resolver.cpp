@@ -5631,9 +5631,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             // Move tracking for function arguments
             track_move_sink(scope.parent_fn_node, arg, arg_type, node, param_type);
 
-            // ConstructExpr args are cleaned up by out_temporaries immediately after the call
-            if (arg->type != NodeType::ConstructExpr)
-                ensure_temp_owner(arg, arg_type, scope);
+            ensure_temp_owner(arg, arg_type, scope);
         }
     }
 
