@@ -28,8 +28,6 @@ iterating m2:
 testing map lifecycle:
 m["a"].id=10
 m["b"].id=20
-  TracedValue.delete(20)
-  TracedValue.delete(10)
 after return: m["a"].id=10
 before scope exit:
   TracedValue.delete(10)

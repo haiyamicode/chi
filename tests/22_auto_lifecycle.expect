@@ -25,7 +25,6 @@ After helper returned
 HoldsShared.new
   RefCountedData.new(42)
   ref_count after construction: 1
-  RefCountedData.delete(42)
 Before function exit
   RefCountedData.delete(42)
 After helper - RefCountedData should be deleted
@@ -41,7 +40,6 @@ After helper returned
 HoldsOptionalShared.new
   OptionalData.new(99)
   ref_count: 1
-  OptionalData.delete(99)
 Before function exit (with value)
   OptionalData.delete(99)
 After helper - OptionalData should be deleted
@@ -75,13 +73,10 @@ After helper returned
 === Test 10: Temporary cleanup (no leaks) ===
 --- fn call arg ---
   TrackedVar.new('fn-arg')
-  TrackedVar.copy('fn-arg')
   TrackedVar.delete('fn-arg')
 after consume(make())
 --- nested fn call arg ---
   TrackedVar.new('nested')
-  TrackedVar.copy('nested')
-  TrackedVar.copy('nested')
   TrackedVar.delete('nested')
 after consume(identity(make()))
 --- orphaned fn call ---
@@ -92,15 +87,10 @@ after orphaned make()
 after orphaned TrackedVar construct
 --- if expr as fn arg ---
   TrackedVar.new('if-true')
-  TrackedVar.copy('if-true')
   TrackedVar.delete('if-true')
 after consume(if ...)
-  TrackedVar.delete('if-true')
   TrackedVar.delete('orphan-construct')
   TrackedVar.delete('orphan-fn')
-  TrackedVar.delete('nested')
-  TrackedVar.delete('nested')
-  TrackedVar.delete('fn-arg')
 === Test 11: Temps in expression-position contexts ===
 --- if condition: DotExpr base on temp ---
   TrackedVar.new('if-cond')
@@ -121,4 +111,62 @@ after unary
   TrackedVar.delete('for-post')
   TrackedVar.delete('while-cond')
   TrackedVar.delete('if-cond')
+=== Test 12: Function arg copy semantics ===
+--- named var to fn ---
+  TrackedVar.new('named')
+  TrackedVar.copy('named')
+  TrackedVar.delete('named')
+  after consume: t.name='named'
+--- move to fn ---
+  TrackedVar.new('moved')
+  TrackedVar.delete('moved')
+  after consume(move)
+--- named var to constructor ---
+  TrackedVar.new('ctor-named')
+  TrackedVar.copy('ctor-named')
+  TrackedVar.copy('ctor-named')
+  c.inner.name='ctor-named', t3.name='ctor-named'
+--- rvalue to constructor ---
+  TrackedVar.new('ctor-rvalue')
+  TrackedVar.copy('ctor-rvalue')
+  c2.inner.name='ctor-rvalue'
+--- move to constructor ---
+  TrackedVar.new('ctor-moved')
+  TrackedVar.copy('ctor-moved')
+  c3.inner.name='ctor-moved'
+  after move-construct
+--- multiple args ---
+  TrackedVar.new('arg-a')
+  TrackedVar.new('arg-b')
+  TrackedVar.copy('arg-a')
+  TrackedVar.copy('arg-b')
+  consumed 'arg-a' and 'arg-b'
+  TrackedVar.delete('arg-b')
+  TrackedVar.delete('arg-a')
+  after: a='arg-a', b='arg-b'
+--- multiple rvalue args ---
+  TrackedVar.new('rv-a')
+  TrackedVar.new('rv-b')
+  consumed 'rv-a' and 'rv-b'
+  TrackedVar.delete('rv-b')
+  TrackedVar.delete('rv-a')
+  after consume_two(make(), make())
+--- named var in loop ---
+  TrackedVar.new('loop-0')
+  TrackedVar.copy('loop-0')
+  TrackedVar.delete('loop-0')
+  TrackedVar.delete('loop-0')
+  TrackedVar.new('loop-1')
+  TrackedVar.copy('loop-1')
+  TrackedVar.delete('loop-1')
+  TrackedVar.delete('loop-1')
+  after loop
+--- scope exit ---
+  TrackedVar.delete('arg-b')
+  TrackedVar.delete('arg-a')
+  TrackedVar.delete('ctor-moved')
+  TrackedVar.delete('ctor-rvalue')
+  TrackedVar.delete('ctor-named')
+  TrackedVar.delete('ctor-named')
+  TrackedVar.delete('named')
 All tests completed!

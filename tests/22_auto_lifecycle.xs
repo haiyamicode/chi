@@ -381,6 +381,74 @@ func test_expr_contexts() {
     println("after unary");
 }
 
+struct TrackedContainer {
+    inner: TrackedVar;
+
+    func new(inner: TrackedVar) {
+        this.inner = inner;
+    }
+}
+
+func consume_two(a: TrackedVar, b: TrackedVar) {
+    printf("  consumed '{}' and '{}'\n", a.name, b.name);
+}
+
+func test_fn_arg_copy_semantics() {
+    println("=== Test 12: Function arg copy semantics ===");
+
+    // Named var to fn: caller copies, callee owns the copy
+    println("--- named var to fn ---");
+    var t = TrackedVar{"named"};
+    consume_tracked(t);
+    printf("  after consume: t.name='{}'\n", t.name);
+
+    // move(x) to fn: no copy, ownership transfers
+    println("--- move to fn ---");
+    var t2 = TrackedVar{"moved"};
+    consume_tracked(move (t2));
+    println("  after consume(move)");
+
+    // Named var to constructor: caller copies for constructor param
+    println("--- named var to constructor ---");
+    var t3 = TrackedVar{"ctor-named"};
+    var c = TrackedContainer{t3};
+    printf("  c.inner.name='{}', t3.name='{}'\n", c.inner.name, t3.name);
+
+    // Rvalue to constructor: no copy for constructor param (moved)
+    println("--- rvalue to constructor ---");
+    var c2 = TrackedContainer{make_tracked("ctor-rvalue")};
+    printf("  c2.inner.name='{}'\n", c2.inner.name);
+
+    // move(x) to constructor: no copy
+    println("--- move to constructor ---");
+    var t4 = TrackedVar{"ctor-moved"};
+    var c3 = TrackedContainer{move (t4)};
+    printf("  c3.inner.name='{}'\n", c3.inner.name);
+    println("  after move-construct");
+
+    // Multiple destructible args: both properly copied
+    println("--- multiple args ---");
+    var a = TrackedVar{"arg-a"};
+    var b = TrackedVar{"arg-b"};
+    consume_two(a, b);
+    printf("  after: a='{}', b='{}'\n", a.name, b.name);
+
+    // Multiple rvalue args: both moved, no copies
+    println("--- multiple rvalue args ---");
+    consume_two(make_tracked("rv-a"), make_tracked("rv-b"));
+    println("  after consume_two(make(), make())");
+
+    // Named var in loop: alloca reuse, correct copies each iteration
+    println("--- named var in loop ---");
+    for var i: uint32 = 0; i < 2; i++ {
+        var h = TrackedVar{if i == 0 => "loop-0" else => "loop-1"};
+        consume_tracked(h);
+    }
+    println("  after loop");
+
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -393,6 +461,7 @@ func main() {
     test_multiple_vars();
     test_temp_cleanup();
     test_expr_contexts();
+    test_fn_arg_copy_semantics();
     println("All tests completed!");
 }
 

@@ -5729,6 +5729,20 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             track_move_sink(scope.parent_fn_node, arg, arg_type, node, param_type);
 
             ensure_temp_owner(arg, arg_type, scope);
+
+            // Mark rvalue/moved args — caller transfers ownership to callee
+            // via bitwise pass, so callee skips copy_from and caller
+            // skips destroying the temp.
+            bool is_explicit_move = arg->type == NodeType::UnaryOpExpr &&
+                                    arg->data.unary_op_expr.op_type == TokenType::KW_MOVE;
+            if (param_type && !param_type->is_reference() &&
+                (!is_addressable(arg) || is_explicit_move) && should_destroy(arg, arg_type)) {
+                arg->escape.moved = true;
+                // Sink the temp outlet so cleanup doesn't destroy it
+                if (arg->resolved_outlet && scope.parent_fn_node) {
+                    scope.parent_fn_node->data.fn_def.add_sink_edge(arg->resolved_outlet, node);
+                }
+            }
         }
     }
 

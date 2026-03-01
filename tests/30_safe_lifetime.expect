@@ -78,7 +78,6 @@ iter 202
 Heavy.delete(202)
 after loop
 === move to fn arg ===
-Heavy.copy(55)
 consumed: 55
 Heavy.delete(55)
 === move block cleanup ===
@@ -86,13 +85,10 @@ b = 60
 Heavy.delete(60)
 after block
 === move in loop ===
-Heavy.copy(300)
 consumed: 300
 Heavy.delete(300)
-Heavy.copy(301)
 consumed: 301
 Heavy.delete(301)
-Heavy.copy(302)
 consumed: 302
 Heavy.delete(302)
 === move ptr block ===

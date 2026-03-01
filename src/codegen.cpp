@@ -701,7 +701,10 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
             emit_dbg_location(param);
 
-            compile_copy(fn, llvm_param, var, param_type);
+            // Bitwise store only — caller is responsible for copy semantics.
+            // For rvalue args (temps), this avoids a redundant copy_from + destroy.
+            // For named var args, the caller does copy_from before passing.
+            builder.CreateStore(llvm_param, var);
             add_var(param, var);
 
             // debug info
@@ -936,6 +939,24 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
         value = compile_conversion(fn, src_value, src_type, dest_type);
     }
     return value;
+}
+
+llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto arg_value = compile_assignment_to_type(fn, expr, param_type);
+
+    // Caller-side copy: for non-moved args (named vars) passed to by-value
+    // params, do copy_from here since the callee only does a bitwise store.
+    // Moved args (rvalues) are already fresh values — ownership transfers.
+    if (!expr->escape.moved && param_type && !param_type->is_reference() &&
+        get_resolver()->type_needs_destruction(param_type)) {
+        auto tmp = fn->entry_alloca(compile_type(param_type), "_arg_copy");
+        emit_dbg_location(expr);
+        compile_copy(fn, arg_value, tmp, param_type, expr);
+        arg_value = builder.CreateLoad(compile_type(param_type), tmp);
+    }
+
+    return arg_value;
 }
 
 void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
@@ -3709,8 +3730,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
                     if (!default_val)
                         break;
                     auto param_type = constructor_fn->fn_type->data.fn.get_param_at(i);
-                    auto val = compile_assignment_to_type(fn, default_val, param_type);
-                    args.push_back(val);
+                    args.push_back(compile_arg_for_call(fn, default_val, param_type));
                 }
             }
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
@@ -4360,7 +4380,7 @@ Compiler::compile_fn_args(Function *fn, Function *callee, array<ast::Node *> arg
 
         // For C variadic args (param_type is nullptr), compile the expression directly
         if (param_type) {
-            call_args.push_back(compile_assignment_to_type(fn, arg_node, param_type));
+            call_args.push_back(compile_arg_for_call(fn, arg_node, param_type));
         } else {
             call_args.push_back(compile_expr(fn, arg_node));
         }
@@ -4662,11 +4682,12 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto param_type = fn_spec.get_param_at(i);
 
         // For C variadic args (param_type is nullptr), compile the expression directly
-        if (param_type) {
-            args.push_back(compile_assignment_to_type(fn, arg, param_type));
-        } else {
+        if (!param_type) {
             args.push_back(compile_expr(fn, arg));
+            continue;
         }
+
+        args.push_back(compile_arg_for_call(fn, arg, param_type));
     }
     // Compile default values for missing arguments
     if (fn_decl->type == ast::NodeType::FnDef) {
@@ -4676,7 +4697,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             if (!default_val)
                 break;
             auto param_type = fn_spec.get_param_at(i);
-            args.push_back(compile_assignment_to_type(fn, default_val, param_type));
+            args.push_back(compile_arg_for_call(fn, default_val, param_type));
         }
     }
 
