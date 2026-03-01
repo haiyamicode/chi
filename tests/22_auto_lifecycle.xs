@@ -348,6 +348,40 @@ func test_temp_cleanup() {
     println("after consume(if ...)");
 }
 
+func test_expr_contexts() {
+    println("=== Test 11: Temps in expression-position contexts ===");
+
+    // if condition: DotExpr base on temp — temp owned and destroyed at scope exit
+    println("--- if condition: DotExpr base on temp ---");
+    if make_tracked("if-cond").name == "if-cond" {
+        println("if matched");
+    }
+    println("after if");
+
+    // while condition: DotExpr base on temp — single iteration via break
+    println("--- while condition: DotExpr base on temp ---");
+    while make_tracked("while-cond").name == "while-cond" {
+        break;
+    }
+    println("after while");
+
+    // for loop: orphaned temp in post position — destroyed at scope exit
+    println("--- for post: orphaned temp ---");
+    for var i: uint32 = 0; i < 1; make_tracked("for-post") {
+        println("in for loop");
+        i = i + 1;
+    }
+    println("after for");
+
+    // unary op: temp as operand — owned at scope
+    println("--- unary op on temp ---");
+    if !make_tracked("unary").name.is_empty() {
+        println("unary not-empty matched");
+    }
+    println("after unary");
+
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -359,6 +393,7 @@ func main() {
     test_both_lifecycles();
     test_multiple_vars();
     test_temp_cleanup();
+    test_expr_contexts();
     println("All tests completed!");
 }
 

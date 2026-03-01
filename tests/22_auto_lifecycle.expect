@@ -101,4 +101,24 @@ after consume(if ...)
   TrackedVar.delete('nested')
   TrackedVar.delete('nested')
   TrackedVar.delete('fn-arg')
+=== Test 11: Temps in expression-position contexts ===
+--- if condition: DotExpr base on temp ---
+  TrackedVar.new('if-cond')
+if matched
+after if
+--- while condition: DotExpr base on temp ---
+  TrackedVar.new('while-cond')
+after while
+--- for post: orphaned temp ---
+in for loop
+  TrackedVar.new('for-post')
+after for
+--- unary op on temp ---
+  TrackedVar.new('unary')
+unary not-empty matched
+after unary
+  TrackedVar.delete('unary')
+  TrackedVar.delete('for-post')
+  TrackedVar.delete('while-cond')
+  TrackedVar.delete('if-cond')
 All tests completed!

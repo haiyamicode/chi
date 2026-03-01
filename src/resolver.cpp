@@ -1552,6 +1552,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!t) {
             return nullptr;
         }
+        ensure_temp_owner(data.op1, t, scope);
         switch (auto tt = data.op_type) {
         case TokenType::SUB:
         case TokenType::ADD:
@@ -1769,6 +1770,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.cast_expr;
         auto dest_type = resolve_value(data.dest_type, scope);
         auto from_type = resolve(data.expr, scope);
+        ensure_temp_owner(data.expr, from_type, scope);
         if (!scope.is_unsafe_block &&
             (from_type->is_raw_pointer() || dest_type->is_raw_pointer())) {
             error(node, "pointer cast requires unsafe block");
@@ -2550,6 +2552,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto cond_type = resolve(data.condition, scope);
+        ensure_temp_owner(data.condition, cond_type, scope);
 
         // Positive narrowing: identifiers narrowed when condition is truthy
         array<ast::Node *> then_narrowables;
@@ -2592,6 +2595,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.while_stmt;
         if (data.condition) {
             auto cond_type = resolve(data.condition, scope);
+            ensure_temp_owner(data.condition, cond_type, scope);
             check_assignment(data.condition, cond_type, get_system_types()->bool_);
         }
         auto loop_scope = scope.set_parent_loop(node);
@@ -3282,14 +3286,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (data.init) {
             auto init_scope = loop_var_hint ? scope.set_value_type(loop_var_hint) : scope;
-            resolve(data.init, init_scope);
+            auto init_type = resolve(data.init, init_scope);
+            ensure_temp_owner(data.init, init_type, scope);
         }
         if (data.condition) {
             auto cond_type = resolve(data.condition, scope);
+            ensure_temp_owner(data.condition, cond_type, scope);
             check_assignment(data.condition, cond_type, get_system_types()->bool_);
         }
         if (data.post) {
-            resolve(data.post, scope);
+            auto post_type = resolve(data.post, scope);
+            ensure_temp_owner(data.post, post_type, scope);
         }
         if (data.expr) {
             if (data.expr->type == NodeType::RangeExpr) {
@@ -3775,6 +3782,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             node->escape.moved = true;
         }
         auto expr_type = resolve(data.expr, scope);
+        ensure_temp_owner(data.expr, expr_type, scope);
 
         // Handle invalid switch expressions gracefully
         if (!expr_type) {
