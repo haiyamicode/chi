@@ -2438,6 +2438,20 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::GE:
         case TokenType::EQ:
         case TokenType::NE: {
+            // Struct comparison via operator method
+            if (data.resolved_call) {
+                auto result = compile_fn_call(fn, data.resolved_call);
+                switch (data.op_type) {
+                case TokenType::EQ: return result;                          // Eq::eq → bool
+                case TokenType::NE: return builder.CreateNot(result);      // !Eq::eq
+                default: {
+                    // Ord::cmp returns int; compare to 0
+                    auto zero = llvm::ConstantInt::get(result->getType(), 0);
+                    auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));
+                    return builder.CreateCmp(cmpop, result, zero);
+                }
+                }
+            }
             auto lhs = compile_comparator(fn, data.op1);
             auto rhs = compile_comparator(fn, data.op2);
             auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));

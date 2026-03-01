@@ -5,6 +5,7 @@ extern "C" {
     private unsafe func cx_free(address: *void);
     private unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     private unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
+    func memcmp(s1: *void, s2: *void, n: uint32) int;
 }
 
 unsafe func malloc(size: uint32) *void {

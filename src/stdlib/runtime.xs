@@ -648,6 +648,31 @@ struct __CxString {
             return result;
         }
     }
+
+    impl ops.Eq {
+        func eq(other: string) bool {
+            if this.length != other.length {
+                return false;
+            }
+            return mem.memcmp(this.data, other.data, this.length) == 0;
+        }
+    }
+
+    impl ops.Ord {
+        func cmp(other: string) int {
+            var min_len = this.length;
+            if other.length < min_len {
+                min_len = other.length;
+            }
+            var result = mem.memcmp(this.data, other.data, min_len);
+            if result != 0 {
+                return result;
+            }
+            if this.length < other.length { return -1; }
+            if this.length > other.length { return 1; }
+            return 0;
+        }
+    }
 }
 
 struct Map<K, V> {

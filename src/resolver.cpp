@@ -158,6 +158,8 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.MutIterator"] = IntrinsicSymbol::MutIterator;
     m_ctx->intrinsic_symbols["std.ops.MutIterable"] = IntrinsicSymbol::MutIterable;
     m_ctx->intrinsic_symbols["std.ops.Slice"] = IntrinsicSymbol::Slice;
+    m_ctx->intrinsic_symbols["std.ops.Eq"] = IntrinsicSymbol::Eq;
+    m_ctx->intrinsic_symbols["std.ops.Ord"] = IntrinsicSymbol::Ord;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -1415,6 +1417,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (!scope.is_unsafe_block) {
                     error(node, "pointer comparison requires unsafe block");
                     return nullptr;
+                }
+            }
+            // Try operator method for struct types (e.g. Eq::eq for strings)
+            IntrinsicSymbol cmp_sym = get_operator_intrinsic_symbol(data.op_type);
+            if (cmp_sym != IntrinsicSymbol::None) {
+                auto method_call = try_resolve_operator_method(cmp_sym, t1, t2, data.op1,
+                                                               data.op2, node, scope);
+                if (method_call.has_value()) {
+                    data.resolved_call = method_call->call_node;
                 }
             }
             return get_system_types()->bool_;
@@ -4279,10 +4290,19 @@ IntrinsicSymbol Resolver::get_operator_intrinsic_symbol(TokenType op_type) {
     switch (op_type) {
     case TokenType::ADD:
         return IntrinsicSymbol::Add;
+    case TokenType::EQ:
+    case TokenType::NE:
+        return IntrinsicSymbol::Eq;
+    case TokenType::LT:
+    case TokenType::LE:
+    case TokenType::GT:
+    case TokenType::GE:
+        return IntrinsicSymbol::Ord;
     default:
         return IntrinsicSymbol::None;
     }
 }
+
 
 ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node *node,
                                                  ResolveScope &scope) {

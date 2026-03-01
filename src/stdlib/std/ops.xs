@@ -112,16 +112,13 @@ interface Slice<Out> {
 // interface ShrAssign<Rhs> {
 //   mut func shr_assign(rhs: Rhs);
 // }
-// interface Eq<Rhs> {
-//   func eq(other: &Rhs) bool;
-// }
-// interface Ord<Rhs> {
-//   func lt(other: &Rhs) bool;
-//   func le(other: &Rhs) bool;
-//   func gt(other: &Rhs) bool;
-//   func ge(other: &Rhs) bool;
-//   func eq(other: &Rhs) bool;
-// }
+interface Eq {
+    func eq(other: This) bool;
+}
+
+interface Ord {
+    func cmp(other: This) int;
+}
 // // Integer trait combining all common integer operations
 // interface Int<T=This> {
 //   // Inherit arithmetic operations

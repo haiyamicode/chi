@@ -113,6 +113,7 @@ void cx_string_concat(CxString *dest, CxString *s1, CxString *s2) {
     memcpy(dest->data + s1->size, s2->data, s2->size);
 }
 
+
 char *cx_cstring_copy(char *src) {
     if (src == nullptr) return nullptr;
     size_t len = strlen(src);
