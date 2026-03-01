@@ -1,0 +1,23 @@
+if expressions:
+if_expr(5)=1
+if_expr(-3)=-1
+if statements:
+positive
+non-positive
+positive
+switch expressions:
+switch_expr(1)=one
+switch_expr(2)=two
+switch_expr(99)=other
+switch statements:
+one
+two
+other
+nested if expressions:
+nested_if_expr(20)=2
+nested_if_expr(5)=1
+nested_if_expr(-1)=0
+if/switch in unsafe blocks:
+x=5
+one
+other

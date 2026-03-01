@@ -2667,7 +2667,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             ensure_temp_owner(stmt, stmt_type, child_scope);
         }
         if (data.return_expr) {
-            return resolve(data.return_expr, child_scope);
+            auto type = resolve(data.return_expr, child_scope);
+            if (!type || type->kind == TypeKind::Void) {
+                // Not value-producing (e.g. void if/switch) — reclassify as statement
+                ensure_temp_owner(data.return_expr, type, child_scope);
+                data.return_expr->index = data.statements.len;
+                data.statements.add(data.return_expr);
+                data.return_expr = nullptr;
+                return get_system_types()->void_;
+            }
+            return type;
         }
         return get_system_types()->void_;
     }

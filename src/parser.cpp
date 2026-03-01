@@ -1296,8 +1296,9 @@ Node *Parser::parse_stmt(bool *as_expr) {
     switch (token->type) {
     case TokenType::KW_IF: {
         auto node = parse_if_expr();
-        // If-expression: if with else as last expr in block
-        if (node->data.if_expr.else_node && next_is(TokenType::RBRACE))
+        // If-expression: only when both branches have return expressions
+        if (node->data.if_expr.else_node && next_is(TokenType::RBRACE) &&
+            node->data.if_expr.then_block->data.block.return_expr)
             *as_expr = true;
         return node;
     }
