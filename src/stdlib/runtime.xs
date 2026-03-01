@@ -27,12 +27,7 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(
-        type_info: *void,
-        data_ptr: *void,
-        vtable_ptr: *void,
-        type_id: uint32
-    );
+    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -314,13 +309,7 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(
-                stringf(
-                    "expected {}, got {}",
-                    json_kind_display(kind),
-                    json_kind_display(this.kind)
-                )
-            );
+            panic(stringf("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
         }
     }
 
@@ -785,10 +774,6 @@ struct Promise<T> {
         return p;
     }
 
-    func delete() {
-        this.data.delete();
-    }
-
     func resolve(value: T) {
         var state = this.data.as_ref();
         if state.state != 0 {
@@ -832,12 +817,10 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(
-        func (resolve) {
-            timeout(ms, func [resolve] () {
-                resolve({});
-            });
-        }
-    );
+    return Promise<Unit>.make(func (resolve) {
+        timeout(ms, func [resolve] () {
+            resolve({});
+        });
+    });
 }
 

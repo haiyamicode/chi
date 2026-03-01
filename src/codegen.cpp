@@ -2221,6 +2221,14 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op, ChiType *type) {
 llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
+        // Write result directly into resolved_outlet alloca, then load from it
+        if (expr->resolved_outlet) {
+            auto &builder = *m_ctx->llvm_builder.get();
+            auto dest = get_var(expr->resolved_outlet);
+            auto type_l = compile_type(get_chitype(expr));
+            compile_fn_call(fn, expr, nullptr, dest);
+            return builder.CreateLoad(type_l, dest);
+        }
         auto &call_data = expr->data.fn_call_expr;
 
         // Handle optional chaining method calls: obj?.method()
@@ -2471,7 +2479,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // Check if RHS constructs in-place at dest (resolved_outlet set)
             bool in_place = data.op2->escape.moved &&
                             data.op2->type == ast::NodeType::ConstructExpr &&
-                            data.op2->data.construct_expr.resolved_outlet;
+                            data.op2->resolved_outlet;
             // If in-place, destruct old BEFORE RHS overwrites dest
             if (in_place && destruct_old) {
                 compile_destruction_for_type(fn, ref.address, dest_type);
@@ -2917,7 +2925,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         // Calculate element type first - for 'new' expressions, we need to allocate
         // the element type, not the pointer type
         auto type = data.is_new ? get_chitype(expr)->get_elem() : get_chitype(expr);
-        auto ptr = data.resolved_outlet ? compile_expr_ref(fn, data.resolved_outlet).address
+        auto ptr = expr->resolved_outlet ? compile_expr_ref(fn, expr->resolved_outlet).address
                                         : compile_alloc(fn, expr, data.is_new, type);
         compile_construction(fn, ptr, type, expr);
         return data.is_new ? ptr : builder.CreateLoad(compile_type(type), ptr);
@@ -3019,8 +3027,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         llvm::Value *var = nullptr;
         if (ret_type && ret_type->kind != TypeKind::Void) {
-            if (data.resolved_outlet) {
-                var = compile_expr_ref(fn, data.resolved_outlet).address;
+            if (expr->resolved_outlet) {
+                var = compile_expr_ref(fn, expr->resolved_outlet).address;
             } else {
                 var = compile_alloc(fn, expr, false);
             }
@@ -3073,8 +3081,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &builder = *m_ctx->llvm_builder;
         llvm::Value *var = nullptr;
         if (ret_type->kind != TypeKind::Void) {
-            if (data.resolved_outlet) {
-                var = compile_expr_ref(fn, data.resolved_outlet).address;
+            if (expr->resolved_outlet) {
+                var = compile_expr_ref(fn, expr->resolved_outlet).address;
             } else {
                 var = compile_alloc(fn, expr, false);
             }
@@ -4178,8 +4186,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         }
     }
     case ast::NodeType::FnCallExpr: {
-        auto &data = expr->data.fn_call_expr;
         auto &builder = *m_ctx->llvm_builder.get();
+        if (expr->resolved_outlet) {
+            auto dest = get_var(expr->resolved_outlet);
+            compile_fn_call(fn, expr, nullptr, dest);
+            return RefValue::from_address(dest);
+        }
         auto ret = compile_fn_call(fn, expr);
         auto var = compile_alloc(fn, expr);
         builder.CreateStore(ret, var);
@@ -4344,7 +4356,7 @@ Compiler::compile_fn_args(Function *fn, Function *callee, array<ast::Node *> arg
         if (out_temporaries && arg_node->type == ast::NodeType::ConstructExpr) {
             auto &construct_data = arg_node->data.construct_expr;
             // Only track non-new constructs without an outlet (these create temporaries)
-            if (!construct_data.is_new && !construct_data.resolved_outlet) {
+            if (!construct_data.is_new && !arg_node->resolved_outlet) {
                 auto arg_type = get_chitype(arg_node);
                 auto destructor = ChiTypeStruct::get_destructor(arg_type);
                 if (destructor) {
@@ -4670,7 +4682,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         if (arg->type == ast::NodeType::ConstructExpr) {
             auto &construct_data = arg->data.construct_expr;
             // Only track non-new constructs without an outlet (these create temporaries)
-            if (!construct_data.is_new && !construct_data.resolved_outlet) {
+            if (!construct_data.is_new && !arg->resolved_outlet) {
                 auto arg_type = get_chitype(arg);
                 auto destructor = ChiTypeStruct::get_destructor(arg_type);
                 if (destructor) {
@@ -6970,7 +6982,7 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
                 if (!node)
                     return;
                 if (node->type == ast::NodeType::ConstructExpr) {
-                    node->data.construct_expr.resolved_outlet = nullptr;
+                    node->resolved_outlet = nullptr;
                     for (auto item : node->data.construct_expr.items) {
                         clear_outlets(item);
                     }
@@ -7005,6 +7017,10 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
 
     auto scope = fn->push_scope();
     fn->active_blocks.push_back(&data);
+    for (auto var : data.stmt_temp_vars) {
+        compile_stmt(fn, var);
+    }
+
     for (auto stmt : data.statements) {
         compile_stmt(fn, stmt);
     }

@@ -1278,7 +1278,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             track_move_sink(scope.parent_fn_node, data.expr, expr_type, node,
                             var_type ? var_type : expr_type);
             if (var_type) {
-                if (expr_type->kind == TypeKind::Undefined || expr_type->kind == TypeKind::ZeroInit) {
+                if (expr_type->kind == TypeKind::Undefined ||
+                    expr_type->kind == TypeKind::ZeroInit) {
                     return var_type;
                 }
                 if (data.expr->type != NodeType::ConstructExpr ||
@@ -1396,6 +1397,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.op2, t2, t1);
             return t1;
         }
+
+        // Non-assignment: operands are consumed by the operator, ensure any temps are owned
+        ensure_temp_owner(data.op1, t1, scope);
+        ensure_temp_owner(data.op2, t2, scope);
 
         switch (data.op_type) {
         case TokenType::EQ:
@@ -1868,8 +1873,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Return-move optimization: when returning a simple local/param variable,
         // mark the expression as moved (bitwise copy instead of deep copy).
         // The codegen will skip destruction of this variable at the return site.
-        if (data.expr && !data.expr->escape.moved &&
-            data.expr->type == NodeType::Identifier &&
+        if (data.expr && !data.expr->escape.moved && data.expr->type == NodeType::Identifier &&
             data.expr->data.identifier.kind == ast::IdentifierKind::Value) {
             auto *decl = data.expr->data.identifier.decl;
             if (decl && (decl->type == NodeType::VarDecl || decl->type == NodeType::ParamDecl)) {
@@ -1928,6 +1932,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!expr_type) {
             return nullptr;
         }
+        ensure_temp_owner(data.expr, expr_type, scope);
 
         // Optional chaining: unwrap ?T to T, resolve member, wrap result in ?
         if (data.is_optional_chain) {
@@ -2228,7 +2233,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.construct_expr;
         auto dest_type = scope.value_type; // Save before resolve calls modify scope
         if (scope.move_outlet && !data.is_new) {
-            data.resolved_outlet = scope.move_outlet;
+            node->resolved_outlet = scope.move_outlet;
             node->escape.moved = true;
         }
         ChiType *value_type;
@@ -2301,8 +2306,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto elem_type = value_type->data.fixed_array.elem;
             auto fa_size = value_type->data.fixed_array.size;
             if ((uint32_t)data.items.len > fa_size) {
-                error(node, "too many items for [{}]{}: got {}, max {}",
-                      fa_size, format_type_display(elem_type), data.items.len, fa_size);
+                error(node, "too many items for [{}]{}: got {}, max {}", fa_size,
+                      format_type_display(elem_type), data.items.len, fa_size);
             }
             auto item_scope = scope.set_value_type(elem_type);
             item_scope.move_outlet = nullptr; // Items need separate temporaries
@@ -2374,8 +2379,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         // Can't construct in-place if dest type differs from construct type
-        if (data.resolved_outlet && dest_type && dest_type != result_type) {
-            data.resolved_outlet = nullptr;
+        if (node->resolved_outlet && dest_type && dest_type != result_type) {
+            node->resolved_outlet = nullptr;
         }
 
         if (data.spread_expr) {
@@ -2529,7 +2534,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.if_expr;
 
         if (scope.move_outlet) {
-            data.resolved_outlet = scope.move_outlet;
+            node->resolved_outlet = scope.move_outlet;
             node->escape.moved = true;
         }
 
@@ -2593,7 +2598,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             child_scope = child_scope.set_is_unsafe_block(true);
         }
         for (auto stmt : data.statements) {
-            resolve(stmt, child_scope);
+            auto stmt_type = resolve(stmt, child_scope);
+            ensure_temp_owner(stmt, stmt_type, child_scope);
         }
         if (data.return_expr) {
             return resolve(data.return_expr, child_scope);
@@ -3071,6 +3077,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!expr_type) {
             return nullptr;
         }
+        ensure_temp_owner(data.expr, expr_type, scope);
 
         // Determine the expected index type based on expr_type
         ChiType *expected_index_type = nullptr;
@@ -3287,6 +3294,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
 
                 auto expr_type = resolve(data.expr, scope);
+                ensure_temp_owner(data.expr, expr_type, scope);
 
                 // FixedArray iteration (also handles &[N]T and &mut [N]T)
                 auto fa_type = expr_type;
@@ -3752,7 +3760,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::SwitchExpr: {
         auto &data = node->data.switch_expr;
         if (scope.move_outlet) {
-            data.resolved_outlet = scope.move_outlet;
+            node->resolved_outlet = scope.move_outlet;
             node->escape.moved = true;
         }
         auto expr_type = resolve(data.expr, scope);
@@ -4199,6 +4207,7 @@ bool Resolver::is_addressable(ast::Node *node) {
     case NodeType::Identifier:
     case NodeType::DotExpr:
     case NodeType::IndexExpr:
+    case NodeType::LiteralExpr: // static lifetime, no temp needed
         return true;
 
     case NodeType::ParenExpr:
@@ -4207,6 +4216,7 @@ bool Resolver::is_addressable(ast::Node *node) {
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
         return data.op_type == TokenType::MUL ||
+               data.op_type == TokenType::KW_MOVE ||
                (data.op_type == TokenType::LNOT && data.is_suffix && data.resolved_call);
     }
 
@@ -4337,8 +4347,8 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
                     auto concrete_fn_type =
                         get_fn_type(base_fn.return_type, &base_fn.params, base_fn.is_variadic,
                                     derived_type, base_fn.is_extern, nullptr);
-                    child_method = derived.add_member(get_allocator(), node->name, node,
-                                                      concrete_fn_type);
+                    child_method =
+                        derived.add_member(get_allocator(), node->name, node, concrete_fn_type);
                     child_method->orig_parent = base_type;
                 }
             } else if (!child_method) {
@@ -5592,6 +5602,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
 
             // Move tracking for function arguments
             track_move_sink(scope.parent_fn_node, arg, arg_type, node, param_type);
+
+            // ConstructExpr args are cleaned up by out_temporaries immediately after the call
+            if (arg->type != NodeType::ConstructExpr)
+                ensure_temp_owner(arg, arg_type, scope);
         }
     }
 
@@ -5686,6 +5700,42 @@ ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
     node->data.var_decl.is_generated = true;
     node->data.var_decl.expr = expr;
     return node;
+}
+
+ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, ResolveScope &scope) {
+    // Whitelist: only node types that can produce a non-addressable temporary value
+    switch (expr->type) {
+    case NodeType::FnCallExpr:
+    case NodeType::ConstructExpr:
+    case NodeType::IfExpr:
+    case NodeType::SwitchExpr:
+    case NodeType::Block:
+        break;
+    default:
+        return nullptr;
+    }
+    if (is_addressable(expr))
+        return nullptr;
+    if (expr->resolved_outlet) // already has an outlet (e.g. move_outlet set earlier)
+        return nullptr;
+    if (expr_type && expr_type->kind == TypeKind::MoveRef) // &move transfers ownership — no temp
+        return nullptr;
+    if (!should_destroy(expr, expr_type))
+        return nullptr;
+    if (!scope.block || !scope.parent_fn_node)
+        return nullptr;
+
+    auto temp = get_dummy_var("__tmp"); // no expr — just an alloca, filled at call site
+    temp->resolved_type = expr_type;
+    temp->token = expr->token;
+    temp->module = expr->module;
+    temp->decl_order = scope.parent_fn_def()->next_decl_order++;
+
+    expr->resolved_outlet = temp;
+    scope.block->stmt_temp_vars.add(temp);
+    scope.block->cleanup_vars.add(temp);
+    scope.parent_fn_def()->has_cleanup = true;
+    return temp;
 }
 
 static string build_narrowing_path(ast::Node *expr) {

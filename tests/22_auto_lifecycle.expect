@@ -72,4 +72,33 @@ Before function exit - destroys in reverse declaration order
   TrackedVar.delete('first')
 After helper returned
 
+=== Test 10: Temporary cleanup (no leaks) ===
+--- fn call arg ---
+  TrackedVar.new('fn-arg')
+  TrackedVar.copy('fn-arg')
+  TrackedVar.delete('fn-arg')
+after consume(make())
+--- nested fn call arg ---
+  TrackedVar.new('nested')
+  TrackedVar.copy('nested')
+  TrackedVar.copy('nested')
+  TrackedVar.delete('nested')
+after consume(identity(make()))
+--- orphaned fn call ---
+  TrackedVar.new('orphan-fn')
+after orphaned make()
+--- orphaned construct expr ---
+  TrackedVar.new('orphan-construct')
+after orphaned TrackedVar construct
+--- if expr as fn arg ---
+  TrackedVar.new('if-true')
+  TrackedVar.copy('if-true')
+  TrackedVar.delete('if-true')
+after consume(if ...)
+  TrackedVar.delete('if-true')
+  TrackedVar.delete('orphan-construct')
+  TrackedVar.delete('orphan-fn')
+  TrackedVar.delete('nested')
+  TrackedVar.delete('nested')
+  TrackedVar.delete('fn-arg')
 All tests completed!

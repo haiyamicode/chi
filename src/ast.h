@@ -286,6 +286,7 @@ struct LifetimeParam {
 struct Block {
     array<Node *> statements = {};
     array<Node *> implicit_vars = {};
+    array<Node *> stmt_temp_vars = {}; // arg temporaries, compiled after push_scope
     array<Node *> cleanup_vars = {};
     cx::Scope *scope = nullptr;
     bool is_arrow = false;
@@ -362,7 +363,6 @@ struct IfExpr {
     Node *condition = nullptr;
     Node *then_block = nullptr;
     Node *else_node = nullptr; // can be null, block node, or another if node
-    Node *resolved_outlet = nullptr;
     array<Node *> post_narrow_vars = {}; // narrowed vars emitted after guard clause
 };
 
@@ -426,7 +426,6 @@ struct ConstructExpr {
     array<Node *> items = {};
     array<Node *> field_inits = {};
     Node *type = nullptr;
-    Node *resolved_outlet = nullptr;
     Node *spread_expr = nullptr; // ...expr spread source
 };
 
@@ -514,7 +513,6 @@ struct WhileStmt {
 struct SwitchExpr {
     Node *expr = nullptr;
     array<Node *> cases = {};
-    Node *resolved_outlet = nullptr;
     bool is_type_switch = false;
 };
 
@@ -654,6 +652,7 @@ struct Node {
     string global_id = "";
     IntrinsicSymbol symbol = IntrinsicSymbol::None;
     int32_t decl_order = -1; // declaration order within function (-1 = not a local)
+    Node *resolved_outlet = nullptr; // synthetic __tmp that owns this expr's result (for cleanup)
 
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;

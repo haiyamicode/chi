@@ -290,6 +290,13 @@ struct TrackedVar {
     func delete() {
         printf("  TrackedVar.delete('{}')\n", this.name);
     }
+
+    impl ops.CopyFrom<TrackedVar> {
+        func copy_from(source: &TrackedVar) {
+            this.name = source.name;
+            printf("  TrackedVar.copy('{}')\n", source.name);
+        }
+    }
 }
 
 func test_multiple_vars_helper() {
@@ -306,6 +313,41 @@ func test_multiple_vars() {
     println("");
 }
 
+func make_tracked(name: string) TrackedVar {
+    return {name};
+}
+
+func consume_tracked(t: TrackedVar) {
+}
+
+func identity_tracked(t: TrackedVar) TrackedVar {
+    return t;
+}
+
+func test_temp_cleanup() {
+    println("=== Test 10: Temporary cleanup (no leaks) ===");
+
+    println("--- fn call arg ---");
+    consume_tracked(make_tracked("fn-arg"));
+    println("after consume(make())");
+
+    println("--- nested fn call arg ---");
+    consume_tracked(identity_tracked(make_tracked("nested")));
+    println("after consume(identity(make()))");
+
+    println("--- orphaned fn call ---");
+    make_tracked("orphan-fn");
+    println("after orphaned make()");
+
+    println("--- orphaned construct expr ---");
+    TrackedVar{"orphan-construct"};
+    println("after orphaned TrackedVar construct");
+
+    println("--- if expr as fn arg ---");
+    consume_tracked(if true => make_tracked("if-true") else => make_tracked("if-false"));
+    println("after consume(if ...)");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -316,6 +358,7 @@ func main() {
     test_optional_direct();
     test_both_lifecycles();
     test_multiple_vars();
+    test_temp_cleanup();
     println("All tests completed!");
 }
 
