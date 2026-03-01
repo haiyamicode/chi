@@ -312,7 +312,7 @@ std::string get_value_display(const CxAny &v) {
     }
 }
 
-void cx_print_any(CxAny *value) { fmt::print(get_value_display(*value)); }
+void cx_print_any(CxAny *value) { fmt::print("{}", get_value_display(*value)); }
 
 void cx_print_number(uint64_t value) { fmt::print("{}\n", value); }
 
@@ -378,7 +378,7 @@ void cx_printf(CxString *format, CxSlice *values) {
 
 void cx_print(CxString str) {
     string s(str.data, str.size);
-    fmt::print(s);
+    fmt::print("{}", s);
 }
 
 void cx_array_new(CxArray *dest) {
