@@ -530,14 +530,14 @@ struct TrackedVal {
     impl ops.Add {
         func add(rhs: TrackedVal) TrackedVal {
             printf("  TrackedVal.add({}, {})\n", this.id, rhs.id);
-            return TrackedVal{this.id + rhs.id};
+            return {this.id + rhs.id};
         }
     }
 
     // Regular method with by-value param (same signature as add)
     func combine(other: TrackedVal) TrackedVal {
         printf("  TrackedVal.combine({}, {})\n", this.id, other.id);
-        return TrackedVal{this.id + other.id};
+        return {this.id + other.id};
     }
 
     // Method that consumes param without returning
@@ -548,7 +548,7 @@ struct TrackedVal {
     // Method with multiple by-value params
     func merge(a: TrackedVal, b: TrackedVal) TrackedVal {
         printf("  TrackedVal.merge({}, {}, {})\n", this.id, a.id, b.id);
-        return TrackedVal{this.id + a.id + b.id};
+        return {this.id + a.id + b.id};
     }
 }
 

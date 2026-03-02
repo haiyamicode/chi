@@ -16,3 +16,35 @@ call + call + var: (30, 31)
 generic add calls: (3, 3)
 four temps: (11, 11)
 temp + generic: (102, 104)
+=== Binary operators ===
+add: [13, 24]
+sub: [7, 16]
+mul: [30, 80]
+div: [3, 5]
+rem: [1, 0]
+=== Bitwise operators ===
+bitand: [15, 15]
+bitor: [255, 255]
+bitxor: [240, 240]
+=== Shift operators ===
+shl: [32, 128]
+shr: [2, 2]
+=== Unary operators ===
+neg: [-10, -20]
+not: [-1, 0]
+=== Compound assignments ===
++=: [15, 25]
+-=: [12, 22]
+*=: [24, 44]
+/=: [8, 4]
+%=: [2, 0]
+&=: [2, 0]
+|=: [18, 32]
+^=: [237, 223]
+<<=: [16, 16]
+>>=: [4, 8]
+=== Generic with Sub ===
+generic sub: [7, 16]
+=== Temporaries ===
+call - call: [7, 16]
+chain: [3, 5]

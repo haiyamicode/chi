@@ -2439,6 +2439,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::ADD:
         case TokenType::SUB: {
+            if (data.resolved_call) {
+                return compile_fn_call(fn, data.resolved_call);
+            }
             auto value = compile_expr(fn, data.op1);
             auto type = get_chitype(data.op1);
             if (type->kind == TypeKind::Float) {
@@ -2448,6 +2451,13 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 auto zero = llvm::ConstantInt::get(compile_type(type), 0);
                 return data.op_type == TokenType::ADD ? value : builder.CreateSub(zero, value);
             }
+        }
+        case TokenType::NOT: {
+            if (data.resolved_call) {
+                return compile_fn_call(fn, data.resolved_call);
+            }
+            auto value = compile_expr(fn, data.op1);
+            return builder.CreateNot(value);
         }
         default:
             panic("not implemented: {}", PRINT_ENUM(data.op_type));
@@ -2563,24 +2573,17 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
 
-            // Try operator method (e.g. string += uses Add interface)
-            auto base_op = get_assignment_op(data.op_type);
-            auto intrinsic = Resolver::get_operator_intrinsic_symbol(base_op);
-            if (intrinsic != IntrinsicSymbol::None) {
-                auto rhs_type = get_chitype(data.op2);
-                ResolveScope dummy_scope = {};
-                auto method_call = get_resolver()->try_resolve_operator_method(
-                    intrinsic, lhs_type, rhs_type, data.op1, data.op2, expr, dummy_scope);
-                if (method_call.has_value()) {
-                    auto result = compile_fn_call(fn, method_call->call_node);
-                    // Destruct old value, then move the temp result in (no copy needed)
-                    compile_destruction_for_type(fn, ref.address, lhs_type);
-                    builder.CreateStore(result, ref.address);
-                    return result;
-                }
+            // Operator method (e.g. string += uses Add, Vec2 -= uses Sub)
+            if (data.resolved_call) {
+                auto result = compile_fn_call(fn, data.resolved_call);
+                // Destruct old value, then move the temp result in (no copy needed)
+                compile_destruction_for_type(fn, ref.address, lhs_type);
+                builder.CreateStore(result, ref.address);
+                return result;
             }
 
             // Primitive types: load, compute, store
+            auto base_op = get_assignment_op(data.op_type);
             auto lhs_val = builder.CreateLoad(compile_type(lhs_type), ref.address);
             auto rhs_val = compile_expr(fn, data.op2);
             auto rhs_type = get_chitype(data.op2);

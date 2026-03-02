@@ -55,6 +55,147 @@ struct Wrapper {
     }
 }
 
+// Vec2: tests all arithmetic, bitwise, shift, and unary operator interfaces
+struct Vec2 {
+    x: int = 0;
+    y: int = 0;
+
+    impl ops.Display {
+        func display() string {
+            return stringf("[{}, {}]", this.x, this.y);
+        }
+    }
+
+    impl ops.Add {
+        func add(rhs: Vec2) Vec2 {
+            return {x: this.x + rhs.x, y: this.y + rhs.y};
+        }
+    }
+    impl ops.Sub {
+        func sub(rhs: Vec2) Vec2 {
+            return {x: this.x - rhs.x, y: this.y - rhs.y};
+        }
+    }
+    impl ops.Mul {
+        func mul(rhs: Vec2) Vec2 {
+            return {x: this.x * rhs.x, y: this.y * rhs.y};
+        }
+    }
+    impl ops.Div {
+        func div(rhs: Vec2) Vec2 {
+            return {x: this.x / rhs.x, y: this.y / rhs.y};
+        }
+    }
+    impl ops.Rem {
+        func rem(rhs: Vec2) Vec2 {
+            return {x: this.x % rhs.x, y: this.y % rhs.y};
+        }
+    }
+    impl ops.Neg {
+        func neg() Vec2 {
+            return {x: -this.x, y: -this.y};
+        }
+    }
+    impl ops.BitAnd {
+        func bitand(rhs: Vec2) Vec2 {
+            return {x: this.x & rhs.x, y: this.y & rhs.y};
+        }
+    }
+    impl ops.BitOr {
+        func bitor(rhs: Vec2) Vec2 {
+            return {x: this.x | rhs.x, y: this.y | rhs.y};
+        }
+    }
+    impl ops.BitXor {
+        func bitxor(rhs: Vec2) Vec2 {
+            return {x: this.x ^ rhs.x, y: this.y ^ rhs.y};
+        }
+    }
+    impl ops.Not {
+        func not() Vec2 {
+            return {x: ~this.x, y: ~this.y};
+        }
+    }
+    impl ops.Shl {
+        func shl(rhs: Vec2) Vec2 {
+            return {x: this.x << rhs.x, y: this.y << rhs.y};
+        }
+    }
+    impl ops.Shr {
+        func shr(rhs: Vec2) Vec2 {
+            return {x: this.x >> rhs.x, y: this.y >> rhs.y};
+        }
+    }
+}
+
+func make_vec2(x: int, y: int) Vec2 {
+    return {x: x, y: y};
+}
+
+func sub<V: ops.Sub>(a: V, b: V) V {
+    return a - b;
+}
+
+func test_all_operators() {
+    println("=== Binary operators ===");
+    var a = Vec2{x: 10, y: 20};
+    var b = Vec2{x: 3, y: 4};
+    printf("add: {}\n", a + b);
+    printf("sub: {}\n", a - b);
+    printf("mul: {}\n", a * b);
+    printf("div: {}\n", a / b);
+    printf("rem: {}\n", a % b);
+
+    println("=== Bitwise operators ===");
+    var c = Vec2{x: 255, y: 15};
+    var d = Vec2{x: 15, y: 255};
+    printf("bitand: {}\n", c & d);
+    printf("bitor: {}\n", c | d);
+    printf("bitxor: {}\n", c ^ d);
+
+    println("=== Shift operators ===");
+    var e = Vec2{x: 8, y: 16};
+    var f = Vec2{x: 2, y: 3};
+    printf("shl: {}\n", e << f);
+    printf("shr: {}\n", e >> f);
+
+    println("=== Unary operators ===");
+    printf("neg: {}\n", -a);
+    var g = Vec2{x: 0, y: -1};
+    printf("not: {}\n", ~g);
+
+    println("=== Compound assignments ===");
+    var h = Vec2{x: 10, y: 20};
+    h += Vec2{x: 5, y: 5};
+    printf("+=: {}\n", h);
+    h -= Vec2{x: 3, y: 3};
+    printf("-=: {}\n", h);
+    h *= Vec2{x: 2, y: 2};
+    printf("*=: {}\n", h);
+    h /= Vec2{x: 3, y: 11};
+    printf("/=: {}\n", h);
+    h %= Vec2{x: 3, y: 4};
+    printf("%=: {}\n", h);
+    h &= Vec2{x: 255, y: 255};
+    printf("&=: {}\n", h);
+    h |= Vec2{x: 16, y: 32};
+    printf("|=: {}\n", h);
+    h ^= Vec2{x: 255, y: 255};
+    printf("^=: {}\n", h);
+    var i = Vec2{x: 1, y: 2};
+    i <<= Vec2{x: 4, y: 3};
+    printf("<<=: {}\n", i);
+    i >>= Vec2{x: 2, y: 1};
+    printf(">>=: {}\n", i);
+
+    println("=== Generic with Sub ===");
+    printf("generic sub: {}\n", sub<Vec2>(a, b));
+
+    println("=== Temporaries ===");
+    printf("call - call: {}\n", make_vec2(10, 20) - make_vec2(3, 4));
+    printf("chain: {}\n", make_vec2(1, 2) + make_vec2(3, 4) - make_vec2(1, 1));
+}
+
 func main() {
     let p1 = Point{0, 1};
     let p2 = Point{2, 3};
@@ -116,5 +257,7 @@ func main() {
     // Mixed: temporary op with result feeding into another op with var
     let p10 = make_point(100, 100) + add<Point>(p1, p2);
     printf("temp + generic: {}\n", p10);
+
+    test_all_operators();
 }
 

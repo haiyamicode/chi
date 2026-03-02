@@ -151,6 +151,17 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
+    m_ctx->intrinsic_symbols["std.ops.Sub"] = IntrinsicSymbol::Sub;
+    m_ctx->intrinsic_symbols["std.ops.Mul"] = IntrinsicSymbol::Mul;
+    m_ctx->intrinsic_symbols["std.ops.Div"] = IntrinsicSymbol::Div;
+    m_ctx->intrinsic_symbols["std.ops.Rem"] = IntrinsicSymbol::Rem;
+    m_ctx->intrinsic_symbols["std.ops.Neg"] = IntrinsicSymbol::Neg;
+    m_ctx->intrinsic_symbols["std.ops.BitAnd"] = IntrinsicSymbol::BitAnd;
+    m_ctx->intrinsic_symbols["std.ops.BitOr"] = IntrinsicSymbol::BitOr;
+    m_ctx->intrinsic_symbols["std.ops.BitXor"] = IntrinsicSymbol::BitXor;
+    m_ctx->intrinsic_symbols["std.ops.Not"] = IntrinsicSymbol::BitNot;
+    m_ctx->intrinsic_symbols["std.ops.Shl"] = IntrinsicSymbol::Shl;
+    m_ctx->intrinsic_symbols["std.ops.Shr"] = IntrinsicSymbol::Shr;
     m_ctx->intrinsic_symbols["std.ops.Sized"] = IntrinsicSymbol::Sized;
     m_ctx->intrinsic_symbols["std.ops.AllowUnsized"] = IntrinsicSymbol::AllowUnsized;
     m_ctx->intrinsic_symbols["std.ops.Construct"] = IntrinsicSymbol::Construct;
@@ -1393,7 +1404,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             }
-            auto var_scope = scope.set_value_type(t1).set_move_outlet(data.op1);
+            auto var_scope = scope.set_value_type(t1);
+            // For plain assignment, allow construct-into-target optimization.
+            // For compound assignments (+=, -=, etc.), don't set move_outlet because
+            // the old LHS value must be read by the operator method before being overwritten.
+            if (data.op_type == TokenType::ASS) {
+                var_scope = var_scope.set_move_outlet(data.op1);
+            }
             t2 = resolve(data.op2, var_scope);
             if (scope.parent_fn_node) {
                 auto lhs_decl = find_root_decl(data.op1);
@@ -1591,7 +1608,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // For unary arithmetic operators, don't propagate value_type context to operand
         // because the operator determines its own result type (e.g., -1 should be int, not uint64)
         auto operand_scope = scope;
-        if (data.op_type == TokenType::SUB || data.op_type == TokenType::ADD) {
+        if (data.op_type == TokenType::SUB || data.op_type == TokenType::ADD ||
+            data.op_type == TokenType::NOT) {
             operand_scope = scope.set_value_type(nullptr);
         }
         auto t = resolve(data.op1, operand_scope);
@@ -1601,6 +1619,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ensure_temp_owner(data.op1, t, scope);
         switch (auto tt = data.op_type) {
         case TokenType::SUB:
+            // For struct types, try Neg interface
+            if (t->kind == TypeKind::Struct) {
+                auto method_call = try_resolve_operator_method(
+                    IntrinsicSymbol::Neg, t, nullptr, data.op1, nullptr, node, scope);
+                if (method_call) {
+                    data.resolved_call = method_call->call_node;
+                    return method_call->return_type;
+                }
+            }
+            [[fallthrough]];
         case TokenType::ADD:
         case TokenType::INC:
         case TokenType::DEC:
@@ -1614,6 +1642,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.op1, t,
                              t->kind == TypeKind::Float ? t : get_system_types()->int_);
             return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
+        case TokenType::NOT: {
+            // For struct types, try Not interface (bitwise not ~x)
+            if (t->kind == TypeKind::Struct) {
+                auto method_call = try_resolve_operator_method(
+                    IntrinsicSymbol::BitNot, t, nullptr, data.op1, nullptr, node, scope);
+                if (method_call) {
+                    data.resolved_call = method_call->call_node;
+                    return method_call->return_type;
+                }
+            }
+            // Primitive bitwise NOT
+            check_assignment(data.op1, t, get_system_types()->int_);
+            return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
+        }
         case TokenType::MUL: {
             if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
                 if (t->is_raw_pointer() && !scope.is_unsafe_block &&
@@ -4431,6 +4473,24 @@ IntrinsicSymbol Resolver::get_operator_intrinsic_symbol(TokenType op_type) {
     switch (op_type) {
     case TokenType::ADD:
         return IntrinsicSymbol::Add;
+    case TokenType::SUB:
+        return IntrinsicSymbol::Sub;
+    case TokenType::MUL:
+        return IntrinsicSymbol::Mul;
+    case TokenType::DIV:
+        return IntrinsicSymbol::Div;
+    case TokenType::MOD:
+        return IntrinsicSymbol::Rem;
+    case TokenType::AND:
+        return IntrinsicSymbol::BitAnd;
+    case TokenType::OR:
+        return IntrinsicSymbol::BitOr;
+    case TokenType::XOR:
+        return IntrinsicSymbol::BitXor;
+    case TokenType::LSHIFT:
+        return IntrinsicSymbol::Shl;
+    case TokenType::RSHIFT:
+        return IntrinsicSymbol::Shr;
     case TokenType::EQ:
     case TokenType::NE:
         return IntrinsicSymbol::Eq;

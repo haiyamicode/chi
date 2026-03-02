@@ -1495,6 +1495,7 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
     case TokenType::AND:
     case TokenType::MUL:
     case TokenType::SUB:
+    case TokenType::NOT:
     case TokenType::LNOT:
     case TokenType::INC:
     case TokenType::DEC: {
