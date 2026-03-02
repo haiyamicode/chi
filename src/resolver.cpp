@@ -3012,6 +3012,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (auto body = fn_member->data.fn_def.body) {
                     resolve(body, fn_scope);
                     check_lifetime_constraints(&fn_member->data.fn_def);
+
+                    // Add params to cleanup_vars on the body block
+                    auto &proto_data = fn_member->data.fn_def.fn_proto->data.fn_proto;
+                    for (auto param : proto_data.params) {
+                        if (should_destroy(param) && !param->escape.is_capture()) {
+                            body->data.block.cleanup_vars.add(param);
+                            fn_member->data.fn_def.has_cleanup = true;
+                        }
+                    }
                 }
             };
             for (auto member : data.members) {

@@ -125,14 +125,17 @@ after unary
   TrackedVar.new('ctor-named')
   TrackedVar.copy('ctor-named')
   TrackedVar.copy('ctor-named')
+  TrackedVar.delete('ctor-named')
   c.inner.name='ctor-named', t3.name='ctor-named'
 --- rvalue to constructor ---
   TrackedVar.new('ctor-rvalue')
   TrackedVar.copy('ctor-rvalue')
+  TrackedVar.delete('ctor-rvalue')
   c2.inner.name='ctor-rvalue'
 --- move to constructor ---
   TrackedVar.new('ctor-moved')
   TrackedVar.copy('ctor-moved')
+  TrackedVar.delete('ctor-moved')
   c3.inner.name='ctor-moved'
   after move-construct
 --- multiple args ---
@@ -169,4 +172,80 @@ after unary
   TrackedVar.delete('ctor-named')
   TrackedVar.delete('ctor-named')
   TrackedVar.delete('named')
+=== Test 13: Method by-value param cleanup ===
+--- regular method ---
+  TrackedVal.new(10)
+  TrackedVal.new(5)
+  TrackedVal.copy(5)
+  TrackedVal.combine(10, 5)
+  TrackedVal.new(15)
+  TrackedVal.delete(5)
+  c.id=15
+--- operator method (a + b) ---
+  TrackedVal.new(20)
+  TrackedVal.new(7)
+  TrackedVal.copy(7)
+  TrackedVal.add(20, 7)
+  TrackedVal.new(27)
+  TrackedVal.delete(7)
+  TrackedVal.copy(27)
+  f.id=27
+--- void method ---
+  TrackedVal.new(30)
+  TrackedVal.new(8)
+  TrackedVal.copy(8)
+  TrackedVal.absorb(30, 8)
+  TrackedVal.delete(8)
+  after absorb
+--- multi-param method ---
+  TrackedVal.new(1)
+  TrackedVal.new(2)
+  TrackedVal.new(3)
+  TrackedVal.copy(2)
+  TrackedVal.copy(3)
+  TrackedVal.merge(1, 2, 3)
+  TrackedVal.new(6)
+  TrackedVal.delete(3)
+  TrackedVal.delete(2)
+  l.id=6
+--- chained operators ---
+  TrackedVal.new(1)
+  TrackedVal.new(2)
+  TrackedVal.new(3)
+  TrackedVal.copy(2)
+  TrackedVal.add(1, 2)
+  TrackedVal.new(3)
+  TrackedVal.delete(2)
+  TrackedVal.copy(3)
+  TrackedVal.add(3, 3)
+  TrackedVal.new(6)
+  TrackedVal.delete(3)
+  TrackedVal.copy(6)
+  s.id=6
+--- rvalue to method ---
+  TrackedVal.new(40)
+  TrackedVal.new(9)
+  TrackedVal.combine(40, 9)
+  TrackedVal.new(49)
+  TrackedVal.delete(9)
+  u.id=49
+--- scope exit ---
+  TrackedVal.delete(49)
+  TrackedVal.delete(40)
+  TrackedVal.delete(6)
+  TrackedVal.delete(3)
+  TrackedVal.delete(2)
+  TrackedVal.delete(1)
+  TrackedVal.delete(6)
+  TrackedVal.delete(3)
+  TrackedVal.delete(2)
+  TrackedVal.delete(1)
+  TrackedVal.delete(8)
+  TrackedVal.delete(30)
+  TrackedVal.delete(27)
+  TrackedVal.delete(7)
+  TrackedVal.delete(20)
+  TrackedVal.delete(15)
+  TrackedVal.delete(5)
+  TrackedVal.delete(10)
 All tests completed!

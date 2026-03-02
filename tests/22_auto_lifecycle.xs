@@ -507,6 +507,100 @@ func test_fn_arg_copy_semantics() {
     println("--- scope exit ---");
 }
 
+// TrackedVal: like TrackedVar but with Add operator for testing operator method cleanup
+struct TrackedVal {
+    id: int = 0;
+
+    func new(id: int) {
+        this.id = id;
+        printf("  TrackedVal.new({})\n", id);
+    }
+
+    func delete() {
+        printf("  TrackedVal.delete({})\n", this.id);
+    }
+
+    impl ops.CopyFrom<TrackedVal> {
+        func copy_from(source: &TrackedVal) {
+            this.id = source.id;
+            printf("  TrackedVal.copy({})\n", source.id);
+        }
+    }
+
+    impl ops.Add {
+        func add(rhs: TrackedVal) TrackedVal {
+            printf("  TrackedVal.add({}, {})\n", this.id, rhs.id);
+            return TrackedVal{this.id + rhs.id};
+        }
+    }
+
+    // Regular method with by-value param (same signature as add)
+    func combine(other: TrackedVal) TrackedVal {
+        printf("  TrackedVal.combine({}, {})\n", this.id, other.id);
+        return TrackedVal{this.id + other.id};
+    }
+
+    // Method that consumes param without returning
+    func absorb(other: TrackedVal) {
+        printf("  TrackedVal.absorb({}, {})\n", this.id, other.id);
+    }
+
+    // Method with multiple by-value params
+    func merge(a: TrackedVal, b: TrackedVal) TrackedVal {
+        printf("  TrackedVal.merge({}, {}, {})\n", this.id, a.id, b.id);
+        return TrackedVal{this.id + a.id + b.id};
+    }
+}
+
+func test_method_param_cleanup() {
+    println("=== Test 13: Method by-value param cleanup ===");
+
+    // Regular method: by-value param destructed at method exit
+    println("--- regular method ---");
+    var a = TrackedVal{10};
+    var b = TrackedVal{5};
+    var c = a.combine(b);
+    printf("  c.id={}\n", c.id);
+
+    // Operator method: rhs param destructed at method exit
+    println("--- operator method (a + b) ---");
+    var d = TrackedVal{20};
+    var e = TrackedVal{7};
+    var f = d + e;
+    printf("  f.id={}\n", f.id);
+
+    // Void method: by-value param destructed at method exit
+    println("--- void method ---");
+    var g = TrackedVal{30};
+    var h = TrackedVal{8};
+    g.absorb(h);
+    printf("  after absorb\n");
+
+    // Multiple by-value params on method
+    println("--- multi-param method ---");
+    var i = TrackedVal{1};
+    var j = TrackedVal{2};
+    var k = TrackedVal{3};
+    var l = i.merge(j, k);
+    printf("  l.id={}\n", l.id);
+
+    // Chained: a + b + c (intermediate temps)
+    println("--- chained operators ---");
+    var p = TrackedVal{1};
+    var q = TrackedVal{2};
+    var r = TrackedVal{3};
+    var s = p + q + r;
+    printf("  s.id={}\n", s.id);
+
+    // Rvalue to method: no caller-side copy, param still cleaned up
+    println("--- rvalue to method ---");
+    var t = TrackedVal{40};
+    var u = t.combine(TrackedVal{9});
+    printf("  u.id={}\n", u.id);
+
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -520,6 +614,7 @@ func main() {
     test_temp_cleanup();
     test_expr_contexts();
     test_fn_arg_copy_semantics();
+    test_method_param_cleanup();
     println("All tests completed!");
 }
 

@@ -27,7 +27,12 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    private unsafe func cx_throw(
+        type_info: *void,
+        data_ptr: *void,
+        vtable_ptr: *void,
+        type_id: uint32
+    );
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -47,7 +52,12 @@ extern "C" {
     private unsafe func cx_map_find(data: *void, key: *HashBytes) *void;
     private unsafe func cx_map_add(data: *void, key: *HashBytes, value: *void);
     private unsafe func cx_map_remove(data: *void, key: *HashBytes);
-    private unsafe func cx_map_keys(data: *void, dest_array: *void, key_size: uint32, key_type: *any);
+    private unsafe func cx_map_keys(
+        data: *void,
+        dest_array: *void,
+        key_size: uint32,
+        key_type: *any
+    );
     private unsafe func cx_parse_json(str: *string, result: *void);
     private unsafe func cx_json_value_delete(data: *void);
     private unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
@@ -162,7 +172,7 @@ struct Box<T: ops.AllowUnsized> {
 
     func new(ptr: &move T) {
         unsafe {
-            this._ptr = ptr as *T;
+            this._ptr = (move ptr) as *T;
         }
     }
 
@@ -310,7 +320,13 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(stringf("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
+            panic(
+                stringf(
+                    "expected {}, got {}",
+                    json_kind_display(kind),
+                    json_kind_display(this.kind)
+                )
+            );
         }
     }
 
@@ -792,11 +808,13 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
+    return Promise<Unit>.make(
+        func (resolve) {
+            timeout(ms, func [resolve] () {
+                resolve({});
+            });
+        }
+    );
 }
 
 struct MapIterator<K, V> {
