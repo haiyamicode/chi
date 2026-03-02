@@ -408,6 +408,141 @@ func test_default_multi_interface() {
     printf("ref desc: {}\n", d.describe());
 }
 
+// --- Interface embedding (interface-into-interface) ---
+
+interface Greetable {
+    func greet() string;
+}
+
+interface Farewellable {
+    func bye() string;
+}
+
+// Composite: embeds two interfaces
+interface Polite {
+    ...Greetable;
+    ...Farewellable;
+}
+
+struct Gentleman {
+    name: string = "";
+
+    impl Polite {
+        func greet() string {
+            return "Hello from " + this.name;
+        }
+        func bye() string {
+            return "Goodbye from " + this.name;
+        }
+    }
+}
+
+// Generic function using composite interface as bound
+func be_polite<T: Polite>(p: &T) string {
+    return p.greet() + ", " + p.bye();
+}
+
+// Multi-level: Level1 -> Level2 -> Level3
+interface HasId {
+    func id() int;
+}
+
+interface HasName {
+    func get_name() string;
+}
+
+interface Identifiable {
+    ...HasId;
+    ...HasName;
+}
+
+interface Printable {
+    func print_info() string;
+}
+
+// 3 levels deep
+interface FullEntity {
+    ...Identifiable;
+    ...Printable;
+}
+
+struct Entity {
+    _id: int = 0;
+    _name: string = "";
+
+    impl FullEntity {
+        func id() int {
+            return this._id;
+        }
+        func get_name() string {
+            return this._name;
+        }
+        func print_info() string {
+            return stringf("Entity({}, {})", this._id, this._name);
+        }
+    }
+}
+
+func test_interface_embedding() {
+    println("=== interface embedding ===");
+
+    // Direct calls on struct implementing composite interface
+    var g = Gentleman{name: "Bob"};
+    printf("greet: {}\n", g.greet());
+    printf("bye: {}\n", g.bye());
+
+    // Through composite interface ref
+    var p: &Polite = &g;
+    printf("ref greet: {}\n", p.greet());
+    printf("ref bye: {}\n", p.bye());
+
+    // Generic with composite bound
+    printf("generic polite: {}\n", be_polite<Gentleman>(&g));
+}
+
+func show_entity<T: FullEntity>(e: &T) string {
+    return stringf("#{}: {} - {}", e.id(), e.get_name(), e.print_info());
+}
+
+func sum_three<T: ops.Numeric>(a: T, b: T, c: T) T {
+    return a + b + c;
+}
+
+func bitwise_and<T: ops.Int>(a: T, b: T) T {
+    return a & b;
+}
+
+func test_multilevel_embedding() {
+    println("=== multi-level embedding ===");
+
+    var e = Entity{_id: 42, _name: "hero"};
+
+    // Direct calls
+    printf("id: {}\n", e.id());
+    printf("name: {}\n", e.get_name());
+    printf("info: {}\n", e.print_info());
+
+    // Through top-level composite ref
+    var fe: &FullEntity = &e;
+    printf("ref id: {}\n", fe.id());
+    printf("ref name: {}\n", fe.get_name());
+    printf("ref info: {}\n", fe.print_info());
+
+    // Generic with multi-level composite bound
+    printf("generic entity: {}\n", show_entity<Entity>(&e));
+}
+
+func test_ops_composite() {
+    println("=== ops composite interfaces ===");
+
+    // Numeric bound: int satisfies Add+Sub+Mul+Div+Rem+Neg+Eq+Ord
+    printf("sum_three int: {}\n", sum_three<int>(10, 20, 30));
+    printf("sum_three float: {}\n", sum_three<float>(1.5, 2.5, 3.0));
+
+    // Int bound: includes Numeric + bitwise ops
+    printf("bitwise_and int: {}\n", bitwise_and<int>(255, 15));
+}
+
 func main() {
     test_basic();
     test_heap_and_delete();
@@ -418,5 +553,8 @@ func main() {
     test_type_switch();
     test_default_methods();
     test_default_multi_interface();
+    test_interface_embedding();
+    test_multilevel_embedding();
+    test_ops_composite();
 }
 

@@ -2653,8 +2653,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 }
             }
 
-            // Check if this is an interface method call for an operator (from resolver)
-            if (data.resolved_call) {
+            // Check if this is an interface method call for an operator (from resolver).
+            // Only use resolved_call when the concrete type is a struct — for primitive
+            // types (int, float, etc.), fall through to built-in arithmetic. This handles
+            // composite interface bounds (e.g. Numeric) where the resolver sets
+            // resolved_call but the concrete instantiation is a primitive.
+            if (data.resolved_call && struct_type) {
                 return compile_fn_call(fn, data.resolved_call);
             }
 
@@ -4665,7 +4669,16 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             std::vector<llvm::Type *> param_types;
             for (unsigned i = 0; i < orig_fn_type->getNumParams(); i++) {
                 auto param = orig_fn_type->getParamType(i);
-                if (param == ctn_type_l) {
+                // For embedded interface methods, the fn_decl's 'this' param may be
+                // a fat pointer for the original interface (e.g. FatIFacePointer<Greetable>)
+                // rather than the composite (FatIFacePointer<Polite>). Match any fat
+                // interface pointer type.
+                bool is_fat_iface = (param == ctn_type_l);
+                if (!is_fat_iface) {
+                    if (auto *st = llvm::dyn_cast<llvm::StructType>(param))
+                        is_fat_iface = st->hasName() && st->getName().starts_with("FatIFacePointer<");
+                }
+                if (is_fat_iface) {
                     param_types.push_back(get_llvm_ptr_type()); // thin pointer for 'this'
                 } else {
                     param_types.push_back(param);

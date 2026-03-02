@@ -62,3 +62,21 @@ label: [sword]
 desc: Item(sword)
 ref label: [sword]
 ref desc: Item(sword)
+=== interface embedding ===
+greet: Hello from Bob
+bye: Goodbye from Bob
+ref greet: Hello from Bob
+ref bye: Goodbye from Bob
+generic polite: Hello from Bob, Goodbye from Bob
+=== multi-level embedding ===
+id: 42
+name: hero
+info: Entity(42, hero)
+ref id: 42
+ref name: hero
+ref info: Entity(42, hero)
+generic entity: #42: hero - Entity(42, hero)
+=== ops composite interfaces ===
+sum_three int: 60
+sum_three float: 7
+bitwise_and int: 15

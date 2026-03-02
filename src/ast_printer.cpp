@@ -335,6 +335,13 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::VarDecl: {
         auto &data = node->data.var_decl;
+        // Interface embed: ...InterfaceName (no var keyword, no field name)
+        if (data.is_embed && !data.is_field) {
+            emit("...");
+            if (data.type)
+                print_node(data.type);
+            break;
+        }
         if (data.is_field) {
             if (data.decl_spec) {
                 print_declspec(data.decl_spec);

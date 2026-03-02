@@ -1287,7 +1287,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *var_type = nullptr;
         if (data.type) {
             var_type = resolve_value(data.type, scope);
-            if (var_type && ChiTypeStruct::is_interface(var_type)) {
+            // Interface embed nodes (...InterfaceName inside an interface) are allowed
+            // to reference bare interface types. Struct embeds have is_field=true.
+            bool is_interface_embed = data.is_embed && !data.is_field;
+            if (var_type && ChiTypeStruct::is_interface(var_type) && !is_interface_embed) {
                 error(node, errors::BARE_INTERFACE_TYPE, format_type_display(var_type),
                       format_type_display(var_type));
             }
@@ -1349,7 +1352,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return var_type;
         }
         // Global mutable variables are not supported (struct fields and let bindings are fine)
-        if (!scope.parent_fn_node && !data.is_field && data.kind == ast::VarKind::Mutable) {
+        if (!scope.parent_fn_node && !data.is_field && !data.is_embed &&
+            data.kind == ast::VarKind::Mutable) {
             error(node, "global variables are not supported; use 'let' or 'const' for module-level "
                         "declarations");
             return var_type;
@@ -2946,6 +2950,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     for (auto impl_member : member->data.implement_block.members) {
                         resolve_struct_member(struct_type, impl_member, struct_scope);
                     }
+                } else if (member->type == NodeType::VarDecl &&
+                           member->data.var_decl.is_embed && !member->data.var_decl.is_field) {
+                    // Interface embed (...InterfaceName): resolve type only, don't add as
+                    // struct member. Actual method copying is done in resolve_struct_embed.
+                    // Struct embeds (...base: Type) have is_field=true and go through
+                    // resolve_struct_member normally.
+                    resolve(member, struct_scope);
                 } else {
                     resolve_struct_member(struct_type, member, struct_scope);
                 }

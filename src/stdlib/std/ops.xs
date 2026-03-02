@@ -105,35 +105,29 @@ interface Ord {
     func cmp(other: This) int;
 }
 
-// // Integer trait combining all common integer operations
-// interface Int<T=This> {
-//   // Inherit arithmetic operations
-//   ...Add<T>;
-//   ...Sub<T>;
-//   ...Mul<T>;
-//   ...Div<T>;
-//   ...Rem<T>;
-//   ...Neg<T>;
-//   // Inherit arithmetic assignment operations
-//   ...AddAssign<T>;
-//   ...SubAssign<T>;
-//   ...MulAssign<T>;
-//   ...DivAssign<T>;
-//   ...RemAssign<T>;
-//   // Inherit bitwise operations
-//   ...BitAnd<T>;
-//   ...BitOr<T>;
-//   ...BitXor<T>;
-//   ...Not<T>;
-//   ...Shl<T, T>;
-//   ...Shr<T, T>;
-//   // Inherit bitwise assignment operations
-//   ...BitAndAssign<T>;
-//   ...BitOrAssign<T>;
-//   ...BitXorAssign<T>;
-//   ...ShlAssign<T>;
-//   ...ShrAssign<T>;
-//   // Inherit comparison operations
-//   ...Eq<T>;
-//   ...Ord<T>;
-// }
+// Composite numeric interfaces
+interface Numeric {
+    ...Add;
+    ...Sub;
+    ...Mul;
+    ...Div;
+    ...Rem;
+    ...Neg;
+    ...Eq;
+    ...Ord;
+}
+
+interface Float {
+    ...Numeric;
+}
+
+interface Int {
+    ...Numeric;
+    ...BitAnd;
+    ...BitOr;
+    ...BitXor;
+    ...Not;
+    ...Shl;
+    ...Shr;
+}
+
