@@ -2229,6 +2229,10 @@ static llvm::BinaryOperator::BinaryOps get_binop(TokenType op, ChiType *type) {
         return llvm::BinaryOperator::BinaryOps::Or;
     case TokenType::XOR:
         return llvm::BinaryOperator::BinaryOps::Xor;
+    case TokenType::LSHIFT:
+        return llvm::BinaryOperator::BinaryOps::Shl;
+    case TokenType::RSHIFT:
+        return llvm::BinaryOperator::BinaryOps::AShr;
     case TokenType::LAND:
         return llvm::BinaryOperator::BinaryOps::And;
     case TokenType::LOR:
@@ -2463,8 +2467,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             if (data.resolved_call) {
                 auto result = compile_fn_call(fn, data.resolved_call);
                 switch (data.op_type) {
-                case TokenType::EQ: return result;                          // Eq::eq → bool
-                case TokenType::NE: return builder.CreateNot(result);      // !Eq::eq
+                case TokenType::EQ:
+                    return result; // Eq::eq → bool
+                case TokenType::NE:
+                    return builder.CreateNot(result); // !Eq::eq
                 default: {
                     // Ord::cmp returns int; compare to 0
                     auto zero = llvm::ConstantInt::get(result->getType(), 0);
@@ -2542,6 +2548,49 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 val = builder.CreateLoad(compile_type(dest_type), src_ref.address);
             compile_store_or_copy(fn, val, ref.address, dest_type, data.op2, destruct_old);
             return val;
+        }
+        case TokenType::ADD_ASS:
+        case TokenType::SUB_ASS:
+        case TokenType::MUL_ASS:
+        case TokenType::DIV_ASS:
+        case TokenType::MOD_ASS:
+        case TokenType::AND_ASS:
+        case TokenType::OR_ASS:
+        case TokenType::XOR_ASS:
+        case TokenType::LSHIFT_ASS:
+        case TokenType::RSHIFT_ASS: {
+            auto lhs_type = get_chitype(data.op1);
+            auto ref = compile_expr_ref(fn, data.op1);
+            assert(ref.address);
+
+            // Try operator method (e.g. string += uses Add interface)
+            auto base_op = get_assignment_op(data.op_type);
+            auto intrinsic = Resolver::get_operator_intrinsic_symbol(base_op);
+            if (intrinsic != IntrinsicSymbol::None) {
+                auto rhs_type = get_chitype(data.op2);
+                ResolveScope dummy_scope = {};
+                auto method_call = get_resolver()->try_resolve_operator_method(
+                    intrinsic, lhs_type, rhs_type, data.op1, data.op2, expr, dummy_scope);
+                if (method_call.has_value()) {
+                    auto result = compile_fn_call(fn, method_call->call_node);
+                    // Destruct old value, then move the temp result in (no copy needed)
+                    compile_destruction_for_type(fn, ref.address, lhs_type);
+                    builder.CreateStore(result, ref.address);
+                    return result;
+                }
+            }
+
+            // Primitive types: load, compute, store
+            auto lhs_val = builder.CreateLoad(compile_type(lhs_type), ref.address);
+            auto rhs_val = compile_expr(fn, data.op2);
+            auto rhs_type = get_chitype(data.op2);
+            if (rhs_type != lhs_type) {
+                rhs_val = compile_conversion(fn, rhs_val, rhs_type, lhs_type);
+            }
+            auto llvm_op = get_binop(base_op, lhs_type);
+            auto result = builder.CreateBinOp(llvm_op, lhs_val, rhs_val);
+            builder.CreateStore(result, ref.address);
+            return result;
         }
         default: {
             auto target_type = get_chitype(expr);
@@ -2961,7 +3010,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         // the element type, not the pointer type
         auto type = data.is_new ? get_chitype(expr)->get_elem() : get_chitype(expr);
         auto ptr = expr->resolved_outlet ? compile_expr_ref(fn, expr->resolved_outlet).address
-                                        : compile_alloc(fn, expr, data.is_new, type);
+                                         : compile_alloc(fn, expr, data.is_new, type);
         compile_construction(fn, ptr, type, expr);
         return data.is_new ? ptr : builder.CreateLoad(compile_type(type), ptr);
     }
@@ -3718,8 +3767,8 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto constructor_fn = *entry;
             auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
             auto args = std::vector<llvm::Value *>{dest};
-            auto remaining_args = compile_fn_args(
-                fn, constructor_fn, expr->data.construct_expr.items, expr);
+            auto remaining_args =
+                compile_fn_args(fn, constructor_fn, expr->data.construct_expr.items, expr);
             args.insert(args.end(), remaining_args.begin(), remaining_args.end());
 
             // Compile default args for missing params (e.g. = {} on generic field)
@@ -4333,9 +4382,8 @@ normal:
     return RefValue::from_address(get_var(data.decl));
 }
 
-std::vector<llvm::Value *>
-Compiler::compile_fn_args(Function *fn, Function *callee, array<ast::Node *> args,
-                          ast::Node *fn_call) {
+std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *callee,
+                                                     array<ast::Node *> args, ast::Node *fn_call) {
     std::vector<llvm::Value *> call_args = {};
     auto &builder = *m_ctx->llvm_builder.get();
     llvm::Value *va_ptr = nullptr;
@@ -7093,8 +7141,8 @@ Function *Compiler::get_fn(ast::Node *node) {
     // type's copy_from during the stdlib module pass). Compile the proto now
     // and schedule the body for later. This is safe because compile_fn_proto
     // only creates the LLVM declaration — no recursion into get_fn.
-    if (!entry && node->type == ast::NodeType::FnDef &&
-        node->resolved_type && !node->resolved_type->is_placeholder) {
+    if (!entry && node->type == ast::NodeType::FnDef && node->resolved_type &&
+        !node->resolved_type->is_placeholder) {
         auto compiled = compile_fn_proto(node->data.fn_def.fn_proto, node);
         m_ctx->pending_fns.add(compiled);
         entry = m_ctx->function_table.get(id);

@@ -1423,8 +1423,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
-        // For assignment operators, just check assignment validity
+        // For plain assignment
+        if (data.op_type == TokenType::ASS) {
+            check_assignment(data.op2, t2, t1);
+            return t1;
+        }
+        // For compound assignment operators, validate the base op
         if (is_assignment_op(data.op_type)) {
+            // Check if an operator method handles this (e.g. Add for +=)
+            auto base_op = get_assignment_op(data.op_type);
+            auto intrinsic = get_operator_intrinsic_symbol(base_op);
+            if (intrinsic != IntrinsicSymbol::None) {
+                auto method_call = try_resolve_operator_method(
+                    intrinsic, t1, t2, data.op1, data.op2, node, scope);
+                if (method_call.has_value()) {
+                    data.resolved_call = method_call->call_node;
+                    return t1;
+                }
+            }
+            check_binary_op(node, data.op_type, t1);
             check_assignment(data.op2, t2, t1);
             return t1;
         }
@@ -7046,7 +7063,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
 
 void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type) {
     if (is_assignment_op(op_type)) {
-        return;
+        op_type = get_assignment_op(op_type);
     }
     if (node->type == ast::NodeType::BinOpExpr && node->data.bin_op_expr.resolved_call) {
         return;

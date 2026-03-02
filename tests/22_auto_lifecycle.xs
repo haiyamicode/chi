@@ -584,6 +584,13 @@ func test_method_param_cleanup() {
     var l = i.merge(j, k);
     printf("  l.id={}\n", l.id);
 
+    // Compound assignment with operator method
+    println("--- compound assignment (+=) ---");
+    var m = TrackedVal{100};
+    var n = TrackedVal{50};
+    m += n;
+    printf("  m.id={}\n", m.id);
+
     // Chained: a + b + c (intermediate temps)
     println("--- chained operators ---");
     var p = TrackedVal{1};

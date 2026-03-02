@@ -208,6 +208,15 @@ after unary
   TrackedVal.delete(3)
   TrackedVal.delete(2)
   l.id=6
+--- compound assignment (+=) ---
+  TrackedVal.new(100)
+  TrackedVal.new(50)
+  TrackedVal.copy(50)
+  TrackedVal.add(100, 50)
+  TrackedVal.new(150)
+  TrackedVal.delete(50)
+  TrackedVal.delete(100)
+  m.id=150
 --- chained operators ---
   TrackedVal.new(1)
   TrackedVal.new(2)
@@ -236,6 +245,8 @@ after unary
   TrackedVal.delete(3)
   TrackedVal.delete(2)
   TrackedVal.delete(1)
+  TrackedVal.delete(50)
+  TrackedVal.delete(150)
   TrackedVal.delete(6)
   TrackedVal.delete(3)
   TrackedVal.delete(2)
