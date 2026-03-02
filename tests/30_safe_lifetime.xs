@@ -1,5 +1,7 @@
 // Test safe mode lifetime analysis (-s flag)
 
+import "std/ops" as ops;
+
 // --- Basic struct with reference field ---
 
 struct Holder {
@@ -186,6 +188,12 @@ struct Resource {
     func delete() {
         printf("Resource.delete({})\n", this.name);
     }
+
+    impl ops.CopyFrom<Resource> {
+        func copy_from(source: &Resource) {
+            this.name = source.name;
+        }
+    }
 }
 
 func take_ownership(r: &move Resource) {
@@ -235,8 +243,6 @@ func test_early_delete() {
 }
 
 // --- Move semantics: move (value optimization) ---
-
-import "std/ops" as ops;
 
 struct Heavy {
     value: int;

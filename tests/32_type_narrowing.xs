@@ -1,3 +1,5 @@
+import "std/ops" as ops;
+
 // === Basic narrowing (single variable) ===
 
 func basic_positive(x: ?int) int {
@@ -175,6 +177,12 @@ struct Traced {
 
     func delete() {
         printf("  destroy({})\n", this.id);
+    }
+
+    impl ops.CopyFrom<Traced> {
+        func copy_from(source: &Traced) {
+            this.id = source.id;
+        }
     }
 }
 

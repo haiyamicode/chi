@@ -7088,6 +7088,18 @@ Function *Compiler::get_fn(ast::Node *node) {
         }
     }
 
+    // On-demand proto compilation: the function's module may not have been
+    // compiled yet (e.g. a generic stdlib type like Box<T> references a user
+    // type's copy_from during the stdlib module pass). Compile the proto now
+    // and schedule the body for later. This is safe because compile_fn_proto
+    // only creates the LLVM declaration — no recursion into get_fn.
+    if (!entry && node->type == ast::NodeType::FnDef &&
+        node->resolved_type && !node->resolved_type->is_placeholder) {
+        auto compiled = compile_fn_proto(node->data.fn_def.fn_proto, node);
+        m_ctx->pending_fns.add(compiled);
+        entry = m_ctx->function_table.get(id);
+    }
+
     if (!entry) {
         panic("Function not found: {}", id);
     }

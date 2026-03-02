@@ -1,4 +1,5 @@
 import "std/mem" as mem;
+import "std/ops" as ops;
 
 func guard_add(x: ?int) int {
     if !x {
@@ -135,6 +136,13 @@ struct Traced {
     func delete() {
         printf("  Traced.delete({})\n", this.id);
     }
+
+    impl ops.CopyFrom<Traced> {
+        func copy_from(source: &Traced) {
+            this.id = source.id;
+            printf("  Traced.copy({})\n", source.id);
+        }
+    }
 }
 
 struct TracedValue {
@@ -143,6 +151,12 @@ struct TracedValue {
     func delete() {
         if this.id != 0 {
             printf("  TracedValue.delete({})\n", this.id);
+        }
+    }
+
+    impl ops.CopyFrom<TracedValue> {
+        func copy_from(source: &TracedValue) {
+            this.id = source.id;
         }
     }
 }

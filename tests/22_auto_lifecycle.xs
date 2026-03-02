@@ -11,6 +11,12 @@ struct Inner1 {
     func delete() {
         printf("  Inner1.delete({})\n", this.id);
     }
+
+    impl ops.CopyFrom<Inner1> {
+        func copy_from(source: &Inner1) {
+            this.id = source.id;
+        }
+    }
 }
 
 struct Outer1 {
@@ -63,6 +69,12 @@ struct OrderedField {
     func delete() {
         printf("  OrderedField.delete('{}')\n", this.name);
     }
+
+    impl ops.CopyFrom<OrderedField> {
+        func copy_from(source: &OrderedField) {
+            this.name = source.name;
+        }
+    }
 }
 
 struct OrderedContainer {
@@ -79,6 +91,14 @@ struct OrderedContainer {
 
     func delete() {
         println("OrderedContainer.delete (user)");
+    }
+
+    impl ops.CopyFrom<OrderedContainer> {
+        func copy_from(source: &OrderedContainer) {
+            this.first = source.first;
+            this.second = source.second;
+            this.third = source.third;
+        }
     }
 }
 
@@ -104,6 +124,12 @@ struct RefCountedData {
 
     func delete() {
         printf("  RefCountedData.delete({})\n", this.value);
+    }
+
+    impl ops.CopyFrom<RefCountedData> {
+        func copy_from(source: &RefCountedData) {
+            this.value = source.value;
+        }
     }
 }
 
@@ -135,6 +161,12 @@ struct Level3 {
     func delete() {
         printf("    Level3.delete({})\n", this.id);
     }
+
+    impl ops.CopyFrom<Level3> {
+        func copy_from(source: &Level3) {
+            this.id = source.id;
+        }
+    }
 }
 
 struct Level2 {
@@ -149,6 +181,13 @@ struct Level2 {
     func delete() {
         printf("  Level2.delete({})\n", this.id);
     }
+
+    impl ops.CopyFrom<Level2> {
+        func copy_from(source: &Level2) {
+            this.id = source.id;
+            this.child = source.child;
+        }
+    }
 }
 
 struct Level1 {
@@ -162,6 +201,13 @@ struct Level1 {
 
     func delete() {
         printf("Level1.delete({})\n", this.id);
+    }
+
+    impl ops.CopyFrom<Level1> {
+        func copy_from(source: &Level1) {
+            this.id = source.id;
+            this.child = source.child;
+        }
     }
 }
 
@@ -187,6 +233,12 @@ struct OptionalData {
 
     func delete() {
         printf("  OptionalData.delete({})\n", this.value);
+    }
+
+    impl ops.CopyFrom<OptionalData> {
+        func copy_from(source: &OptionalData) {
+            this.value = source.value;
+        }
     }
 }
 
@@ -233,6 +285,12 @@ struct DirectStruct {
 
     func delete() {
         printf("  DirectStruct.delete({})\n", this.id);
+    }
+
+    impl ops.CopyFrom<DirectStruct> {
+        func copy_from(source: &DirectStruct) {
+            this.id = source.id;
+        }
     }
 }
 

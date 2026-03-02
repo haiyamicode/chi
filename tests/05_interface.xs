@@ -1,3 +1,5 @@
+import "std/ops" as ops;
+
 interface Animal {
     func make_sound();
 }
@@ -69,6 +71,12 @@ struct Circle {
             return "circle";
         }
     }
+
+    impl ops.CopyFrom<Circle> {
+        func copy_from(source: &Circle) {
+            this.radius = source.radius;
+        }
+    }
 }
 
 struct Rect {
@@ -86,6 +94,13 @@ struct Rect {
 
         func name() string {
             return "rect";
+        }
+    }
+
+    impl ops.CopyFrom<Rect> {
+        func copy_from(source: &Rect) {
+            this.w = source.w;
+            this.h = source.h;
         }
     }
 }

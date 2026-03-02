@@ -64,6 +64,12 @@ struct RefHolder<T> {
             delete this.data;
         }
     }
+
+    impl ops.CopyFrom<RefHolder<T>> {
+        func copy_from(source: &RefHolder<T>) {
+            this.data = source.data;
+        }
+    }
 }
 
 struct Arr<T> {
@@ -96,6 +102,14 @@ struct Arr<T> {
     func delete() {
         unsafe {
             delete this.data;
+        }
+    }
+
+    impl ops.CopyFrom<Arr<T>> {
+        func copy_from(source: &Arr<T>) {
+            this.data = source.data;
+            this.size = source.size;
+            this.capacity = source.capacity;
         }
     }
 

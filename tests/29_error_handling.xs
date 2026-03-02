@@ -1,5 +1,7 @@
 // Test error handling: throw, try/catch, destructors during unwinding
 
+import "std/ops" as ops;
+
 struct MyError {
     msg: string = "";
 
@@ -27,6 +29,12 @@ struct Resource {
 
     func delete() {
         printf("Resource.delete({})\n", this.name);
+    }
+
+    impl ops.CopyFrom<Resource> {
+        func copy_from(source: &Resource) {
+            this.name = source.name;
+        }
     }
 }
 

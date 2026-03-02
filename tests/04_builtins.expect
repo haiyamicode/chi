@@ -53,6 +53,7 @@ creating box:
   Traced.new(1)
 b1.id=1
 copying box:
+  Traced.copy(1)
 b2.id=1
 before scope exit:
   Traced.delete(1)

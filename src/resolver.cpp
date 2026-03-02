@@ -3063,6 +3063,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
 
+            // Rule of Three: struct with func delete() must implement CopyFrom
+            // (not required in managed mode — GC handles lifecycle)
+            if (struct_->kind == ContainerKind::Struct &&
+                !has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED) &&
+                struct_->find_member("delete") &&
+                !struct_->member_intrinsics.has_key(IntrinsicSymbol::CopyFrom)) {
+                auto name = format_type_display(struct_type);
+                error(node, errors::DESTRUCTOR_WITHOUT_COPY_FROM, name, name);
+            }
+
             struct_->resolve_status = ResolveStatus::Done;
         }
         return type_sym;
