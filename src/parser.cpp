@@ -532,6 +532,15 @@ Node *Parser::parse_type_expr(bool type_only) {
             sigil_nodes.add(node);
             continue;
         }
+        // []T array view type
+        if (token->type == TokenType::LBRACK && lookahead(1)->type == TokenType::RBRACK) {
+            consume(); // [
+            consume(); // ]
+            auto node = create_node(NodeType::TypeSigil, token);
+            node->data.sigil_type.sigil = SigilKind::ArrayView;
+            sigil_nodes.add(node);
+            continue;
+        }
         if (auto sigil_kind = get_sigil_kind(token->type)) {
             consume();
 
@@ -856,6 +865,17 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     if (as_field && next_is(TokenType::ELLIPSIS)) {
         is_embed = true;
         consume();
+        // Interface-style embed: ...TypeName; (no field name, no colon)
+        // Parse as interface embed and let resolver reject if in wrong context
+        if (next_is(TokenType::IDEN) && lookahead(1)->type != TokenType::COLON) {
+            auto embed_node = create_node(NodeType::VarDecl, get());
+            embed_node->data.var_decl.is_embed = true;
+            embed_node->data.var_decl.is_field = false;
+            embed_node->data.var_decl.type = parse_type_expr(true);
+            embed_node->name = "__embed";
+            expect(TokenType::SEMICOLON);
+            return embed_node;
+        }
     }
     auto iden = expect(TokenType::IDEN);
     if (iden->type != TokenType::IDEN) {
@@ -1993,8 +2013,13 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         return false;
     }
 
-    // Handle [N]T fixed-size array type
+    // Handle [N]T fixed-size array type or []T array view type
     if (token->type == TokenType::LBRACK) {
+        if (lookahead(pos + 1)->type == TokenType::RBRACK) {
+            // []T array view
+            pos += 2;
+            return try_parse_type_expr_lookahead(pos, struct_only);
+        }
         pos++;
         if (lookahead(pos)->type != TokenType::INT)
             return false;

@@ -64,7 +64,7 @@ extern "C" {
     private unsafe func cx_capture_get_data(capture_ptr: *void) *void;
 }
 
-struct __CxEnumBase<T> {
+private struct __CxEnumBase<T> {
     private __value: T = undefined;
     private __display_name: *string = undefined;
 
@@ -227,7 +227,7 @@ struct Box<T: ops.AllowUnsized> {
 // Internal lambda struct for compiler-generated closures.
 // Captures are type-erased (CxCapture payload pointer) so lambdas can be converted across
 // capture types with the same call signature.
-struct __CxLambda {
+private struct __CxLambda {
     fn_ptr: *void = null;
     length: uint32 = 0;
     captures: *void = null; // CxCapture payload pointer (or null)
@@ -578,6 +578,28 @@ struct Array<T> {
             return result;
         }
     }
+
+    func as_array_view() []T {
+        unsafe {
+            return {this.data, this.length};
+        }
+    }
+
+    func view(start: ?uint32, end: ?uint32) []T {
+        var s: uint32 = 0;
+        var e: uint32 = this.length;
+        if start {
+            s = start;
+        }
+        if end {
+            e = end;
+        }
+        assert(s <= e, "view start must be <= end");
+        assert(e <= this.length, "view end out of bounds");
+        unsafe {
+            return {&this.data[s], e - s};
+        }
+    }
 }
 
 struct CString {
@@ -609,7 +631,7 @@ struct CString {
     }
 }
 
-struct __CxString {
+private struct __CxString {
     private data: *char = null;
     protected length: uint32 = 0;
     private is_static: uint32 = 0;
@@ -676,6 +698,74 @@ struct __CxString {
                 return 1;
             }
             return 0;
+        }
+    }
+}
+
+private struct __CxArrayView<T> {
+    private data: *T;
+    protected length: uint32;
+
+    unsafe func new(data: *T, length: uint32) {
+        this.data = data;
+        this.length = length;
+    }
+
+    func is_empty() bool {
+        return this.length == 0;
+    }
+
+    impl ops.IndexMut<uint32, T>, ops.IndexMutIterable<uint32, T> {
+        func index_mut(index: uint32) &mut T {
+            assert(index < this.length, "index out of bounds");
+            unsafe {
+                return &mut this.data[index];
+            }
+        }
+
+        func begin() uint32 {
+            return 0;
+        }
+
+        func end() uint32 {
+            return this.length;
+        }
+
+        func next(index: uint32) uint32 {
+            return index + 1;
+        }
+    }
+
+    impl ops.Display {
+        func display() string {
+            var buf = Buffer{};
+            buf.write_string("[");
+            for item, i in this {
+                if i > 0 {
+                    buf.write_string(", ");
+                }
+                buf.write_string(stringf("{}", item));
+            }
+            buf.write_string("]");
+            return buf.to_string();
+        }
+    }
+
+    impl ops.Slice<[]T> {
+        func slice(start: ?uint32, end: ?uint32) []T {
+            var s: uint32 = 0;
+            var e: uint32 = this.length;
+            if start {
+                s = start;
+            }
+            if end {
+                e = end;
+            }
+            assert(s <= e, "slice start must be <= end");
+            assert(e <= this.length, "slice end out of bounds");
+            unsafe {
+                return {&this.data[s], e - s};
+            }
         }
     }
 }

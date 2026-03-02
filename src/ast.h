@@ -399,7 +399,7 @@ struct FieldInitExpr {
     void *compiled_field_address = nullptr;
 };
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move, FixedArray)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move, FixedArray, ArrayView)
 
 struct DestructureField {
     Token *field_name = nullptr;   // struct field to extract
