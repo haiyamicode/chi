@@ -943,7 +943,9 @@ struct Map<K: ops.Hash + ops.Eq, V> {
     }
 
     func delete() {
-        if this.buckets == null { return; }
+        if this.buckets == null {
+            return;
+        }
         var i: uint32 = 0;
         while i < this.capacity {
             unsafe {
@@ -956,11 +958,15 @@ struct Map<K: ops.Hash + ops.Eq, V> {
             }
             i += 1;
         }
-        unsafe { cx_free(this.buckets as *void); }
+        unsafe {
+            cx_free(this.buckets as *void);
+        }
     }
 
     func get(key: K) ?&V {
-        if this.buckets == null { return null; }
+        if this.buckets == null {
+            return null;
+        }
         var h = key.hash();
         var idx = (h % (this.capacity as uint64)) as uint32;
         unsafe {
@@ -1019,7 +1025,9 @@ struct Map<K: ops.Hash + ops.Eq, V> {
     }
 
     func remove(key: K) {
-        if this.buckets == null { return; }
+        if this.buckets == null {
+            return;
+        }
         var h = key.hash();
         var idx = (h % (this.capacity as uint64)) as uint32;
         unsafe {
@@ -1083,7 +1091,7 @@ struct Map<K: ops.Hash + ops.Eq, V> {
 
     impl ops.MutIterable<V> {
         func to_iter_mut() MapIterator<K, V> {
-            return MapIterator<K, V>{this.buckets, this.capacity};
+            return {this.buckets, this.capacity};
         }
     }
 
@@ -1100,3 +1108,4 @@ struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 }
+

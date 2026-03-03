@@ -2188,6 +2188,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto trait_struct = &trait_type->data.struct_;
                     auto member = trait_struct->find_member(field_name);
                     if (member && member->is_method()) {
+                        if (!scope.is_fn_call) {
+                            error(node, errors::TRAIT_METHOD_NOT_CALLABLE,
+                                  field_name, format_type_display(expr_type));
+                            return nullptr;
+                        }
                         data.resolved_struct_member = member;
                         data.resolved_decl = member->node;
                         data.field->node = member->node;

@@ -82,6 +82,8 @@ constexpr auto UNSAFE_CALL_IN_SAFE_MODE =
 constexpr auto DESTRUCTOR_WITHOUT_COPY_FROM =
     "struct '{}' defines 'func delete()' but does not implement 'ops.CopyFrom<{}>'; "
     "types with custom destructors must define copy semantics";
+constexpr auto TRAIT_METHOD_NOT_CALLABLE =
+    "trait method '{}' on generic type {} must be called, not used as a value";
 
 } // namespace errors
 } // namespace cx
