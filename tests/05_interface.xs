@@ -504,7 +504,7 @@ func show_entity<T: FullEntity>(e: &T) string {
     return stringf("#{}: {} - {}", e.id(), e.get_name(), e.print_info());
 }
 
-func sum_three<T: ops.Numeric>(a: T, b: T, c: T) T {
+func sum_three<T: ops.Number>(a: T, b: T, c: T) T {
     return a + b + c;
 }
 
@@ -535,11 +535,11 @@ func test_multilevel_embedding() {
 func test_ops_composite() {
     println("=== ops composite interfaces ===");
 
-    // Numeric bound: int satisfies Add+Sub+Mul+Div+Rem+Neg+Eq+Ord
+    // Number bound: int satisfies Add+Sub+Mul+Div+Rem+Neg+Eq+Ord
     printf("sum_three int: {}\n", sum_three<int>(10, 20, 30));
     printf("sum_three float: {}\n", sum_three<float>(1.5, 2.5, 3.0));
 
-    // Int bound: includes Numeric + bitwise ops
+    // Int bound: includes Number + bitwise ops
     printf("bitwise_and int: {}\n", bitwise_and<int>(255, 15));
 }
 

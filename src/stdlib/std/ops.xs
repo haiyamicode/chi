@@ -106,7 +106,7 @@ interface Ord {
 }
 
 // Composite numeric interfaces
-interface Numeric {
+interface Number {
     ...Add;
     ...Sub;
     ...Mul;
@@ -118,11 +118,11 @@ interface Numeric {
 }
 
 interface Float {
-    ...Numeric;
+    ...Number;
 }
 
 interface Int {
-    ...Numeric;
+    ...Number;
     ...BitAnd;
     ...BitOr;
     ...BitXor;

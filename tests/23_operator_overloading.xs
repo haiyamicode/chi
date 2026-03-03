@@ -205,10 +205,10 @@ func test_all_operators() {
     printf("generic sub: {}\n", sub<Vec2>(a, b));
 
     println("=== Comparison operators ===");
-    var p = Vec2{x: 3, y: 4};   // magnitude^2 = 25
-    var q = Vec2{x: 3, y: 4};   // magnitude^2 = 25
-    var r = Vec2{x: 1, y: 1};   // magnitude^2 = 2
-    var s = Vec2{x: 10, y: 0};  // magnitude^2 = 100
+    var p = Vec2{x: 3, y: 4}; // magnitude^2 = 25
+    var q = Vec2{x: 3, y: 4}; // magnitude^2 = 25
+    var r = Vec2{x: 1, y: 1}; // magnitude^2 = 2
+    var s = Vec2{x: 10, y: 0}; // magnitude^2 = 100
     printf("p == q: {}\n", p == q);
     printf("p == r: {}\n", p == r);
     printf("p != r: {}\n", p != r);
