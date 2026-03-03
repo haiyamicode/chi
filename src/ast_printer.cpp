@@ -830,6 +830,7 @@ void AstPrinter::print_node(Node *node) {
         }
         emit(" = ");
         print_node(data.type);
+        emit(";");
         break;
     }
     case NodeType::EnumVariant: {

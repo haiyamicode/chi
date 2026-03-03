@@ -3868,13 +3868,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
 
-            auto target_package =
-                m_ctx->allocator->get_or_create_package(path_info->package_id_path);
             auto path = path_info->entry_path;
-            auto src = io::Buffer::from_file(path);
-            module = m_ctx->allocator->process_source(target_package, &src, path);
-            Resolver resolver(m_ctx);
-            resolver.resolve(module);
+            auto abs_path = fs::absolute(path).string();
+            auto cached_mod = comp_ctx->source_modules.get(abs_path);
+            if (cached_mod) {
+                module = *cached_mod;
+            } else {
+                auto target_package =
+                    m_ctx->allocator->get_or_create_package(path_info->package_id_path);
+                auto src = io::Buffer::from_file(path);
+                module = m_ctx->allocator->process_source(target_package, &src, path);
+                Resolver resolver(m_ctx);
+                resolver.resolve(module);
+                comp_ctx->source_modules[abs_path] = module;
+            }
         }
 
         data.resolved_module = module;
@@ -5290,7 +5297,17 @@ ChiType *Resolver::type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs) {
 ChiType *Resolver::type_placeholders_sub_map(ChiType *type, map<ChiType *, ChiType *> *subs) {
     auto handle_placeholder = [subs](ChiType *type, ChiTypeSubtype *) -> ChiType * {
         auto substitution = subs->get(type);
-        return substitution ? *substitution : type;
+        if (substitution)
+            return *substitution;
+        // Fallback: match by global_id for cross-module cases where
+        // get_subtype caching may produce different Placeholder pointers
+        if (!type->global_id.empty()) {
+            for (auto &pair : subs->get()) {
+                if (pair.first->global_id == type->global_id)
+                    return pair.second;
+            }
+        }
+        return type;
     };
 
     auto make_recursive_call = [this, subs](ChiType *type, ChiTypeSubtype *) -> ChiType * {

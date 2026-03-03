@@ -33,6 +33,7 @@ struct CompilationContext : public Context {
     map<string, ast::Package *> package_map = {};
     ResolveContext resolve_ctx;
     map<string, ast::Module *> module_map = {};
+    map<string, ast::Module *> source_modules = {}; // absolute path → parsed module (dedup)
     // Tracks which symbol patterns have already been extracted per C header
     map<string, map<string, bool>> header_extracted_symbols = {};
 
