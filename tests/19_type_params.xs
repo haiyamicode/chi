@@ -33,8 +33,8 @@ func main() {
     printf("identity<int>(42) = {}\n", int_result);
     var int_result_inferred = identity(42);
     printf("identity(42) [inferred] = {}\n", int_result_inferred);
-    var char_result = identity<char>('A');
-    printf("identity<char>('A') = {}\n", char_result);
+    var char_result = identity<byte>('A');
+    printf("identity<byte>('A') = {}\n", char_result);
     var char_result_inferred = identity('A');
     printf("identity('A') [inferred] = {}\n", char_result_inferred);
     var doubled = transform<int, int>(5, func (x: int) int {
@@ -46,13 +46,13 @@ func main() {
     });
     printf("transform(5, double) [inferred] = {}\n", doubled_inferred);
     var container = Container<int>{65};
-    var zmap_result = container.zmap<char>(func (value: int) char {
-        return (value + 10) as char;
+    var zmap_result = container.zmap<byte>(func (value: int) byte {
+        return (value + 10) as byte;
     });
     var final_value = zmap_result.get();
     printf("final value: {}\n", final_value);
-    var zmap_result_inferred = container.zmap(func (value: int) char {
-        return (value + 10) as char;
+    var zmap_result_inferred = container.zmap(func (value: int) byte {
+        return (value + 10) as byte;
     });
     var final_value_inferred = zmap_result_inferred.get();
     printf("final value [inferred]: {}\n", final_value_inferred);

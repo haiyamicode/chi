@@ -490,7 +490,11 @@ Node *Parser::parse_identifier() {
     auto decl = m_ctx->resolver->find_symbol(token->str);
     auto node = create_identifier_node(token, decl);
     if (!decl && token->type != TokenType::KW_THIS_TYPE && !m_ctx->format_mode) {
-        error(token, errors::UNDECLARED, node->name);
+        if (node->name == "char") {
+            error(token, errors::CHAR_USE_BYTE);
+        } else {
+            error(token, errors::UNDECLARED, node->name);
+        }
     }
     if (token->type == TokenType::KW_THIS) {
         node->data.identifier.kind = IdentifierKind::This;

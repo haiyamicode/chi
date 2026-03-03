@@ -430,7 +430,7 @@ static ChiType* parse_c_type(CompilationContext* ctx, const std::string& c_type_
         return resolve_ctx->system_types.uint64;
     }
     if (type_str == "char" || type_str == "signed char") {
-        return resolve_ctx->system_types.char_;
+        return resolve_ctx->system_types.byte_;
     }
     if (type_str == "unsigned char" || type_str == "uint8_t") {
         return resolve_ctx->system_types.uint8;

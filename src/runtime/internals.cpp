@@ -225,7 +225,7 @@ std::string get_value_display(const CxAny &v) {
     }
     case TypeKind::Bool:
         return fmt::format("{}", *(bool *)&v.data);
-    case TypeKind::Char: {
+    case TypeKind::Byte: {
         uint8_t char_value = *(uint8_t *)&v.data;
         // Only display as character if it's printable, otherwise show as number
         if (char_value >= 32 && char_value <= 126) {

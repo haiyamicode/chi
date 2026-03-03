@@ -38,7 +38,7 @@ int construct: 0
 string construct:
 bool construct: false
 float construct: 0
-char construct: 0
+byte construct: 0
 make_default int: 0
 make_default float: 0
 make_default bool: false

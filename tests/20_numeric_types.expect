@@ -44,7 +44,7 @@ large float: 1000000
 
 Implicit integer conversions:
 bool to int32: true -> 1
-char to int32: ''A'' -> 65
+byte to int32: ''A'' -> 65
 int8 to int32: 127 -> 127
 int16 to int64: 32767 -> 32767
 int32 to float: 127 -> 127

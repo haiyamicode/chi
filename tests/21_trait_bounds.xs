@@ -245,8 +245,8 @@ func main() {
     printf("bool construct: {}\n", cb5.get());
     var cbf = ConstructBox<float>{};
     printf("float construct: {}\n", cbf.get());
-    var cbc = ConstructBox<char>{};
-    printf("char construct: {}\n", cbc.get());
+    var cbc = ConstructBox<byte>{};
+    printf("byte construct: {}\n", cbc.get());
 
     // Generic function with Construct bound
     printf("make_default int: {}\n", make_default<int>());

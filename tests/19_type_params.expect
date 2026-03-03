@@ -1,6 +1,6 @@
 identity<int>(42) = 42
 identity(42) [inferred] = 42
-identity<char>('A') = 'A'
+identity<byte>('A') = 'A'
 identity('A') [inferred] = 'A'
 transform<int, int>(5, double) = 10
 transform(5, double) [inferred] = 10

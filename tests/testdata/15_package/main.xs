@@ -63,10 +63,10 @@ func main() {
 
     // Test strcpy from imported header
     unsafe {
-        var buf = mem.malloc(100) as *char;
+        var buf = mem.malloc(100) as *byte;
         strcpy(buf, hello);
 
-        var copied = string.from_char_ptr(buf, 5);
+        var copied = string.from_raw(buf, 5);
         printf("strcpy result: {}\n", copied);
     }
 }

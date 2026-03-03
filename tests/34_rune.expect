@@ -1,10 +1,10 @@
-char: 'A'
+byte: 'A'
 rune ascii: A
 rune unicode: 海
 rune escape: é
-char->rune: X
+byte->rune: X
 literal->rune: B
-rune->char: 'Z'
+rune->byte: 'Z'
 int->rune: A
 rune->int: 65
 A+1: B

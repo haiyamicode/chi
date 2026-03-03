@@ -53,7 +53,7 @@ struct SystemTypes {
     ChiType *void_ptr = nullptr;
     ChiType *null_ptr = nullptr;
     ChiType *void_ref = nullptr;
-    ChiType *char_ = nullptr;
+    ChiType *byte_ = nullptr;
     ChiType *rune_ = nullptr;
     ChiType *str_lit = nullptr;
     ChiType *any = nullptr;

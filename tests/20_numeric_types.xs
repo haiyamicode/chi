@@ -80,7 +80,7 @@ func test_edge_cases() {
 
 func test_implicit_conversions() {
     var b: bool = true;
-    var c: char = 'A';
+    var c: byte = 'A';
     var i8: int8 = 127;
     var i16: int16 = 32767;
     var i32: int32 = 0;
@@ -91,7 +91,7 @@ func test_implicit_conversions() {
     i32 = b;
     printf("bool to int32: {} -> {}\n", true, i32);
     i32 = c;
-    printf("char to int32: '{}' -> {}\n", c, i32);
+    printf("byte to int32: '{}' -> {}\n", c, i32);
     i32 = i8;
     printf("int8 to int32: {} -> {}\n", i8, i32);
     i64 = i16;

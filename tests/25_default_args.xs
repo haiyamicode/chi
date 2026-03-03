@@ -2,7 +2,7 @@ func greet(name: string, greeting: string = "Hello") {
     printf("{}, {}!\n", greeting, name);
 }
 
-func format_number(n: int, width: int = 0, fill: char = ' ') int {
+func format_number(n: int, width: int = 0, fill: byte = ' ') int {
     printf("n={}, width={}, fill={}\n", n, width, fill);
     return n;
 }

@@ -5,7 +5,7 @@ extern "C" {
     func sqrt(x: float64) float64;
     func pow(x: float64, y: float64) float64;
     func abs(x: int32) int32;
-    func snprintf(buf: *char, size: uint64, fmt: *char, ...) int32;
+    func snprintf(buf: *byte, size: uint64, fmt: *byte, ...) int32;
 }
 
 func test_sqrt() {
@@ -37,9 +37,9 @@ func test_abs() {
 
 func test_snprintf() {
     println("testing C snprintf:");
-    var buf: *char = null;
+    var buf: *byte = null;
     unsafe {
-        buf = mem.malloc(100) as *char;
+        buf = mem.malloc(100) as *byte;
     }
     let fmt = c"Hello, %s! Number: %d";
     let world = c"World";
@@ -47,7 +47,7 @@ func test_snprintf() {
     printf("snprintf returned: {}\n", count);
 
     unsafe {
-        var result = string.from_char_ptr(buf, count as uint32);
+        var result = string.from_raw(buf, count as uint32);
         printf("buffer: {}\n", result);
     }
 }

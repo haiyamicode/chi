@@ -85,5 +85,8 @@ constexpr auto DESTRUCTOR_WITHOUT_COPY_FROM =
 constexpr auto TRAIT_METHOD_NOT_CALLABLE =
     "trait method '{}' on generic type {} must be called, not used as a value";
 
+constexpr auto CHAR_USE_BYTE =
+    "use 'byte' instead of 'char'; for a unicode character, use 'rune'";
+
 } // namespace errors
 } // namespace cx

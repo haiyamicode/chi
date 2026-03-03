@@ -22,7 +22,12 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    private unsafe func cx_throw(
+        type_info: *void,
+        data_ptr: *void,
+        vtable_ptr: *void,
+        type_id: uint32
+    );
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -33,9 +38,9 @@ extern "C" {
     private unsafe func cx_string_from_chars(data: *void, size: uint32, str: *string);
     private unsafe func cx_string_delete(dest: *string);
     private unsafe func cx_string_copy(dest: *string, src: *string);
-    private unsafe func cx_string_to_cstring(str: *string) *char;
+    private unsafe func cx_string_to_cstring(str: *string) *byte;
     private unsafe func cx_string_concat(dest: *string, s1: *string, s2: *string);
-    private unsafe func cx_cstring_copy(src: *char) *char;
+    private unsafe func cx_cstring_copy(src: *byte) *byte;
     private unsafe func cx_parse_json(str: *string, result: *void);
     private unsafe func cx_json_value_delete(data: *void);
     private unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
@@ -303,7 +308,13 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(stringf("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
+            panic(
+                stringf(
+                    "expected {}, got {}",
+                    json_kind_display(kind),
+                    json_kind_display(this.kind)
+                )
+            );
         }
     }
 
@@ -596,9 +607,9 @@ struct Array<T> {
 }
 
 struct CString {
-    data: *char = null;
+    data: *byte = null;
 
-    mut func new(ptr: *char) {
+    mut func new(ptr: *byte) {
         this.data = ptr;
     }
 
@@ -611,7 +622,7 @@ struct CString {
         }
     }
 
-    func as_ptr() *char {
+    func as_ptr() *byte {
         return this.data;
     }
 
@@ -625,11 +636,11 @@ struct CString {
 }
 
 private struct __CxString {
-    private data: *char = null;
+    private data: *byte = null;
     protected length: uint32 = 0;
     private is_static: uint32 = 0;
 
-    static unsafe func from_char_ptr(data: *char, size: uint32) string {
+    static unsafe func from_raw(data: *byte, size: uint32) string {
         var result: string = "";
         cx_string_from_chars(data as *void, size, &result);
         return result;
@@ -645,8 +656,8 @@ private struct __CxString {
         }
     }
 
-    func to_chars() Array<char> {
-        var result: Array<char> = [];
+    func to_bytes() Array<byte> {
+        var result: Array<byte> = [];
         var i: uint32 = 0;
         while i < this.length {
             result.add(this.data[i]);
@@ -764,13 +775,13 @@ private struct __CxArrayView<T> {
 }
 
 struct Buffer {
-    protected bytes: Array<char>;
+    protected bytes: Array<byte>;
 
     mut func new() {
         this.bytes = {};
     }
 
-    static func from_chars(data: Array<char>) Buffer {
+    static func from_bytes(data: Array<byte>) Buffer {
         var buf = Buffer{};
         buf.write(data);
         return buf;
@@ -782,9 +793,9 @@ struct Buffer {
         return buf;
     }
 
-    mut func write(data: Array<char>) {
+    mut func write(data: Array<byte>) {
         unsafe {
-            cx_array_append(&this.bytes, &data, sizeof char);
+            cx_array_append(&this.bytes, &data, sizeof byte);
         }
     }
 
@@ -875,11 +886,13 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
+    return Promise<Unit>.make(
+        func (resolve) {
+            timeout(ms, func [resolve] () {
+                resolve({});
+            });
+        }
+    );
 }
 
 private struct MapNode<K: ops.Hash + ops.Eq, V> {

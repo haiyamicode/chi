@@ -28,7 +28,7 @@ func combine(a: int, b: int, f: func (x: int, y: int) int) int {
     return f(a, b);
 }
 
-func apply_char(c: char, f: func (ch: char) char) char {
+func apply_char(c: byte, f: func (ch: byte) byte) byte {
     return f(c);
 }
 
@@ -66,7 +66,7 @@ func main() {
     printf("apply_int(7, n => n * 2) = {}\n", doubled);
     printf("\nTest 4: Char type\n");
     var upper = apply_char('a', func (c) {
-        return (c as int - 32) as char;
+        return (c as int - 32) as byte;
     });
     printf("apply_char('a', to_upper) = {}\n", upper);
     printf("\nTest 5: Transform with inference\n");
