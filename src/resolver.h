@@ -427,7 +427,8 @@ class Resolver {
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
     ChiStructMember *get_struct_member_access(ast::Node *node, ChiType *struct_type,
                                               const string &field_name, bool is_internal,
-                                              bool is_write, ResolveScope *scope = nullptr);
+                                              bool is_write, ResolveScope *scope = nullptr,
+                                              ChiType *access_type = nullptr);
     bool is_friend_struct(ChiType *a, ChiType *b);
 
     struct OperatorMethodCall {

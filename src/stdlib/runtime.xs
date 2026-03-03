@@ -74,7 +74,7 @@ private struct SharedData<T> {
     ref_count: uint32;
     value: T;
 
-    func new(v: T) {
+    mut func new(v: T) {
         this.ref_count = 1;
         this.value = v;
     }
@@ -83,17 +83,17 @@ private struct SharedData<T> {
 struct Shared<T> {
     private data: *SharedData<T> = null;
 
-    func new(value: T) {
+    mut func new(value: T) {
         this.data = new SharedData<T>{value};
     }
 
-    private func retain() {
+    private mut func retain() {
         if this.data {
             this.data.ref_count = this.data.ref_count + 1;
         }
     }
 
-    private func release() {
+    private mut func release() {
         if this.data {
             var rc = this.data.ref_count - 1;
             this.data.ref_count = rc;
@@ -105,7 +105,7 @@ struct Shared<T> {
         }
     }
 
-    func delete() {
+    mut func delete() {
         this.release();
     }
 
@@ -113,7 +113,7 @@ struct Shared<T> {
         return &this.data.value;
     }
 
-    func set(value: T) {
+    mut func set(value: T) {
         if !this.data {
             this.data = new SharedData<T>{value};
         } else {
@@ -126,14 +126,17 @@ struct Shared<T> {
     }
 
     impl ops.CopyFrom<Shared<T>> {
-        func copy_from(source: &Shared<T>) {
-            source.retain();
-            this.data = source.data;
+        mut func copy_from(source: &Shared<T>) {
+            var ptr = source.data;
+            if ptr {
+                ptr.ref_count = ptr.ref_count + 1;
+            }
+            this.data = ptr;
         }
     }
 
     impl ops.UnwrapMut<T> {
-        func unwrap_mut() &mut T {
+        mut func unwrap_mut() &mut T {
             return &mut this.data.value;
         }
     }
@@ -148,13 +151,13 @@ struct Shared<T> {
 struct Box<T: ops.AllowUnsized> {
     private _ptr: *T = null;
 
-    func new(ptr: &move T) {
+    mut func new(ptr: &move T) {
         unsafe {
             this._ptr = (move ptr) as *T;
         }
     }
 
-    func from_ptr(ptr: *T) {
+    mut func from_ptr(ptr: *T) {
         unsafe {
             if this._ptr {
                 delete this._ptr;
@@ -163,7 +166,7 @@ struct Box<T: ops.AllowUnsized> {
         this._ptr = ptr;
     }
 
-    func delete() {
+    mut func delete() {
         unsafe {
             if this._ptr {
                 delete this._ptr;
@@ -172,17 +175,19 @@ struct Box<T: ops.AllowUnsized> {
     }
 
     func as_ref() &T {
-        return this.as_mut();
+        unsafe {
+            return this._ptr;
+        }
     }
 
-    func as_mut() &mut T {
+    mut func as_mut() &mut T {
         unsafe {
             return this._ptr;
         }
     }
 
     impl ops.CopyFrom<Box<T>> {
-        func copy_from(source: &Box<T>) {
+        mut func copy_from(source: &Box<T>) {
             unsafe {
                 this._ptr = mem.copy_from<T>(source._ptr as &T) as *T;
             }
@@ -220,16 +225,16 @@ private struct __CxLambda {
     length: uint32 = 0;
     captures: *void = null; // CxCapture payload pointer (or null)
 
-    func new(fn: *void, len: uint32) {
+    mut func new(fn: *void, len: uint32) {
         this.fn_ptr = fn;
         this.length = len;
     }
 
-    func set_captures_ptr(ptr: *void) {
+    mut func set_captures_ptr(ptr: *void) {
         this.captures = ptr;
     }
 
-    func delete() {
+    mut func delete() {
         if this.captures {
             unsafe {
                 cx_capture_release(this.captures);
@@ -249,7 +254,7 @@ private struct __CxLambda {
     }
 
     impl ops.CopyFrom<__CxLambda> {
-        func copy_from(source: &__CxLambda) {
+        mut func copy_from(source: &__CxLambda) {
             // Retain the source captures
             if source.captures {
                 unsafe {
@@ -280,7 +285,7 @@ struct JsonValue {
     private data: *void = null;
     protected kind: JsonKind = JsonKind.Null;
 
-    func delete() {
+    mut func delete() {
         unsafe {
             cx_json_value_delete(this.data);
         }
@@ -349,7 +354,7 @@ struct JsonValue {
     }
 
     impl ops.CopyFrom<JsonValue> {
-        func copy_from(source: &JsonValue) {
+        mut func copy_from(source: &JsonValue) {
             unsafe {
                 cx_json_value_copy(source.data, &this);
             }
@@ -439,7 +444,7 @@ struct Array<T> {
     protected length: uint32 = 0;
     protected capacity: uint32 = 0;
 
-    func new(...values: T) {
+    mut func new(...values: T) {
         unsafe {
             cx_array_new(&this);
         }
@@ -453,26 +458,26 @@ struct Array<T> {
         }
     }
 
-    func delete() {
+    mut func delete() {
         unsafe {
             cx_free(this.data as *void);
         }
     }
 
-    func add(item: T) {
+    mut func add(item: T) {
         unsafe {
             var ptr = cx_array_add(&this, sizeof T) as *T;
             *ptr = item;
         }
     }
 
-    func reserve(n: uint32) {
+    mut func reserve(n: uint32) {
         unsafe {
             cx_array_reserve(&this, sizeof T, this.length + n);
         }
     }
 
-    func clear() {
+    mut func clear() {
         unsafe {
             if this.data {
                 cx_free(this.data as *void);
@@ -504,7 +509,7 @@ struct Array<T> {
     }
 
     impl ops.IndexMut<uint32, T>, ops.IndexMutIterable<uint32, T> {
-        func index_mut(index: uint32) &mut T {
+        mut func index_mut(index: uint32) &mut T {
             assert(index < this.length, "index out of bounds");
             return &mut this.data[index];
         }
@@ -523,7 +528,7 @@ struct Array<T> {
     }
 
     impl ops.CopyFrom<Array<T>> {
-        func copy_from(source: &Array<T>) {
+        mut func copy_from(source: &Array<T>) {
             for item in source {
                 this.add(item);
             }
@@ -694,7 +699,7 @@ private struct __CxArrayView<T> {
     private data: *T;
     protected length: uint32;
 
-    unsafe func new(data: *T, length: uint32) {
+    unsafe mut func new(data: *T, length: uint32) {
         this.data = data;
         this.length = length;
     }
@@ -704,7 +709,7 @@ private struct __CxArrayView<T> {
     }
 
     impl ops.IndexMut<uint32, T>, ops.IndexMutIterable<uint32, T> {
-        func index_mut(index: uint32) &mut T {
+        mut func index_mut(index: uint32) &mut T {
             assert(index < this.length, "index out of bounds");
             unsafe {
                 return &mut this.data[index];
@@ -777,13 +782,13 @@ struct Buffer {
         return buf;
     }
 
-    func write(data: Array<char>) {
+    mut func write(data: Array<char>) {
         unsafe {
             cx_array_append(&this.bytes, &data, sizeof char);
         }
     }
 
-    func write_string(str: string) {
+    mut func write_string(str: string) {
         unsafe {
             cx_array_write_str(&this.bytes, &str);
         }
@@ -815,7 +820,7 @@ private struct PromiseState<T> {
 struct Promise<T> {
     protected data: Shared<PromiseState<T>>;
 
-    func new() {
+    mut func new() {
         this.data = {{}};
     }
 
@@ -827,8 +832,8 @@ struct Promise<T> {
         return p;
     }
 
-    func resolve(value: T) {
-        var state = this.data.as_ref();
+    mut func resolve(value: T) {
+        var state = this.data.unwrap_mut();
         if state.state != 0 {
             return;
         }
@@ -847,8 +852,8 @@ struct Promise<T> {
         return this.data.as_ref().value;
     }
 
-    func then(callback: func (value: T)) {
-        var state = this.data.as_ref();
+    mut func then(callback: func (value: T)) {
+        var state = this.data.unwrap_mut();
         if state.state == 1 {
             // Already resolved - invoke immediately
             callback(state.value!);
@@ -883,7 +888,7 @@ private struct MapNode<K: ops.Hash + ops.Eq, V> {
     hash: uint64;
     next: *MapNode<K, V>;
 
-    func new(key: K, value: V, hash: uint64, next: *MapNode<K, V>) {
+    mut func new(key: K, value: V, hash: uint64, next: *MapNode<K, V>) {
         this.key = key;
         this.value = value;
         this.hash = hash;
@@ -897,7 +902,7 @@ struct MapIterator<K: ops.Hash + ops.Eq, V> {
     private bucket_idx: uint32;
     private current: *MapNode<K, V>;
 
-    func new(buckets: **MapNode<K, V>, capacity: uint32) {
+    mut func new(buckets: **MapNode<K, V>, capacity: uint32) {
         this.buckets = buckets;
         this.capacity = capacity;
         this.bucket_idx = 0;
@@ -905,7 +910,7 @@ struct MapIterator<K: ops.Hash + ops.Eq, V> {
     }
 
     impl ops.MutIterator<V> {
-        func next() ?(&mut V) {
+        mut func next() ?(&mut V) {
             if this.current != null {
                 unsafe {
                     var node = this.current;
@@ -942,7 +947,7 @@ struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    func delete() {
+    mut func delete() {
         if this.buckets == null {
             return;
         }
@@ -981,7 +986,7 @@ struct Map<K: ops.Hash + ops.Eq, V> {
         return null;
     }
 
-    func set(key: K, value: V) {
+    mut func set(key: K, value: V) {
         var h = key.hash();
         var idx = (h % (this.capacity as uint64)) as uint32;
         unsafe {
@@ -1001,7 +1006,7 @@ struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    private func resize(new_capacity: uint32) {
+    private mut func resize(new_capacity: uint32) {
         unsafe {
             var new_size = 8 * new_capacity;
             var new_buckets = cx_malloc(new_size, null) as **MapNode<K, V>;
@@ -1024,7 +1029,7 @@ struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    func remove(key: K) {
+    mut func remove(key: K) {
         if this.buckets == null {
             return;
         }
@@ -1096,7 +1101,7 @@ struct Map<K: ops.Hash + ops.Eq, V> {
     }
 
     impl ops.CopyFrom<Map<K, V>> {
-        func copy_from(source: &Map<K, V>) {
+        mut func copy_from(source: &Map<K, V>) {
             this.new();
             var ks = source.keys();
             for k in ks {

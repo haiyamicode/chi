@@ -58,7 +58,7 @@ interface Shape {
 struct Circle {
     radius: int = 0;
 
-    func delete() {
+    mut func delete() {
         printf("Circle.delete(r={})\n", this.radius);
     }
 
@@ -73,7 +73,7 @@ struct Circle {
     }
 
     impl ops.CopyFrom<Circle> {
-        func copy_from(source: &Circle) {
+        mut func copy_from(source: &Circle) {
             this.radius = source.radius;
         }
     }
@@ -83,7 +83,7 @@ struct Rect {
     w: int = 0;
     h: int = 0;
 
-    func delete() {
+    mut func delete() {
         printf("Rect.delete({}x{})\n", this.w, this.h);
     }
 
@@ -98,7 +98,7 @@ struct Rect {
     }
 
     impl ops.CopyFrom<Rect> {
-        func copy_from(source: &Rect) {
+        mut func copy_from(source: &Rect) {
             this.w = source.w;
             this.h = source.h;
         }

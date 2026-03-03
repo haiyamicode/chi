@@ -11,7 +11,7 @@ struct LinkedListIterator<T> {
     current: ?*Node<T> = null;
 
     impl ops.MutIterator<T> {
-        func next() ?(&mut T) {
+        mut func next() ?(&mut T) {
             if !this.current {
                 return null;
             }

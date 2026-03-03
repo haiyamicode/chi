@@ -14,7 +14,7 @@ func add_offset(x: int, offset: int = 10 * 2) int {
 struct Greeter {
     prefix: string;
 
-    func new(prefix: string = "Hey") {
+    mut func new(prefix: string = "Hey") {
         this.prefix = prefix;
     }
 
@@ -29,7 +29,7 @@ struct Configurable {
     x: int;
     y: int;
 
-    func new(x: int = 10, y: int = 20) {
+    mut func new(x: int = 10, y: int = 20) {
         this.x = x;
         this.y = y;
     }

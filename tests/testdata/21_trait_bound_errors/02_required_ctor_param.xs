@@ -5,7 +5,7 @@ import "std/ops" as ops;
 struct RequiredParam {
     x: int;
 
-    func new(x: int) {
+    mut func new(x: int) {
         this.x = x;
     }
 }

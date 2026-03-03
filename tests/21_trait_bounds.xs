@@ -118,7 +118,7 @@ struct SizedBox<T: ops.Construct> {
 struct DefaultCtor {
     x: int;
 
-    func new(x: int = 42) {
+    mut func new(x: int = 42) {
         this.x = x;
     }
 }
@@ -154,7 +154,7 @@ interface IntConstruct {
 struct IntBox {
     x: int;
 
-    func new(x: int) {
+    mut func new(x: int) {
         this.x = x;
     }
 }
@@ -163,7 +163,7 @@ struct IntBox {
 struct IntBoxDefault {
     x: int;
 
-    func new(x: int = 77) {
+    mut func new(x: int = 77) {
         this.x = x;
     }
 }

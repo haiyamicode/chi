@@ -3,7 +3,7 @@
 struct Obj {
     value: int;
 
-    func new(v: int) {
+    mut func new(v: int) {
         this.value = v;
     }
 }

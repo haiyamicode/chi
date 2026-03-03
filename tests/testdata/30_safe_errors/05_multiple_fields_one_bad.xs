@@ -4,7 +4,7 @@ struct MultiRef {
     a: &int;
     b: &int;
 
-    func new(a: &'this int, b: &'this int) {
+    mut func new(a: &'this int, b: &'this int) {
         this.a = a;
         this.b = b;
     }

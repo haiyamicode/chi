@@ -7,7 +7,7 @@ interface IntConstruct {
 struct WrongParam {
     s: string;
 
-    func new(s: string) {
+    mut func new(s: string) {
         this.s = s;
     }
 }

@@ -4,7 +4,7 @@ import "std/ops" as ops;
 struct GenericBox<T> {
     value: int = 0;
 
-    func new() {
+    mut func new() {
         this.value = 42;
     }
 }
@@ -20,7 +20,7 @@ struct RefContainer<T> {
 struct Inner<T> {
     value: T;
 
-    func new(v: T) {
+    mut func new(v: T) {
         this.value = v;
     }
 }
@@ -28,7 +28,7 @@ struct Inner<T> {
 struct Wrapper<T> {
     data: Shared<Inner<T>>;
 
-    func init(value: T) {
+    mut func init(value: T) {
         var inner = Inner<T>{value};
         this.data = {inner};
     }
@@ -42,7 +42,7 @@ struct DataHolder<T> {
     ref_count: uint32;
     value: T;
 
-    func new(v: T) {
+    mut func new(v: T) {
         this.ref_count = 1;
         this.value = v;
     }
@@ -51,7 +51,7 @@ struct DataHolder<T> {
 struct RefHolder<T> {
     data: *DataHolder<T> = null;
 
-    func new(value: T) {
+    mut func new(value: T) {
         this.data = new DataHolder<T>{value};
     }
 
@@ -59,14 +59,14 @@ struct RefHolder<T> {
         return this.data.value;
     }
 
-    func delete() {
+    mut func delete() {
         unsafe {
             delete this.data;
         }
     }
 
     impl ops.CopyFrom<RefHolder<T>> {
-        func copy_from(source: &RefHolder<T>) {
+        mut func copy_from(source: &RefHolder<T>) {
             this.data = source.data;
         }
     }
@@ -77,7 +77,7 @@ struct Arr<T> {
     size: uint32 = 0;
     capacity: uint32 = 0;
 
-    func add(item: T) {
+    mut func add(item: T) {
         unsafe {
             if this.size >= this.capacity {
                 var new_cap: uint32 = this.capacity * 2;
@@ -99,14 +99,14 @@ struct Arr<T> {
         }
     }
 
-    func delete() {
+    mut func delete() {
         unsafe {
             delete this.data;
         }
     }
 
     impl ops.CopyFrom<Arr<T>> {
-        func copy_from(source: &Arr<T>) {
+        mut func copy_from(source: &Arr<T>) {
             this.data = source.data;
             this.size = source.size;
             this.capacity = source.capacity;

@@ -3,17 +3,17 @@ import "std/ops" as ops;
 struct TrackedBox {
     id: int;
 
-    func new(id_val: int) {
+    mut func new(id_val: int) {
         this.id = id_val;
         printf("TrackedBox({}) constructed\n", this.id);
     }
 
-    func delete() {
+    mut func delete() {
         printf("TrackedBox({}) destroyed\n", this.id);
     }
 
     impl ops.CopyFrom<TrackedBox> {
-        func copy_from(source: &TrackedBox) {
+        mut func copy_from(source: &TrackedBox) {
             printf("TrackedBox({}) copied from TrackedBox({})\n", this.id, source.id);
             this.id = source.id;
         }

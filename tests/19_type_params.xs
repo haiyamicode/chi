@@ -11,7 +11,7 @@ func transform<T, U>(value: T, transformer: func (value: T) U) U {
 struct Container<T: ops.Add> {
     value: T;
 
-    func new(value: T) {
+    mut func new(value: T) {
         this.value = value;
     }
 

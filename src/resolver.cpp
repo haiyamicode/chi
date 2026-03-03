@@ -2229,7 +2229,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
         auto member =
-            get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs, &scope);
+            get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs, &scope,
+                                     expr_type);
         if (!member) {
             return nullptr;
         }
@@ -5678,13 +5679,15 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
 
 ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *struct_type,
                                                     const string &field_name, bool is_internal,
-                                                    bool is_write, ResolveScope *scope) {
+                                                    bool is_write, ResolveScope *scope,
+                                                    ChiType *access_type) {
+    auto mut_check_type = access_type ? access_type : struct_type;
     auto field_member = get_struct_member(struct_type, field_name);
     if (!field_member) {
         error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(struct_type));
         return nullptr;
     }
-    if (is_write && !is_struct_access_mutable(struct_type, scope)) {
+    if (is_write && !is_struct_access_mutable(mut_check_type, scope)) {
         error(node, errors::CANNOT_MODIFY_IMMUTABLE_REFERENCE, format_type_display(struct_type));
         return nullptr;
     }
@@ -5701,7 +5704,7 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
 
     if (field_member->is_method()) {
         auto is_mutable = field_member->node->declspec_ref().is_mutable();
-        if (is_mutable && !is_struct_access_mutable(struct_type, scope)) {
+        if (is_mutable && !is_struct_access_mutable(mut_check_type, scope)) {
             error(node, errors::MUTATING_METHOD_ON_IMMUTABLE_REFERENCE, field_name,
                   format_type_display(struct_type));
             return nullptr;

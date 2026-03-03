@@ -2,7 +2,7 @@ struct Point {
     x: int;
     y: int;
 
-    func new(x: int, y: int) {
+    mut func new(x: int, y: int) {
         this.x = x;
         this.y = y;
     }
@@ -11,7 +11,7 @@ struct Point {
 struct Wrapper<T> {
     value: T;
 
-    func new(v: T) {
+    mut func new(v: T) {
         this.value = v;
     }
 }

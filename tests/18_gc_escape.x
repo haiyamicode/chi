@@ -14,7 +14,7 @@ struct GCBox {
 struct Holder {
     ref: &GCBox;
 
-    func new(r: &GCBox) {
+    mut func new(r: &GCBox) {
         this.ref = r;
     }
 }

@@ -9,7 +9,7 @@ interface Show {
 struct Showable {
     x: int;
 
-    func new(x: int) {
+    mut func new(x: int) {
         this.x = x;
     }
 

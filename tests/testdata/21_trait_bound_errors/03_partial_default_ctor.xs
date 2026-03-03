@@ -6,7 +6,7 @@ struct PartialDefault {
     x: int;
     y: int;
 
-    func new(x: int, y: int = 0) {
+    mut func new(x: int, y: int = 0) {
         this.x = x;
         this.y = y;
     }

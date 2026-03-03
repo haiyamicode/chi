@@ -14,7 +14,7 @@ struct Point {
     x: int;
     y: int;
 
-    func new(x: int, y: int) {
+    mut func new(x: int, y: int) {
         this.x = x;
         this.y = y;
     }
@@ -44,7 +44,7 @@ func add<V: ops.Add>(a: V, b: V) V {
 struct Wrapper {
     private _data: Point;
 
-    func new(p: Point) {
+    mut func new(p: Point) {
         this._data = p;
     }
 

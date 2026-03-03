@@ -46,7 +46,7 @@ interface Unwrap<T> {
 }
 
 interface UnwrapMut<T> {
-    mut func unwrap_mut() &mut T;
+    func unwrap_mut() &mut T;
 }
 
 interface Slice<Out> {

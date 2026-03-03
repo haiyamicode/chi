@@ -7,7 +7,7 @@ import "std/ops" as ops;
 struct Holder {
     ref: &int;
 
-    func new(r: &'this int) {
+    mut func new(r: &'this int) {
         this.ref = r;
     }
 
@@ -26,7 +26,7 @@ struct MultiRef {
     a: &int;
     b: &int;
 
-    func new(a: &'this int, b: &'this int) {
+    mut func new(a: &'this int, b: &'this int) {
         this.a = a;
         this.b = b;
     }
@@ -75,7 +75,7 @@ struct Pair {
     first: &int;
     second: &int;
 
-    func new(first: &'this int, second: &'this int) {
+    mut func new(first: &'this int, second: &'this int) {
         this.first = first;
         this.second = second;
     }
@@ -181,16 +181,16 @@ func test_local_order() {
 struct Resource {
     name: string;
 
-    func new(n: string) {
+    mut func new(n: string) {
         this.name = n;
     }
 
-    func delete() {
+    mut func delete() {
         printf("Resource.delete({})\n", this.name);
     }
 
     impl ops.CopyFrom<Resource> {
-        func copy_from(source: &Resource) {
+        mut func copy_from(source: &Resource) {
             this.name = source.name;
         }
     }
@@ -247,12 +247,12 @@ func test_early_delete() {
 struct Heavy {
     value: int;
 
-    func delete() {
+    mut func delete() {
         printf("Heavy.delete({})\n", this.value);
     }
 
     impl ops.CopyFrom<Heavy> {
-        func copy_from(source: &Heavy) {
+        mut func copy_from(source: &Heavy) {
             printf("Heavy.copy({})\n", source.value);
             this.value = source.value;
         }
@@ -318,7 +318,7 @@ func test_unsafe_fn_calls_unsafe() {
 struct RefHolder {
     val: &int;
 
-    func new(v: &'this int) {
+    mut func new(v: &'this int) {
         this.val = v;
     }
 }

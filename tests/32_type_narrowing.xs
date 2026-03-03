@@ -175,12 +175,12 @@ struct Traced {
         printf("  construct({})\n", id);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  destroy({})\n", this.id);
     }
 
     impl ops.CopyFrom<Traced> {
-        func copy_from(source: &Traced) {
+        mut func copy_from(source: &Traced) {
             this.id = source.id;
         }
     }

@@ -92,7 +92,7 @@ struct NestedState {
 struct NestedShared {
     data: Shared<NestedState>;
 
-    func new() {
+    mut func new() {
         this.data = {{}};
     }
 
@@ -128,17 +128,17 @@ func test_string() {
 struct Traced {
     id: int = 0;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         printf("  Traced.new({})\n", id);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  Traced.delete({})\n", this.id);
     }
 
     impl ops.CopyFrom<Traced> {
-        func copy_from(source: &Traced) {
+        mut func copy_from(source: &Traced) {
             this.id = source.id;
             printf("  Traced.copy({})\n", source.id);
         }
@@ -148,14 +148,14 @@ struct Traced {
 struct TracedValue {
     id: int = 0;
 
-    func delete() {
+    mut func delete() {
         if this.id != 0 {
             printf("  TracedValue.delete({})\n", this.id);
         }
     }
 
     impl ops.CopyFrom<TracedValue> {
-        func copy_from(source: &TracedValue) {
+        mut func copy_from(source: &TracedValue) {
             this.id = source.id;
         }
     }
@@ -187,7 +187,7 @@ struct MapTestPoint {
     x: int;
     y: int;
 
-    func new(x: int, y: int) {
+    mut func new(x: int, y: int) {
         this.x = x;
         this.y = y;
     }

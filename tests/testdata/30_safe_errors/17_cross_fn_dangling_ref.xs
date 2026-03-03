@@ -5,7 +5,7 @@
 struct RefHolder {
     val: &int;
 
-    func new(v: &'this int) {
+    mut func new(v: &'this int) {
         this.val = v;
     }
 }

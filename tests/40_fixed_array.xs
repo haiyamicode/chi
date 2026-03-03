@@ -9,21 +9,21 @@ struct Point {
 struct Traced {
     id: int = 0;
 
-    func new(id: int = 0) {
+    mut func new(id: int = 0) {
         this.id = id;
         if id != 0 {
             printf("Traced({}) created\n", id);
         }
     }
 
-    func delete() {
+    mut func delete() {
         if this.id != 0 {
             printf("Traced({}) destroyed\n", this.id);
         }
     }
 
     impl ops.CopyFrom<Traced> {
-        func copy_from(source: &Traced) {
+        mut func copy_from(source: &Traced) {
             this.id = source.id;
             if source.id != 0 {
                 printf("Traced({}) copied\n", source.id);

@@ -27,12 +27,12 @@ struct OtherError {
 struct Resource {
     name: string = "";
 
-    func delete() {
+    mut func delete() {
         printf("Resource.delete({})\n", this.name);
     }
 
     impl ops.CopyFrom<Resource> {
-        func copy_from(source: &Resource) {
+        mut func copy_from(source: &Resource) {
             this.name = source.name;
         }
     }

@@ -3,7 +3,7 @@
 struct Holder {
     ref: &int;
 
-    func new(r: &'this int) {
+    mut func new(r: &'this int) {
         this.ref = r;
     }
 

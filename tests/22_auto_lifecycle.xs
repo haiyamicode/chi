@@ -3,17 +3,17 @@ import "std/ops" as ops;
 struct Inner1 {
     id: int = 0;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         printf("  Inner1.new({})\n", id);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  Inner1.delete({})\n", this.id);
     }
 
     impl ops.CopyFrom<Inner1> {
-        func copy_from(source: &Inner1) {
+        mut func copy_from(source: &Inner1) {
             this.id = source.id;
         }
     }
@@ -22,7 +22,7 @@ struct Inner1 {
 struct Outer1 {
     inner: Inner1;
 
-    func new(id: int) {
+    mut func new(id: int) {
         println("Outer1.new");
         this.inner = {id};
     }
@@ -45,7 +45,7 @@ struct WithDefaults {
     b: int = 20;
     c: int;
 
-    func new(c_val: int) {
+    mut func new(c_val: int) {
         printf("WithDefaults.new: a={}, b={}, setting c={}\n", this.a, this.b, c_val);
         this.c = c_val;
     }
@@ -61,17 +61,17 @@ func test_new_initializes_defaults() {
 struct OrderedField {
     name: string;
 
-    func new(name: string) {
+    mut func new(name: string) {
         this.name = name;
         printf("  OrderedField.new('{}')\n", name);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  OrderedField.delete('{}')\n", this.name);
     }
 
     impl ops.CopyFrom<OrderedField> {
-        func copy_from(source: &OrderedField) {
+        mut func copy_from(source: &OrderedField) {
             this.name = source.name;
         }
     }
@@ -82,19 +82,19 @@ struct OrderedContainer {
     second: OrderedField;
     third: OrderedField;
 
-    func new() {
+    mut func new() {
         println("OrderedContainer.new");
         this.first = {"first"};
         this.second = {"second"};
         this.third = {"third"};
     }
 
-    func delete() {
+    mut func delete() {
         println("OrderedContainer.delete (user)");
     }
 
     impl ops.CopyFrom<OrderedContainer> {
-        func copy_from(source: &OrderedContainer) {
+        mut func copy_from(source: &OrderedContainer) {
             this.first = source.first;
             this.second = source.second;
             this.third = source.third;
@@ -117,17 +117,17 @@ func test_destruction_order() {
 struct RefCountedData {
     value: int = 0;
 
-    func new(v: int) {
+    mut func new(v: int) {
         this.value = v;
         printf("  RefCountedData.new({})\n", v);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  RefCountedData.delete({})\n", this.value);
     }
 
     impl ops.CopyFrom<RefCountedData> {
-        func copy_from(source: &RefCountedData) {
+        mut func copy_from(source: &RefCountedData) {
             this.value = source.value;
         }
     }
@@ -136,7 +136,7 @@ struct RefCountedData {
 struct HoldsShared {
     data: Shared<RefCountedData>;
 
-    func new(v: int) {
+    mut func new(v: int) {
         println("HoldsShared.new");
         this.data = {{v}};
         printf("  ref_count after construction: {}\n", this.data.ref_count());
@@ -158,12 +158,12 @@ func test_shared_auto_destroy() {
 struct Level3 {
     id: int = 0;
 
-    func delete() {
+    mut func delete() {
         printf("    Level3.delete({})\n", this.id);
     }
 
     impl ops.CopyFrom<Level3> {
-        func copy_from(source: &Level3) {
+        mut func copy_from(source: &Level3) {
             this.id = source.id;
         }
     }
@@ -173,17 +173,17 @@ struct Level2 {
     id: int = 0;
     child: Level3;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         this.child = {id: id * 10};
     }
 
-    func delete() {
+    mut func delete() {
         printf("  Level2.delete({})\n", this.id);
     }
 
     impl ops.CopyFrom<Level2> {
-        func copy_from(source: &Level2) {
+        mut func copy_from(source: &Level2) {
             this.id = source.id;
             this.child = source.child;
         }
@@ -194,17 +194,17 @@ struct Level1 {
     id: int = 0;
     child: Level2;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         this.child = {id * 10};
     }
 
-    func delete() {
+    mut func delete() {
         printf("Level1.delete({})\n", this.id);
     }
 
     impl ops.CopyFrom<Level1> {
-        func copy_from(source: &Level1) {
+        mut func copy_from(source: &Level1) {
             this.id = source.id;
             this.child = source.child;
         }
@@ -226,17 +226,17 @@ func test_nested_destruction() {
 struct OptionalData {
     value: int = 0;
 
-    func new(v: int) {
+    mut func new(v: int) {
         this.value = v;
         printf("  OptionalData.new({})\n", v);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  OptionalData.delete({})\n", this.value);
     }
 
     impl ops.CopyFrom<OptionalData> {
-        func copy_from(source: &OptionalData) {
+        mut func copy_from(source: &OptionalData) {
             this.value = source.value;
         }
     }
@@ -245,7 +245,7 @@ struct OptionalData {
 struct HoldsOptionalShared {
     data: ?Shared<OptionalData> = null;
 
-    func new(v: int) {
+    mut func new(v: int) {
         println("HoldsOptionalShared.new");
         this.data! = {{v}};
         printf("  ref_count: {}\n", this.data!.ref_count());
@@ -278,17 +278,17 @@ func test_optional_auto_destroy() {
 struct DirectStruct {
     id: int = 0;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         printf("  DirectStruct.new({})\n", id);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  DirectStruct.delete({})\n", this.id);
     }
 
     impl ops.CopyFrom<DirectStruct> {
-        func copy_from(source: &DirectStruct) {
+        mut func copy_from(source: &DirectStruct) {
             this.id = source.id;
         }
     }
@@ -297,7 +297,7 @@ struct DirectStruct {
 struct HoldsOptionalDirect {
     data: ?DirectStruct = null;
 
-    func new(id: int) {
+    mut func new(id: int) {
         println("HoldsOptionalDirect.new");
         this.data! = {id};
     }
@@ -319,7 +319,7 @@ struct BothLifecycles {
     default_val: int = 999;
     inner: Inner1;
 
-    func new(id: int) {
+    mut func new(id: int) {
         printf("BothLifecycles.new: default_val={}\n", this.default_val);
         this.inner = {id};
     }
@@ -340,17 +340,17 @@ func test_both_lifecycles() {
 struct TrackedVar {
     name: string;
 
-    func new(name: string) {
+    mut func new(name: string) {
         this.name = name;
         printf("  TrackedVar.new('{}')\n", name);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  TrackedVar.delete('{}')\n", this.name);
     }
 
     impl ops.CopyFrom<TrackedVar> {
-        func copy_from(source: &TrackedVar) {
+        mut func copy_from(source: &TrackedVar) {
             this.name = source.name;
             printf("  TrackedVar.copy('{}')\n", source.name);
         }
@@ -442,7 +442,7 @@ func test_expr_contexts() {
 struct TrackedContainer {
     inner: TrackedVar;
 
-    func new(inner: TrackedVar) {
+    mut func new(inner: TrackedVar) {
         this.inner = inner;
     }
 }
@@ -511,17 +511,17 @@ func test_fn_arg_copy_semantics() {
 struct TrackedVal {
     id: int = 0;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         printf("  TrackedVal.new({})\n", id);
     }
 
-    func delete() {
+    mut func delete() {
         printf("  TrackedVal.delete({})\n", this.id);
     }
 
     impl ops.CopyFrom<TrackedVal> {
-        func copy_from(source: &TrackedVal) {
+        mut func copy_from(source: &TrackedVal) {
             this.id = source.id;
             printf("  TrackedVal.copy({})\n", source.id);
         }

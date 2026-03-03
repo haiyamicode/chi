@@ -44,17 +44,17 @@ enum Node (type: uint64) {
 struct Traced {
     id: int = 0;
 
-    func new(id: int) {
+    mut func new(id: int) {
         this.id = id;
         printf("Traced({}) created\n", id);
     }
 
-    func delete() {
+    mut func delete() {
         printf("Traced({}) destroyed\n", this.id);
     }
 
     impl ops.CopyFrom<Traced> {
-        func copy_from(source: &Traced) {
+        mut func copy_from(source: &Traced) {
             this.id = source.id;
             printf("Traced({}) copied\n", source.id);
         }

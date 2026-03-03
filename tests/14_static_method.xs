@@ -9,7 +9,7 @@ struct Color {
     private g: int = 0;
     protected b: int = 0;
 
-    func new(r: int, g: int, b: int) {
+    mut func new(r: int, g: int, b: int) {
         this.r = r;
         this.g = g;
         this.b = b;
