@@ -67,7 +67,7 @@ struct SystemTypes {
     ChiType *zeroinit = nullptr;
     ChiType *never_ = nullptr;
     ChiType *lambda = nullptr;
-    ChiType *array_view = nullptr;
+    ChiType *span = nullptr;
 };
 
 // Forward declaration for GenericResolver
@@ -103,7 +103,8 @@ struct ResolveContext {
     SystemTypes system_types = {};
     array<ast::Node *> internal_methods = {};
     map<ChiType *, ChiType *> array_of = {};
-    map<ChiType *, ChiType *> array_view_of = {};
+    map<ChiType *, ChiType *> span_of = {};
+    map<ChiType *, ChiType *> mut_span_of = {};
     map<string, ChiType *> fixed_array_of = {};
     map<ChiType *, ChiType *> pointer_of[(int)TypeKind::__COUNT] = {};
     optional<ErrorHandler> error_handler = {};
@@ -112,7 +113,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> promise_of = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
     ChiType *rt_array_type = nullptr;
-    ChiType *rt_array_view_type = nullptr;
+    ChiType *rt_span_type = nullptr;
     ChiType *rt_promise_type = nullptr;
     ChiType *rt_lambda_type = nullptr;
     ChiType *rt_string_type = nullptr;
@@ -334,7 +335,7 @@ class Resolver {
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
 
     ChiType *get_array_type(ChiType *elem);
-    ChiType *get_array_view_type(ChiType *elem);
+    ChiType *get_span_type(ChiType *elem, bool is_mut = false);
     ChiType *get_fixed_array_type(ChiType *elem, uint32_t size);
 
     ChiType *get_promise_type(ChiType *value);

@@ -22,12 +22,7 @@ extern "C" {
     private unsafe func cx_set_program_vtable(ptr: *void);
     private unsafe func cx_runtime_stop();
     private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(
-        type_info: *void,
-        data_ptr: *void,
-        vtable_ptr: *void,
-        type_id: uint32
-    );
+    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
     private unsafe func cx_get_error_type_info() *void;
     private unsafe func cx_get_error_data() *void;
     private unsafe func cx_get_error_vtable() *void;
@@ -308,13 +303,7 @@ struct JsonValue {
 
     func assert_kind(kind: JsonKind) {
         if this.kind != kind {
-            panic(
-                stringf(
-                    "expected {}, got {}",
-                    json_kind_display(kind),
-                    json_kind_display(this.kind)
-                )
-            );
+            panic(stringf("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
         }
     }
 
@@ -583,26 +572,22 @@ struct Array<T> {
         }
     }
 
-    func as_array_view() []T {
+    private static func make_span(data: *T, length: uint32, start: ?uint32, end: ?uint32) []mut T {
+        var s = start ?? 0;
+        var e = end ?? length;
+        assert(s <= e, "span start must be <= end");
+        assert(e <= length, "span end out of bounds");
         unsafe {
-            return {this.data, this.length};
+            return {&data[s], e - s};
         }
     }
 
-    func view(start: ?uint32, end: ?uint32) []T {
-        var s: uint32 = 0;
-        var e: uint32 = this.length;
-        if start {
-            s = start;
-        }
-        if end {
-            e = end;
-        }
-        assert(s <= e, "view start must be <= end");
-        assert(e <= this.length, "view end out of bounds");
-        unsafe {
-            return {&this.data[s], e - s};
-        }
+    func span(start: ?uint32, end: ?uint32) []T {
+        return Array.make_span(this.data, this.length, start, end);
+    }
+
+    mut func span_mut(start: ?uint32, end: ?uint32) []mut T {
+        return Array.make_span(this.data, this.length, start, end);
     }
 }
 
@@ -706,7 +691,7 @@ private struct __CxString {
     }
 }
 
-private struct __CxArrayView<T> {
+private struct __CxSpan<T> {
     private data: *T;
     protected length: uint32;
 
@@ -886,13 +871,11 @@ struct Promise<T> {
 }
 
 func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(
-        func (resolve) {
-            timeout(ms, func [resolve] () {
-                resolve({});
-            });
-        }
-    );
+    return Promise<Unit>.make(func (resolve) {
+        timeout(ms, func [resolve] () {
+            resolve({});
+        });
+    });
 }
 
 private struct MapNode<K: ops.Hash + ops.Eq, V> {

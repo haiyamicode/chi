@@ -595,8 +595,8 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         auto size = llvm_type_size(compile_type(data.elem));
         return llvm_db.createArrayType(0, size, elem_type, {});
     }
-    case TypeKind::ArrayView: {
-        auto &data = type->data.array_view;
+    case TypeKind::Span: {
+        auto &data = type->data.span;
         auto elem_type = compile_di_type(data.elem);
         auto size = llvm_type_size(compile_type(data.elem));
         return llvm_db.createArrayType(0, size, elem_type, {});
@@ -1072,7 +1072,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     TypeMetaEntry *meta_table_data = nullptr;
 
     if (type->kind == TypeKind::Struct || type->kind == TypeKind::Array ||
-        type->kind == TypeKind::ArrayView) {
+        type->kind == TypeKind::Span) {
         auto sty = get_resolver()->resolve_struct_type(type);
         for (auto member : sty->members) {
             if (member->is_method() && member->vtable_index >= 0) {
@@ -3460,7 +3460,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     }
     case TypeKind::Subtype:
     case TypeKind::Array:
-    case TypeKind::ArrayView:
+    case TypeKind::Span:
     case TypeKind::Struct: {
         // Interface copy via vtable dispatch
         // dest and src.address are fat pointer struct VALUES {data_ptr, vtable_ptr}
@@ -3741,7 +3741,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         break;
     }
     case TypeKind::Array:
-    case TypeKind::ArrayView: {
+    case TypeKind::Span: {
         auto array_struct_type = get_resolver()->eval_struct_type(type);
         return compile_construction(fn, dest, array_struct_type, expr);
     }
@@ -4267,7 +4267,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         case TypeKind::Struct:
         case TypeKind::Subtype:
         case TypeKind::Array:
-        case TypeKind::ArrayView: {
+        case TypeKind::Span: {
             auto ref = compile_expr_ref(fn, data.expr);
             auto method = data.resolved_method;
             auto variant_type_id = resolve_variant_type_id(fn, data.expr->resolved_type);
@@ -7574,8 +7574,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Array: {
         return compile_type(type->data.array.internal);
     }
-    case TypeKind::ArrayView: {
-        return compile_type(type->data.array_view.internal);
+    case TypeKind::Span: {
+        return compile_type(type->data.span.internal);
     }
     case TypeKind::FixedArray: {
         auto elem_type_l = compile_type(type->data.fixed_array.elem);

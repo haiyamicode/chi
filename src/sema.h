@@ -23,7 +23,7 @@ struct ChiTypeEnum;
 struct ChiLifetime;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Byte, Rune, String, Struct, Pointer,
-          Reference, MutRef, MoveRef, Array, FixedArray, ArrayView, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
+          Reference, MutRef, MoveRef, Array, FixedArray, Span, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
           Undefined, ZeroInit, Never)
 
@@ -195,9 +195,10 @@ struct ChiTypeFixedArray {
     uint32_t size = 0;
 };
 
-struct ChiTypeArrayView {
+struct ChiTypeSpan {
     ChiType *elem = nullptr;
-    ChiType *internal = nullptr; // lazily set to __CxArrayView<elem>
+    ChiType *internal = nullptr; // lazily set to __CxSpan<elem>
+    bool is_mut = false;
 };
 
 struct ChiTypeResult {
@@ -312,7 +313,7 @@ struct ChiType {
         ChiTypePointer pointer;
         ChiTypeArray array;
         ChiTypeFixedArray fixed_array;
-        ChiTypeArrayView array_view;
+        ChiTypeSpan span;
         ChiTypeInt int_;
         ChiTypeFloat float_;
         ChiTypeSubtype subtype;

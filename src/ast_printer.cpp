@@ -23,7 +23,7 @@ string get_sigil_symbol(SigilKind sigil) {
     case SigilKind::Move:
         return "&move";
     case SigilKind::FixedArray:
-    case SigilKind::ArrayView:
+    case SigilKind::Span:
         return ""; // handled specially in TypeSigil printer
     default:
         panic("unknown sigil {}", PRINT_ENUM(sigil));
@@ -784,8 +784,8 @@ void AstPrinter::print_node(Node *node) {
             print_node(data.type);
             break;
         }
-        if (data.sigil == SigilKind::ArrayView) {
-            emit("[]");
+        if (data.sigil == SigilKind::Span) {
+            emit(data.is_mut ? "[]mut " : "[]");
             print_node(data.type);
             break;
         }
@@ -811,7 +811,7 @@ void AstPrinter::print_node(Node *node) {
             !(data.sigil == SigilKind::Optional &&
               (inner_sigil == SigilKind::Reference || inner_sigil == SigilKind::Pointer)) &&
             inner_sigil != SigilKind::FixedArray &&
-            inner_sigil != SigilKind::ArrayView;
+            inner_sigil != SigilKind::Span;
         if (needs_parens)
             emit("(");
         print_node(data.type);

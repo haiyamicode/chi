@@ -98,7 +98,7 @@ void Resolver::context_init_primitives() {
     system_types.string = create_type(TypeKind::String);
     system_types.str_lit = create_pointer_type(system_types.byte_, TypeKind::Pointer);
     system_types.array = create_type(TypeKind::Array);
-    system_types.array_view = create_type(TypeKind::ArrayView);
+    system_types.span = create_type(TypeKind::Span);
     system_types.optional = create_type(TypeKind::Optional);
     system_types.result = create_type(TypeKind::Result);
     // Promise is now defined as a Chi-native struct in runtime.xs
@@ -219,7 +219,10 @@ void Resolver::resolve(ast::Module *module) {
     for (const auto &pair : m_ctx->array_of.get()) {
         resolve_struct_type(pair.second);
     }
-    for (const auto &pair : m_ctx->array_view_of.get()) {
+    for (const auto &pair : m_ctx->span_of.get()) {
+        resolve_struct_type(pair.second);
+    }
+    for (const auto &pair : m_ctx->mut_span_of.get()) {
         resolve_struct_type(pair.second);
     }
 
@@ -337,9 +340,12 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Array:
         return from_type->kind == TypeKind::Array &&
                can_assign(from_type->get_elem(), to_type->get_elem(), is_explicit);
-    case TypeKind::ArrayView:
-        return from_type->kind == TypeKind::ArrayView &&
-               can_assign(from_type->get_elem(), to_type->get_elem(), is_explicit);
+    case TypeKind::Span:
+        if (from_type->kind != TypeKind::Span) return false;
+        if (!can_assign(from_type->get_elem(), to_type->get_elem(), is_explicit)) return false;
+        // []mut T -> []T is allowed (downgrade), []T -> []mut T is not
+        if (to_type->data.span.is_mut && !from_type->data.span.is_mut) return false;
+        return true;
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
@@ -1200,8 +1206,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.sigil == ast::SigilKind::FixedArray) {
             return get_fixed_array_type(type, data.fixed_size);
         }
-        if (data.sigil == ast::SigilKind::ArrayView) {
-            return get_array_view_type(type);
+        if (data.sigil == ast::SigilKind::Span) {
+            return get_span_type(type, data.is_mut);
         }
         auto kind = get_sigil_type_kind(data.sigil);
         ChiType *final_type;
@@ -2962,8 +2968,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_lambda_type = struct_type;
                 } else if (node->name == "__CxString") {
                     m_ctx->rt_string_type = struct_type;
-                } else if (node->name == "__CxArrayView") {
-                    m_ctx->rt_array_view_type = struct_type;
+                } else if (node->name == "__CxSpan") {
+                    m_ctx->rt_span_type = struct_type;
                 } else if (node->name == "__CxEnumBase") {
                     m_ctx->rt_enum_base = node;
                 } else if (node->name == "Error") {
@@ -3364,7 +3370,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TypeKind::Struct:
         case TypeKind::Subtype:
         case TypeKind::Array:
-        case TypeKind::ArrayView: {
+        case TypeKind::Span: {
+            // Block writes on immutable spans
+            if (scope.is_lhs && expr_type->kind == TypeKind::Span && !expr_type->data.span.is_mut) {
+                error(node, errors::CANNOT_WRITE_IMMUTABLE_SPAN,
+                      format_type_display(expr_type),
+                      format_type_display(expr_type->data.span.elem));
+                return nullptr;
+            }
             auto struct_ = resolve_struct_type(expr_type);
             // LHS (write): require IndexMut
             // RHS (read): prefer Index, fall back to IndexMut
@@ -3420,7 +3433,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         if (expr_type->kind != TypeKind::Struct && expr_type->kind != TypeKind::Subtype &&
-            expr_type->kind != TypeKind::Array && expr_type->kind != TypeKind::ArrayView) {
+            expr_type->kind != TypeKind::Array && expr_type->kind != TypeKind::Span) {
             error(node, "cannot slice type {}", format_type_display(expr_type));
             return nullptr;
         }
@@ -4391,8 +4404,10 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "?" + format_type(type->get_elem(), for_display);
     case TypeKind::Array:
         return fmt::format("Array<{}>", format_type(type->get_elem(), for_display));
-    case TypeKind::ArrayView:
-        return fmt::format("[]{}", format_type(type->data.array_view.elem, for_display));
+    case TypeKind::Span:
+        return fmt::format("{}{}",
+            type->data.span.is_mut ? "[]mut " : "[]",
+            format_type(type->data.span.elem, for_display));
     case TypeKind::FixedArray:
         return fmt::format("[{}]{}", type->data.fixed_array.size,
                            format_type(type->data.fixed_array.elem, for_display));
@@ -4866,7 +4881,7 @@ bool Resolver::is_borrowing_type(ChiType *type) {
         return true;
     case TypeKind::Optional:
     case TypeKind::Array:
-    case TypeKind::ArrayView:
+    case TypeKind::Span:
         return is_borrowing_type(type->get_elem());
     case TypeKind::Result:
         return is_borrowing_type(type->get_elem()) || is_borrowing_type(type->data.result.error);
@@ -5071,11 +5086,17 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::MoveRef:
-    case TypeKind::Optional:
-    case TypeKind::Array:
-    case TypeKind::ArrayView: {
+    case TypeKind::Optional: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
-        return get_wrapped_type(elem_type, type->kind);
+        return get_pointer_type(elem_type, type->kind);
+    }
+    case TypeKind::Array: {
+        auto elem_type = make_recursive_call(type->get_elem(), subs);
+        return get_array_type(elem_type);
+    }
+    case TypeKind::Span: {
+        auto elem_type = make_recursive_call(type->get_elem(), subs);
+        return get_span_type(elem_type, type->data.span.is_mut);
     }
 
     case TypeKind::Subtype: {
@@ -5405,7 +5426,7 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
     case TypeKind::MoveRef:
     case TypeKind::Optional:
     case TypeKind::Array:
-    case TypeKind::ArrayView: {
+    case TypeKind::Span: {
         // Must have same wrapper kind and unify element types
         if (param_type->kind != arg_type->kind) {
             return false;
@@ -5636,17 +5657,17 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
         } else {
             sty = sty->data.array.internal;
         }
-    } else if (sty->kind == TypeKind::ArrayView) {
-        if (!sty->data.array_view.internal) {
-            auto rt_array_view = m_ctx->rt_array_view_type;
-            assert(rt_array_view);
+    } else if (sty->kind == TypeKind::Span) {
+        if (!sty->data.span.internal) {
+            auto rt_span = m_ctx->rt_span_type;
+            assert(rt_span);
             array<ChiType *> args;
-            args.add(sty->data.array_view.elem);
-            auto sstype = get_subtype(to_value_type(rt_array_view), &args);
-            sty->data.array_view.internal = sstype;
+            args.add(sty->data.span.elem);
+            auto sstype = get_subtype(to_value_type(rt_span), &args);
+            sty->data.span.internal = sstype;
             sty = sstype;
         } else {
-            sty = sty->data.array_view.internal;
+            sty = sty->data.span.internal;
         }
     } else if (sty->kind == TypeKind::String) {
         auto rt_string = m_ctx->rt_string_type;
@@ -6055,15 +6076,17 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     return type;
 }
 
-ChiType *Resolver::get_array_view_type(ChiType *elem) {
-    if (auto cached = m_ctx->array_view_of.get(elem))
+ChiType *Resolver::get_span_type(ChiType *elem, bool is_mut) {
+    auto &cache = is_mut ? m_ctx->mut_span_of : m_ctx->span_of;
+    if (auto cached = cache.get(elem))
         return *cached;
-    auto type = create_type(TypeKind::ArrayView);
-    type->data.array_view.elem = elem;
-    m_ctx->array_view_of[elem] = type;
+    auto type = create_type(TypeKind::Span);
+    type->data.span.elem = elem;
+    type->data.span.is_mut = is_mut;
+    cache[elem] = type;
     type->is_placeholder = elem->is_placeholder;
     auto elem_str = elem->global_id.empty() ? format_type_id(elem) : elem->global_id;
-    type->global_id = fmt::format("runtime.__CxArrayView<{}>", elem_str);
+    type->global_id = fmt::format("runtime.__CxSpan<{}>", elem_str);
     return type;
 }
 
@@ -7388,8 +7411,8 @@ ChiType *Resolver::get_system_type(TypeKind kind) {
         return types->string;
     case TypeKind::Array:
         return types->array;
-    case TypeKind::ArrayView:
-        return types->array_view;
+    case TypeKind::Span:
+        return types->span;
     case TypeKind::Optional:
         return types->optional;
     case TypeKind::Bool:
@@ -7416,8 +7439,8 @@ ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
         return get_pointer_type(elem, kind);
     case TypeKind::Array:
         return get_array_type(elem);
-    case TypeKind::ArrayView:
-        return get_array_view_type(elem);
+    case TypeKind::Span:
+        return get_span_type(elem);
     case TypeKind::Promise:
         return get_promise_type(elem);
     default:

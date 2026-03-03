@@ -18,7 +18,7 @@ struct Pair<A: ops.Construct, B: ops.Construct> {
 typedef IntArray = Array<int>;
 typedef Str = string;
 // --- Single-param generic typedef ---
-typedef View<T> = []T;
+typedef Span<T> = []T;
 // --- Multi-param: full application ---
 typedef IntPair = Pair<int, int>;
 // --- Multi-param: partial application (pin first) ---
@@ -26,7 +26,7 @@ typedef IntFirst<B> = Pair<int, B>;
 // --- Multi-param: partial application (pin second) ---
 typedef WithName<A> = Pair<A, string>;
 // --- Chained typedef: typedef of a generic typedef ---
-typedef IntView = View<int>;
+typedef IntSpan = Span<int>;
 // --- Partial application of stdlib generic ---
 typedef StringMap<V> = Map<string, V>;
 // --- Nested generics ---
@@ -39,7 +39,7 @@ func sum(arr: IntArray) int {
     return total;
 }
 
-func print_view(v: View<int>) {
+func print_span(v: Span<int>) {
     for item in v {
         printf("{} ", item);
     }
@@ -68,16 +68,16 @@ func main() {
     printf("greeting: hello, {}\n", s);
 
     // Single-param generic typedef
-    var v: View<int> = arr.as_array_view();
-    print_view(v);
+    var v: Span<int> = arr.span();
+    print_span(v);
 
     // Chained typedef (typedef of generic typedef)
-    var iv: IntView = arr.as_array_view();
+    var iv: IntSpan = arr.span();
     printf("iv: {}\n", iv);
 
-    // Interchangeable: IntView == View<int> == []int
+    // Interchangeable: IntSpan == Span<int> == []int
     var v2: []int = iv;
-    var v3: View<int> = v2;
+    var v3: Span<int> = v2;
     printf("v3: {}\n", v3);
 
     // Multi-param: full application (construct via typedef name)

@@ -538,12 +538,16 @@ Node *Parser::parse_type_expr(bool type_only) {
             sigil_nodes.add(node);
             continue;
         }
-        // []T array view type
+        // []T or []mut T span type
         if (token->type == TokenType::LBRACK && lookahead(1)->type == TokenType::RBRACK) {
             consume(); // [
             consume(); // ]
             auto node = create_node(NodeType::TypeSigil, token);
-            node->data.sigil_type.sigil = SigilKind::ArrayView;
+            node->data.sigil_type.sigil = SigilKind::Span;
+            if (next_is(TokenType::KW_MUT)) {
+                consume(); // mut
+                node->data.sigil_type.is_mut = true;
+            }
             sigil_nodes.add(node);
             continue;
         }
@@ -2025,11 +2029,14 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         return false;
     }
 
-    // Handle [N]T fixed-size array type or []T array view type
+    // Handle [N]T fixed-size array type or []T / []mut T span type
     if (token->type == TokenType::LBRACK) {
         if (lookahead(pos + 1)->type == TokenType::RBRACK) {
-            // []T array view
+            // []T or []mut T span
             pos += 2;
+            if (lookahead(pos)->type == TokenType::KW_MUT) {
+                pos++; // skip mut
+            }
             return try_parse_type_expr_lookahead(pos, struct_only);
         }
         pos++;

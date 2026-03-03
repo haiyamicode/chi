@@ -288,7 +288,7 @@ std::string get_value_display(const CxAny &v) {
         }
     }
     case cx::TypeKind::Array:
-    case cx::TypeKind::ArrayView:
+    case cx::TypeKind::Span:
     case cx::TypeKind::Struct: {
         auto display_method = get_typemeta_display_method(v.type);
         if (display_method) {

@@ -1,4 +1,4 @@
-func print_view(s: []int) {
+func print_span(s: []int) {
     for item in s {
         printf("{} ", item);
     }
@@ -16,43 +16,44 @@ func sum(s: []int) int {
 func main() {
     var arr: Array<int> = [1, 2, 3, 4, 5];
 
-    // as_array_view
-    var s = arr.as_array_view();
+    // immutable span
+    var s = arr.span();
     printf("len: {}\n", s.length);
     printf("is_empty: {}\n", s.is_empty());
 
     // for loop iteration
-    print_view(s);
+    print_span(s);
 
     // Display
     printf("{}\n", s);
 
-    // index operator
+    // index read
     printf("s[0]: {}\n", s[0]);
     printf("s[2]: {}\n", s[2]);
     printf("s[4]: {}\n", s[4]);
 
-    // index mutation
-    s[2] = 30;
-    printf("after s[2]=30: {}\n", s);
+    // mutable span — index mutation
+    var ms = arr.span_mut();
+    ms[2] = 30;
+    printf("after ms[2]=30: {}\n", ms);
 
-    // for loop with index
-    for item, i in s {
+    // for loop with index on mutable span
+    for item, i in ms {
         printf("{}:{} ", i, item);
     }
     println("");
 
-    // view from Array
-    var v1 = arr.view(1, 4);
-    printf("view(1,4): {}\n", v1);
+    // span from Array with bounds
+    var v1 = arr.span(1, 4);
+    printf("span(1,4): {}\n", v1);
 
-    var v2 = arr.view(null, 3);
-    printf("view(null,3): {}\n", v2);
+    var v2 = arr.span(null, 3);
+    printf("span(null,3): {}\n", v2);
 
-    var v3 = arr.view(2, null);
-    printf("view(2,null): {}\n", v3);
+    var v3 = arr.span(2, null);
+    printf("span(2,null): {}\n", v3);
 
-    // slice on array view (produces another []T)
+    // slice on span (produces another []T)
     var sub = s.slice(1, 4);
     printf("slice(1,4): {}\n", sub);
 
@@ -62,22 +63,22 @@ func main() {
     var sub3 = s.slice(3, null);
     printf("slice(3,null): {}\n", sub3);
 
-    // slice operator on array view
+    // slice operator on span
     var sub4 = s[1..4];
     printf("s[1..4]: {}\n", sub4);
 
-    // pass to function
-    printf("sum: {}\n", sum(s));
+    // pass to function — []mut T coerces to []T
+    printf("sum: {}\n", sum(ms));
 
-    // empty view
+    // empty span
     var empty_arr: Array<int> = [];
-    var ev = empty_arr.as_array_view();
+    var ev = empty_arr.span();
     printf("empty len: {}\n", ev.length);
     printf("empty is_empty: {}\n", ev.is_empty());
     printf("empty: {}\n", ev);
 
-    // view reflects underlying array mutation
-    s[0] = 100;
-    printf("arr[0] after view mutation: {}\n", arr[0]);
+    // mutable span reflects underlying array mutation
+    ms[0] = 100;
+    printf("arr[0] after span mutation: {}\n", arr[0]);
 }
 
