@@ -17,28 +17,20 @@ struct Pair<A: ops.Construct, B: ops.Construct> {
 // --- Simple aliases ---
 typedef IntArray = Array<int>;
 typedef Str = string;
-
 // --- Single-param generic typedef ---
 typedef View<T> = []T;
-
 // --- Multi-param: full application ---
 typedef IntPair = Pair<int, int>;
-
 // --- Multi-param: partial application (pin first) ---
 typedef IntFirst<B> = Pair<int, B>;
-
 // --- Multi-param: partial application (pin second) ---
 typedef WithName<A> = Pair<A, string>;
-
 // --- Chained typedef: typedef of a generic typedef ---
 typedef IntView = View<int>;
-
 // --- Partial application of stdlib generic ---
 typedef StringMap<V> = Map<string, V>;
-
 // --- Nested generics ---
 typedef ArrayPair<T> = Pair<Array<T>, Array<T>>;
-
 func sum(arr: IntArray) int {
     var total = 0;
     for item in arr {
@@ -89,7 +81,7 @@ func main() {
     printf("v3: {}\n", v3);
 
     // Multi-param: full application (construct via typedef name)
-    var p1: IntPair = IntPair{10, 20};
+    var p1 = IntPair{10, 20};
     printf("p1: {}\n", format_int_pair(p1));
 
     // IntPair is interchangeable with Pair<int, int>
@@ -112,7 +104,7 @@ func main() {
     printf("named: {}\n", format_named<float>(p6));
 
     // Partial application of Map (construct via typedef name)
-    var m: StringMap<int> = StringMap<int>{};
+    var m = StringMap<int>{};
     m.set("x", 10);
     m.set("y", 20);
     printf("m[x]: {}\n", m["x"]);
@@ -138,7 +130,8 @@ func main() {
     printf("imported: {}\n", imported_arr);
 
     // Cross-module generic typedef (named import with alias)
-    var sm: SM<int> = SM<int>{};
+    var sm = SM<int>{};
     sm.set("z", 99);
     printf("sm[z]: {}\n", sm["z"]);
 }
+
