@@ -492,6 +492,7 @@ enum SemanticTokenType {
     ST_Namespace = 0, ST_Type = 1, ST_Function = 2, ST_Method = 3,
     ST_Variable = 4, ST_Parameter = 5, ST_Property = 6, ST_EnumMember = 7,
     ST_Keyword = 8, ST_Number = 9, ST_String = 10, ST_Operator = 11, ST_Decorator = 12,
+    ST_Modifier = 13,
 };
 enum SemanticTokenModifier {
     SM_Declaration = 1 << 0, SM_Readonly = 1 << 1,
@@ -510,10 +511,18 @@ static boost::json::array generate_semantic_tokens(cx::ast::Module *module) {
         if (tok->type >= cx::TokenType::KW_BREAK && tok->type < cx::TokenType::BOOL) {
             auto len = tok->str.size();
             if (len == 0) continue;
+            // Storage modifiers get a distinct token type (blue in Dark+)
+            auto st = ST_Keyword;
+            if (tok->type == cx::TokenType::KW_MUT ||
+                tok->type == cx::TokenType::KW_STATIC ||
+                tok->type == cx::TokenType::KW_PRIVATE ||
+                tok->type == cx::TokenType::KW_PROTECTED) {
+                st = ST_Modifier;
+            }
             result.push_back(tok->pos.line);
             result.push_back(tok->pos.col - 1);
             result.push_back((int64_t)len);
-            result.push_back(ST_Keyword);
+            result.push_back(st);
             result.push_back(0);
             continue;
         }
