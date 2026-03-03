@@ -432,6 +432,7 @@ struct ConstructExpr {
 struct TypedefDecl {
     Node *type = nullptr;
     Token *identifier = nullptr;
+    array<Node *> type_params = {};
 };
 
 struct DotExpr {

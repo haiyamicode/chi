@@ -3185,6 +3185,51 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             type = resolved_sym->data.type_symbol.underlying_type;
         }
 
+        // Generic typedef expansion: typedef StringMap<V> = Map<string, V>
+        // When used as StringMap<int>, expand to Map<string, int>
+        // Also follow ImportSymbol -> resolved_decl for cross-module typedefs
+        auto decl_for_typedef = data.type->type == NodeType::Identifier ? data.type->data.identifier.decl : nullptr;
+        if (decl_for_typedef && decl_for_typedef->type == NodeType::ImportSymbol &&
+            decl_for_typedef->data.import_symbol.resolved_decl) {
+            decl_for_typedef = decl_for_typedef->data.import_symbol.resolved_decl;
+        }
+        if (decl_for_typedef && decl_for_typedef->type == NodeType::TypedefDecl) {
+            auto td_node = decl_for_typedef;
+            auto &td = td_node->data.typedef_decl;
+            if (td.type_params.len > 0) {
+                // Resolve provided type args
+                if (data.args.len > td.type_params.len) {
+                    error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
+                          td_node->name, td.type_params.len, data.args.len);
+                    return nullptr;
+                }
+                // Check missing args have defaults
+                for (auto i = data.args.len; i < td.type_params.len; i++) {
+                    if (!td.type_params[i]->data.type_param.default_type) {
+                        error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
+                              td_node->name, td.type_params.len, data.args.len);
+                        return nullptr;
+                    }
+                }
+                // Build substitution args matching the typedef's type param indices
+                ChiTypeSubtype subs;
+                for (size_t i = 0; i < td.type_params.len; i++) {
+                    ChiType *arg;
+                    if (i < data.args.len) {
+                        arg = resolve_value(data.args[i], scope);
+                    } else {
+                        arg = resolve_value(td.type_params[i]->data.type_param.default_type, scope);
+                    }
+                    if (!arg) return nullptr;
+                    subs.args.add(arg);
+                }
+                // Substitute placeholders in the typedef's resolved RHS by index
+                auto rhs_type = to_value_type(td_node->resolved_type);
+                auto expanded = type_placeholders_sub(rhs_type, &subs);
+                return create_type_symbol({}, expanded);
+            }
+        }
+
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional) {
             if (data.args.len != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
@@ -3958,8 +4003,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.resolved_decl = first_match;
             return first_match ? first_match->resolved_type : nullptr;
         } else {
-            // Regular single symbol import
-            auto decl = module->import_scope->find_one(symbol_name);
+            // Regular single symbol import - search exports
+            ast::Node *decl = nullptr;
+            for (auto export_item : module->exports) {
+                if (export_item->name == symbol_name) {
+                    decl = export_item;
+                    break;
+                }
+            }
+            if (!decl) {
+                // Fallback: also check import_scope for re-exported symbols
+                decl = module->import_scope->find_one(symbol_name);
+            }
             if (!decl) {
                 error(node, errors::SYMBOL_NOT_FOUND_MODULE, symbol_name, module->path);
                 return nullptr;
@@ -4114,7 +4169,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         return node->resolved_type;
     }
     case NodeType::TypedefDecl: {
-        // TypedefDecl nodes from C interop are pre-resolved
+        // C interop typedefs are pre-resolved
+        if (node->resolved_type) {
+            return node->resolved_type;
+        }
+        auto &data = node->data.typedef_decl;
+        // Resolve type params as placeholders
+        for (auto param : data.type_params) {
+            resolve(param, scope);
+        }
+        // Resolve the RHS type expression
+        auto rhs_type = resolve_value(data.type, scope);
+        if (!rhs_type) {
+            return nullptr;
+        }
+        node->resolved_type = create_type_symbol(node->name, rhs_type);
         return node->resolved_type;
     }
     default:

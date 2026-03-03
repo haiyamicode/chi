@@ -1,0 +1,20 @@
+sum: 15
+arr2: [1, 2, 3, 4, 5]
+greeting: hello, world
+1 2 3 4 5
+iv: [1, 2, 3, 4, 5]
+v3: [1, 2, 3, 4, 5]
+p1: (10, 20)
+p2: (10, 20)
+p3: answer = 42
+p4: answer = 42
+named: score: 100
+named: pi: 3.14
+m[x]: 10
+m[y]: 20
+m2[x]: 10
+ap.first: [1, 2]
+ap.second: [3, 4]
+ap2.first: [1, 2]
+imported: [10, 20, 30]
+sm[z]: 99

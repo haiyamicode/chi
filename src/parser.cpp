@@ -324,6 +324,8 @@ void Parser::parse_top_level_decls(NodeList *decls) {
             if (!ds || ds->is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
+        } else if (decl->type == NodeType::TypedefDecl) {
+            m_ctx->module->exports.add(decl);
         }
     }
 
@@ -2789,9 +2791,54 @@ Node *Parser::parse_typedef() {
     auto node = create_node(NodeType::TypedefDecl, token);
     auto iden = expect(TokenType::IDEN);
     iden->semantic_node = node;
+    node->name = iden->str;
     node->data.typedef_decl.identifier = iden;
+    auto &params = node->data.typedef_decl.type_params;
+    if (next_is(TokenType::LT)) {
+        expect(TokenType::LT);
+        Token *param_token;
+        for (;;) {
+            param_token = get();
+            if (param_token->type == TokenType::END) {
+                error(param_token, errors::UNEXPECTED_EOF);
+                return node;
+            }
+            if (param_token->type == TokenType::GT) {
+                break;
+            }
+            auto param_iden = expect(TokenType::IDEN);
+            auto param_node = create_node(NodeType::TypeParam, param_iden);
+            if (next_is(TokenType::COLON)) {
+                consume();
+                do {
+                    param_node->data.type_param.type_bounds.add(parse_type_expr(true));
+                } while (next_is(TokenType::ADD) && (consume(), true));
+            }
+            if (next_is(TokenType::ASS)) {
+                consume();
+                param_node->data.type_param.default_type = parse_type_expr(true);
+            }
+            param_node->data.type_param.index = params.len;
+            param_node->data.type_param.source_decl = node;
+            params.add(param_node);
+            if (!at_comma(TokenType::GT)) {
+                break;
+            }
+            consume();
+        }
+        expect(TokenType::GT);
+    }
+    if (params.len > 0) {
+        m_ctx->resolver->push_scope(node);
+        for (auto type_param : params) {
+            m_ctx->resolver->declare_symbol(type_param->name, type_param);
+        }
+    }
     expect(TokenType::ASS);
     node->data.typedef_decl.type = parse_type_expr(true);
+    if (params.len > 0) {
+        m_ctx->resolver->pop_scope();
+    }
     add_to_scope(node, iden->str);
     expect(TokenType::SEMICOLON);
     return node;

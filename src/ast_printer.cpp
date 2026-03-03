@@ -823,6 +823,11 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.typedef_decl;
         emit("typedef ");
         emit(data.identifier->str);
+        if (data.type_params.len) {
+            emit("<");
+            emit_wrapped_list(&data.type_params, "", "", ", ");
+            emit(">");
+        }
         emit(" = ");
         print_node(data.type);
         break;

@@ -154,7 +154,7 @@ ast::Node *Scope::find_one(const string &symbol, bool recursive) {
 
 ast::Node *Scope::find_export(const string &symbol) {
     auto node = find_one(symbol);
-    if (!node || !node->declspec_ref().is_exported()) {
+    if (!node || !node->declspec().is_exported()) {
         return nullptr;
     }
     return node;
