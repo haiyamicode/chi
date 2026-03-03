@@ -73,7 +73,7 @@ class Parser {
             return;
         }
 
-        print("{}:{}:{}: error: {}\n", m_ctx->module->full_path(), token->pos.line_number(),
+        print("{}:{}:{}: error: {}\n", m_ctx->module->display_path(), token->pos.line_number(),
               token->pos.col_number(), message);
 
         ++m_error_count;

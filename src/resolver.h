@@ -271,10 +271,10 @@ class Resolver {
         }
 
         auto pos = node->token->pos;
-        print("{}:{}:{}: error: {}\n", m_module->full_path(), pos.line_number(), pos.col_number(),
+        print("{}:{}:{}: error: {}\n", m_module->display_path(), pos.line_number(), pos.col_number(),
               message);
         for (auto &note : notes) {
-            print("{}:{}:{}: note: {}\n", m_module->full_path(), note.pos.line_number(),
+            print("{}:{}:{}: note: {}\n", m_module->display_path(), note.pos.line_number(),
                   note.pos.col_number(), note.message);
         }
         exit(1);

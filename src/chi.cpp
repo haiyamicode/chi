@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
         // Print collected errors for analyzer testing
         if (module && module->errors.len > 0) {
             for (auto &error : module->errors) {
-                print("{}:{}:{}: error: {}\n", module->full_path(), error.pos.line_number(),
+                print("{}:{}:{}: error: {}\n", module->display_path(), error.pos.line_number(),
                       error.pos.col_number(), error.message);
             }
             return 1; // Return error code to indicate parsing issues
@@ -193,7 +193,7 @@ int main(int argc, char *argv[]) {
 
         if (module && module->errors.len > 0) {
             for (auto &error : module->errors) {
-                fmt::print(stderr, "{}:{}:{}: error: {}\n", module->full_path(),
+                fmt::print(stderr, "{}:{}:{}: error: {}\n", module->display_path(),
                            error.pos.line_number(), error.pos.col_number(), error.message);
             }
             return 1;

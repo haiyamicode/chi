@@ -71,6 +71,14 @@ struct Module {
     Module &operator=(const Module &) = delete;
 
     string full_path() const { return (fs::path(path) / filename).string(); }
+    string display_path() const {
+        auto fp = full_path();
+        auto cwd = fs::current_path().string();
+        if (fp.size() > cwd.size() + 1 && fp.substr(0, cwd.size()) == cwd && fp[cwd.size()] == '/') {
+            return fp.substr(cwd.size() + 1);
+        }
+        return fp;
+    }
     string global_id() const;
 
     static ModuleKind kind_from_extension(const string &ext) {

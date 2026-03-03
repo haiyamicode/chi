@@ -23,9 +23,10 @@ ast::Module *CompilationContext::module_from_path(ast::Package *package, const s
     auto module_path = rel_path.substr(0, rel_path.size() - extension.size());
     auto module = package->add_module();
     module->package = package;
-    module->path = fs::absolute(fs_path).parent_path().string();
+    auto abs_path = fs::weakly_canonical(fs_path);
+    module->path = abs_path.parent_path().string();
     module->id_path = string_join(string_split(module_path, "/"), ".");
-    module->filename = fs::absolute(fs_path).string();
+    module->filename = abs_path.string();
     module->name = fs_path.stem().string();
     module->kind = ast::Module::kind_from_extension(extension);
     return module;
@@ -136,7 +137,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
 
     if (module_map.has_key(module->global_id())) {
         if (exitOnError) {
-            print("{}:{}:{}: error: module {} already exists\n", module->path, 1, 1,
+            print("{}:{}:{}: error: module {} already exists\n", module->display_path(), 1, 1,
                   module->global_id());
             exit(1);
         } else {
@@ -154,7 +155,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     module->comments = std::move(tokenization.comments);
     if (tokenization.error) {
         if (exitOnError) {
-            print("{}:{}:{}: error: {}\n", module->path, tokenization.error_pos.line_number(),
+            print("{}:{}:{}: error: {}\n", module->display_path(), tokenization.error_pos.line_number(),
                   tokenization.error_pos.col_number(), *tokenization.error);
             exit(1);
         } else {
