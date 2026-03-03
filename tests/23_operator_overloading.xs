@@ -126,6 +126,19 @@ struct Vec2 {
             return {x: this.x >> rhs.x, y: this.y >> rhs.y};
         }
     }
+    impl ops.Eq {
+        func eq(other: Vec2) bool {
+            return this.x == other.x && this.y == other.y;
+        }
+    }
+    impl ops.Ord {
+        // Compare by magnitude squared (x*x + y*y)
+        func cmp(other: Vec2) int {
+            var lhs = this.x * this.x + this.y * this.y;
+            var rhs = other.x * other.x + other.y * other.y;
+            return lhs - rhs;
+        }
+    }
 }
 
 func make_vec2(x: int, y: int) Vec2 {
@@ -190,6 +203,24 @@ func test_all_operators() {
 
     println("=== Generic with Sub ===");
     printf("generic sub: {}\n", sub<Vec2>(a, b));
+
+    println("=== Comparison operators ===");
+    var p = Vec2{x: 3, y: 4};   // magnitude^2 = 25
+    var q = Vec2{x: 3, y: 4};   // magnitude^2 = 25
+    var r = Vec2{x: 1, y: 1};   // magnitude^2 = 2
+    var s = Vec2{x: 10, y: 0};  // magnitude^2 = 100
+    printf("p == q: {}\n", p == q);
+    printf("p == r: {}\n", p == r);
+    printf("p != r: {}\n", p != r);
+    printf("p != q: {}\n", p != q);
+    printf("r < p: {}\n", r < p);
+    printf("p < r: {}\n", p < r);
+    printf("s > p: {}\n", s > p);
+    printf("p > s: {}\n", p > s);
+    printf("r <= p: {}\n", r <= p);
+    printf("p <= q: {}\n", p <= q);
+    printf("s >= p: {}\n", s >= p);
+    printf("p >= q: {}\n", p >= q);
 
     println("=== Temporaries ===");
     printf("call - call: {}\n", make_vec2(10, 20) - make_vec2(3, 4));

@@ -45,6 +45,19 @@ not: [-1, 0]
 >>=: [4, 8]
 === Generic with Sub ===
 generic sub: [7, 16]
+=== Comparison operators ===
+p == q: true
+p == r: false
+p != r: true
+p != q: false
+r < p: true
+p < r: false
+s > p: true
+p > s: false
+r <= p: true
+p <= q: true
+s >= p: true
+p >= q: true
 === Temporaries ===
 call - call: [7, 16]
 chain: [3, 5]
