@@ -105,6 +105,10 @@ interface Ord {
     func cmp(other: This) int;
 }
 
+interface Hash {
+    func hash() uint64;
+}
+
 // Composite numeric interfaces
 interface Number {
     ...Add;

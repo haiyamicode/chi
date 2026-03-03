@@ -1,11 +1,6 @@
 import "std/ops" as ops;
 import "std/mem" as mem;
 
-private struct HashBytes {
-    data: *void = null;
-    length: uint32 = 0;
-}
-
 extern "C" {
     private unsafe func cx_print(str: string);
     private unsafe func cx_printf(format: *string, values: *void);
@@ -41,13 +36,6 @@ extern "C" {
     private unsafe func cx_string_to_cstring(str: *string) *char;
     private unsafe func cx_string_concat(dest: *string, s1: *string, s2: *string);
     private unsafe func cx_cstring_copy(src: *char) *char;
-    private unsafe func cx_hbytes(value: *any, result: *HashBytes);
-    private unsafe func cx_map_new() *void;
-    private unsafe func cx_map_delete(data: *void);
-    private unsafe func cx_map_find(data: *void, key: *HashBytes) *void;
-    private unsafe func cx_map_add(data: *void, key: *HashBytes, value: *void);
-    private unsafe func cx_map_remove(data: *void, key: *HashBytes);
-    private unsafe func cx_map_keys(data: *void, dest_array: *void, key_size: uint32, key_type: *any);
     private unsafe func cx_parse_json(str: *string, result: *void);
     private unsafe func cx_json_value_delete(data: *void);
     private unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
@@ -889,25 +877,50 @@ func sleep(ms: uint64) Promise<Unit> {
     });
 }
 
-struct MapIterator<K, V> {
-    map: *Map<K, V> = null;
-    keys: Array<K> = [];
-    index: uint32 = 0;
+private struct MapNode<K: ops.Hash + ops.Eq, V> {
+    key: K;
+    value: V;
+    hash: uint64;
+    next: *MapNode<K, V>;
+
+    func new(key: K, value: V, hash: uint64, next: *MapNode<K, V>) {
+        this.key = key;
+        this.value = value;
+        this.hash = hash;
+        this.next = next;
+    }
+}
+
+struct MapIterator<K: ops.Hash + ops.Eq, V> {
+    private buckets: **MapNode<K, V>;
+    private capacity: uint32;
+    private bucket_idx: uint32;
+    private current: *MapNode<K, V>;
+
+    func new(buckets: **MapNode<K, V>, capacity: uint32) {
+        this.buckets = buckets;
+        this.capacity = capacity;
+        this.bucket_idx = 0;
+        this.current = null;
+    }
 
     impl ops.MutIterator<V> {
         func next() ?(&mut V) {
-            if this.index >= this.keys.length {
-                return null;
+            if this.current != null {
+                unsafe {
+                    var node = this.current;
+                    this.current = node.next;
+                    return {&mut node.value};
+                }
             }
-            var k = this.keys[this.index];
-            this.index = this.index + 1;
-            unsafe {
-                var k_any: any = k;
-                var h = HashBytes{};
-                cx_hbytes(&k_any, &h);
-                var p = cx_map_find((*this.map).data, &h) as *V;
-                if p {
-                    return {p};
+            while this.bucket_idx < this.capacity {
+                unsafe {
+                    var node = this.buckets[this.bucket_idx];
+                    this.bucket_idx += 1;
+                    if node != null {
+                        this.current = node.next;
+                        return {&mut node.value};
+                    }
                 }
             }
             return null;
@@ -915,113 +928,168 @@ struct MapIterator<K, V> {
     }
 }
 
-struct Map<K: ops.Construct, V> {
-    protected data: *void = null;
+struct Map<K: ops.Hash + ops.Eq, V> {
+    private buckets: **MapNode<K, V> = null;
+    private capacity: uint32 = 0;
+    private count: uint32 = 0;
 
     mut func new() {
+        this.capacity = 16;
         unsafe {
-            this.data = cx_map_new();
+            var size = 8 * (this.capacity as uint32);
+            this.buckets = cx_malloc(size, null) as **MapNode<K, V>;
+            cx_memset(this.buckets as *void, 0, size);
         }
     }
 
     func delete() {
-        if this.data != null {
-            var ks = this.keys();
-            for k in ks {
-                unsafe {
-                    var k_any: any = k;
-                    var h = HashBytes{};
-                    cx_hbytes(&k_any, &h);
-                    var p = cx_map_find(this.data, &h) as *V;
-                    if p {
-                        delete p;
-                    }
+        if this.buckets == null { return; }
+        var i: uint32 = 0;
+        while i < this.capacity {
+            unsafe {
+                var node = this.buckets[i];
+                while node != null {
+                    var next = node.next;
+                    delete node;
+                    node = next;
                 }
             }
-            unsafe {
-                cx_map_delete(this.data);
-            }
+            i += 1;
         }
+        unsafe { cx_free(this.buckets as *void); }
     }
 
     func get(key: K) ?&V {
-        var k: any = key;
-        var h = HashBytes{};
+        if this.buckets == null { return null; }
+        var h = key.hash();
+        var idx = (h % (this.capacity as uint64)) as uint32;
         unsafe {
-            cx_hbytes(&k, &h);
-            var p = cx_map_find(this.data, &h) as *V;
-            if p {
-                return {p};
+            var node = this.buckets[idx];
+            while node != null {
+                if node.hash == h && node.key == key {
+                    return {&node.value};
+                }
+                node = node.next;
             }
         }
         return null;
     }
 
-    func remove(key: K) {
-        var k: any = key;
-        var h = HashBytes{};
+    func set(key: K, value: V) {
+        var h = key.hash();
+        var idx = (h % (this.capacity as uint64)) as uint32;
         unsafe {
-            cx_hbytes(&k, &h);
-            var p = cx_map_find(this.data, &h) as *V;
-            if p {
-                delete p;
+            var node = this.buckets[idx];
+            while node != null {
+                if node.hash == h && node.key == key {
+                    node.value = value;
+                    return;
+                }
+                node = node.next;
             }
-            cx_map_remove(this.data, &h);
+            this.buckets[idx] = new MapNode<K, V>{key, value, h, this.buckets[idx]};
+        }
+        this.count += 1;
+        if this.count > this.capacity * 2 {
+            this.resize(this.capacity * 10);
+        }
+    }
+
+    private func resize(new_capacity: uint32) {
+        unsafe {
+            var new_size = 8 * new_capacity;
+            var new_buckets = cx_malloc(new_size, null) as **MapNode<K, V>;
+            cx_memset(new_buckets as *void, 0, new_size);
+            var i: uint32 = 0;
+            while i < this.capacity {
+                var node = this.buckets[i];
+                while node != null {
+                    var next = node.next;
+                    var new_idx = (node.hash % (new_capacity as uint64)) as uint32;
+                    node.next = new_buckets[new_idx];
+                    new_buckets[new_idx] = node;
+                    node = next;
+                }
+                i += 1;
+            }
+            cx_free(this.buckets as *void);
+            this.buckets = new_buckets;
+            this.capacity = new_capacity;
+        }
+    }
+
+    func remove(key: K) {
+        if this.buckets == null { return; }
+        var h = key.hash();
+        var idx = (h % (this.capacity as uint64)) as uint32;
+        unsafe {
+            var prev: *MapNode<K, V> = null;
+            var node = this.buckets[idx];
+            while node != null {
+                var next = node.next;
+                if node.hash == h && node.key == key {
+                    if prev != null {
+                        prev.next = next;
+                    } else {
+                        this.buckets[idx] = next;
+                    }
+                    var to_delete = node;
+                    node = null;
+                    delete to_delete;
+                    this.count -= 1;
+                    return;
+                }
+                prev = node;
+                node = next;
+            }
         }
     }
 
     func keys() Array<K> {
         var result: Array<K> = [];
-        var probe: any = K{};
-        unsafe {
-            cx_map_keys(this.data, &result, sizeof K, &probe);
+        var i: uint32 = 0;
+        while i < this.capacity {
+            unsafe {
+                var node = this.buckets[i];
+                while node != null {
+                    result.add(node.key);
+                    node = node.next;
+                }
+            }
+            i += 1;
         }
         return result;
     }
 
     impl ops.Index<K, V> {
         func index(key: K) &V {
-            var k: any = key;
-            var h = HashBytes{};
+            if this.buckets == null {
+                panic("map: key not found");
+            }
+            var h = key.hash();
+            var idx = (h % (this.capacity as uint64)) as uint32;
             unsafe {
-                cx_hbytes(&k, &h);
-                var p = cx_map_find(this.data, &h) as *V;
-                if !p {
-                    panic("map: key not found");
+                var node = this.buckets[idx];
+                while node != null {
+                    if node.hash == h && node.key == key {
+                        return &node.value;
+                    }
+                    node = node.next;
                 }
-                return p;
             }
-        }
-    }
-
-    func set(key: K, value: V) {
-        var k: any = key;
-        var h = HashBytes{};
-        unsafe {
-            cx_hbytes(&k, &h);
-            var p = cx_map_find(this.data, &h) as *V;
-            if p {
-                *p = value;
-            } else {
-                p = mem.copy_from<V>(&value) as *V;
-                cx_map_add(this.data, &h, p);
-            }
+            panic("map: key not found");
         }
     }
 
     impl ops.MutIterable<V> {
         func to_iter_mut() MapIterator<K, V> {
-            unsafe {
-                return {map: &this as *Map<K, V>, keys: this.keys(), index: 0};
-            }
+            return MapIterator<K, V>{this.buckets, this.capacity};
         }
     }
 
     impl ops.CopyFrom<Map<K, V>> {
         func copy_from(source: &Map<K, V>) {
-            unsafe {
-                this.data = cx_map_new();
-            }
+            this.new();
             var ks = source.keys();
             for k in ks {
                 var v = source.get(k);
@@ -1032,4 +1100,3 @@ struct Map<K: ops.Construct, V> {
         }
     }
 }
-

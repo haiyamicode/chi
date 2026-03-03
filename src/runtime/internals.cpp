@@ -630,72 +630,36 @@ void cx_timeout(uint64_t delay, void *lambda_ptr) {
     uv_timer_start(timer, timeout_cb, delay, 0);
 }
 
-static CxHash get_hbytes(CxAny *v) {
-    switch ((TypeKind)v->type->kind) {
-    case TypeKind::String: {
-        auto s = (CxString *)v->data;
-        return {s->data, s->size};
+static inline uint32_t meiyan_hash(const char *key, int count) {
+    typedef uint32_t *P;
+    uint32_t h = 0x811c9dc5;
+    while (count >= 8) {
+        h = (h ^ ((((*(P)key) << 5) | ((*(P)key) >> 27)) ^ *(P)(key + 4))) * 0xad3e7;
+        count -= 8;
+        key += 8;
     }
-    default:
-        return {v->data, (uint32_t)v->type->size};
-    }
-    return {v->data, (uint32_t)v->type->size};
+#define meiyan_tmp h = (h ^ *(uint16_t *)key) * 0xad3e7; key += 2;
+    if (count & 4) { meiyan_tmp meiyan_tmp }
+    if (count & 2) { meiyan_tmp }
+    if (count & 1) { h = (h ^ *key) * 0xad3e7; }
+#undef meiyan_tmp
+    return h ^ (h >> 16);
 }
 
-void cx_hbytes(CxAny *v, CxHash *result) { *result = get_hbytes(v); }
+uint64_t cx_meiyan(const void *key, int count) {
+    return (uint64_t)meiyan_hash((const char *)key, count);
+}
+
+bool cx_string_eq(CxString *a, CxString *b) {
+    if (a->size != b->size) return false;
+    return memcmp(a->data, b->data, a->size) == 0;
+}
 
 // DEPRECATED: Promise is now a Chi-native struct in runtime.xs
 // void cx_promise_init(CxPromise *promise) { ... }
 // void cx_promise_resolve(CxPromise *promise, void *value) { ... }
 // void cx_promise_reject(CxPromise *promise, void *error) { ... }
 // void cx_promise_then(CxPromise *promise, CxLambda *on_resolve, CxLambda *on_reject) { ... }
-
-void *cx_map_new() { return dic_new(0); }
-
-void cx_map_delete(void *data) {
-    dic_delete((dictionary *)data);
-}
-
-void *cx_map_find(void *data, CxHash *key) {
-    auto dict = (dictionary *)data;
-    auto found = dic_find(dict, key->data, key->size);
-    if (!found) {
-        return nullptr;
-    }
-    return *dict->value;
-}
-
-void cx_map_add(void *data, CxHash *key, void *value) {
-    auto dict = (dictionary *)data;
-    dic_add(dict, key->data, key->size);
-    *dict->value = value;
-}
-
-void cx_map_remove(void *data, CxHash *key) {}
-
-struct MapKeysCtx {
-    void *dest_array;
-    uint32_t key_size;
-    bool is_string;
-};
-
-static int collect_map_key(void *key, int count, void **value, void *user) {
-    auto ctx = (MapKeysCtx *)user;
-    auto slot = cx_array_add((CxArray *)ctx->dest_array, ctx->key_size);
-    if (ctx->is_string) {
-        cx_string_from_chars((const char *)key, (uint32_t)count, (CxString *)slot);
-    } else {
-        memcpy(slot, key, ctx->key_size);
-    }
-    return true;
-}
-
-void cx_map_keys(void *data, void *dest_array, uint32_t key_size, CxAny *key_type) {
-    auto dict = (dictionary *)data;
-    bool is_string = (TypeKind)key_type->type->kind == TypeKind::String;
-    MapKeysCtx ctx = {dest_array, key_size, is_string};
-    dic_forEach(dict, collect_map_key, &ctx);
-}
 
 static void create_cx_json_result(boost::json::value *data, void *result) {
     auto result_p = (CxJsonValue *)result;

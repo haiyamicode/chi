@@ -4461,6 +4461,87 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
     return call_args;
 }
 
+llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
+                                                   ChiType *concrete_type,
+                                                   const std::string &method_name,
+                                                   ast::FnCallExpr &fn_call_data) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+    auto receiver_expr = fn_call_data.fn_ref_expr->data.dot_expr.expr;
+    auto receiver = compile_expr(fn, receiver_expr);
+
+    if (method_name == "hash") {
+        // Declare cx_meiyan if not already declared
+        auto i64_ty = llvm::Type::getInt64Ty(llvm_ctx);
+        auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
+        auto ptr_ty = builder.getPtrTy();
+        auto meiyan_fn_ty = llvm::FunctionType::get(i64_ty, {ptr_ty, i32_ty}, false);
+        auto meiyan_fn = m_ctx->llvm_module->getOrInsertFunction("cx_meiyan", meiyan_fn_ty);
+
+        if (concrete_type->kind == TypeKind::String) {
+            // String: hash the content bytes — extract data ptr (field 0) and size (field 1)
+            auto data_ptr = builder.CreateExtractValue(receiver, {0}, "str_data");
+            auto size = builder.CreateExtractValue(receiver, {1}, "str_size");
+            return builder.CreateCall(meiyan_fn, {data_ptr, size}, "hash");
+        } else {
+            // Int/float/bool/char/rune: alloca, store, hash the raw bytes
+            auto value_type_l = compile_type(concrete_type);
+            auto tmp = fn->entry_alloca(value_type_l, "hash_tmp");
+            builder.CreateStore(receiver, tmp);
+            auto size = llvm::ConstantInt::get(
+                i32_ty, m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l));
+            return builder.CreateCall(meiyan_fn, {tmp, size}, "hash");
+        }
+    } else if (method_name == "eq") {
+        assert(fn_call_data.args.len == 1 && "eq() expects one argument");
+        auto other = compile_expr(fn, fn_call_data.args[0]);
+
+        if (concrete_type->kind == TypeKind::String) {
+            // String eq: call cx_string_eq
+            auto i1_ty = llvm::Type::getInt1Ty(llvm_ctx);
+            auto ptr_ty = builder.getPtrTy();
+            auto string_eq_fn_ty = llvm::FunctionType::get(i1_ty, {ptr_ty, ptr_ty}, false);
+            auto string_eq_fn =
+                m_ctx->llvm_module->getOrInsertFunction("cx_string_eq", string_eq_fn_ty);
+            // Need pointers to both CxString structs
+            auto str_type_l = compile_type(concrete_type);
+            auto lhs_ptr = fn->entry_alloca(str_type_l, "eq_lhs");
+            auto rhs_ptr = fn->entry_alloca(str_type_l, "eq_rhs");
+            builder.CreateStore(receiver, lhs_ptr);
+            builder.CreateStore(other, rhs_ptr);
+            return builder.CreateCall(string_eq_fn, {lhs_ptr, rhs_ptr}, "eq");
+        } else if (concrete_type->kind == TypeKind::Float) {
+            return builder.CreateFCmpOEQ(receiver, other, "eq");
+        } else {
+            // Int-like, bool, char, rune: icmp eq
+            return builder.CreateICmpEQ(receiver, other, "eq");
+        }
+    } else if (method_name == "cmp") {
+        // Ord::cmp — returns int (lhs - rhs for numeric types)
+        assert(fn_call_data.args.len == 1 && "cmp() expects one argument");
+        auto other = compile_expr(fn, fn_call_data.args[0]);
+
+        if (concrete_type->kind == TypeKind::Float) {
+            // Float comparison: convert to int result (-1, 0, 1)
+            auto lt = builder.CreateFCmpOLT(receiver, other, "lt");
+            auto gt = builder.CreateFCmpOGT(receiver, other, "gt");
+            auto i64_ty = llvm::Type::getInt64Ty(llvm_ctx);
+            auto neg1 = llvm::ConstantInt::getSigned(i64_ty, -1);
+            auto zero = llvm::ConstantInt::getSigned(i64_ty, 0);
+            auto one = llvm::ConstantInt::getSigned(i64_ty, 1);
+            auto gt_val = builder.CreateSelect(gt, one, zero);
+            return builder.CreateSelect(lt, neg1, gt_val, "cmp");
+        } else {
+            // Int-like: just subtract
+            return builder.CreateSub(receiver, other, "cmp");
+        }
+    }
+
+    panic("compile_builtin_trait_call: unhandled method '{}' on type {}", method_name,
+          PRINT_ENUM(concrete_type->kind));
+    return nullptr;
+}
+
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke,
                                        llvm::Value *sret_dest) {
     auto &data = expr->data.fn_call_expr;
@@ -4599,8 +4680,30 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 auto name = dot_data.field->get_name();
                 auto concrete_type = get_chitype(dot_data.expr);
                 auto concrete_struct = get_resolver()->resolve_struct_type(concrete_type);
+
+                if (!concrete_struct) {
+                    // Built-in type: generate intrinsic code for trait methods
+                    auto result = compile_builtin_trait_call(fn, expr, concrete_type, name,
+                                                             fn_call_data);
+                    if (sret_dest && result) {
+                        builder.CreateStore(result, sret_dest);
+                        return nullptr;
+                    }
+                    return result;
+                }
+
                 auto concrete_member = concrete_struct->find_member(name);
-                assert(concrete_member && "concrete member not found during codegen");
+                if (!concrete_member) {
+                    // Built-in type mapped to a runtime struct (e.g. string → __CxString)
+                    // that doesn't have the trait method — use intrinsic fallback
+                    auto result = compile_builtin_trait_call(fn, expr, concrete_type, name,
+                                                             fn_call_data);
+                    if (sret_dest && result) {
+                        builder.CreateStore(result, sret_dest);
+                        return nullptr;
+                    }
+                    return result;
+                }
                 fn_type = concrete_member->resolved_type;
                 ctn_type = concrete_type;
                 fn_decl = concrete_member->node;

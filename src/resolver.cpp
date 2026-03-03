@@ -173,6 +173,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Slice"] = IntrinsicSymbol::Slice;
     m_ctx->intrinsic_symbols["std.ops.Eq"] = IntrinsicSymbol::Eq;
     m_ctx->intrinsic_symbols["std.ops.Ord"] = IntrinsicSymbol::Ord;
+    m_ctx->intrinsic_symbols["std.ops.Hash"] = IntrinsicSymbol::Hash;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -3874,6 +3875,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (cached_mod) {
                 module = *cached_mod;
             } else {
+                // When the BUILTIN (runtime) module imports/exports a sub-module,
+                // make all currently-resolved runtime exports available as builtins
+                // so the sub-module can reference types like Array, panic, etc.
+                if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
+                    context_init_builtins(scope.module);
+                }
                 auto target_package =
                     m_ctx->allocator->get_or_create_package(path_info->package_id_path);
                 auto src = io::Buffer::from_file(path);
@@ -7261,6 +7268,38 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     return sty;
 }
 
+bool Resolver::builtin_satisfies_intrinsic(ChiType *type, IntrinsicSymbol symbol) {
+    switch (symbol) {
+    case IntrinsicSymbol::Add:
+        return type->is_int_like() || type->kind == TypeKind::Float ||
+               type->kind == TypeKind::String;
+    case IntrinsicSymbol::Sub:
+    case IntrinsicSymbol::Mul:
+    case IntrinsicSymbol::Div:
+    case IntrinsicSymbol::Rem:
+    case IntrinsicSymbol::Neg:
+        return type->is_int_like() || type->kind == TypeKind::Float;
+    case IntrinsicSymbol::Eq:
+    case IntrinsicSymbol::Ord:
+        return type->is_int_like() || type->kind == TypeKind::Float ||
+               type->kind == TypeKind::String || type->kind == TypeKind::Bool ||
+               type->kind == TypeKind::Char || type->kind == TypeKind::Rune;
+    case IntrinsicSymbol::Hash:
+        return type->is_int_like() || type->kind == TypeKind::Float ||
+               type->kind == TypeKind::String || type->kind == TypeKind::Bool ||
+               type->kind == TypeKind::Char || type->kind == TypeKind::Rune;
+    case IntrinsicSymbol::BitAnd:
+    case IntrinsicSymbol::BitOr:
+    case IntrinsicSymbol::BitXor:
+    case IntrinsicSymbol::BitNot:
+    case IntrinsicSymbol::Shl:
+    case IntrinsicSymbol::Shr:
+        return type->is_int_like();
+    default:
+        return false;
+    }
+}
+
 void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type) {
     if (is_assignment_op(op_type)) {
         op_type = get_assignment_op(op_type);
@@ -7269,28 +7308,10 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
         return;
     }
 
-    bool ok;
-    switch (op_type) {
-    case TokenType::ADD:
-        ok = type->is_int_like() || type->kind == TypeKind::Float || type->kind == TypeKind::String;
-        break;
-    case TokenType::SUB:
-    case TokenType::MUL:
-    case TokenType::DIV:
-    case TokenType::MOD:
-    case TokenType::LT:
-    case TokenType::GT:
-    case TokenType::LE:
-    case TokenType::GE:
-    case TokenType::EQ:
-    case TokenType::NE:
-        ok = type->is_int_like() || type->kind == TypeKind::Float;
-        break;
-    default:
-        // Bitwise and shift operators: integers only
-        ok = type->is_int_like();
-        break;
-    }
+    auto intrinsic = get_operator_intrinsic_symbol(op_type);
+    bool ok = (intrinsic != IntrinsicSymbol::None)
+        ? builtin_satisfies_intrinsic(type, intrinsic)
+        : false;
 
     // Handle placeholder types with appropriate trait bounds
     if (!ok && type->kind == TypeKind::Placeholder && type->data.placeholder.traits.len > 0) {
@@ -8022,9 +8043,24 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
             if (method_member)
                 break;
             if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
+                // First try member_intrinsics (populated on implementing structs)
                 auto member_p = trait_type->data.struct_.member_intrinsics.get(symbol);
                 if (member_p && (*member_p)->is_method()) {
                     method_member = *member_p;
+                } else if (trait_type->data.struct_.node) {
+                    // For interfaces, check if this trait IS the intrinsic
+                    auto global_id = resolve_global_id(trait_type->data.struct_.node);
+                    auto intrinsic_p = m_ctx->intrinsic_symbols.get(global_id);
+                    if (intrinsic_p && *intrinsic_p == symbol) {
+                        for (auto m : trait_type->data.struct_.members) {
+                            if (m->is_method()) {
+                                method_member = m;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (method_member) {
                     auto method_type = method_member->resolved_type;
                     if (method_type && method_type->kind == TypeKind::Fn) {
                         auto &fn_data = method_type->data.fn;
@@ -8229,15 +8265,18 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         if (is_constructor_interface_compatible(check_arg, trait_type))
             return true;
     } else {
-        // Built-in types: check intrinsics
+        // Built-in types: check all required intrinsics are satisfied
         auto required = interface_get_intrinsics(trait_type);
-        for (auto &intrinsic : required) {
-            if (intrinsic == IntrinsicSymbol::Add) {
-                if (type_arg->is_int_like() || type_arg->kind == TypeKind::Float ||
-                    type_arg->kind == TypeKind::String) {
-                    return true;
+        if (required.len > 0) {
+            bool all_satisfied = true;
+            for (auto &intrinsic : required) {
+                if (!builtin_satisfies_intrinsic(type_arg, intrinsic)) {
+                    all_satisfied = false;
+                    break;
                 }
             }
+            if (all_satisfied)
+                return true;
         }
         // Constructor interface: built-in types are zero-arg constructible
         if (is_constructor_interface_compatible(check_arg, trait_type))

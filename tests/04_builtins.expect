@@ -25,6 +25,23 @@ iterating m2:
   v=2
   v=99
 
+testing map int key:
+m[1] = 100
+m[2] = 200
+m[3] = 300
+m[2] after overwrite = 999
+m.get(1) = 100
+m.get(99) = null
+m.get(2) after remove = null
+m[1] still = 100
+
+testing map custom key:
+m[(1,2)] = alpha
+m[(3,4)] = beta
+m[(5,6)] = gamma
+m[(1,2)] after overwrite = replaced
+m.get((3,4)) after remove = null
+
 testing map lifecycle:
 m["a"].id=10
 m["b"].id=20

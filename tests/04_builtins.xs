@@ -161,6 +161,70 @@ struct TracedValue {
     }
 }
 
+func test_map_int_key() {
+    println("testing map int key:");
+    var m = Map<int, int>{};
+    m.set(1, 100);
+    m.set(2, 200);
+    m.set(3, 300);
+    printf("m[1] = {}\n", m[1]);
+    printf("m[2] = {}\n", m[2]);
+    printf("m[3] = {}\n", m[3]);
+    // overwrite
+    m.set(2, 999);
+    printf("m[2] after overwrite = {}\n", m[2]);
+    // get optional
+    printf("m.get(1) = {}\n", m.get(1)!);
+    printf("m.get(99) = {}\n", m.get(99));
+    // remove
+    m.remove(2);
+    printf("m.get(2) after remove = {}\n", m.get(2));
+    printf("m[1] still = {}\n", m[1]);
+    println("");
+}
+
+struct MapTestPoint {
+    x: int;
+    y: int;
+
+    func new(x: int, y: int) {
+        this.x = x;
+        this.y = y;
+    }
+
+    impl ops.Hash {
+        func hash() uint64 {
+            var h = (this.x as uint64) * 31;
+            h = h + (this.y as uint64);
+            return h;
+        }
+    }
+
+    impl ops.Eq {
+        func eq(other: MapTestPoint) bool {
+            return this.x == other.x && this.y == other.y;
+        }
+    }
+}
+
+func test_map_custom_key() {
+    println("testing map custom key:");
+    var m = Map<MapTestPoint, string>{};
+    m.set(MapTestPoint{1, 2}, "alpha");
+    m.set(MapTestPoint{3, 4}, "beta");
+    m.set(MapTestPoint{5, 6}, "gamma");
+    printf("m[(1,2)] = {}\n", m[MapTestPoint{1, 2}]);
+    printf("m[(3,4)] = {}\n", m[MapTestPoint{3, 4}]);
+    printf("m[(5,6)] = {}\n", m[MapTestPoint{5, 6}]);
+    // overwrite
+    m.set(MapTestPoint{1, 2}, "replaced");
+    printf("m[(1,2)] after overwrite = {}\n", m[MapTestPoint{1, 2}]);
+    // remove
+    m.remove(MapTestPoint{3, 4});
+    printf("m.get((3,4)) after remove = {}\n", m.get(MapTestPoint{3, 4}));
+    println("");
+}
+
 func test_map_lifecycle_helper() Map<string, TracedValue> {
     var m = Map<string, TracedValue>{};
     m.set("a", TracedValue{id: 10});
@@ -203,6 +267,8 @@ func main() {
     test_optional();
     test_array();
     test_map();
+    test_map_int_key();
+    test_map_custom_key();
     test_map_lifecycle();
     test_shared();
     test_nested_shared();

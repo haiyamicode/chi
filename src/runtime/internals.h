@@ -63,10 +63,6 @@ CHI_RT_EXPORT void cx_capture_release(void *capture_ptr);
 CHI_RT_EXPORT void *cx_capture_get_type(void *capture_ptr);
 CHI_RT_EXPORT void *cx_capture_get_data(void *capture_ptr);
 
-struct CxHash {
-    char *data;
-    uint32_t size;
-};
 
 struct CxJsonValue {
     void *data;
@@ -144,13 +140,9 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
 
 CHI_RT_EXPORT void cx_timeout(uint64_t delay, void *callback);
 
-CHI_RT_EXPORT void cx_hbytes(CxAny *value, CxHash *result);
-CHI_RT_EXPORT void *cx_map_new();
-CHI_RT_EXPORT void cx_map_delete(void *data);
-CHI_RT_EXPORT void *cx_map_find(void *data, CxHash *key);
-CHI_RT_EXPORT void cx_map_add(void *data, CxHash *key, void *value);
-CHI_RT_EXPORT void cx_map_remove(void *data, CxHash *key);
-CHI_RT_EXPORT void cx_map_keys(void *data, void *dest_array, uint32_t key_size, CxAny *key_type);
+CHI_RT_EXPORT uint64_t cx_meiyan(const void *key, int count);
+CHI_RT_EXPORT bool cx_string_eq(CxString *a, CxString *b);
+
 
 CHI_RT_EXPORT void cx_parse_json(CxString *str, void *result);
 CHI_RT_EXPORT void cx_json_value_delete(void *data);
