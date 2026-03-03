@@ -2579,6 +2579,32 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 add_borrow_source_edges(fn_def, data.value, field_init);
             }
         }
+
+        // For structs without a constructor, check that all fields without defaults
+        // are provided via field initializers or spread at the construction site
+        if (struct_type && value_type->kind == TypeKind::Struct && !constructor) {
+            std::set<string> provided;
+            for (auto fi : data.field_inits) {
+                provided.insert(fi->data.field_init_expr.field->str);
+            }
+            // Spread provides fields that exist in the source type
+            if (data.spread_expr) {
+                auto spread_type = to_value_type(node_get_type(data.spread_expr));
+                if (spread_type && spread_type->kind == TypeKind::Struct) {
+                    for (auto src_field : spread_type->data.struct_.own_fields()) {
+                        provided.insert(src_field->get_name());
+                    }
+                }
+            }
+            for (auto field : value_type->data.struct_.own_fields()) {
+                auto &vd = field->node->data.var_decl;
+                if (!vd.initialized_at && !provided.count(field->get_name())) {
+                    error(node, "missing field '{}' in construction of '{}'",
+                          field->get_name(), format_type_display(value_type));
+                }
+            }
+        }
+
         return result_type;
     }
     case NodeType::PackExpansion: {
@@ -3154,7 +3180,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                        struct_->kind == ContainerKind::Interface);
                     // Skip initialization check for extern C structs
                     auto is_extern = data.decl_spec && data.decl_spec->is_extern();
-                    if (!not_needed && !is_extern) {
+                    // Skip if the struct has no constructor — fields can be provided
+                    // via field initializers at the construction site (checked per-site)
+                    auto has_ctor = get_struct_member(struct_type, "new") != nullptr;
+                    auto can_field_init = struct_->kind == ContainerKind::Struct &&
+                                          !has_ctor;
+                    if (!not_needed && !is_extern && !can_field_init) {
                         error(member, errors::UNINITIALIZED_FIELD, member->name,
                               format_type_display(struct_type));
                     }

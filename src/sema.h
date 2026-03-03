@@ -95,6 +95,7 @@ struct ChiStructMember {
 
     bool is_field() { return field_index > -1; }
     bool is_method() { return method_index > -1; }
+    bool is_promoted() { return parent_member != nullptr; }
 };
 
 typedef array<ChiStructMember *> ImplMembers;
@@ -139,6 +140,11 @@ struct ChiTypeStruct {
                                 ChiType *resolved_type);
 
     ChiStructMember *find_member(const string &name);
+
+    // Returns only direct (non-promoted) fields, excluding fields promoted from embeds.
+    // Promoted fields have field_index relative to their embedded struct, not the parent,
+    // so they must not be used for direct GEP/destruction/copy on the parent struct.
+    array<ChiStructMember *> own_fields();
 
     ChiStructMember *find_static_member(const string &name);
 

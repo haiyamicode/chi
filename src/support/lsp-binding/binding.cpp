@@ -516,7 +516,8 @@ static boost::json::array generate_semantic_tokens(cx::ast::Module *module) {
             if (tok->type == cx::TokenType::KW_MUT ||
                 tok->type == cx::TokenType::KW_STATIC ||
                 tok->type == cx::TokenType::KW_PRIVATE ||
-                tok->type == cx::TokenType::KW_PROTECTED) {
+                tok->type == cx::TokenType::KW_PROTECTED ||
+                tok->type == cx::TokenType::KW_UNSAFE) {
                 st = ST_Modifier;
             }
             result.push_back(tok->pos.line);

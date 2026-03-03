@@ -699,7 +699,7 @@ private struct __CxArrayView<T> {
     private data: *T;
     protected length: uint32;
 
-    unsafe mut func new(data: *T, length: uint32) {
+    mut unsafe func new(data: *T, length: uint32) {
         this.data = data;
         this.length = length;
     }

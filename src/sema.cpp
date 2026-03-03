@@ -45,6 +45,15 @@ ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &nam
     return member;
 }
 
+array<ChiStructMember *> ChiTypeStruct::own_fields() {
+    array<ChiStructMember *> result;
+    for (auto field : fields) {
+        if (!field->is_promoted())
+            result.add(field);
+    }
+    return result;
+}
+
 ChiStructMember *ChiTypeStruct::find_member(const string &name) {
     auto found = member_table.get(name);
     return found ? *found : nullptr;

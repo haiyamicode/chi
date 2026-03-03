@@ -3547,10 +3547,10 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         // (transitively — handles nested structs with CopyFrom/destructor fields).
         // If so, copy field-by-field to ensure proper deep copy semantics.
         if (type->kind == TypeKind::Struct) {
-            auto &data = type->data.struct_;
+            auto own = type->data.struct_.own_fields();
             bool needs_field_copy = false;
 
-            for (auto field : data.fields) {
+            for (auto field : own) {
                 if (get_resolver()->type_needs_destruction(field->resolved_type)) {
                     needs_field_copy = true;
                     break;
@@ -3569,7 +3569,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                 }
 
                 auto llvm_type = compile_type(type);
-                for (auto field : data.fields) {
+                for (auto field : own) {
                     auto field_src_gep =
                         builder.CreateStructGEP(llvm_type, from_address, field->field_index);
                     auto field_dest_gep =
@@ -3817,7 +3817,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto dest_type_l = compile_type(type);
 
             // Iterate source fields, find matching target field by name
-            for (auto src_field : spread_type->data.struct_.fields) {
+            for (auto src_field : spread_type->data.struct_.own_fields()) {
                 auto tgt_field = get_resolver()->get_struct_member(type, src_field->get_name());
                 if (!tgt_field)
                     continue; // validated by resolver
@@ -6317,8 +6317,7 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     }
 
     // 2. Destroy fields that need destruction (in reverse order)
-    auto &struct_data = resolved_type->data.struct_;
-    auto fields = struct_data.fields;
+    auto fields = resolved_type->data.struct_.own_fields();
 
     // Iterate in reverse order
     for (int i = fields.len - 1; i >= 0; i--) {

@@ -69,6 +69,36 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	fi; \
        	rm -f $*.output
 
+# Special rule for construct expr test — also tests rejection cases
+42_construct_expr.test: 42_construct_expr.expect
+	echo Test: 42_construct_expr...
+	@$(CHI) -o $(TMP).42_construct_expr -c 42_construct_expr.xs && $(TMP).42_construct_expr 2>&1 >42_construct_expr.output
+	@if [ "x`diff -qbu 42_construct_expr.expect 42_construct_expr.output`" != "x" ]; \
+	then \
+		echo "error in test 42_construct_expr (output mismatch)"; \
+		diff -u 42_construct_expr.expect 42_construct_expr.output; \
+		rm -f 42_construct_expr.output; \
+		exit 1; \
+	fi; \
+	rm -f 42_construct_expr.output
+	@failed=0; \
+	for f in testdata/42_construct_expr_errors/*.xs; do \
+		name=$$(basename $$f); \
+		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_construct 2>&1); \
+		if [ $$? -eq 0 ]; then \
+			echo "error: $$name should have been rejected but compiled successfully"; \
+			failed=1; \
+		else \
+			expected=$$(grep '// expect-error:' $$f | head -1 | sed 's/.*expect-error: *//'); \
+			if [ -n "$$expected" ] && ! echo "$$errmsg" | grep -q "$$expected"; then \
+				echo "error: $$name wrong error (expected '$$expected')"; \
+				echo "  got: $$(echo "$$errmsg" | head -1)"; \
+				failed=1; \
+			fi; \
+		fi; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
+
 # Special rule for trait bounds test — also tests rejection cases
 21_trait_bounds.test: 21_trait_bounds.expect
 	echo Test: 21_trait_bounds...
