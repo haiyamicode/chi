@@ -4722,6 +4722,9 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
 
             if (node->data.fn_def.body) {
                 if (!child_method) {
+                    // Don't promote constructors or destructors through embedding
+                    if (node->name == "new" || node->name == "delete")
+                        continue;
                     // Create a new fn type with container_ref pointing to the
                     // implementing struct so codegen compiles it with the correct
                     // 'this' type (thin pointer to concrete struct, not fat
