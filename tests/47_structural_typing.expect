@@ -1,0 +1,3 @@
+count after direct: 5
+count after logger: 11
+count after fn: 14

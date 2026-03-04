@@ -434,11 +434,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                 auto from_elem = from_type->get_elem();
                 if (from_elem && from_elem->kind == TypeKind::Struct &&
                     from_elem->data.struct_.kind == ContainerKind::Struct) {
-                    for (auto &impl : from_elem->data.struct_.interfaces) {
-                        if (is_same_type(impl->interface_type, to_elem)) {
-                            return true;
-                        }
-                    }
+                    if (struct_satisfies_interface(from_elem, to_elem)) return true;
                 }
             }
         }
@@ -4767,6 +4763,7 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
             }
             if (iface_impl) {
                 assert(child_method);
+                child_method->is_impl_method = true;
                 iface_impl->impl_members.add(child_method);
 
                 if (trait_symbol != IntrinsicSymbol::None) {
@@ -8335,6 +8332,35 @@ bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface
     return true;
 }
 
+// Returns true if struct_type satisfies iface_type (nominal first, then structural fallback).
+// Builds the vtable on-demand if structural match fires.
+// Structural fallback only considers methods that were declared inside an impl block
+// (is_impl_method == true), preventing accidental satisfaction by coincidentally-named methods.
+bool Resolver::struct_satisfies_interface(ChiType *struct_type, ChiType *iface_type) {
+    if (iface_type->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(iface_type))
+        return false;
+    auto &struct_ = struct_type->data.struct_;
+    auto &iface = iface_type->data.struct_;
+    // 1. Nominal: explicit interface_table entry or embedding chain
+    if (struct_.interface_table.get(iface_type)) return true;
+    for (auto &impl : struct_.interfaces) {
+        if (interface_satisfies_trait(impl->interface_type, iface_type)) return true;
+    }
+    // 2. Structural fallback: all required (non-default) methods must exist and be impl-declared
+    for (auto &iface_member : iface.members) {
+        if (!iface_member->is_method()) continue;
+        if (iface_member->node && iface_member->node->data.fn_def.body) continue; // skip defaults
+        auto struct_member = struct_.find_member(iface_member->get_name());
+        if (!struct_member || !struct_member->is_method()) return false;
+        if (!struct_member->is_impl_method) return false;
+        auto expected = substitute_this_type(iface_member->resolved_type, struct_type);
+        if (!compare_impl_type(expected, struct_member->resolved_type)) return false;
+    }
+    // Structural match: build vtable on-demand so codegen can dispatch normally
+    resolve_vtable(iface_type, struct_type, nullptr);
+    return true;
+}
+
 bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
     auto check_arg = type_arg;
     if (check_arg->kind == TypeKind::Subtype) {
@@ -8348,12 +8374,7 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
     }
 
     if (check_arg->kind == TypeKind::Struct) {
-        for (auto &impl : check_arg->data.struct_.interfaces) {
-            if (impl->interface_type == trait_type ||
-                interface_satisfies_trait(impl->interface_type, trait_type)) {
-                return true;
-            }
-        }
+        if (struct_satisfies_interface(check_arg, trait_type)) return true;
         // Constructor interface: check ctor compatibility
         if (is_constructor_interface_compatible(check_arg, trait_type))
             return true;

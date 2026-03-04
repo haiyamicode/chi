@@ -87,6 +87,7 @@ struct ChiStructMember {
     map<TypeId, ChiStructMember *> variants = {};
     ChiStructMember *parent_member = nullptr;
     long vtable_index = -1;
+    bool is_impl_method = false;  // true if declared inside an impl block
     WhereCondition *where_condition = nullptr;
 
     string get_name();

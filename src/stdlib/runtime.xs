@@ -651,6 +651,12 @@ private struct __CxString {
         return result;
     }
 
+    func span() []byte {
+        unsafe {
+            return {this.data, this.length};
+        }
+    }
+
     impl ops.Add {
         func add(rhs: string) string {
             var result = string{};
@@ -759,8 +765,17 @@ private struct __CxSpan<T> {
     }
 }
 
+private interface Reader {
+    func read(buf: []mut byte) uint32;
+}
+
+private interface Writer {
+    func write(data: []byte);
+}
+
 struct Buffer {
     ...bytes: Array<byte>;
+    read_pos: uint32 = 0;
 
     mut func new() {
         this.bytes = {};
@@ -768,7 +783,7 @@ struct Buffer {
 
     static func from_bytes(data: Array<byte>) Buffer {
         var buf = Buffer{};
-        buf.write(data);
+        buf.write(data.span());
         return buf;
     }
 
@@ -776,12 +791,6 @@ struct Buffer {
         var buf = Buffer{};
         buf.write_string(str);
         return buf;
-    }
-
-    mut func write(data: Array<byte>) {
-        unsafe {
-            cx_array_append(&this.bytes, &data, sizeof byte);
-        }
     }
 
     mut func write_string(str: string) {
@@ -796,6 +805,31 @@ struct Buffer {
             cx_string_from_chars(this.raw_data(), this.length, &str);
         }
         return str;
+    }
+
+    impl Writer {
+        mut func write(data: []byte) {
+            for b in data {
+                this.bytes.push(b);
+            }
+        }
+    }
+
+    impl Reader {
+        mut func read(buf: []mut byte) uint32 {
+            if this.read_pos >= this.length {
+                return 0;
+            }
+            var available = this.length - this.read_pos;
+            var n = if buf.length < available => buf.length else => available;
+            var i: uint32 = 0;
+            while i < n {
+                buf[i] = this.bytes[this.read_pos + i];
+                i = i + 1;
+            }
+            this.read_pos = this.read_pos + n;
+            return n;
+        }
     }
 }
 

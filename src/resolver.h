@@ -241,6 +241,7 @@ class Resolver {
     array<IntrinsicSymbol> interface_get_intrinsics(ChiType *interface_type);
 
     bool interface_satisfies_trait(ChiType *interface_type, ChiType *required_trait);
+    bool struct_satisfies_interface(ChiType *struct_type, ChiType *iface_type);
     bool check_trait_bound(ChiType *type_arg, ChiType *trait_type);
     bool is_constructor_interface_compatible(ChiType *type, ChiType *iface_type);
     bool check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data);
