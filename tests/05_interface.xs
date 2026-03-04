@@ -532,6 +532,89 @@ func test_multilevel_embedding() {
     printf("generic entity: {}\n", show_entity<Entity>(&e));
 }
 
+// --- Struct embedding tests ---
+
+interface Adder {
+    func add(n: int) int;
+}
+
+struct EmbedBase {
+    val: int = 0;
+
+    mut func new(v: int) {
+        this.val = v;
+    }
+
+    func doubled() int {
+        return this.val * 2;
+    }
+
+    impl Adder {
+        func add(n: int) int {
+            return this.val + n;
+        }
+    }
+}
+
+// Single-level embedding: proxies forward to EmbedBase methods
+struct EmbedDerived {
+    ...base: EmbedBase;
+
+    mut func new(v: int) {
+        this.base = {v};
+    }
+}
+
+// Override: only the overridden method uses its own impl; other methods proxy
+struct EmbedOverride {
+    ...base: EmbedBase;
+
+    mut func new(v: int) {
+        this.base = {v};
+    }
+
+    func doubled() int {
+        return this.val * 10;
+    }
+}
+
+// Multi-level: EmbedDeep.method proxies to EmbedDerived.method which proxies to EmbedBase.method
+struct EmbedDeep {
+    ...inner: EmbedDerived;
+
+    mut func new(v: int) {
+        this.inner = {v};
+    }
+}
+
+func via_adder(a: &Adder) int {
+    return a.add(100);
+}
+
+func test_struct_embed() {
+    println("=== struct embedding ===");
+
+    // Direct proxy method calls
+    var d = EmbedDerived{5};
+    printf("doubled: {}\n", d.doubled());
+    printf("add: {}\n", d.add(3));
+    printf("val: {}\n", d.val);
+
+    // Override suppresses proxy; non-overridden method still proxied
+    var o = EmbedOverride{3};
+    printf("overridden doubled: {}\n", o.doubled());
+    printf("inherited add: {}\n", o.add(7));
+
+    // Multi-level proxy chain: EmbedDeep -> EmbedDerived -> EmbedBase
+    var deep = EmbedDeep{4};
+    printf("deep doubled: {}\n", deep.doubled());
+    printf("deep add: {}\n", deep.add(6));
+
+    // Interface propagated through embedding; vtable dispatch
+    printf("adder d: {}\n", via_adder(&d));
+    printf("adder deep: {}\n", via_adder(&deep));
+}
+
 func test_ops_composite() {
     println("=== ops composite interfaces ===");
 
@@ -555,6 +638,7 @@ func main() {
     test_default_multi_interface();
     test_interface_embedding();
     test_multilevel_embedding();
+    test_struct_embed();
     test_ops_composite();
 }
 

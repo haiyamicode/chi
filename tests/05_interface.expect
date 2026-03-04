@@ -76,6 +76,16 @@ ref id: 42
 ref name: hero
 ref info: Entity(42, hero)
 generic entity: #42: hero - Entity(42, hero)
+=== struct embedding ===
+doubled: 10
+add: 8
+val: 5
+overridden doubled: 30
+inherited add: 10
+deep doubled: 8
+deep add: 10
+adder d: 105
+adder deep: 104
 === ops composite interfaces ===
 sum_three int: 60
 sum_three float: 7

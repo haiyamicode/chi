@@ -376,7 +376,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         }
     }
 
-    // Compile inherited default methods from interfaces
+    // Compile inherited/promoted methods
     for (auto member : struct_type->data.struct_.members) {
         if (!member->is_method() || !member->orig_parent || !member->node->data.fn_def.body)
             continue;
@@ -394,15 +394,22 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         auto fn_node = member->node;
         auto struct_name = get_resolver()->format_type_display(struct_type);
         auto name = struct_name + "." + fn_node->name;
+        // For embedding proxies, get original before compile_fn_proto overwrites
+        // the global-ID table entry.
+        Function *orig_fn = member->parent_member ? get_fn(member->node, member->orig_parent) : nullptr;
         auto fn =
             compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node, name, member->resolved_type);
         fn->container_type = type;
-        fn->default_method_struct = struct_type;
-        // Register under struct-qualified key so multiple structs can inherit
-        // the same default method without colliding
         auto key = fn_node->module->global_id() + "." + struct_name + "." + fn_node->name;
         m_ctx->function_table[key] = fn;
-        m_ctx->pending_fns.add(fn);
+
+        if (member->parent_member) {
+            generate_embed_proxy(fn, orig_fn, member, struct_type);
+        } else {
+            // Interface default method: recompile body with concrete struct dispatch
+            fn->default_method_struct = struct_type;
+            m_ctx->pending_fns.add(fn);
+        }
     }
 
     // Generate __delete and __copy before vtables (vtable needs these fn ptrs)
@@ -4984,6 +4991,40 @@ ast::Node *Compiler::get_variant_member_node(ChiStructMember *member,
         }
     }
     return node;
+}
+
+void Compiler::generate_embed_proxy(Function *proxy_fn, Function *orig_fn,
+                                    ChiStructMember *member, ChiType *struct_type) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto saved_insert_point = builder.GetInsertBlock();
+
+    auto entry_bb = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "entry", proxy_fn->llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+
+    // GEP 'this' to the embedded field
+    auto embedded_ptr = compile_dot_access(proxy_fn, proxy_fn->bind_ptr, struct_type, member->parent_member);
+
+    // Forward all args, replacing 'this' with the embedded field pointer
+    std::vector<llvm::Value *> args;
+    for (unsigned i = 0; i < proxy_fn->llvm_fn->arg_size(); i++) {
+        auto arg = proxy_fn->llvm_fn->getArg(i);
+        if (arg == proxy_fn->bind_ptr) {
+            args.push_back(embedded_ptr);
+        } else {
+            args.push_back(arg);
+        }
+    }
+
+    auto call = builder.CreateCall(orig_fn->llvm_fn, args);
+    if (proxy_fn->llvm_fn->getReturnType()->isVoidTy()) {
+        builder.CreateRetVoid();
+    } else {
+        builder.CreateRet(call);
+    }
+
+    if (saved_insert_point) {
+        builder.SetInsertPoint(saved_insert_point);
+    }
 }
 
 llvm::Value *Compiler::generate_method_proxy_function(Function *fn, ChiStructMember *method_member,

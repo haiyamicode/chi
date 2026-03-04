@@ -4842,35 +4842,34 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
         _resolve(base.node, parent_scope);
     }
 
-    // Add to embeds array if this is an interface
     if (current.kind == ContainerKind::Interface) {
         current.embeds.add(em_type);
-
-        // Copy methods from embedded interface to current interface
         for (auto embed_member : base.members) {
-            if (embed_member->is_method()) {
-                // Check if method already exists in current interface
-                auto existing_member = current.find_member(embed_member->get_name());
-                if (!existing_member) {
-                    // Add the method to current interface
-                    auto copied_member =
-                        current.add_member(get_allocator(), embed_member->get_name(),
-                                           embed_member->node, embed_member->resolved_type);
-                    copied_member->orig_parent = em_type;
-                    copied_member->symbol = embed_member->symbol;
-
-                    // Add to member_intrinsics if it has an intrinsic symbol
-                    if (copied_member->symbol != IntrinsicSymbol::None) {
-                        current.member_intrinsics[copied_member->symbol] = copied_member;
-                    }
-                }
+            if (!embed_member->is_method())
+                continue;
+            auto existing_member = current.find_member(embed_member->get_name());
+            if (existing_member)
+                continue;
+            auto copied_member =
+                current.add_member(get_allocator(), embed_member->get_name(),
+                                   embed_member->node, embed_member->resolved_type);
+            copied_member->orig_parent = em_type;
+            copied_member->symbol = embed_member->symbol;
+            if (copied_member->symbol != IntrinsicSymbol::None) {
+                current.member_intrinsics[copied_member->symbol] = copied_member;
             }
         }
+        return;
     }
 
-    // Only resolve vtable for struct implementations, not interface embeds
-    if (current.kind != ContainerKind::Interface) {
-        resolve_vtable(em_type, struct_type, base_node);
+    resolve_vtable(em_type, struct_type, base_node);
+
+    // Set parent_member on promoted methods so codegen generates forwarding proxies
+    auto embed_field = base_node->data.var_decl.resolved_field;
+    for (auto &member : current.members) {
+        if (member->is_method() && member->orig_parent == em_type && !member->parent_member) {
+            member->parent_member = embed_field;
+        }
     }
 }
 
