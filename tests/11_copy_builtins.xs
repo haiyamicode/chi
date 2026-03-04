@@ -11,11 +11,11 @@ func test_string() {
 
 func test_array() {
     var a: Array<int> = [];
-    a.add(1);
-    a.add(2);
+    a.push(1);
+    a.push(2);
     var b = a;
     a.clear();
-    a.add(3);
+    a.push(3);
     printf("a.length: {}\n", a.length);
     printf("b.length: {}\n", b.length);
     printf("a[0]: {}\n", a[0]);

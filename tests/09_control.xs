@@ -1,9 +1,9 @@
 func switch_int() string {
     var levels: Array<int> = [];
-    levels.add(1);
-    levels.add(2);
-    levels.add(3);
-    levels.add(4);
+    levels.push(1);
+    levels.push(2);
+    levels.push(3);
+    levels.push(4);
 
     for item in levels {
         var label = switch item {

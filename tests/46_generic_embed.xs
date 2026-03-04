@@ -22,9 +22,9 @@ struct FixedVec<T> {
     ...data: Array<T>;
     max_size: uint32;
 
-    func add(item: T) {
+    func push(item: T) {
         if this.length < this.max_size {
-            this.data.add(item);
+            this.data.push(item);
         }
     }
 }
@@ -70,9 +70,9 @@ struct SilentWrapper {
 func main() {
     // --- Non-generic struct embedding concrete generic ---
     var s = IntStack{items: Array<int>{}};
-    s.add(10);
-    s.add(20);
-    s.add(30);
+    s.push(10);
+    s.push(20);
+    s.push(30);
     printf("IntStack length: {}\n", s.length);
     printf("IntStack peek: {}\n", s.peek());
     printf("IntStack peek2: {}\n", s.peek2());
@@ -82,14 +82,14 @@ func main() {
 
     // --- Generic struct embedding generic ---
     var vi = Vec<int>{data: Array<int>{}};
-    vi.add(1);
-    vi.add(2);
-    vi.add(3);
+    vi.push(1);
+    vi.push(2);
+    vi.push(3);
     printf("Vec<int> length: {}\n", vi.length);
 
     var vs = Vec<string>{data: Array<string>{}};
-    vs.add("hello");
-    vs.add("world");
+    vs.push("hello");
+    vs.push("world");
     printf("Vec<string> length: {}\n", vs.length);
 
     vs.clear();
@@ -97,33 +97,33 @@ func main() {
 
     // --- Method override: own add() uses promoted this.length to cap at max_size ---
     var fv = FixedVec<int>{data: Array<int>{}, max_size: 2};
-    fv.add(1);
-    fv.add(2);
-    fv.add(3); // capped
+    fv.push(1);
+    fv.push(2);
+    fv.push(3); // capped
     printf("FixedVec length: {}\n", fv.length);
     printf("FixedVec max_size: {}\n", fv.max_size);
 
     // --- Field override: own length field shadows promoted one ---
     var cv = CountedVec<int>{data: Array<int>{}, length: 99};
-    cv.data.add(1);
-    cv.data.add(2);
+    cv.data.push(1);
+    cv.data.push(2);
     printf("CountedVec data.length: {}\n", cv.data.length);
     printf("CountedVec own length: {}\n", cv.length);
 
     // --- Chained generic embedding ---
     var ds = DoubleStack<int>{inner: Stack<int>{data: Array<int>{}}};
-    ds.add(1);
-    ds.add(2);
-    ds.add(3);
+    ds.push(1);
+    ds.push(2);
+    ds.push(3);
     printf("DoubleStack length: {}\n", ds.length);
     ds.clear();
     printf("DoubleStack after clear: {}\n", ds.length);
 
     // --- Multi-type-param with two embeds ---
     var p = Pair<int, string>{keys: Array<int>{}, values: Array<string>{}};
-    p.keys.add(1);
-    p.keys.add(2);
-    p.values.add("a");
+    p.keys.push(1);
+    p.keys.push(2);
+    p.values.push("a");
     printf("Pair keys length: {}\n", p.keys.length);
     printf("Pair values length: {}\n", p.values.length);
 

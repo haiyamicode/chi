@@ -12,9 +12,9 @@ func for_classic() {
 func for_in() {
     println("for_in:");
     var list: Array<int> = [];
-    list.add(1);
-    list.add(2);
-    list.add(3);
+    list.push(1);
+    list.push(2);
+    list.push(3);
     println("print from 1 to 3");
 
     for &item in list {

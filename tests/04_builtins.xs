@@ -33,8 +33,8 @@ func test_optional() {
 func test_array() {
     println("testing array:");
     var a: Array<int> = [];
-    a.add(1);
-    a.add(2);
+    a.push(1);
+    a.push(2);
     printf("a=[{}, {}]\n", a[0], a[1]);
     a[0] = 2;
     a[1] = 1;

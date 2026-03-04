@@ -77,7 +77,7 @@ struct Arr<T> {
     size: uint32 = 0;
     capacity: uint32 = 0;
 
-    mut func add(item: T) {
+    mut func push(item: T) {
         unsafe {
             if this.size >= this.capacity {
                 var new_cap: uint32 = this.capacity * 2;
@@ -151,11 +151,11 @@ func main() {
     printf("box_heap.value={}\n", box_heap.value);
     delete box_heap;
     var a = Arr<int>{};
-    a.add(1);
-    a.add(2);
+    a.push(1);
+    a.push(2);
     printf("a.size={}\n", a.size);
     printf("a=[{},{}]\n", a.get(0), a.get(1));
-    a.add(3);
+    a.push(3);
     printf("a.size={}\n", a.size);
     printf("a=[{},{},{}]\n", a.get(0), a.get(1), a.get(2));
     var c = Container<int>{};

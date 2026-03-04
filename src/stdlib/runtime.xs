@@ -348,7 +348,7 @@ struct JsonValue {
             unsafe {
                 cx_json_array_index(this.data, i, &new_value);
             }
-            result.add(new_value);
+            result.push(new_value);
         }
         return result;
     }
@@ -453,7 +453,7 @@ struct Array<T> {
                 cx_array_reserve(&this, sizeof T, values.length);
             }
             for value in values {
-                this.add(value);
+                this.push(value);
             }
         }
     }
@@ -464,7 +464,7 @@ struct Array<T> {
         }
     }
 
-    mut func add(item: T) {
+    mut func push(item: T) {
         unsafe {
             var ptr = cx_array_add(&this, sizeof T) as *T;
             *ptr = item;
@@ -494,7 +494,7 @@ struct Array<T> {
         var result: Array<T> = [];
         for item in this {
             if predicate(item) {
-                result.add(item);
+                result.push(item);
             }
         }
         return result;
@@ -503,7 +503,7 @@ struct Array<T> {
     func map<U>(transform: func (value: T, index: uint32) U) Array<U> {
         var result: Array<U> = [];
         for item, i in this {
-            result.add(transform(item, i));
+            result.push(transform(item, i));
         }
         return result;
     }
@@ -530,7 +530,7 @@ struct Array<T> {
     impl ops.CopyFrom<Array<T>> {
         mut func copy_from(source: &Array<T>) {
             for item in source {
-                this.add(item);
+                this.push(item);
             }
         }
     }
@@ -565,7 +565,7 @@ struct Array<T> {
             var result: Array<T> = [];
             var i = s;
             while i < e {
-                result.add(this.data[i]);
+                result.push(this.data[i]);
                 i = i + 1;
             }
             return result;
@@ -645,7 +645,7 @@ private struct __CxString {
         var result: Array<byte> = [];
         var i: uint32 = 0;
         while i < this.length {
-            result.add(this.data[i]);
+            result.push(this.data[i]);
             i = i + 1;
         }
         return result;
@@ -855,7 +855,7 @@ struct Promise<T> {
             callback(state.value!);
         } else {
             // Pending - add to callback list
-            state.callbacks.add(callback);
+            state.callbacks.push(callback);
         }
     }
 
@@ -1061,7 +1061,7 @@ struct Map<K: ops.Hash + ops.Eq, V> {
             unsafe {
                 var node = this.buckets[i];
                 while node != null {
-                    result.add(node.key);
+                    result.push(node.key);
                     node = node.next;
                 }
             }

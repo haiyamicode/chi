@@ -53,9 +53,9 @@ func test_arrays() {
     println("\n=== Arrays Test ===");
 
     var arr: Array<int> = [];
-    arr.add(10);
-    arr.add(20);
-    arr.add(30);
+    arr.push(10);
+    arr.push(20);
+    arr.push(30);
 
     printf("Array: [{}, {}, {}]\n", arr[0], arr[1], arr[2]);
 
