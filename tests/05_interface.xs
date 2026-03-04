@@ -124,7 +124,7 @@ func test_basic() {
     println("=== basic dispatch ===");
     var sheep = Sheep{1};
     var cat = Cat{2};
-    var ant = Ant{ base: {3} };
+    var ant = Ant{base: {3}};
     var animal: &Animal = &sheep;
     animal.make_sound();
     animal = &cat;
@@ -260,7 +260,7 @@ func test_type_switch() {
 
     var sheep = Sheep{10};
     var cat = Cat{20};
-    var ant = Ant{ base: {30} };
+    var ant = Ant{base: {30}};
     printf("sheep: {}\n", describe_animal(&sheep));
     printf("cat: {}\n", describe_animal(&cat));
     printf("ant: {}\n", describe_animal(&ant));

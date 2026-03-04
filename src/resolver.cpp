@@ -4755,7 +4755,12 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
             // Substitute This types in interface methods with the implementing type
             base_member_type = substitute_this_type(base_member_type, derived_type);
 
-            if (!compare_impl_type(base_member_type, child_method->resolved_type)) {
+            // Signature check only applies to interface implementation, not struct embedding.
+            // For promoted methods (from struct embedding), also skip — the embedded struct
+            // already verified interface compliance.
+            bool is_promoted = child_method->orig_parent != nullptr;
+            if (iface_impl && !is_promoted &&
+                !compare_impl_type(base_member_type, child_method->resolved_type)) {
                 error(base_node, errors::IMPLEMENT_NOT_MATCH, node->name,
                       format_type_display(base_type));
                 break;
@@ -4809,9 +4814,18 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
             auto child_field = derived.find_member(node->name);
             if (!child_field) {
                 child_field = derived.add_member(get_allocator(), node->name, node,
-                                                 base_member->resolved_type);
+                                                 base_member->resolved_type, false);
                 child_field->orig_parent = base_type;
-                child_field->parent_member = base_node->data.var_decl.resolved_field;
+                // If base_member is itself promoted (multi-level embed), chain through
+                // the already-promoted intermediary in derived rather than jumping
+                // directly to the embed field (which would produce an invalid GEP index).
+                if (base_member->parent_member) {
+                    auto intermediate = derived.find_member(base_member->parent_member->get_name());
+                    child_field->parent_member = intermediate ? intermediate
+                                                              : base_node->data.var_decl.resolved_field;
+                } else {
+                    child_field->parent_member = base_node->data.var_decl.resolved_field;
+                }
                 child_field->field_index = base_member->field_index;
             }
         }
@@ -4825,11 +4839,12 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
                                     ResolveScope &parent_scope) {
     auto &current = struct_type->data.struct_;
     auto em_type = node_get_type(base_node);
-    if (em_type->kind != TypeKind::Struct) {
+    auto em_struct = resolve_struct_type(em_type);
+    if (!em_struct) {
         error(base_node, errors::INVALID_EMBED);
         return;
     }
-    auto &base = em_type->data.struct_;
+    auto &base = *em_struct;
     if (base.kind != ContainerKind::Struct && base.kind != ContainerKind::Interface) {
         error(base_node, errors::INVALID_EMBED);
         return;
@@ -7264,13 +7279,26 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
             node->data.fn_def.fn_proto->data.fn_proto.fn_def_node = node;
         }
 
-        auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type);
+        auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type,
+                                          !member->is_promoted());
         if (member->symbol != IntrinsicSymbol::None) {
             scpy.member_intrinsics[member->symbol] = new_member;
             new_member->symbol = member->symbol;
         }
         member->variants[subtype->id] = new_member;
         new_member->root_variant = member->root_variant ? member->root_variant : member;
+
+        // Propagate struct-embedding metadata so codegen generates forwarding proxies
+        // for the concrete specialization (e.g., Vec<int> embedding Array<int>)
+        if (member->orig_parent) {
+            new_member->orig_parent =
+                type_placeholders_sub_selective(member->orig_parent, &data, base.node);
+            if (member->parent_member) {
+                auto concrete_field = member->parent_member->variants.get(subtype->id);
+                new_member->parent_member = concrete_field ? *concrete_field : member->parent_member;
+                new_member->field_index = member->field_index;
+            }
+        }
     }
 
     // Copy static members into the specialized struct
@@ -7312,7 +7340,8 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
             node->data.fn_def.fn_proto->data.fn_proto.fn_def_node = node;
         }
 
-        auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type);
+        auto new_member = scpy.add_member(get_allocator(), member->get_name(), node, type,
+                                          !member->is_promoted());
         if (member->symbol != IntrinsicSymbol::None) {
             scpy.member_intrinsics[member->symbol] = new_member;
             new_member->symbol = member->symbol;

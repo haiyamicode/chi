@@ -1,0 +1,16 @@
+IntStack length: 3
+IntStack peek: 30
+IntStack peek2: 30
+IntStack after clear: 0
+Vec<int> length: 3
+Vec<string> length: 2
+Vec<string> after clear: 0
+FixedVec length: 2
+FixedVec max_size: 2
+CountedVec data.length: 2
+CountedVec own length: 99
+DoubleStack length: 3
+DoubleStack after clear: 0
+Pair keys length: 2
+Pair values length: 1
+Silent: hello

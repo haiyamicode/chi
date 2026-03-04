@@ -380,6 +380,12 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     for (auto member : struct_type->data.struct_.members) {
         if (!member->is_method() || !member->orig_parent || !member->node->data.fn_def.body)
             continue;
+        // Skip members whose embed origin is still a placeholder (unspecialized generic)
+        if (member->orig_parent->is_placeholder)
+            continue;
+        // Skip generic methods (e.g. map<U>) — they can't be concretely proxied
+        if (member->resolved_type->is_placeholder)
+            continue;
         // Skip if the struct already has its own implementation (override)
         bool has_own_impl = false;
         for (auto m : fn_members) {
@@ -394,9 +400,17 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         auto fn_node = member->node;
         auto struct_name = get_resolver()->format_type_display(struct_type);
         auto name = struct_name + "." + fn_node->name;
-        // For embedding proxies, get original before compile_fn_proto overwrites
-        // the global-ID table entry.
-        Function *orig_fn = member->parent_member ? get_fn(member->node, member->orig_parent) : nullptr;
+        // For embedding proxies, look up the orig_fn via the concrete embedded struct's
+        // own member node (not the clone) so the function_table key matches correctly.
+        Function *orig_fn = nullptr;
+        if (member->parent_member && member->orig_parent) {
+            auto orig_sty = get_resolver()->resolve_struct_type(member->orig_parent);
+            if (orig_sty) {
+                auto orig_method = orig_sty->find_member(member->node->name);
+                if (orig_method)
+                    orig_fn = get_fn(orig_method->node);
+            }
+        }
         auto fn =
             compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node, name, member->resolved_type);
         fn->container_type = type;
@@ -7326,7 +7340,6 @@ Function *Compiler::get_fn(ast::Node *node) {
 }
 
 Function *Compiler::get_fn(ast::Node *node, ChiType *struct_type) {
-    // Try struct-qualified key first (for both concrete methods and inherited defaults)
     if (struct_type) {
         auto key = fmt::format("{}.{}.{}", node->module->global_id(),
                                get_resolver()->format_type_display(struct_type), node->name);
@@ -7636,7 +7649,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Struct: {
         auto key = get_resolver()->format_type_id(type);
         auto &data = type->data.struct_;
-        if (!data.fields.len) {
+        auto own = data.own_fields();
+        if (!own.len) {
             // Empty structs need a placeholder byte for LLVM allocations
             // (void type cannot be allocated)
             std::vector<llvm::Type *> members;
@@ -7645,7 +7659,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         }
 
         std::vector<llvm::Type *> members;
-        for (auto &member : data.fields) {
+        for (auto &member : own) {
             members.push_back(compile_type(member->resolved_type));
         }
         return llvm::StructType::create(members, get_resolver()->format_type_display(type));

@@ -20,7 +20,7 @@ ChiTypeEnum *ChiTypeEnumValue::parent_enum() {
 }
 
 ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &name, ast::Node *node,
-                                           ChiType *resolved_type) {
+                                           ChiType *resolved_type, bool is_layout_field) {
     auto member = allocator->create_struct_member();
     member->node = node;
     member->resolved_type = resolved_type;
@@ -35,7 +35,7 @@ ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &nam
         members.add(member);
         if (node->type == ast::NodeType::FnDef) {
             member->method_index = vtable_size++;
-        } else {
+        } else if (is_layout_field) {
             member->field_index = fields.len;
             fields.add(member);
         }
@@ -44,6 +44,7 @@ ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &nam
 
     return member;
 }
+
 
 array<ChiStructMember *> ChiTypeStruct::own_fields() {
     array<ChiStructMember *> result;

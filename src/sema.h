@@ -137,7 +137,7 @@ struct ChiTypeStruct {
     ChiLifetime *this_lifetime = nullptr;  // implicit 'this lifetime
 
     ChiStructMember *add_member(Context *allocator, const string &name, ast::Node *node,
-                                ChiType *resolved_type);
+                                ChiType *resolved_type, bool is_layout_field = true);
 
     ChiStructMember *find_member(const string &name);
 

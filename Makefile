@@ -26,6 +26,9 @@ compile_example_debug: build install
 run_example_debug: compile_example_debug
 	./local/test
 
+debug_compile_example: build install
+	lldb -o run -o "bt all" -o quit -- $(CHI) -d -c $(INPUT_FILE) -o local/test -w local/build
+
 ast: build
 	$(CHI) -a -c $(INPUT_FILE)
 
