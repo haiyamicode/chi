@@ -233,7 +233,8 @@ class Resolver {
     void resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
                               ResolveScope &parent_scope);
 
-    void resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node);
+    void resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node,
+                        bool from_embedding = false);
 
     ChiType *resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn, NodeList *args,
                              ast::Node *fn_decl = nullptr);

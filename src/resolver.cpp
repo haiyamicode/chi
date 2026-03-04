@@ -4702,7 +4702,8 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
     return member;
 }
 
-void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node) {
+void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node,
+                              bool from_embedding) {
     auto &base = *resolve_struct_type(base_type);
     auto &derived = *resolve_struct_type(derived_type);
     InterfaceImpl *iface_impl = nullptr;
@@ -4757,6 +4758,14 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
             bool is_promoted = child_method->orig_parent != nullptr;
             if (iface_impl && !is_promoted &&
                 !compare_impl_type(base_member_type, child_method->resolved_type)) {
+                if (from_embedding) {
+                    // The derived struct has explicitly overridden this method with a different
+                    // signature (e.g. for a different generic specialisation). The embedded
+                    // type's interface no longer applies to the derived type — invalidate it.
+                    derived.interface_table.unset(base_type);
+                    derived.interfaces.pop();
+                    return;
+                }
                 error(base_node, errors::IMPLEMENT_NOT_MATCH, node->name,
                       format_type_display(base_type));
                 break;
@@ -4828,7 +4837,7 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
         }
     }
     for (auto &impl : base.interfaces) {
-        resolve_vtable(impl->interface_type, derived_type, base_node);
+        resolve_vtable(impl->interface_type, derived_type, base_node, from_embedding);
     }
 }
 
@@ -4874,7 +4883,7 @@ void Resolver::resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,
         return;
     }
 
-    resolve_vtable(em_type, struct_type, base_node);
+    resolve_vtable(em_type, struct_type, base_node, /*from_embedding=*/true);
 
     // Set parent_member on promoted methods so codegen generates forwarding proxies
     auto embed_field = base_node->data.var_decl.resolved_field;

@@ -1,6 +1,8 @@
-// Embedding a struct that implements an interface, then overriding the
-// interface method with a non-compliant signature — must be rejected.
-// expect-error: does not match definition from interface
+// Wrapper embeds Dog (which implements Greet) but overrides greet() with a
+// different signature. This invalidates Greet for Wrapper — assigning Wrapper
+// to &Greet must be rejected.
+// expect-error: cannot convert
+
 interface Greet {
     func greet();
 }
@@ -16,7 +18,6 @@ struct Dog {
 struct Wrapper {
     ...inner: Dog;
 
-    // Wrong signature: Greet requires greet(), but user adds a parameter
     func greet(extra: int) {
         printf("Wrapped: {}\n", extra);
     }
@@ -24,6 +25,5 @@ struct Wrapper {
 
 func main() {
     var w = Wrapper{inner: Dog{}};
-    w.greet(42);
+    var g: &Greet = &w; // expect-error: cannot convert
 }
-

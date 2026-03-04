@@ -162,6 +162,33 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	done; \
 	if [ "$$failed" = "1" ]; then exit 1; fi
 
+# Special rule for stdlib mega-test — each file in testdata/48_stdlib/*.xs is compiled
+# and run independently; output is compared to the corresponding .expect file.
+48_stdlib.test:
+	echo Test: 48_stdlib...
+	@failed=0; \
+	for f in testdata/48_stdlib/*.xs; do \
+		name=$$(basename $$f .xs); \
+		expect=testdata/48_stdlib/$$name.expect; \
+		if [ ! -f "$$expect" ]; then \
+			echo "error: missing expect file for $$name"; \
+			failed=1; continue; \
+		fi; \
+		$(CHI) -o $(TMP).48_stdlib_$$name -c $$f -w /tmp/chitest_stdlib_$$name 2>&1; \
+		if [ $$? -ne 0 ]; then \
+			echo "error: $$name failed to compile"; \
+			failed=1; continue; \
+		fi; \
+		$(TMP).48_stdlib_$$name > $(TMP).48_stdlib_$$name.out 2>&1; \
+		if ! diff -qbu $$expect $(TMP).48_stdlib_$$name.out > /dev/null; then \
+			echo "error: $$name output mismatch"; \
+			diff -u $$expect $(TMP).48_stdlib_$$name.out; \
+			failed=1; \
+		fi; \
+		rm -f $(TMP).48_stdlib_$$name.out; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
+
 # Special rule for GC tests - finalization order is non-deterministic,
 # so sort destruction lines (everything after "Test completed") before comparing.
 18_gc_escape.test: 18_gc_escape.expect

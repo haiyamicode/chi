@@ -67,6 +67,29 @@ struct SilentWrapper {
     }
 }
 
+// Test: override a promoted interface method with a different signature — allowed.
+// The embedded Dog implements Greet; Wrapper's override invalidates that interface
+// for Wrapper (Wrapper no longer satisfies Greet), but compiles fine.
+interface Greet {
+    func greet();
+}
+
+struct Dog {
+    impl Greet {
+        func greet() {
+            printf("Woof!\n");
+        }
+    }
+}
+
+struct Wrapper {
+    ...inner: Dog;
+
+    func greet(extra: int) {
+        printf("Wrapped: {}\n", extra);
+    }
+}
+
 func main() {
     // --- Non-generic struct embedding concrete generic ---
     var s = IntStack{items: Array<int>{}};
@@ -130,5 +153,9 @@ func main() {
     // --- Override with different signature when no interface is involved ---
     var sw = SilentWrapper{inner: Barker{}};
     sw.greet("hello");
+
+    // --- Override invalidates embedded interface ---
+    var w = Wrapper{inner: Dog{}};
+    w.greet(42);
 }
 
