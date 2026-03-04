@@ -246,6 +246,8 @@ class Resolver {
     bool check_trait_bound(ChiType *type_arg, ChiType *trait_type);
     bool is_constructor_interface_compatible(ChiType *type, ChiType *iface_type);
     bool check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data);
+    WhereCondition *build_where_condition(ast::ImplementBlockData &impl_data,
+                                          ChiTypeStruct *struct_, ResolveScope &scope);
 
     void type_placeholders_sub_each(TypeList *input, ChiTypeSubtype *subs, TypeList *output);
 

@@ -107,6 +107,7 @@ struct InterfaceImpl {
     ChiType *impl_type = nullptr;
     ImplMembers impl_members = {};
     long itable_index = -1;
+    WhereCondition *where_condition = nullptr; // non-null for `impl Iface where T: Bound`
 };
 
 MAKE_ENUM(ResolveStatus, None, MemberTypesKnown, EmbedsResolved, BodiesResolved, Done);

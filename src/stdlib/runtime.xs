@@ -486,6 +486,24 @@ struct Array<T> {
         }
     }
 
+    impl where T: ops.Int {
+        // Resize to exactly n elements, zero-filling any new space.
+        mut func resize_fill(n: uint32) {
+            this.reserve(n);
+            unsafe {
+                cx_memset(this.data as *void, 0, n * sizeof T);
+            }
+            this.length = n;
+        }
+
+        // Shrink length to n without freeing memory.
+        mut func truncate(n: uint32) {
+            if n < this.length {
+                this.length = n;
+            }
+        }
+    }
+
     func raw_data() &T {
         return this.data;
     }
@@ -781,6 +799,12 @@ struct Buffer {
         this.bytes = {};
     }
 
+    static func alloc(n: uint32) Buffer {
+        var buf = Buffer{};
+        buf.bytes.resize_fill(n);
+        return buf;
+    }
+
     static func from_bytes(data: Array<byte>) Buffer {
         var buf = Buffer{};
         buf.write(data.span());
@@ -830,6 +854,10 @@ struct Buffer {
             this.read_pos = this.read_pos + n;
             return n;
         }
+    }
+
+    mut func truncate(n: uint32) {
+        this.bytes.truncate(n);
     }
 }
 

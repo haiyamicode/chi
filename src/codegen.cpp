@@ -432,10 +432,11 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     }
     generate_copier(type);
 
-    if (!subtype) {
-        if (struct_type->data.struct_.interfaces.len) {
-            compile_struct_vtables(struct_type);
-        }
+    if (struct_type->data.struct_.interfaces.len) {
+        // For generic instantiations (subtype != null), pass the subtype as the lookup_type
+        // so that the dtor/copier are found in destructor_table/copier_table (which are
+        // keyed by the subtype, not the resolved concrete struct).
+        compile_struct_vtables(struct_type, subtype);
     }
 
     for (auto member : struct_type->data.struct_.members) {
@@ -1022,20 +1023,24 @@ llvm::TypeSize Compiler::llvm_type_size(llvm::Type *type) {
     return m_ctx->llvm_module->getDataLayout().getTypeAllocSize(type);
 }
 
-void Compiler::compile_struct_vtables(ChiType *type) {
+void Compiler::compile_struct_vtables(ChiType *type, ChiType *lookup_type /*= nullptr*/) {
     array<CompiledVtable> vtables = {};
     int32_t count = 0;
     std::vector<llvm::Constant *> methods;
 
     assert(type->kind == TypeKind::Struct);
+    // For generic instantiations (subtypes), dtor/copier are keyed by the subtype in
+    // destructor_table/copier_table. Use lookup_type if provided, otherwise fall back to type.
+    auto dtor_lookup = lookup_type ? lookup_type : type;
+    auto copier_lookup = lookup_type ? lookup_type : type;
 
     // Get destructor for this concrete type (may be null)
-    auto dtor_it = m_ctx->destructor_table.get(type);
+    auto dtor_it = m_ctx->destructor_table.get(dtor_lookup);
     llvm::Constant *dtor_ptr =
         dtor_it && *dtor_it ? (llvm::Constant *)(*dtor_it)->llvm_fn : get_null_ptr();
 
     // Get copier for this concrete type (may be null)
-    auto copier_it = m_ctx->copier_table.get(type);
+    auto copier_it = m_ctx->copier_table.get(copier_lookup);
     llvm::Constant *copier_ptr =
         copier_it && *copier_it ? (llvm::Constant *)(*copier_it)->llvm_fn : get_null_ptr();
 
@@ -2148,6 +2153,10 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             auto data_p = builder.CreateStructGEP(iface_type_l, vp, 0);
             builder.CreateStore(value, data_p);
             auto vtable_p = builder.CreateStructGEP(iface_type_l, vp, 1);
+            // Resolve generic instantiations (Subtype) to their concrete struct type,
+            // which has the interface_table populated by can_assign/struct_satisfies_interface.
+            if (from_elem && from_elem->kind == TypeKind::Subtype)
+                from_elem = get_resolver()->resolve_subtype(from_elem);
             if (from_elem && from_elem->kind == TypeKind::Struct &&
                 !ChiTypeStruct::is_interface(from_elem)) {
                 // &Concrete → &Interface: look up vtable from impl table

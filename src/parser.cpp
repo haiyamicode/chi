@@ -2546,6 +2546,17 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
             do {
                 node->data.implement_block.interface_types.add(parse_type_expr(true));
             } while (next_is(TokenType::COMMA) && (consume(), true));
+            // impl Interface where T: Bound { ... } — conditional interface implementation
+            if (next_is(TokenType::KW_WHERE)) {
+                consume(); // consume 'where'
+                do {
+                    ast::WhereClause clause;
+                    clause.param_name = expect(TokenType::IDEN);
+                    expect(TokenType::COLON);
+                    clause.bound_type = parse_type_expr(true);
+                    node->data.implement_block.where_clauses.add(clause);
+                } while (next_is(TokenType::COMMA) && (consume(), true));
+            }
             expect(TokenType::LBRACE);
             while (get()->type != TokenType::RBRACE) {
                 if (get()->type == TokenType::END) {

@@ -500,7 +500,7 @@ class Compiler {
                             llvm::Value *result_promise_ptr);
     void compile_async_fn_body(Function *fn);
 
-    void compile_struct_vtables(ChiType *type);
+    void compile_struct_vtables(ChiType *type, ChiType *lookup_type = nullptr);
     llvm::Value *compile_type_info(ChiType *type);
 
     llvm::TypeSize llvm_type_size(llvm::Type *type);

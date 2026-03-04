@@ -432,6 +432,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
             if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
                 from_type->kind == TypeKind::MutRef || from_type->kind == TypeKind::MoveRef) {
                 auto from_elem = from_type->get_elem();
+                if (from_elem && from_elem->kind == TypeKind::Subtype)
+                    from_elem = resolve_subtype(from_elem);
                 if (from_elem && from_elem->kind == TypeKind::Struct &&
                     from_elem->data.struct_.kind == ContainerKind::Struct) {
                     if (struct_satisfies_interface(from_elem, to_elem)) return true;
@@ -1892,7 +1894,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::NULLP:
             return get_system_types()->null_ptr;
         case TokenType::INT:
-            if (scope.value_type && scope.value_type->kind == TypeKind::Int) {
+            if (scope.value_type && (scope.value_type->kind == TypeKind::Int ||
+                                     scope.value_type->kind == TypeKind::Byte ||
+                                     scope.value_type->kind == TypeKind::Rune)) {
                 return scope.value_type;
             }
             return get_system_types()->int_;
@@ -3026,6 +3030,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (impl_data.interface_types.len == 0)
                     continue;
 
+                // Build where condition for `impl Interface where T: Bound` blocks
+                auto *impl_where_cond = build_where_condition(impl_data, struct_, scope);
+
                 for (auto iface_node : impl_data.interface_types) {
                     auto impl_trait = resolve_value(iface_node, scope);
                     if (!impl_trait)
@@ -3039,11 +3046,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
 
                     resolve_vtable(impl_trait, struct_type, iface_node);
+                    // Tag the InterfaceImpl with the where condition so resolve_subtype
+                    // can filter it for concrete specializations
+                    if (impl_where_cond) {
+                        auto entry = struct_->interface_table.get(impl_trait);
+                        if (entry)
+                            (*entry)->where_condition = impl_where_cond;
+                    }
                     if (struct_->is_generic()) {
                         for (auto subtype : struct_->subtypes) {
-                            if (subtype->is_placeholder) {
+                            if (subtype->is_placeholder)
                                 continue;
-                            }
+                            // Skip concrete subtypes that don't satisfy the where condition
+                            if (impl_where_cond &&
+                                !check_where_condition(impl_where_cond,
+                                                       &subtype->data.subtype))
+                                continue;
                             ChiType *subtype_impl_trait = impl_trait;
                             if (impl_trait->kind == TypeKind::Subtype) {
                                 auto &subtype_data = subtype->data.subtype;
@@ -3064,29 +3082,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (impl_data.interface_types.len > 0 || impl_data.where_clauses.len == 0)
                     continue;
 
-                auto *cond = get_allocator()->create_where_condition();
-
-                for (auto &clause : impl_data.where_clauses) {
-                    auto param_name = clause.param_name->str;
-                    long param_index = -1;
-                    for (long i = 0; i < (long)struct_->type_params.len; i++) {
-                        auto tp = to_value_type(struct_->type_params[i]);
-                        if (tp->name == param_name) {
-                            param_index = i;
-                            break;
-                        }
-                    }
-                    if (param_index < 0) {
-                        error(clause.bound_type, "unknown type parameter '{}'", param_name);
-                        continue;
-                    }
-
-                    auto trait_type = resolve_value(clause.bound_type, scope);
-                    if (!trait_type)
-                        continue;
-
-                    cond->bounds.add({param_index, trait_type});
-                }
+                auto *cond = build_where_condition(impl_data, struct_, scope);
 
                 for (auto impl_member : impl_data.members) {
                     auto *sm = struct_->find_member(impl_member->name);
@@ -7250,6 +7246,17 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
             continue;
         if (!check_where_condition(member->where_condition, &data))
             continue;
+        // For promoted methods (from struct embedding), verify the method still exists in
+        // the concrete embedded type — where conditions on that type's methods may have
+        // filtered it out for this specialization (e.g. Vec<string> should not have
+        // resize_fill promoted from Array<string> when resize_fill is only in impl where T: Int).
+        if (member->is_method() && member->orig_parent && member->parent_member) {
+            auto concrete_orig =
+                type_placeholders_sub_selective(member->orig_parent, &data, base.node);
+            auto concrete_struct = resolve_struct_type(concrete_orig);
+            if (concrete_struct && !concrete_struct->find_member(member->get_name()))
+                continue;
+        }
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
         if (member->is_method()) {
@@ -7363,7 +7370,22 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
     }
 
     data.final_type = sty;
-    scpy.interfaces = base.interfaces;
+    // Copy qualifying interfaces into the concrete struct, filtering conditional ones whose
+    // where condition isn't satisfied. Also populate interface_table so codegen can look up
+    // vtables (interface_table is keyed by the concrete interface type, e.g. Index<uint32, int>
+    // not the generic Index<uint32, T>).
+    for (auto iface_impl : base.interfaces) {
+        if (iface_impl->where_condition &&
+            !check_where_condition(iface_impl->where_condition, &data))
+            continue;
+        scpy.interfaces.add(iface_impl);
+        // Populate interface_table with the concrete (specialized) interface type as key.
+        ChiType *concrete_iface_type = iface_impl->interface_type;
+        if (concrete_iface_type->kind == TypeKind::Subtype) {
+            concrete_iface_type = type_placeholders_sub(concrete_iface_type, &data);
+        }
+        scpy.interface_table[concrete_iface_type] = iface_impl;
+    }
     return sty;
 }
 
@@ -8406,6 +8428,33 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
             return true;
     }
     return false;
+}
+
+WhereCondition *Resolver::build_where_condition(ast::ImplementBlockData &impl_data,
+                                                ChiTypeStruct *struct_, ResolveScope &scope) {
+    if (impl_data.where_clauses.len == 0)
+        return nullptr;
+    auto *cond = get_allocator()->create_where_condition();
+    for (auto &clause : impl_data.where_clauses) {
+        auto param_name = clause.param_name->str;
+        long param_index = -1;
+        for (long i = 0; i < (long)struct_->type_params.len; i++) {
+            auto tp = to_value_type(struct_->type_params[i]);
+            if (tp->name == param_name) {
+                param_index = i;
+                break;
+            }
+        }
+        if (param_index < 0) {
+            error(clause.bound_type, "unknown type parameter '{}'", param_name);
+            continue;
+        }
+        auto trait_type = resolve_value(clause.bound_type, scope);
+        if (!trait_type)
+            continue;
+        cond->bounds.add({param_index, trait_type});
+    }
+    return cond;
 }
 
 bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data) {

@@ -1,0 +1,5 @@
+writer: hello world
+reader: abcdefghij
+read_bytes: fgh
+read_all: hello
+write_string: test write_string
