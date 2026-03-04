@@ -23,6 +23,7 @@ struct Wrapper {
 }
 
 func main() {
-    var w = Wrapper{ inner: Dog{} };
+    var w = Wrapper{inner: Dog{}};
     w.greet(42);
 }
+
