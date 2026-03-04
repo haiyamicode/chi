@@ -760,7 +760,7 @@ private struct __CxSpan<T> {
 }
 
 struct Buffer {
-    protected bytes: Array<byte>;
+    ...bytes: Array<byte>;
 
     mut func new() {
         this.bytes = {};
@@ -793,7 +793,7 @@ struct Buffer {
     func to_string() string {
         var str: string = "";
         unsafe {
-            cx_string_from_chars(this.bytes.raw_data(), this.bytes.length, &str);
+            cx_string_from_chars(this.raw_data(), this.length, &str);
         }
         return str;
     }
