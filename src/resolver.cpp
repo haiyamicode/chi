@@ -2956,9 +2956,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     if (base_member->is_method()) {
                         auto copy_node = create_node(NodeType::FnDef);
                         base_member->node->clone(copy_node);
-                        base_value_struct->add_member(get_allocator(), base_member->get_name(),
-                                                      copy_node, base_member->resolved_type);
+                        auto new_member = base_value_struct->add_member(
+                            get_allocator(), base_member->get_name(), copy_node,
+                            base_member->resolved_type);
+                        if (base_member->symbol != IntrinsicSymbol::None) {
+                            new_member->symbol = base_member->symbol;
+                            base_value_struct->member_intrinsics[base_member->symbol] = new_member;
+                        }
                     }
+                }
+
+                // Propagate interfaces from __CxEnumBase to enum value struct
+                for (auto iface : enum_base_struct->data.struct_.interfaces) {
+                    resolve_vtable(iface->interface_type, enum_data.base_value_type, node);
                 }
 
                 if (data.base_struct) {
@@ -2968,6 +2978,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     // copy members from custom base struct to enum value struct
                     auto base_struct = eval_struct_type(data.base_struct->resolved_type);
                     copy_struct_members(base_struct, value_struct);
+
+                    // Propagate interfaces from custom struct (overrides __CxEnumBase's)
+                    for (auto iface : base_struct->data.struct_.interfaces) {
+                        resolve_vtable(iface->interface_type, enum_data.base_value_type, node);
+                    }
                 }
             } else if (enum_data.resolve_status == ResolveStatus::EmbedsResolved) {
                 if (data.base_struct) {
@@ -5789,11 +5804,26 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
 void Resolver::copy_struct_members(ChiType *from, ChiType *to, ChiStructMember *parent_member) {
     assert(from->kind == TypeKind::Struct && to->kind == TypeKind::Struct);
     for (auto member : from->data.struct_.members) {
+        auto existing = to->data.struct_.find_member(member->get_name());
+        if (existing && member->is_method()) {
+            // Override existing member (e.g. custom enum struct overriding __CxEnumBase method)
+            existing->node = member->node;
+            existing->resolved_type = member->resolved_type;
+            if (member->symbol != IntrinsicSymbol::None) {
+                existing->symbol = member->symbol;
+                to->data.struct_.member_intrinsics[member->symbol] = existing;
+            }
+            continue;
+        }
         auto new_member = to->data.struct_.add_member(get_allocator(), member->get_name(),
                                                       member->node, member->resolved_type);
         if (parent_member && member->is_field()) {
             new_member->parent_member = parent_member;
             new_member->field_index = member->field_index;
+        }
+        if (member->symbol != IntrinsicSymbol::None) {
+            new_member->symbol = member->symbol;
+            to->data.struct_.member_intrinsics[member->symbol] = new_member;
         }
     }
 }

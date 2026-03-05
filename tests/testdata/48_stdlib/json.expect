@@ -19,7 +19,7 @@ true
 false
 === to_array ===
 3
-=== kind_display ===
+=== kind display ===
 object
 array
 null

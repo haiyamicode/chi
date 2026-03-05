@@ -17,17 +17,19 @@ export enum OpenMode {
     Read,
     Write,
     Append,
-    ReadWrite
-}
+    ReadWrite;
 
-func mode_str(mode: OpenMode) string {
-    return switch mode {
-        OpenMode.Read => "r",
-        OpenMode.Write => "w",
-        OpenMode.Append => "a",
-        OpenMode.ReadWrite => "r+",
-        else => "r"
-    };
+    struct {
+        func mode_string() string {
+            return switch this {
+                OpenMode.Read => "r",
+                OpenMode.Write => "w",
+                OpenMode.Append => "a",
+                OpenMode.ReadWrite => "r+",
+                else => "r"
+            };
+        }
+    }
 }
 
 struct FileHandle {
@@ -74,7 +76,7 @@ export struct File {
 
     static func open(path: string, mode: OpenMode = OpenMode.Read) File {
         var p = path.to_cstring();
-        var m = mode_str(mode).to_cstring();
+        var m = mode.mode_string().to_cstring();
         unsafe {
             var h = __cx_fopen(p.as_ptr(), m.as_ptr());
             if h == null {

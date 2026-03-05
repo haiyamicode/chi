@@ -897,6 +897,8 @@ struct Node {
             return data.var_decl.decl_spec;
         case NodeType::StructDecl:
             return data.struct_decl.decl_spec;
+        case NodeType::EnumDecl:
+            return data.enum_decl.decl_spec;
         case NodeType::ExportDecl:
             return data.export_decl.decl_spec;
         case NodeType::FnProto:

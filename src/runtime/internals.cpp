@@ -311,6 +311,16 @@ std::string get_value_display(const CxAny &v) {
         return fmt::format("<TypeKind:{}>", PRINT_ENUM((TypeKind)v.type->kind));
     }
     case cx::TypeKind::EnumValue: {
+        auto display_method = get_typemeta_display_method(v.type);
+        if (display_method) {
+            auto fn = (void (*)(void *a, void *b))display_method;
+            auto p = get_any_data(&v);
+            CxString s;
+            fn(&s, (void *)p);
+            auto str = string(s.data, s.size);
+            cx_string_delete(&s);
+            return str;
+        }
         auto data_p = get_any_data(&v);
         auto ev = (CxEnumValue *)data_p;
         string display_name(ev->display_name->data, ev->display_name->size);

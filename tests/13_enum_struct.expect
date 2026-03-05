@@ -53,3 +53,39 @@ int
 none
 add
 x
+=== Test: Enum base struct lifecycle ===
+-- create --
+Traced(1) created
+a.trace.id=1
+-- copy --
+Traced(1) copied
+b.trace.id=1
+-- reassign --
+Traced(1) destroyed
+Traced(2) created
+a.trace.id=2
+-- variant with data --
+Traced(3) created
+c.trace.id=3, c.extra=99
+-- copy variant --
+Traced(3) copied
+d.trace.id=3, d.extra=99
+-- scope exit --
+Traced(3) destroyed
+Traced(3) destroyed
+Traced(1) destroyed
+Traced(2) destroyed
+=== Test: Enum Display override ===
+printf red: red
+printf green: green
+printf blue: blue
+display red: red
+display green: green
+display blue: blue
+printf circle: circle(r=3.14)
+printf rect: rect(10x20)
+display circle: circle(r=3.14)
+display rect: rect(10x20)
+copy printf: red
+copy display: red
+reassign printf: blue

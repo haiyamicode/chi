@@ -324,6 +324,10 @@ void Parser::parse_top_level_decls(NodeList *decls) {
             if (ds && ds->is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
+        } else if (decl->type == NodeType::EnumDecl) {
+            if (decl->data.enum_decl.decl_spec->is_exported()) {
+                m_ctx->module->exports.add(decl);
+            }
         } else if (decl->type == NodeType::TypedefDecl) {
             m_ctx->module->exports.add(decl);
         }

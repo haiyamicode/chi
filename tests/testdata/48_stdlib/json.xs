@@ -33,10 +33,10 @@ func main() {
     var items = arr.to_array();
     println(items.length);
 
-    println("=== kind_display ===");
-    println(json.kind_display(obj.kind));
-    println(json.kind_display(arr.kind));
-    println(json.kind_display(null_val.kind));
+    println("=== kind display ===");
+    printf("{}\n", obj.kind);
+    printf("{}\n", arr.kind);
+    printf("{}\n", null_val.kind);
 
     println("done");
 }

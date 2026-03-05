@@ -215,6 +215,127 @@ func test_node_copy() {
     println("--- scope exit ---");
 }
 
+// Enum with custom Display override (no variants)
+enum Color {
+    Red,
+    Green,
+    Blue;
+
+    struct {
+        impl ops.Display {
+            func display() string {
+                return switch this {
+                    Color.Red => "red",
+                    Color.Green => "green",
+                    Color.Blue => "blue",
+                    else => "unknown"
+                };
+            }
+        }
+    }
+}
+
+// Enum struct with Display + variant data
+enum Shape {
+    Circle {
+        radius: float64;
+    },
+    Rect {
+        w: float64;
+        h: float64;
+    };
+
+    struct {
+        impl ops.Display {
+            func display() string {
+                return switch this {
+                    Shape.Circle => stringf("circle(r={})", this.radius),
+                    Shape.Rect => stringf("rect({}x{})", this.w, this.h),
+                    else => "unknown"
+                };
+            }
+        }
+    }
+}
+
+// Enum with non-trivial base struct field (lifecycle: copy, destroy)
+enum LifecycleEnum {
+    Alpha,
+    Beta {
+        extra: int;
+    };
+
+    struct {
+        trace: Traced;
+    }
+}
+
+func test_enum_base_struct_lifecycle() {
+    println("=== Test: Enum base struct lifecycle ===");
+
+    // Create: Traced in base struct is constructed
+    println("-- create --");
+    var a = LifecycleEnum.Alpha{trace: Traced{1}};
+    printf("a.trace.id={}\n", a.trace.id);
+
+    // Copy: base struct Traced is copied
+    println("-- copy --");
+    var b = a;
+    printf("b.trace.id={}\n", b.trace.id);
+
+    // Reassign: old Traced destroyed, new one created
+    println("-- reassign --");
+    a = {trace: Traced{2}};
+    printf("a.trace.id={}\n", a.trace.id);
+
+    // Variant with extra data + base struct field
+    println("-- variant with data --");
+    var c = LifecycleEnum.Beta{trace: Traced{3}, extra: 99};
+    printf("c.trace.id={}, c.extra={}\n", c.trace.id, c.extra);
+
+    // Copy variant with data
+    println("-- copy variant --");
+    var d = c;
+    printf("d.trace.id={}, d.extra={}\n", d.trace.id, d.extra);
+
+    // Scope exit: all destroyed
+    println("-- scope exit --");
+}
+
+func test_enum_display_override() {
+    println("=== Test: Enum Display override ===");
+
+    // Basic enum: printf uses custom Display, not default "Color.Red"
+    var r = Color.Red;
+    var g = Color.Green;
+    var b = Color.Blue;
+    printf("printf red: {}\n", r);
+    printf("printf green: {}\n", g);
+    printf("printf blue: {}\n", b);
+
+    // Direct .display() must match printf output
+    printf("display red: {}\n", r.display());
+    printf("display green: {}\n", g.display());
+    printf("display blue: {}\n", b.display());
+
+    // Enum with variant data
+    var c = Shape.Circle{radius: 3.14};
+    var rect = Shape.Rect{w: 10.0, h: 20.0};
+    printf("printf circle: {}\n", c);
+    printf("printf rect: {}\n", rect);
+    printf("display circle: {}\n", c.display());
+    printf("display rect: {}\n", rect.display());
+
+    // Copy preserves Display behavior
+    var r2 = r;
+    printf("copy printf: {}\n", r2);
+    printf("copy display: {}\n", r2.display());
+
+    // Reassign and display
+    r2 = Color.Blue;
+    printf("reassign printf: {}\n", r2);
+}
+
 func main() {
     var node = Node.FnDef{name: "f", params: {}, ret: "int"};
     printf("node.type: {}\n", node.type);
@@ -233,5 +354,7 @@ func main() {
     test_enum_string_reassign();
     test_node_copy();
     test_switch_narrowing();
+    test_enum_base_struct_lifecycle();
+    test_enum_display_override();
 }
 

@@ -500,6 +500,26 @@ void Compiler::compile_enum(ast::Node *node) {
             }
         }
     }
+
+    // Compile vtables and reflection indices for enum value struct,
+    // same as _compile_struct does for regular structs
+    auto base_value_type = enum_type->data.enum_.base_value_type;
+    auto resolved_struct = base_value_type->data.enum_value.resolved_struct;
+    if (resolved_struct) {
+        auto &sdata = resolved_struct->data.struct_;
+        if (sdata.interfaces.len) {
+            compile_struct_vtables(resolved_struct, nullptr);
+        }
+        for (auto member : sdata.members) {
+            if (member->is_method() && !member->resolved_type->is_placeholder) {
+                auto method_fn = get_fn(member->node, base_value_type);
+                if (method_fn) {
+                    member->vtable_index = m_ctx->reflection_vtable.size();
+                    m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);
+                }
+            }
+        }
+    }
 }
 
 void Compiler::compile_concrete_enum(ChiTypeEnum *enum_data) {
@@ -1098,8 +1118,16 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     TypeMetaEntry *meta_table_data = nullptr;
 
     if (type->kind == TypeKind::Struct || type->kind == TypeKind::Array ||
-        type->kind == TypeKind::Span) {
-        auto sty = get_resolver()->resolve_struct_type(type);
+        type->kind == TypeKind::Span || type->kind == TypeKind::EnumValue) {
+        ChiTypeStruct *sty;
+        if (type->kind == TypeKind::EnumValue) {
+            // Use the parent enum's base value struct — vtable indices are assigned there,
+            // and all variants share the same method layout
+            auto parent_enum = type->data.enum_value.parent_enum();
+            sty = get_resolver()->resolve_struct_type(parent_enum->base_value_type);
+        } else {
+            sty = get_resolver()->resolve_struct_type(type);
+        }
         for (auto member : sty->members) {
             if (member->is_method() && member->vtable_index >= 0) {
                 auto new_len = meta_table_len + 1;
@@ -6902,9 +6930,9 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
     auto enum_type_l = compile_type(resolved_type);
     auto full_size = llvm_type_size(enum_type_l);
 
-    // 1. memset dest to 0
-    auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0);
-    builder.CreateMemSet(dest_ptr, zero, full_size, {});
+    // 1. memcpy entire struct first (preserves trivial fields including variant data),
+    //    then deep-copy non-trivial fields on top
+    builder.CreateMemCpy(dest_ptr, {}, src_ptr, {}, full_size);
 
     // 2. Copy base_value_struct fields (header + base shared fields)
     if (bvs) {

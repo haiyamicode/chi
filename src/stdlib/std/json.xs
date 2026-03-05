@@ -19,21 +19,25 @@ export enum ValueKind {
     Double,
     String,
     Array,
-    Object
-}
+    Object;
 
-export func kind_display(kind: ValueKind) string {
-    return switch kind {
-        ValueKind.Null => "null",
-        ValueKind.Bool => "bool",
-        ValueKind.Int64 => "int64",
-        ValueKind.Uint64 => "uint64",
-        ValueKind.Double => "double",
-        ValueKind.String => "string",
-        ValueKind.Array => "array",
-        ValueKind.Object => "object",
-        else => "unknown"
-    };
+    struct {
+        impl ops.Display {
+            func display() string {
+                return switch this {
+                    ValueKind.Null => "null",
+                    ValueKind.Bool => "bool",
+                    ValueKind.Int64 => "int64",
+                    ValueKind.Uint64 => "uint64",
+                    ValueKind.Double => "double",
+                    ValueKind.String => "string",
+                    ValueKind.Array => "array",
+                    ValueKind.Object => "object",
+                    else => "unknown"
+                };
+            }
+        }
+    }
 }
 
 export struct Value {
@@ -58,7 +62,7 @@ export struct Value {
 
     func assert_kind(kind: ValueKind) {
         if this.kind != kind {
-            panic(stringf("expected {}, got {}", kind_display(kind), kind_display(this.kind)));
+            panic(stringf("expected {}, got {}", kind, this.kind));
         }
     }
 
