@@ -17,18 +17,19 @@ shared handle
 === fs.exists (nonexistent) ===
 false
 === error: open nonexistent ===
+kind: ErrorKind.NotFound
 op: open
 path: /tmp/chi_no_such_file_12345
-code: 2
+raw_code: -2
 has detail: true
-message: open /tmp/chi_no_such_file_12345: No such file or directory (errno 2)
+message: open /tmp/chi_no_such_file_12345: no such file or directory (-2)
 === error: remove nonexistent ===
+kind: ErrorKind.NotFound
 op: remove
-code: 2
 === error: list_dir nonexistent ===
+kind: ErrorKind.NotFound
 op: list_dir
-code: 2
 === error: result mode ===
+kind: ErrorKind.NotFound
 op: open
-code: 2
 done

@@ -852,55 +852,111 @@ uint64_t __cx_time_monotonic(void) {
 }
 
 // std/fs helpers — minimal C primitives
-void *__cx_fopen(const char *path, const char *mode) {
-    return fopen(path, mode);
+// Maps a libuv error code to a FsErrorKind enum value.
+// The enum order must match the Chi-side FsErrorKind enum.
+int32_t __cx_fs_error_kind(int32_t uv_err) {
+    switch (uv_err) {
+    case UV_ENOENT:    return 1; // NotFound
+    case UV_EACCES:    return 2; // PermissionDenied
+    case UV_EEXIST:    return 3; // AlreadyExists
+    case UV_ENOTDIR:   return 4; // NotADirectory
+    case UV_EISDIR:    return 5; // IsADirectory
+    case UV_ENOTEMPTY: return 6; // DirectoryNotEmpty
+    case UV_ENOSPC:    return 7; // NoSpace
+    case UV_EROFS:     return 8; // ReadOnlyFs
+    case UV_EBUSY:     return 9; // Busy
+    case UV_EPERM:     return 2; // PermissionDenied (same as EACCES)
+    default:           return 0; // Unknown
+    }
 }
 
-uint32_t __cx_fread(void *handle, void *buf, uint32_t size) {
-    return (uint32_t)fread(buf, 1, size, (FILE *)handle);
+int32_t __cx_fs_flags(int32_t which) {
+    switch (which) {
+    case 0: return O_RDONLY;
+    case 1: return O_WRONLY;
+    case 2: return O_RDWR;
+    case 3: return O_CREAT;
+    case 4: return O_TRUNC;
+    case 5: return O_APPEND;
+    default: return 0;
+    }
 }
 
-uint32_t __cx_fwrite(void *handle, const void *data, uint32_t size) {
-    return (uint32_t)fwrite(data, 1, size, (FILE *)handle);
+int32_t __cx_fs_open(const char *path, int32_t flags, int32_t mode) {
+    uv_fs_t req;
+    int32_t fd = uv_fs_open(uv_default_loop(), &req, path, flags, mode, NULL);
+    uv_fs_req_cleanup(&req);
+    return fd;
 }
 
-void __cx_fclose(void *handle) {
-    fclose((FILE *)handle);
+int32_t __cx_fs_read(int32_t fd, void *buf, uint32_t size) {
+    uv_fs_t req;
+    uv_buf_t uvbuf = uv_buf_init((char *)buf, size);
+    int32_t n = uv_fs_read(uv_default_loop(), &req, fd, &uvbuf, 1, -1, NULL);
+    uv_fs_req_cleanup(&req);
+    return n < 0 ? n : n;
+}
+
+int32_t __cx_fs_write(int32_t fd, const void *data, uint32_t size) {
+    uv_fs_t req;
+    uv_buf_t uvbuf = uv_buf_init((char *)data, size);
+    int32_t n = uv_fs_write(uv_default_loop(), &req, fd, &uvbuf, 1, -1, NULL);
+    uv_fs_req_cleanup(&req);
+    return n < 0 ? n : n;
+}
+
+int32_t __cx_fs_close(int32_t fd) {
+    uv_fs_t req;
+    int32_t r = uv_fs_close(uv_default_loop(), &req, fd, NULL);
+    uv_fs_req_cleanup(&req);
+    return r;
 }
 
 int32_t __cx_file_exists(const char *path) {
-    return access(path, F_OK) == 0 ? 1 : 0;
+    uv_fs_t req;
+    int32_t r = uv_fs_stat(uv_default_loop(), &req, path, NULL);
+    uv_fs_req_cleanup(&req);
+    return r == 0 ? 1 : 0;
 }
 
 int32_t __cx_file_remove(const char *path) {
-    return remove(path);
+    uv_fs_t req;
+    int32_t r = uv_fs_unlink(uv_default_loop(), &req, path, NULL);
+    uv_fs_req_cleanup(&req);
+    return r;
 }
 
 int32_t __cx_mkdir(const char *path) {
-    return mkdir(path, 0755);
+    uv_fs_t req;
+    int32_t r = uv_fs_mkdir(uv_default_loop(), &req, path, 0755, NULL);
+    uv_fs_req_cleanup(&req);
+    return r;
 }
 
 int32_t __cx_get_errno() {
     return errno;
 }
 
-void __cx_strerror(int32_t errnum, CxString *result) {
-    auto msg = strerror(errnum);
+void __cx_uv_strerror(int32_t errnum, CxString *result) {
+    auto msg = uv_strerror(errnum);
     cx_string_from_chars(msg, strlen(msg), result);
 }
 
 int32_t __cx_list_dir(const char *path, CxArray *result) {
-    DIR *dir = opendir(path);
-    if (!dir) return -1;
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+    uv_fs_t req;
+    int32_t n = uv_fs_scandir(uv_default_loop(), &req, path, 0, NULL);
+    if (n < 0) {
+        uv_fs_req_cleanup(&req);
+        return n;
+    }
+    uv_dirent_t entry;
+    while (uv_fs_scandir_next(&req, &entry) != UV_EOF) {
         CxString s;
-        cx_string_from_chars(entry->d_name, strlen(entry->d_name), &s);
+        cx_string_from_chars(entry.name, strlen(entry.name), &s);
         CxString *slot = (CxString *)cx_array_add(result, sizeof(CxString));
         *slot = s;
     }
-    closedir(dir);
+    uv_fs_req_cleanup(&req);
     return 0;
 }
 }

@@ -49,30 +49,31 @@ func main() {
 
     println("=== error: open nonexistent ===");
     try fs.File.open("/tmp/chi_no_such_file_12345") catch (err: fs.FsError) {
+        printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
         printf("path: {}\n", err.path);
-        printf("code: {}\n", err.code);
+        printf("raw_code: {}\n", err.raw_code);
         printf("has detail: {}\n", err.detail.byte_length() > 0);
         printf("message: {}\n", err.message());
     };
 
     println("=== error: remove nonexistent ===");
     try fs.remove("/tmp/chi_no_such_file_12345") catch (err: fs.FsError) {
+        printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
-        printf("code: {}\n", err.code);
     };
 
     println("=== error: list_dir nonexistent ===");
     try fs.list_dir("/tmp/chi_no_such_dir_12345") catch (err: fs.FsError) {
+        printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
-        printf("code: {}\n", err.code);
     };
 
     println("=== error: result mode ===");
     var result = try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError;
     if result.error {
+        printf("kind: {}\n", result.error.kind);
         printf("op: {}\n", result.error.op);
-        printf("code: {}\n", result.error.code);
     }
 
     println("done");

@@ -3,54 +3,92 @@ import "std/io" as io;
 import "std/ops" as ops;
 
 extern "C" {
-    unsafe func __cx_fopen(path: *byte, mode: *byte) *void;
-    unsafe func __cx_fread(handle: *void, buf: *void, size: uint32) uint32;
-    unsafe func __cx_fwrite(handle: *void, data: *void, size: uint32) uint32;
-    unsafe func __cx_fclose(handle: *void);
+    unsafe func __cx_fs_error_kind(uv_err: int32) int32;
+    unsafe func __cx_fs_flags(which: int32) int32;
+    unsafe func __cx_fs_open(path: *byte, flags: int32, mode: int32) int32;
+    unsafe func __cx_fs_read(fd: int32, buf: *void, size: uint32) int32;
+    unsafe func __cx_fs_write(fd: int32, data: *void, size: uint32) int32;
+    unsafe func __cx_fs_close(fd: int32) int32;
     unsafe func __cx_file_exists(path: *byte) int32;
     unsafe func __cx_file_remove(path: *byte) int32;
     unsafe func __cx_mkdir(path: *byte) int32;
     unsafe func __cx_list_dir(path: *byte, result: *void) int32;
-    unsafe func __cx_get_errno() int32;
-    unsafe func __cx_strerror(errnum: int32, result: *string);
+    unsafe func __cx_uv_strerror(errnum: int32, result: *string);
 }
 
-func get_errno() int32 {
-    unsafe {
-        return __cx_get_errno();
-    }
-}
-
-func strerror(errnum: int32) string {
+func uv_strerror(code: int32) string {
     let result = "";
     unsafe {
-        __cx_strerror(errnum, &result);
+        __cx_uv_strerror(code, &result);
     }
     return result;
 }
 
+export enum ErrorKind {
+    Unknown,
+    NotFound,
+    PermissionDenied,
+    AlreadyExists,
+    NotADirectory,
+    IsADirectory,
+    DirectoryNotEmpty,
+    NoSpace,
+    ReadOnlyFs,
+    Busy
+}
+
+func error_kind_from(uv_err: int32) ErrorKind {
+    unsafe {
+        let k = __cx_fs_error_kind(uv_err);
+        return switch k {
+            1 => ErrorKind.NotFound,
+            2 => ErrorKind.PermissionDenied,
+            3 => ErrorKind.AlreadyExists,
+            4 => ErrorKind.NotADirectory,
+            5 => ErrorKind.IsADirectory,
+            6 => ErrorKind.DirectoryNotEmpty,
+            7 => ErrorKind.NoSpace,
+            8 => ErrorKind.ReadOnlyFs,
+            9 => ErrorKind.Busy,
+            else => ErrorKind.Unknown
+        };
+    }
+}
+
 export struct FsError {
+    kind: ErrorKind = ErrorKind.Unknown;
     op: string = "";
     path: string = "";
-    code: int32 = 0;
+    raw_code: int32 = 0;
     detail: string = "";
 
     impl Error {
         func message() string {
-            return stringf("{} {}: {} (errno {})", this.op, this.path, this.detail, this.code);
+            return stringf("{} {}: {} ({})", this.op, this.path, this.detail, this.raw_code);
         }
     }
 }
 
-func throw_fs_error(op: string, path: string) never {
-    let code = get_errno();
+func throw_fs_error(op: string, path: string, code: int32) never {
     throw new FsError{
+        kind: error_kind_from(code),
         op: op,
         path: path,
-        code: code,
-        detail: strerror(code)
+        raw_code: code,
+        detail: uv_strerror(code)
     };
 }
+
+// POSIX open flags (platform-dependent values from runtime)
+func fs_flag(which: int32) int32 {
+    unsafe { return __cx_fs_flags(which); }
+}
+let O_RDONLY:  int32 = fs_flag(0);
+let O_WRONLY:  int32 = fs_flag(1);
+let O_RDWR:    int32 = fs_flag(2);
+let O_CREAT:   int32 = fs_flag(3);
+let O_TRUNC:   int32 = fs_flag(4);
+let O_APPEND:  int32 = fs_flag(5);
 
 export enum OpenMode {
     Read,
@@ -60,44 +98,48 @@ export enum OpenMode {
     WriteRead;
 
     struct {
-        func mode_string() string {
+        func flags() int32 {
             return switch this {
-                OpenMode.Read => "rb",
-                OpenMode.Write => "wb",
-                OpenMode.Append => "ab",
-                OpenMode.ReadWrite => "r+b",
-                OpenMode.WriteRead => "w+b",
-                else => "rb"
+                OpenMode.Read      => O_RDONLY,
+                OpenMode.Write     => O_WRONLY | O_CREAT | O_TRUNC,
+                OpenMode.Append    => O_WRONLY | O_CREAT | O_APPEND,
+                OpenMode.ReadWrite => O_RDWR,
+                OpenMode.WriteRead => O_RDWR | O_CREAT | O_TRUNC,
+                else => O_RDONLY
             };
         }
     }
 }
 
 struct FileHandle {
-    private raw: *void = null;
+    private fd: int32 = -1;
 
-    mut func new(raw: *void) {
-        this.raw = raw;
+    mut func new(fd: int32) {
+        this.fd = fd;
     }
 
     mut func close() {
-        if this.raw != null {
+        if this.fd >= 0 {
             unsafe {
-                __cx_fclose(this.raw);
+                __cx_fs_close(this.fd);
             }
-            this.raw = null;
+            this.fd = -1;
         }
     }
 
     func read(buf: []mut byte) uint32 {
         unsafe {
-            return __cx_fread(this.raw, buf.as_ptr(), buf.length);
+            let n = __cx_fs_read(this.fd, buf.as_ptr(), buf.length);
+            if n < 0 {
+                return 0;
+            }
+            return n as uint32;
         }
     }
 
-    func write(data: []byte) {
+    func write(data: []byte) int32 {
         unsafe {
-            __cx_fwrite(this.raw, data.as_ptr(), data.length);
+            return __cx_fs_write(this.fd, data.as_ptr(), data.length);
         }
     }
 
@@ -111,19 +153,18 @@ struct FileHandle {
 export struct File {
     private handle: Shared<FileHandle>;
 
-    private mut func new(raw: *void) {
-        this.handle = {FileHandle{raw}};
+    private mut func new(fd: int32) {
+        this.handle = {FileHandle{fd}};
     }
 
     static func open(path: string, mode: OpenMode = OpenMode.Read) File {
-        var p = path.to_cstring();
-        var m = mode.mode_string().to_cstring();
+        var cs = path.to_cstring();
         unsafe {
-            var h = __cx_fopen(p.as_ptr(), m.as_ptr());
-            if h == null {
-                throw_fs_error("open", path);
+            var fd = __cx_fs_open(cs.as_ptr(), mode.flags(), 438); // 438 = 0o666
+            if fd < 0 {
+                throw_fs_error("open", path, fd);
             }
-            return {h};
+            return {fd};
         }
     }
 
@@ -179,8 +220,9 @@ export func exists(path: string) bool {
 export func remove(path: string) {
     var cs = path.to_cstring();
     unsafe {
-        if __cx_file_remove(cs.as_ptr()) != 0 {
-            throw_fs_error("remove", path);
+        let r = __cx_file_remove(cs.as_ptr());
+        if r != 0 {
+            throw_fs_error("remove", path, r);
         }
     }
 }
@@ -188,8 +230,9 @@ export func remove(path: string) {
 export func mkdir(path: string) {
     var cs = path.to_cstring();
     unsafe {
-        if __cx_mkdir(cs.as_ptr()) != 0 {
-            throw_fs_error("mkdir", path);
+        let r = __cx_mkdir(cs.as_ptr());
+        if r != 0 {
+            throw_fs_error("mkdir", path, r);
         }
     }
 }
@@ -212,8 +255,9 @@ export func list_dir(path: string) Array<string> {
     var result: Array<string> = [];
     var cs = path.to_cstring();
     unsafe {
-        if __cx_list_dir(cs.as_ptr(), &result) != 0 {
-            throw_fs_error("list_dir", path);
+        let r = __cx_list_dir(cs.as_ptr(), &result);
+        if r != 0 {
+            throw_fs_error("list_dir", path, r);
         }
     }
     return result;
