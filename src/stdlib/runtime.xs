@@ -945,13 +945,6 @@ struct MapNode<K: ops.Hash + ops.Eq, V> {
     value: V;
     hash: uint64;
     next: *MapNode<K, V>;
-
-    mut func new(key: K, value: V, hash: uint64, next: *MapNode<K, V>) {
-        this.key = key;
-        this.value = value;
-        this.hash = hash;
-        this.next = next;
-    }
 }
 
 export struct MapIterator<K: ops.Hash + ops.Eq, V> {
@@ -1056,7 +1049,8 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
                 }
                 node = node.next;
             }
-            this.buckets[idx] = new MapNode<K, V>{key, value, h, this.buckets[idx]};
+            this.buckets[idx] = new MapNode<K, V>{
+                key: key, value: value, hash: h, next: this.buckets[idx]};
         }
         this.count += 1;
         if this.count > this.capacity * 2 {
