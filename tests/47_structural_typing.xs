@@ -21,19 +21,19 @@ struct ByteCounter {
 }
 
 func write_msg(w: &Logger, msg: string) {
-    w.write(msg.span());
+    w.write(msg.byte_span());
 }
 
 func main() {
     var bc = ByteCounter{};
 
     // Direct call via structural impl
-    bc.write("hello".span());
+    bc.write("hello".byte_span());
     printf("count after direct: {}\n", bc.count);
 
     // Assign to &Logger via structural typing fallback
     var lg: &Logger = &bc;
-    lg.write(" world".span());
+    lg.write(" world".byte_span());
     printf("count after logger: {}\n", bc.count);
 
     // Pass as &Logger to a function

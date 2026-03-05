@@ -2,7 +2,7 @@
 
 export const DEFAULT_BUF_SIZE: uint32 = 8192;
 
-export interface Reader {
+export interface Read {
     func read(buf: []mut byte) uint32;
 
     func read_bytes(n: uint32) Buffer {
@@ -38,15 +38,15 @@ export interface Reader {
     }
 }
 
-export interface Writer {
+export interface Write {
     func write(data: []byte);
 
     func write_string(text: string) {
-        this.write(text.span());
+        this.write(text.byte_span());
     }
 }
 
-export interface Closer {
+export interface Close {
     func close();
 }
 

@@ -131,19 +131,19 @@ export struct File {
         return File.open(path, OpenMode.Write);
     }
 
-    impl io.Reader {
+    impl io.Read {
         mut func read(buf: []mut byte) uint32 {
             return this.handle.read(buf);
         }
     }
 
-    impl io.Writer {
+    impl io.Write {
         func write(data: []byte) {
             this.handle.write(data);
         }
     }
 
-    impl io.Closer {
+    impl io.Close {
         mut func close() {
             this.handle.close();
         }

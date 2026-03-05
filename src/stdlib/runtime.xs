@@ -550,7 +550,7 @@ struct __CxString {
         return result;
     }
 
-    func span() []byte {
+    func byte_span() []byte {
         unsafe {
             return {this.data, this.length};
         }
@@ -864,11 +864,11 @@ struct __CxSpan<T> {
     }
 }
 
-interface Reader {
+interface Read {
     func read(buf: []mut byte) uint32;
 }
 
-interface Writer {
+interface Write {
     func write(data: []byte);
 }
 
@@ -912,7 +912,7 @@ export struct Buffer {
         return str;
     }
 
-    impl Writer {
+    impl Write {
         mut func write(data: []byte) {
             for b in data {
                 this.bytes.push(b);
@@ -920,7 +920,7 @@ export struct Buffer {
         }
     }
 
-    impl Reader {
+    impl Read {
         mut func read(buf: []mut byte) uint32 {
             if this.read_pos >= this.length {
                 return 0;
