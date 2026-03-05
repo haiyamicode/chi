@@ -28,7 +28,6 @@ extern "C" {
     unsafe func cx_get_error_vtable() *void;
     unsafe func cx_get_error_type_id() uint32;
     unsafe func cx_personality(...) int32;
-    unsafe func cx_timeout(delay: uint64, callback: *void);
     unsafe func cx_string_format(format: *string, values: *void, str: *string);
     unsafe func cx_string_from_chars(data: *void, size: uint32, str: *string);
     unsafe func cx_string_delete(dest: *string);
@@ -36,14 +35,6 @@ extern "C" {
     unsafe func cx_string_to_cstring(str: *string) *byte;
     unsafe func cx_string_concat(dest: *string, s1: *string, s2: *string);
     unsafe func cx_cstring_copy(src: *byte) *byte;
-    unsafe func cx_parse_json(str: *string, result: *void);
-    unsafe func cx_json_value_delete(data: *void);
-    unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
-    unsafe func cx_json_value_convert(data: *void, kind: uint32, result: *void);
-    unsafe func cx_json_array_index(data: *void, index: uint32, result: *void);
-    unsafe func cx_json_array_length(data: *void) uint32;
-    unsafe func cx_json_value_copy(data: *void, result: *void);
-    unsafe func cx_file_read(path: *string, result: *string);
     unsafe func cx_debug(ptr: *void);
     unsafe func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
     unsafe func cx_capture_retain(capture_ptr: *void);
@@ -270,112 +261,6 @@ struct __CxLambda {
     }
 }
 
-export enum JsonKind {
-    Null,
-    Bool,
-    Int64,
-    Uint64,
-    Double,
-    String,
-    Array,
-    Object
-}
-
-export struct JsonValue {
-    private data: *void = null;
-    protected kind: JsonKind = JsonKind.Null;
-
-    mut func delete() {
-        unsafe {
-            cx_json_value_delete(this.data);
-        }
-    }
-
-    func get(key: string) JsonValue {
-        let new_value = JsonValue{};
-        unsafe {
-            var key_ptr = &key;
-            var value_ptr = &new_value;
-            cx_json_value_get(this.data, key_ptr as *string, value_ptr as *void);
-        }
-        return new_value;
-    }
-
-    func assert_kind(kind: JsonKind) {
-        if this.kind != kind {
-            panic(stringf("expected {}, got {}", json_kind_display(kind), json_kind_display(this.kind)));
-        }
-    }
-
-    func to_string() string {
-        this.assert_kind(JsonKind.String);
-        let result = "";
-        unsafe {
-            cx_json_value_convert(this.data, JsonKind.String.discriminator(), &result);
-        }
-        return result;
-    }
-
-    func to_bool() bool {
-        this.assert_kind(JsonKind.Bool);
-        let result = false;
-        unsafe {
-            cx_json_value_convert(this.data, JsonKind.Bool.discriminator(), &result);
-        }
-        return result;
-    }
-
-    func to_int() int64 {
-        this.assert_kind(JsonKind.Int64);
-        let result: int64 = 0;
-        unsafe {
-            cx_json_value_convert(this.data, JsonKind.Int64.discriminator(), &result);
-        }
-        return result;
-    }
-
-    func length() uint32 {
-        unsafe {
-            return cx_json_array_length(this.data);
-        }
-    }
-
-    func to_array() Array<JsonValue> {
-        let result: Array<JsonValue> = [];
-        let len = this.length();
-        for i in 0..len {
-            let new_value = JsonValue{};
-            unsafe {
-                cx_json_array_index(this.data, i, &new_value);
-            }
-            result.push(new_value);
-        }
-        return result;
-    }
-
-    impl ops.CopyFrom<JsonValue> {
-        mut func copy_from(source: &JsonValue) {
-            unsafe {
-                cx_json_value_copy(source.data, &this);
-            }
-        }
-    }
-}
-
-export func json_kind_display(kind: JsonKind) string {
-    return switch kind {
-        JsonKind.Null => "null",
-        JsonKind.Bool => "bool",
-        JsonKind.Int64 => "int64",
-        JsonKind.Uint64 => "uint64",
-        JsonKind.Double => "double",
-        JsonKind.String => "string",
-        JsonKind.Array => "array",
-        JsonKind.Object => "object",
-        else => "unknown"
-    };
-}
-
 export func println(value: any) {
     unsafe {
         cx_print_any(&value);
@@ -401,12 +286,6 @@ export func panic(message: string) never {
     }
 }
 
-export func timeout(delay: uint64, callback: func) {
-    unsafe {
-        cx_timeout(delay, &callback);
-    }
-}
-
 export func stringf(format: string, ...values: any) string {
     var str: string = "";
     unsafe {
@@ -421,22 +300,6 @@ export func assert(cond: bool, message: ?string) {
     } else {
         panic("assertion failed");
     }
-}
-
-export func json_parse(str: string) JsonValue {
-    let result = JsonValue{};
-    unsafe {
-        cx_parse_json(&str, &result);
-    }
-    return result;
-}
-
-export func fs_read(path: string) string {
-    var result: string = "";
-    unsafe {
-        cx_file_read(&path, &result);
-    }
-    return result;
 }
 
 export struct Array<T> {
@@ -924,6 +787,10 @@ struct __CxSpan<T> {
         return this.length == 0;
     }
 
+    func as_ptr() *T {
+        return this.data;
+    }
+
     impl ops.IndexMut<uint32, T>, ops.IndexMutIterable<uint32, T> {
         mut func index_mut(index: uint32) &mut T {
             assert(index < this.length, "index out of bounds");
@@ -1126,14 +993,6 @@ export struct Promise<T> {
             this.data.copy_from(&source.data);
         }
     }
-}
-
-export func sleep(ms: uint64) Promise<Unit> {
-    return Promise<Unit>.make(func (resolve) {
-        timeout(ms, func [resolve] () {
-            resolve({});
-        });
-    });
 }
 
 struct MapNode<K: ops.Hash + ops.Eq, V> {

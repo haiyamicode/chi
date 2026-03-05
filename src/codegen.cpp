@@ -4789,14 +4789,23 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         bool redirected = false;
         if (fn->default_method_struct) {
             // Inside a default method body: redirect interface method calls on
-            // 'this' to the concrete struct's implementation (direct call)
-            auto concrete_struct = get_resolver()->resolve_struct_type(fn->default_method_struct);
-            auto concrete_member = concrete_struct->find_member(dot_expr.field->get_name());
-            if (concrete_member) {
-                fn_decl = concrete_member->node;
-                fn_type = concrete_member->resolved_type;
-                ctn_ptr = ptr; // thin pointer to concrete struct
-                redirected = true;
+            // 'this' to the concrete struct's implementation (direct call).
+            // Only redirect when the receiver is actually 'this' — other locals
+            // (e.g. Buffer) must dispatch to their own methods, not the concrete struct's.
+            bool receiver_is_this =
+                dot_expr.expr->type == ast::NodeType::Identifier &&
+                dot_expr.expr->data.identifier.kind == ast::IdentifierKind::This;
+            if (receiver_is_this) {
+                auto concrete_struct =
+                    get_resolver()->resolve_struct_type(fn->default_method_struct);
+                auto concrete_member =
+                    concrete_struct->find_member(dot_expr.field->get_name());
+                if (concrete_member) {
+                    fn_decl = concrete_member->node;
+                    fn_type = concrete_member->resolved_type;
+                    ctn_ptr = ptr; // thin pointer to concrete struct
+                    redirected = true;
+                }
             }
         }
         if (!redirected && receiver_is_interface) {
@@ -7344,7 +7353,10 @@ Function *Compiler::get_fn(ast::Node *node) {
     if (!entry && node->type == ast::NodeType::FnDef && node->resolved_type &&
         !node->resolved_type->is_placeholder) {
         auto compiled = compile_fn_proto(node->data.fn_def.fn_proto, node);
-        m_ctx->pending_fns.add(compiled);
+        // Only schedule body compilation for non-extern functions
+        if (!node->declspec_ref().is_extern()) {
+            m_ctx->pending_fns.add(compiled);
+        }
         entry = m_ctx->function_table.get(id);
     }
 

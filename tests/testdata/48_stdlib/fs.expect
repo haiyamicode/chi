@@ -1,0 +1,17 @@
+=== fs.mkdir ===
+true
+=== File class ===
+true
+hello world
+=== fs.read_file / write_file ===
+overwritten
+=== fs.append_file ===
+overwritten!
+=== fs.list_dir ===
+1
+hello.txt
+=== fs.remove ===
+false
+=== fs.exists (nonexistent) ===
+false
+done

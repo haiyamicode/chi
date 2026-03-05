@@ -146,13 +146,25 @@ CHI_RT_EXPORT bool cx_string_eq(CxString *a, CxString *b);
 
 CHI_RT_EXPORT void cx_parse_json(CxString *str, void *result);
 CHI_RT_EXPORT void cx_json_value_delete(void *data);
-CHI_RT_EXPORT void cx_json_value_get(void *data, char *key, void *result);
+CHI_RT_EXPORT void cx_json_value_get(void *data, CxString *key, void *result);
 CHI_RT_EXPORT void cx_json_value_convert(void *data, uint32_t kind, void *result);
 CHI_RT_EXPORT void cx_json_array_index(void *data, uint32_t index, void *result);
 CHI_RT_EXPORT uint32_t cx_json_array_length(void *data);
 CHI_RT_EXPORT void cx_json_value_copy(void *data, void *result);
 
 CHI_RT_EXPORT void cx_file_read(CxString *path, CxString *result);
+
+CHI_RT_EXPORT uint64_t __cx_time_now(void);
+CHI_RT_EXPORT uint64_t __cx_time_monotonic(void);
+
+CHI_RT_EXPORT void *__cx_fopen(const char *path, const char *mode);
+CHI_RT_EXPORT uint32_t __cx_fread(void *handle, void *buf, uint32_t size);
+CHI_RT_EXPORT uint32_t __cx_fwrite(void *handle, const void *data, uint32_t size);
+CHI_RT_EXPORT void __cx_fclose(void *handle);
+CHI_RT_EXPORT int32_t __cx_file_exists(const char *path);
+CHI_RT_EXPORT int32_t __cx_file_remove(const char *path);
+CHI_RT_EXPORT int32_t __cx_mkdir(const char *path);
+CHI_RT_EXPORT int32_t __cx_list_dir(const char *path, CxArray *result);
 
 #ifdef __cplusplus
 }

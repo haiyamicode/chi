@@ -1,0 +1,9 @@
+=== time.now ===
+true
+=== time.monotonic ===
+true
+=== time.timeout ===
+=== time.sleep ===
+done
+timeout fired
+sleep resolved

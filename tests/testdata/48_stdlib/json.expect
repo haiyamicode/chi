@@ -1,0 +1,26 @@
+=== json.parse object ===
+true
+chi
+1
+true
+=== json.parse array ===
+true
+3
+1
+3
+=== type checks ===
+true
+true
+hello
+true
+false
+=== has ===
+true
+false
+=== to_array ===
+3
+=== kind_display ===
+object
+array
+null
+done

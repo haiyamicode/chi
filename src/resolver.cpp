@@ -2476,6 +2476,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto struct_type = resolve_struct_type(value_type);
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
         if (constructor) {
+            // Check visibility of the constructor
+            auto is_internal =
+                scope.parent_struct && is_friend_struct(scope.parent_struct, value_type);
+            if (!constructor->check_access(is_internal, false)) {
+                error(node, errors::PRIVATE_MEMBER_NOT_ACCESSIBLE, "new",
+                      format_type_display(value_type));
+                return nullptr;
+            }
             auto &fn_type = constructor->resolved_type->data.fn;
             resolve_fn_call(node, scope, &fn_type, &data.items, constructor->node);
 

@@ -1,4 +1,5 @@
 import "std/ops" as ops;
+import "std/time" as time;
 
 func test_manual_promise() {
     println("=== Test 1: Manual Promise with callbacks ===");
@@ -120,7 +121,7 @@ func test_locals_across_await() {
 func test_timeout() {
     println("=== Test 8: timeout() function ===");
     var called = false;
-    timeout(10, func () {
+    time.timeout(10, func () {
         println("timeout callback executed");
     });
     println("timeout scheduled");
@@ -129,7 +130,7 @@ func test_timeout() {
 
 func test_sleep() {
     println("=== Test 9: sleep() function ===");
-    sleep(10).then(func (u: Unit) {
+    time.sleep(10).then(func (u: Unit) {
         println("sleep resolved");
     });
     println("sleep scheduled");
@@ -139,7 +140,7 @@ func test_sleep() {
 func test_sleep_value_capture() {
     println("=== Test 10: By-value capture with sleep ===");
     var counter = 42;
-    sleep(10).then(func [counter] (u: Unit) {
+    time.sleep(10).then(func [counter] (u: Unit) {
         printf("captured counter: {}\n", counter);
     });
     counter = 999;

@@ -13,6 +13,9 @@
 #include <cstring>
 #include <unistd.h>
 #include <sstream>
+#include <sys/time.h>
+#include <sys/stat.h>
+#include <dirent.h>
 #include <uv.h>
 
 #include "internals.h"
@@ -678,10 +681,21 @@ void cx_parse_json(CxString *str, void *result) {
 }
 
 void cx_json_value_delete(void *data) { delete (boost::json::value *)data; }
-void cx_json_value_get(void *data, char *key, void *result) {
+void cx_json_value_get(void *data, CxString *key, void *result) {
     auto value = (boost::json::value *)data;
-    auto ptr = value->at(key);
-    create_cx_json_result(&ptr, result);
+    string k(key->data, key->size);
+    auto &obj = value->as_object();
+    auto it = obj.find(k);
+    if (it == obj.end()) {
+        // Return null JSON value
+        auto result_p = (CxJsonValue *)result;
+        auto null_val = new boost::json::value(nullptr);
+        result_p->data = null_val;
+        result_p->kind = (uint32_t)null_val->kind();
+        return;
+    }
+    auto &found = it->value();
+    create_cx_json_result(&found, result);
 }
 
 void cx_json_value_convert(void *data, uint32_t kind, void *result) {
@@ -812,5 +826,62 @@ int32_t __cx_parse_float(const char *str, double *out) {
     if (errno != 0 || *end != '\0' || end == str) return 0;
     *out = val;
     return 1;
+}
+
+// std/time helpers
+uint64_t __cx_time_now(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000;
+}
+
+uint64_t __cx_time_monotonic(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+// std/fs helpers — minimal C primitives
+void *__cx_fopen(const char *path, const char *mode) {
+    return fopen(path, mode);
+}
+
+uint32_t __cx_fread(void *handle, void *buf, uint32_t size) {
+    return (uint32_t)fread(buf, 1, size, (FILE *)handle);
+}
+
+uint32_t __cx_fwrite(void *handle, const void *data, uint32_t size) {
+    return (uint32_t)fwrite(data, 1, size, (FILE *)handle);
+}
+
+void __cx_fclose(void *handle) {
+    fclose((FILE *)handle);
+}
+
+int32_t __cx_file_exists(const char *path) {
+    return access(path, F_OK) == 0 ? 1 : 0;
+}
+
+int32_t __cx_file_remove(const char *path) {
+    return remove(path);
+}
+
+int32_t __cx_mkdir(const char *path) {
+    return mkdir(path, 0755);
+}
+
+int32_t __cx_list_dir(const char *path, CxArray *result) {
+    DIR *dir = opendir(path);
+    if (!dir) return -1;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        CxString s;
+        cx_string_from_chars(entry->d_name, strlen(entry->d_name), &s);
+        CxString *slot = (CxString *)cx_array_add(result, sizeof(CxString));
+        *slot = s;
+    }
+    closedir(dir);
+    return 0;
 }
 }
