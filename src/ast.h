@@ -46,6 +46,7 @@ enum DeclFlag : uint32_t {
     DECL_STATIC = 1 << 5,
     DECL_ASYNC = 1 << 6,
     DECL_UNSAFE = 1 << 7,
+    DECL_EXPORTED = 1 << 8,   // explicit `export` keyword on a declaration
 };
 
 struct Module {
@@ -132,7 +133,7 @@ struct DeclSpec {
         return Visibility::Public;
     }
 
-    bool is_exported() const { return get_visibility() == Visibility::Public; }
+    bool is_exported() const { return (flags & DECL_EXPORTED) != 0; }
     bool is_mutable() const { return has_flag(DECL_MUTABLE); }
     bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
     bool is_extern() const { return has_flag(DECL_EXTERN); }

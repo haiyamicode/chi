@@ -2,57 +2,57 @@ import "std/ops" as ops;
 import "std/mem" as mem;
 
 extern "C" {
-    private unsafe func cx_print(str: string);
-    private unsafe func cx_printf(format: *string, values: *void);
-    private unsafe func cx_array_new(dest: *void);
-    private unsafe func cx_array_delete(dest: *void);
-    private unsafe func cx_array_add(dest: *void, size: uint32) *void;
-    private unsafe func cx_array_write_str(dest: *void, str: *string);
-    private unsafe func cx_array_reserve(dest: *void, elem_size: uint32, new_cap: uint32);
-    private unsafe func cx_array_append(dest: *void, src: *void, elem_size: uint32);
-    private unsafe func cx_print_any(value: *void);
-    private unsafe func cx_print_number(value: uint64);
-    private unsafe func cx_print_string(str: *string);
-    private unsafe func cx_gc_alloc(size: uint32, destructor: *void) *void;
-    private unsafe func cx_malloc(size: uint32, ignored: *void) *void;
-    private unsafe func cx_free(address: *void);
-    private unsafe func cx_memset(address: *void, v: uint8, n: uint32);
-    private unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
-    private unsafe func cx_runtime_start(stack: *void);
-    private unsafe func cx_set_program_vtable(ptr: *void);
-    private unsafe func cx_runtime_stop();
-    private unsafe func cx_panic(message: *string);
-    private unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
-    private unsafe func cx_get_error_type_info() *void;
-    private unsafe func cx_get_error_data() *void;
-    private unsafe func cx_get_error_vtable() *void;
-    private unsafe func cx_get_error_type_id() uint32;
-    private unsafe func cx_personality(...) int32;
-    private unsafe func cx_timeout(delay: uint64, callback: *void);
-    private unsafe func cx_string_format(format: *string, values: *void, str: *string);
-    private unsafe func cx_string_from_chars(data: *void, size: uint32, str: *string);
-    private unsafe func cx_string_delete(dest: *string);
-    private unsafe func cx_string_copy(dest: *string, src: *string);
-    private unsafe func cx_string_to_cstring(str: *string) *byte;
-    private unsafe func cx_string_concat(dest: *string, s1: *string, s2: *string);
-    private unsafe func cx_cstring_copy(src: *byte) *byte;
-    private unsafe func cx_parse_json(str: *string, result: *void);
-    private unsafe func cx_json_value_delete(data: *void);
-    private unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
-    private unsafe func cx_json_value_convert(data: *void, kind: uint32, result: *void);
-    private unsafe func cx_json_array_index(data: *void, index: uint32, result: *void);
-    private unsafe func cx_json_array_length(data: *void) uint32;
-    private unsafe func cx_json_value_copy(data: *void, result: *void);
-    private unsafe func cx_file_read(path: *string, result: *string);
-    private unsafe func cx_debug(ptr: *void);
-    private unsafe func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
-    private unsafe func cx_capture_retain(capture_ptr: *void);
-    private unsafe func cx_capture_release(capture_ptr: *void);
-    private unsafe func cx_capture_get_type(capture_ptr: *void) *void;
-    private unsafe func cx_capture_get_data(capture_ptr: *void) *void;
+    unsafe func cx_print(str: string);
+    unsafe func cx_printf(format: *string, values: *void);
+    unsafe func cx_array_new(dest: *void);
+    unsafe func cx_array_delete(dest: *void);
+    unsafe func cx_array_add(dest: *void, size: uint32) *void;
+    unsafe func cx_array_write_str(dest: *void, str: *string);
+    unsafe func cx_array_reserve(dest: *void, elem_size: uint32, new_cap: uint32);
+    unsafe func cx_array_append(dest: *void, src: *void, elem_size: uint32);
+    unsafe func cx_print_any(value: *void);
+    unsafe func cx_print_number(value: uint64);
+    unsafe func cx_print_string(str: *string);
+    unsafe func cx_gc_alloc(size: uint32, destructor: *void) *void;
+    unsafe func cx_malloc(size: uint32, ignored: *void) *void;
+    unsafe func cx_free(address: *void);
+    unsafe func cx_memset(address: *void, v: uint8, n: uint32);
+    unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
+    unsafe func cx_runtime_start(stack: *void);
+    unsafe func cx_set_program_vtable(ptr: *void);
+    unsafe func cx_runtime_stop();
+    unsafe func cx_panic(message: *string);
+    unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    unsafe func cx_get_error_type_info() *void;
+    unsafe func cx_get_error_data() *void;
+    unsafe func cx_get_error_vtable() *void;
+    unsafe func cx_get_error_type_id() uint32;
+    unsafe func cx_personality(...) int32;
+    unsafe func cx_timeout(delay: uint64, callback: *void);
+    unsafe func cx_string_format(format: *string, values: *void, str: *string);
+    unsafe func cx_string_from_chars(data: *void, size: uint32, str: *string);
+    unsafe func cx_string_delete(dest: *string);
+    unsafe func cx_string_copy(dest: *string, src: *string);
+    unsafe func cx_string_to_cstring(str: *string) *byte;
+    unsafe func cx_string_concat(dest: *string, s1: *string, s2: *string);
+    unsafe func cx_cstring_copy(src: *byte) *byte;
+    unsafe func cx_parse_json(str: *string, result: *void);
+    unsafe func cx_json_value_delete(data: *void);
+    unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
+    unsafe func cx_json_value_convert(data: *void, kind: uint32, result: *void);
+    unsafe func cx_json_array_index(data: *void, index: uint32, result: *void);
+    unsafe func cx_json_array_length(data: *void) uint32;
+    unsafe func cx_json_value_copy(data: *void, result: *void);
+    unsafe func cx_file_read(path: *string, result: *string);
+    unsafe func cx_debug(ptr: *void);
+    unsafe func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
+    unsafe func cx_capture_retain(capture_ptr: *void);
+    unsafe func cx_capture_release(capture_ptr: *void);
+    unsafe func cx_capture_get_type(capture_ptr: *void) *void;
+    unsafe func cx_capture_get_data(capture_ptr: *void) *void;
 }
 
-private struct __CxEnumBase<T> {
+struct __CxEnumBase<T> {
     private __value: T = undefined;
     private __display_name: *string = undefined;
 
@@ -70,7 +70,7 @@ private struct __CxEnumBase<T> {
     }
 }
 
-private struct SharedData<T> {
+struct SharedData<T> {
     ref_count: uint32;
     value: T;
 
@@ -80,7 +80,7 @@ private struct SharedData<T> {
     }
 }
 
-struct Shared<T> {
+export struct Shared<T> {
     private data: *SharedData<T> = null;
 
     mut func new(value: T) {
@@ -148,7 +148,7 @@ struct Shared<T> {
     }
 }
 
-struct Box<T: ops.AllowUnsized> {
+export struct Box<T: ops.AllowUnsized> {
     private _ptr: *T = null;
 
     mut func new(ptr: &move T) {
@@ -220,7 +220,7 @@ struct Box<T: ops.AllowUnsized> {
 // Internal lambda struct for compiler-generated closures.
 // Captures are type-erased (CxCapture payload pointer) so lambdas can be converted across
 // capture types with the same call signature.
-private struct __CxLambda {
+struct __CxLambda {
     fn_ptr: *void = null;
     length: uint32 = 0;
     captures: *void = null; // CxCapture payload pointer (or null)
@@ -270,7 +270,7 @@ private struct __CxLambda {
     }
 }
 
-enum JsonKind {
+export enum JsonKind {
     Null,
     Bool,
     Int64,
@@ -281,7 +281,7 @@ enum JsonKind {
     Object
 }
 
-struct JsonValue {
+export struct JsonValue {
     private data: *void = null;
     protected kind: JsonKind = JsonKind.Null;
 
@@ -362,7 +362,7 @@ struct JsonValue {
     }
 }
 
-func json_kind_display(kind: JsonKind) string {
+export func json_kind_display(kind: JsonKind) string {
     return switch kind {
         JsonKind.Null => "null",
         JsonKind.Bool => "bool",
@@ -376,38 +376,38 @@ func json_kind_display(kind: JsonKind) string {
     };
 }
 
-func println(value: any) {
+export func println(value: any) {
     unsafe {
         cx_print_any(&value);
         cx_print("\n");
     }
 }
 
-func gc_alloc(size: uint32) *void {
+export func gc_alloc(size: uint32) *void {
     unsafe {
         return cx_gc_alloc(size, null);
     }
 }
 
-func printf(format: string, ...values: any) {
+export func printf(format: string, ...values: any) {
     unsafe {
         cx_printf(&format, &values);
     }
 }
 
-func panic(message: string) never {
+export func panic(message: string) never {
     unsafe {
         cx_panic(&message);
     }
 }
 
-func timeout(delay: uint64, callback: func) {
+export func timeout(delay: uint64, callback: func) {
     unsafe {
         cx_timeout(delay, &callback);
     }
 }
 
-func stringf(format: string, ...values: any) string {
+export func stringf(format: string, ...values: any) string {
     var str: string = "";
     unsafe {
         cx_string_format(&format, &values, &str);
@@ -415,7 +415,7 @@ func stringf(format: string, ...values: any) string {
     return str;
 }
 
-func assert(cond: bool, message: ?string) {
+export func assert(cond: bool, message: ?string) {
     if !cond => if message {
         panic(stringf("assertion failed: {}", message));
     } else {
@@ -423,7 +423,7 @@ func assert(cond: bool, message: ?string) {
     }
 }
 
-func json_parse(str: string) JsonValue {
+export func json_parse(str: string) JsonValue {
     let result = JsonValue{};
     unsafe {
         cx_parse_json(&str, &result);
@@ -431,7 +431,7 @@ func json_parse(str: string) JsonValue {
     return result;
 }
 
-func fs_read(path: string) string {
+export func fs_read(path: string) string {
     var result: string = "";
     unsafe {
         cx_file_read(&path, &result);
@@ -439,7 +439,7 @@ func fs_read(path: string) string {
     return result;
 }
 
-struct Array<T> {
+export struct Array<T> {
     private data: *T = null;
     protected length: uint32 = 0;
     protected capacity: uint32 = 0;
@@ -609,7 +609,7 @@ struct Array<T> {
     }
 }
 
-struct CString {
+export struct CString {
     data: *byte = null;
 
     mut func new(ptr: *byte) {
@@ -638,7 +638,7 @@ struct CString {
     }
 }
 
-private struct __CxString {
+struct __CxString {
     private data: *byte = null;
     protected length: uint32 = 0;
     private is_static: uint32 = 0;
@@ -715,7 +715,7 @@ private struct __CxString {
     }
 }
 
-private struct __CxSpan<T> {
+struct __CxSpan<T> {
     private data: *T;
     protected length: uint32;
 
@@ -783,15 +783,15 @@ private struct __CxSpan<T> {
     }
 }
 
-private interface Reader {
+interface Reader {
     func read(buf: []mut byte) uint32;
 }
 
-private interface Writer {
+interface Writer {
     func write(data: []byte);
 }
 
-struct Buffer {
+export struct Buffer {
     ...bytes: Array<byte>;
     read_pos: uint32 = 0;
 
@@ -861,21 +861,21 @@ struct Buffer {
     }
 }
 
-interface Error {
+export interface Error {
     func message() string;
 }
 
 // Unit type for use as a void-like value type (e.g. Promise<Unit>)
-struct Unit {}
+export struct Unit {}
 
 // Promise for async operations
-private struct PromiseState<T> {
+struct PromiseState<T> {
     state: uint32 = 0; // 0=pending, 1=resolved, 2=rejected
     value: ?T = null;
     callbacks: Array<func (value: T)> = {};
 }
 
-struct Promise<T> {
+export struct Promise<T> {
     protected data: Shared<PromiseState<T>>;
 
     mut func new() {
@@ -932,7 +932,7 @@ struct Promise<T> {
     }
 }
 
-func sleep(ms: uint64) Promise<Unit> {
+export func sleep(ms: uint64) Promise<Unit> {
     return Promise<Unit>.make(func (resolve) {
         timeout(ms, func [resolve] () {
             resolve({});
@@ -940,7 +940,7 @@ func sleep(ms: uint64) Promise<Unit> {
     });
 }
 
-private struct MapNode<K: ops.Hash + ops.Eq, V> {
+struct MapNode<K: ops.Hash + ops.Eq, V> {
     key: K;
     value: V;
     hash: uint64;
@@ -954,7 +954,7 @@ private struct MapNode<K: ops.Hash + ops.Eq, V> {
     }
 }
 
-struct MapIterator<K: ops.Hash + ops.Eq, V> {
+export struct MapIterator<K: ops.Hash + ops.Eq, V> {
     private buckets: **MapNode<K, V>;
     private capacity: uint32;
     private bucket_idx: uint32;
@@ -991,7 +991,7 @@ struct MapIterator<K: ops.Hash + ops.Eq, V> {
     }
 }
 
-struct Map<K: ops.Hash + ops.Eq, V> {
+export struct Map<K: ops.Hash + ops.Eq, V> {
     private buckets: **MapNode<K, V> = null;
     private capacity: uint32 = 0;
     private count: uint32 = 0;

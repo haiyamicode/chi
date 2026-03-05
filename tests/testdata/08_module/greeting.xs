@@ -1,6 +1,6 @@
 export * from "./subgreeting";
 
-struct Greeting {
+export struct Greeting {
     name: string;
 
     mut func new(name: string) {
@@ -12,7 +12,7 @@ struct Greeting {
     }
 }
 
-func hello() {
+export func hello() {
     println("hello from module");
 }
 

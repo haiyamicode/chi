@@ -1,8 +1,8 @@
 // std/io — core I/O interfaces
 
-const DEFAULT_BUF_SIZE: uint32 = 8192;
+export const DEFAULT_BUF_SIZE: uint32 = 8192;
 
-interface Reader {
+export interface Reader {
     func read(buf: []mut byte) uint32;
 
     func read_bytes(n: uint32) Buffer {
@@ -38,7 +38,7 @@ interface Reader {
     }
 }
 
-interface Writer {
+export interface Writer {
     func write(data: []byte);
 
     func write_string(text: string) {
@@ -46,7 +46,7 @@ interface Writer {
     }
 }
 
-interface Closer {
+export interface Closer {
     func close();
 }
 

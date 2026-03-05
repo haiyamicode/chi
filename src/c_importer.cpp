@@ -653,7 +653,7 @@ void add_symbols_to_module(
             fn_def->data.fn_def.fn_proto = fn_proto;
             fn_def->data.fn_def.body = nullptr;  // No body for extern
             fn_def->data.fn_def.decl_spec = ctx->create_decl_spec();
-            fn_def->data.fn_def.decl_spec->flags = ast::DECL_EXTERN;
+            fn_def->data.fn_def.decl_spec->flags = ast::DECL_EXTERN | ast::DECL_EXPORTED;
             fn_def->resolved_type = fn_type;
             fn_proto->data.fn_proto.fn_def_node = fn_def;
 
@@ -689,6 +689,7 @@ void add_symbols_to_module(
 
         const_node->data.var_decl.expr = value_node;
         const_node->data.var_decl.decl_spec = ctx->create_decl_spec();
+        const_node->data.var_decl.decl_spec->flags |= ast::DECL_EXPORTED;
         const_node->data.var_decl.kind = ast::VarKind::Constant;
 
         // Check if already exists before adding
@@ -797,7 +798,7 @@ void add_symbols_to_module(
         struct_decl->module = module;
         struct_decl->data.struct_decl.kind = ContainerKind::Struct;
         struct_decl->data.struct_decl.decl_spec = ctx->create_decl_spec();
-        struct_decl->data.struct_decl.decl_spec->flags = ast::DECL_EXTERN;
+        struct_decl->data.struct_decl.decl_spec->flags = ast::DECL_EXTERN | ast::DECL_EXPORTED;
 
         for (const auto& field : c_struct.fields) {
             auto* field_node = ctx->create_node(ast::NodeType::VarDecl);

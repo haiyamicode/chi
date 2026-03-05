@@ -1,116 +1,116 @@
-interface Display {
+export interface Display {
     func display() string;
 }
 
-interface Index<K, V> {
+export interface Index<K, V> {
     func index(key: K) &V;
 }
 
-interface IndexMut<K, V> {
+export interface IndexMut<K, V> {
     func index_mut(index: K) &mut V;
 }
 
-interface CopyFrom<T> {
+export interface CopyFrom<T> {
     func copy_from(source: &T);
 }
 
-interface IndexMutIterable<K, V> {
+export interface IndexMutIterable<K, V> {
     func index_mut(index: K) &mut V;
     func begin() K;
     func end() K;
     func next(index: K) K;
 }
 
-interface Add {
+export interface Add {
     func add(rhs: This) This;
 }
 
-interface Sized {}
+export interface Sized {}
 
-interface AllowUnsized {}
+export interface AllowUnsized {}
 
-interface Construct {
+export interface Construct {
     func new();
 }
 
-interface MutIterator<T> {
+export interface MutIterator<T> {
     func next() ?(&mut T);
 }
 
-interface MutIterable<T> {
+export interface MutIterable<T> {
     func to_iter_mut() MutIterator<T>;
 }
 
-interface Unwrap<T> {
+export interface Unwrap<T> {
     func unwrap() &T;
 }
 
-interface UnwrapMut<T> {
+export interface UnwrapMut<T> {
     func unwrap_mut() &mut T;
 }
 
-interface Slice<Out> {
+export interface Slice<Out> {
     func slice(start: ?uint32, end: ?uint32) Out;
 }
 
-interface Sub {
+export interface Sub {
     func sub(rhs: This) This;
 }
 
-interface Mul {
+export interface Mul {
     func mul(rhs: This) This;
 }
 
-interface Div {
+export interface Div {
     func div(rhs: This) This;
 }
 
-interface Rem {
+export interface Rem {
     func rem(rhs: This) This;
 }
 
-interface Neg {
+export interface Neg {
     func neg() This;
 }
 
-interface BitAnd {
+export interface BitAnd {
     func bitand(rhs: This) This;
 }
 
-interface BitOr {
+export interface BitOr {
     func bitor(rhs: This) This;
 }
 
-interface BitXor {
+export interface BitXor {
     func bitxor(rhs: This) This;
 }
 
-interface Not {
+export interface Not {
     func not() This;
 }
 
-interface Shl {
+export interface Shl {
     func shl(rhs: This) This;
 }
 
-interface Shr {
+export interface Shr {
     func shr(rhs: This) This;
 }
 
-interface Eq {
+export interface Eq {
     func eq(other: This) bool;
 }
 
-interface Ord {
+export interface Ord {
     func cmp(other: This) int;
 }
 
-interface Hash {
+export interface Hash {
     func hash() uint64;
 }
 
 // Composite numeric interfaces
-interface Number {
+export interface Number {
     ...Add;
     ...Sub;
     ...Mul;
@@ -121,11 +121,11 @@ interface Number {
     ...Ord;
 }
 
-interface Float {
+export interface Float {
     ...Number;
 }
 
-interface Int {
+export interface Int {
     ...Number;
     ...BitAnd;
     ...BitOr;
@@ -134,4 +134,3 @@ interface Int {
     ...Shl;
     ...Shr;
 }
-

@@ -1,22 +1,25 @@
 import "std/ops" as ops;
 
 extern "C" {
-    private unsafe func cx_malloc(size: uint32, ignored: *void) *void;
-    private unsafe func cx_free(address: *void);
-    private unsafe func cx_memset(address: *void, v: uint8, n: uint32);
-    private unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
+    unsafe func cx_malloc(size: uint32, ignored: *void) *void;
+    unsafe func cx_free(address: *void);
+    unsafe func cx_memset(address: *void, v: uint8, n: uint32);
+    unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
+}
+
+export extern "C" {
     func memcmp(s1: *void, s2: *void, n: uint32) int;
 }
 
-unsafe func malloc(size: uint32) *void {
+export unsafe func malloc(size: uint32) *void {
     return cx_malloc(size, null);
 }
 
-unsafe func alloc<T>() &move T {
+export unsafe func alloc<T>() &move T {
     return cx_malloc(sizeof T, null) as *T as &move T;
 }
 
-func copy_from<T: ops.AllowUnsized>(val: &T) &move T {
+export func copy_from<T: ops.AllowUnsized>(val: &T) &move T {
     unsafe {
         var ref = cx_malloc(sizeof val, null) as *T as &move T;
         __copy_from(ref as *T, val as *T, false);
@@ -24,11 +27,10 @@ func copy_from<T: ops.AllowUnsized>(val: &T) &move T {
     }
 }
 
-unsafe func free(address: *void) {
+export unsafe func free(address: *void) {
     cx_free(address);
 }
 
-unsafe func memset(address: *void, v: uint8, n: uint32) {
+export unsafe func memset(address: *void, v: uint8, n: uint32) {
     cx_memset(address, v, n);
 }
-

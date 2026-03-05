@@ -321,7 +321,7 @@ void Parser::parse_top_level_decls(NodeList *decls) {
             }
         } else if (decl->type == NodeType::VarDecl) {
             auto ds = decl->data.var_decl.decl_spec;
-            if (!ds || ds->is_exported()) {
+            if (ds && ds->is_exported()) {
                 m_ctx->module->exports.add(decl);
             }
         } else if (decl->type == NodeType::TypedefDecl) {
@@ -433,7 +433,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::KW_VAR:
     case TokenType::KW_LET:
     case TokenType::KW_CONST:
-        return parse_var_decl(false);
+        return parse_var_decl(false, decl_spec);
     case TokenType::KW_FUNC: {
         return parse_fn_decl(FN_BODY_REQUIRED, decl_spec);
     }
@@ -441,8 +441,20 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
         return parse_extern_decl(decl_spec);
     case TokenType::KW_IMPORT:
         return parse_import_decl();
-    case TokenType::KW_EXPORT:
-        return parse_export_decl();
+    case TokenType::KW_EXPORT: {
+        // Peek at the token after 'export':
+        //   export * from / export {} from  → re-export statement (parse_export_decl)
+        //   export func/struct/let/...      → declaration modifier (DECL_EXPORTED)
+        auto next_tok = lookahead(1);
+        if (next_tok->type == TokenType::MUL || next_tok->type == TokenType::LBRACE) {
+            return parse_export_decl();
+        }
+        consume(); // consume 'export'
+        if (!decl_spec) decl_spec = m_ctx->allocator->create_decl_spec();
+        decl_spec->flags |= DECL_EXPORTED;
+        decl_spec = parse_decl_spec(decl_spec); // collect any additional modifiers
+        return parse_top_level_decl(decl_spec);
+    }
     default:
         unexpected(token);
         recover_to_declaration_boundary();
@@ -2961,7 +2973,7 @@ Node *Parser::parse_extern_decl(DeclSpec *decl_spec) {
         auto fn = parse_fn_decl(FN_BODY_NONE);
         fn->data.fn_def.decl_spec->flags |= DECL_EXTERN;
         if (decl_spec) {
-            fn->data.fn_def.decl_spec->flags |= (decl_spec->flags & (DECL_PRIVATE | DECL_UNSAFE));
+            fn->data.fn_def.decl_spec->flags |= (decl_spec->flags & (DECL_PRIVATE | DECL_UNSAFE | DECL_EXPORTED));
         }
         members.add(fn);
 

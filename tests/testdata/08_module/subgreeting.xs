@@ -1,4 +1,4 @@
-func hello_sub() {
+export func hello_sub() {
     println("hello from sub-module");
 }
 
