@@ -34,3 +34,4 @@ export unsafe func free(address: *void) {
 export unsafe func memset(address: *void, v: uint8, n: uint32) {
     cx_memset(address, v, n);
 }
+

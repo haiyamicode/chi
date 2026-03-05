@@ -5,6 +5,5 @@ func bad() &int {
     return &local;
 }
 
-func main() {
-}
+func main() {}
 

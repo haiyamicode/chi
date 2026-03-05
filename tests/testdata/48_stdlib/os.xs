@@ -10,3 +10,4 @@ func main() {
     var dir = os.cwd();
     printf("cwd is non-empty = {}\n", dir != "");
 }
+

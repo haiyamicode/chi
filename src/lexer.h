@@ -134,6 +134,7 @@ struct Token {
     string str = "";
     TokenType type = TokenType::ERROR;
     Pos pos = {};
+    uint8_t int_base = 10; // number base for INT tokens (2, 8, 10, 16)
     ast::Node *node = nullptr; // identifier node associated with this token
     ast::Node *semantic_node = nullptr; // for semantic token classification (does not affect scan)
 

@@ -579,9 +579,15 @@ struct __CxString {
     private func cp_len(i: uint32) uint32 {
         unsafe {
             let b = this.data[i];
-            if b < 0x80 { return 1; }
-            if b < 0xE0 { return 2; }
-            if b < 0xF0 { return 3; }
+            if b < 0x80 {
+                return 1;
+            }
+            if b < 0xE0 {
+                return 2;
+            }
+            if b < 0xF0 {
+                return 3;
+            }
             return 4;
         }
     }
@@ -613,7 +619,9 @@ struct __CxString {
         unsafe {
             let b0 = this.data[pos] as uint32;
             let n = this.cp_len(pos);
-            if n == 1 { return b0 as rune; }
+            if n == 1 {
+                return b0 as rune;
+            }
             if n == 2 {
                 let b1 = this.data[pos + 1] as uint32;
                 return ((b0 & 0x1F) << 6 | (b1 & 0x3F)) as rune;
@@ -621,12 +629,12 @@ struct __CxString {
             if n == 3 {
                 let b1 = this.data[pos + 1] as uint32;
                 let b2 = this.data[pos + 2] as uint32;
-                return ((b0 & 0x0F) << 12 | (b1 & 0x3F) << 6 | (b2 & 0x3F)) as rune;
+                return ((b0 & 0xF) << 12 | (b1 & 0x3F) << 6 | (b2 & 0x3F)) as rune;
             }
             let b1 = this.data[pos + 1] as uint32;
             let b2 = this.data[pos + 2] as uint32;
             let b3 = this.data[pos + 3] as uint32;
-            return ((b0 & 0x07) << 18 | (b1 & 0x3F) << 12 | (b2 & 0x3F) << 6 | (b3 & 0x3F)) as rune;
+            return ((b0 & 0x7) << 18 | (b1 & 0x3F) << 12 | (b2 & 0x3F) << 6 | (b3 & 0x3F)) as rune;
         }
     }
 
@@ -646,8 +654,12 @@ struct __CxString {
     }
 
     func contains(substr: string) bool {
-        if substr.length == 0 { return true; }
-        if substr.length > this.length { return false; }
+        if substr.length == 0 {
+            return true;
+        }
+        if substr.length > this.length {
+            return false;
+        }
         var i: uint32 = 0;
         let limit = this.length - substr.length;
         while i <= limit {
@@ -660,19 +672,25 @@ struct __CxString {
     }
 
     func starts_with(prefix: string) bool {
-        if prefix.length > this.length { return false; }
+        if prefix.length > this.length {
+            return false;
+        }
         return mem.memcmp(this.data, prefix.data, prefix.length) == 0;
     }
 
     func ends_with(suffix: string) bool {
-        if suffix.length > this.length { return false; }
+        if suffix.length > this.length {
+            return false;
+        }
         unsafe {
             return mem.memcmp(&this.data[this.length - suffix.length], suffix.data, suffix.length) == 0;
         }
     }
 
     func repeat(n: uint32) string {
-        if n == 0 { return ""; }
+        if n == 0 {
+            return "";
+        }
         var buf = Buffer{};
         var i: uint32 = 0;
         while i < n {
@@ -705,7 +723,9 @@ struct __CxString {
     }
 
     func replace_all(old: string, new_val: string) string {
-        if old.length == 0 { return this; }
+        if old.length == 0 {
+            return this;
+        }
         var buf = Buffer{};
         var start: uint32 = 0;
         var i: uint32 = 0;
@@ -1120,8 +1140,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
                 }
                 node = node.next;
             }
-            this.buckets[idx] = new MapNode<K, V>{
-                key: key, value: value, hash: h, next: this.buckets[idx]};
+            this.buckets[idx] = new MapNode<K, V>{key: key, value: value, hash: h, next: this.buckets[idx]};
         }
         this.count += 1;
         if this.count > this.capacity * 2 {

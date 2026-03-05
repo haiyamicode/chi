@@ -40,18 +40,26 @@ export func round(x: float64) float64 {
 }
 
 export func min(a: float64, b: float64) float64 {
-    if a < b { return a; }
+    if a < b {
+        return a;
+    }
     return b;
 }
 
 export func max(a: float64, b: float64) float64 {
-    if a > b { return a; }
+    if a > b {
+        return a;
+    }
     return b;
 }
 
 export func clamp(x: float64, lo: float64, hi: float64) float64 {
-    if x < lo { return lo; }
-    if x > hi { return hi; }
+    if x < lo {
+        return lo;
+    }
+    if x > hi {
+        return hi;
+    }
     return x;
 }
 
@@ -106,3 +114,4 @@ export func is_nan(x: float64) bool {
 export func is_inf(x: float64) bool {
     return x == INF || x == -INF;
 }
+

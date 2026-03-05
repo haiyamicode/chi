@@ -19,6 +19,5 @@ func bad() Holder {
     return h;
 }
 
-func main() {
-}
+func main() {}
 

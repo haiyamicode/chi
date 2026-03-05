@@ -70,25 +70,22 @@ export struct FsError {
 }
 
 func throw_fs_error(op: string, path: string, code: int32) never {
-    throw new FsError{
-        kind: error_kind_from(code),
-        op: op,
-        path: path,
-        raw_code: code,
-        detail: uv_strerror(code)
-    };
+    throw new FsError{kind: error_kind_from(code), op: op, path: path, raw_code: code, detail: uv_strerror(code)};
 }
 
 // POSIX open flags (platform-dependent values from runtime)
 func fs_flag(which: int32) int32 {
-    unsafe { return __cx_fs_flags(which); }
+    unsafe {
+        return __cx_fs_flags(which);
+    }
 }
-let O_RDONLY:  int32 = fs_flag(0);
-let O_WRONLY:  int32 = fs_flag(1);
-let O_RDWR:    int32 = fs_flag(2);
-let O_CREAT:   int32 = fs_flag(3);
-let O_TRUNC:   int32 = fs_flag(4);
-let O_APPEND:  int32 = fs_flag(5);
+
+let O_RDONLY: int32 = fs_flag(0);
+let O_WRONLY: int32 = fs_flag(1);
+let O_RDWR: int32 = fs_flag(2);
+let O_CREAT: int32 = fs_flag(3);
+let O_TRUNC: int32 = fs_flag(4);
+let O_APPEND: int32 = fs_flag(5);
 
 export enum OpenMode {
     Read,
@@ -100,9 +97,9 @@ export enum OpenMode {
     struct {
         func flags() int32 {
             return switch this {
-                OpenMode.Read      => O_RDONLY,
-                OpenMode.Write     => O_WRONLY | O_CREAT | O_TRUNC,
-                OpenMode.Append    => O_WRONLY | O_CREAT | O_APPEND,
+                OpenMode.Read => O_RDONLY,
+                OpenMode.Write => O_WRONLY | O_CREAT | O_TRUNC,
+                OpenMode.Append => O_WRONLY | O_CREAT | O_APPEND,
                 OpenMode.ReadWrite => O_RDWR,
                 OpenMode.WriteRead => O_RDWR | O_CREAT | O_TRUNC,
                 else => O_RDONLY
@@ -262,3 +259,4 @@ export func list_dir(path: string) Array<string> {
     }
     return result;
 }
+

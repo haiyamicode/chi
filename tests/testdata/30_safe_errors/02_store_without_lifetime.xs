@@ -12,6 +12,5 @@ struct Holder {
     }
 }
 
-func main() {
-}
+func main() {}
 

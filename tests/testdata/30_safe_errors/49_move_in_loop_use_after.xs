@@ -5,8 +5,7 @@ struct Obj {
     value: int = 0;
 }
 
-func consume(o: Obj) {
-}
+func consume(o: Obj) {}
 
 func main() {
     var a = Obj{value: 1};

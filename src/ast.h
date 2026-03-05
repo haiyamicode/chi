@@ -395,6 +395,7 @@ struct ImplementBlockData {
 
 struct ExternDecl {
     Token *type = nullptr;
+    DeclSpec *decl_spec = nullptr;
     array<Node *> members = {};
     array<Node *> imports = {}; // Import declarations (ImportDecl nodes) for C headers
     array<Node *> exports = {}; // Export declarations (ExportDecl nodes) for C headers

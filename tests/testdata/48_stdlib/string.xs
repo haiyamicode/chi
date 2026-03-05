@@ -85,3 +85,4 @@ func main() {
     printf("trim_right = '{}'\n", "  hello  ".trim_right());
     printf("trim empty = '{}'\n", "   ".trim());
 }
+

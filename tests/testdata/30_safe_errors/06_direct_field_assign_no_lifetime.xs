@@ -12,6 +12,5 @@ struct Container {
     }
 }
 
-func main() {
-}
+func main() {}
 

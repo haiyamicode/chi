@@ -20,3 +20,4 @@ func main() {
     printf("is_inf(INF) = {}\n", math.is_inf(math.INF));
     printf("mod(10.0, 3.0) = {}\n", math.mod(10.0, 3.0));
 }
+

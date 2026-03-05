@@ -14,3 +14,4 @@ func main() {
     printf("parse_bool('0') = {}\n", conv.parse_bool("0"));
     printf("parse_bool('maybe') = {}\n", conv.parse_bool("maybe"));
 }
+

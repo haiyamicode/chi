@@ -38,3 +38,4 @@ export func parse_bool(s: string) ?bool {
     }
     return null;
 }
+

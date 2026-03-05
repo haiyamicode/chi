@@ -757,6 +757,7 @@ void Lexer::read_number(char c) {
         }
         m_tok.val.i = i;
         m_tok.type = TokenType::INT;
+        m_tok.int_base = b;
         return;
     } else { // float
         double d = std::strtod(buf.c_str(), NULL);
@@ -1107,7 +1108,12 @@ string Token::to_string() const {
     case TokenType::C_STRING:
         return fmt::format("c\"{}\"", get_strlit_repr(str));
     case TokenType::INT:
-        return fmt::format("{}", val.i);
+        switch (int_base) {
+        case 16: return fmt::format("0x{:X}", (uint64_t)val.i);
+        case 8:  return fmt::format("0{:o}", (uint64_t)val.i);
+        case 2:  return fmt::format("0b{:b}", (uint64_t)val.i);
+        default: return fmt::format("{}", val.i);
+        }
     case TokenType::FLOAT: {
         auto s = fmt::format("{}", val.d);
         // Ensure float literals keep a decimal point (3.0 not 3)

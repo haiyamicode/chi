@@ -15,3 +15,4 @@ func main() {
     var b = Handle{};
     b = a; // copy via assignment — rejected
 }
+

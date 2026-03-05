@@ -19,6 +19,5 @@ func bad() {
     h.store(&local);
 }
 
-func main() {
-}
+func main() {}
 

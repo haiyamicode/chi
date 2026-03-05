@@ -24,6 +24,5 @@ func bad(good_ref: &int) MultiRef {
     return m;
 }
 
-func main() {
-}
+func main() {}
 

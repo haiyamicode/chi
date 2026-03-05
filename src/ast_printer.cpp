@@ -353,6 +353,9 @@ void AstPrinter::print_node(Node *node) {
                 print_declspec(data.decl_spec);
             }
         } else {
+            if (data.decl_spec) {
+                print_declspec(data.decl_spec);
+            }
             switch (data.kind) {
             case ast::VarKind::Mutable:
                 emit("var");
@@ -996,6 +999,9 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ExternDecl: {
         auto &data = node->data.extern_decl;
+        if (data.decl_spec) {
+            print_declspec(data.decl_spec);
+        }
         emit("extern {} ", data.type->to_string());
         emit("{{\n");
         m_indent++;
@@ -1021,13 +1027,22 @@ void AstPrinter::print_node(Node *node) {
         }
 
         // Print inline function declarations
+        bool extern_exported = data.decl_spec && data.decl_spec->has_flag(DECL_EXPORTED);
         for (auto member : data.members) {
             auto *ft = first_token(member);
             if (ft)
                 flush_comments_before(ft->pos);
+            // Suppress per-member export when the extern block itself is exported
+            auto *ds = member->get_declspec();
+            if (extern_exported && ds) {
+                ds->flags &= ~DECL_EXPORTED;
+            }
             print_indent(m_indent);
             print_node(member);
             emit("\n");
+            if (extern_exported && ds) {
+                ds->flags |= DECL_EXPORTED;
+            }
         }
         m_indent--;
         emit("}}\n");
@@ -1317,6 +1332,9 @@ void AstPrinter::print_declspec(DeclSpec *declspec) {
         print_node(attr->data.decl_attribute.term);
         emit("]\n");
         print_indent(m_indent);
+    }
+    if (declspec->has_flag(DECL_EXPORTED)) {
+        emit("export ");
     }
     if (declspec->has_flag(DECL_PRIVATE)) {
         emit("private ");

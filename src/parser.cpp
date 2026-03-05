@@ -2942,6 +2942,7 @@ Node *Parser::parse_extern_decl(DeclSpec *decl_spec) {
     auto node = create_node(NodeType::ExternDecl, kw);
     node->data.extern_decl = {};
     node->data.extern_decl.type = type;
+    node->data.extern_decl.decl_spec = decl_spec;
 
     auto &members = node->data.extern_decl.members;
     auto &imports = node->data.extern_decl.imports;
