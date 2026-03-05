@@ -446,6 +446,9 @@ class Resolver {
                                                              ast::Node *op2, ast::Node *node,
                                                              ResolveScope &scope);
 
+    ChiType *try_auto_deref(ast::Node *node, ChiType *stype, const string &field_name,
+                            ResolveScope &scope);
+
     // Static utility function to map operator TokenType to IntrinsicSymbol
     static IntrinsicSymbol get_operator_intrinsic_symbol(TokenType op_type);
 };

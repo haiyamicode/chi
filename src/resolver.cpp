@@ -169,6 +169,8 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Construct"] = IntrinsicSymbol::Construct;
     m_ctx->intrinsic_symbols["std.ops.Unwrap"] = IntrinsicSymbol::Unwrap;
     m_ctx->intrinsic_symbols["std.ops.UnwrapMut"] = IntrinsicSymbol::UnwrapMut;
+    m_ctx->intrinsic_symbols["std.ops.Deref"] = IntrinsicSymbol::Deref;
+    m_ctx->intrinsic_symbols["std.ops.DerefMut"] = IntrinsicSymbol::DerefMut;
     m_ctx->intrinsic_symbols["std.ops.MutIterator"] = IntrinsicSymbol::MutIterator;
     m_ctx->intrinsic_symbols["std.ops.MutIterable"] = IntrinsicSymbol::MutIterable;
     m_ctx->intrinsic_symbols["std.ops.Slice"] = IntrinsicSymbol::Slice;
@@ -2247,6 +2249,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!scope.parent_struct) {
                 error(node, "'{}' cannot be called via dot syntax", field_name);
                 return nullptr;
+            }
+        }
+        // Auto-deref: if member not found, try Deref/DerefMut before reporting error
+        if (!get_struct_member(stype, field_name)) {
+            auto deref_ref_type = try_auto_deref(node, stype, field_name, scope);
+            if (deref_ref_type) {
+                // data.expr was replaced with deref call; redo lookup on deref'd type
+                expr_type = deref_ref_type;
+                stype = eval_struct_type(expr_type);
             }
         }
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
@@ -8178,6 +8189,57 @@ ResolveScope ResolveScope::set_is_fn_call(bool is_fn_call) const {
 
 ResolveScope ResolveScope::set_is_unsafe_block(bool is_unsafe) const {
     RS_SET_PROP_COPY(is_unsafe_block, is_unsafe);
+}
+
+ChiType *Resolver::try_auto_deref(ast::Node *node, ChiType *stype, const string &field_name,
+                                  ResolveScope &scope) {
+    auto &struct_data = stype->data.struct_;
+
+    // Prefer DerefMut when available (gives &mut, works for both mut and non-mut access).
+    // Fall back to Deref (gives &) for read-only access.
+    auto symbol = IntrinsicSymbol::DerefMut;
+    auto member_p = struct_data.member_intrinsics.get(symbol);
+    if (!member_p) {
+        symbol = IntrinsicSymbol::Deref;
+        member_p = struct_data.member_intrinsics.get(symbol);
+    }
+    if (!member_p)
+        return nullptr;
+
+    auto deref_member = *member_p;
+    auto deref_fn_type = deref_member->resolved_type;
+    if (!deref_fn_type || deref_fn_type->kind != TypeKind::Fn)
+        return nullptr;
+
+    auto deref_return_type = deref_fn_type->data.fn.return_type;
+    if (!deref_return_type || !deref_return_type->is_reference())
+        return nullptr;
+
+    // Check that the deref'd target type actually has the member we're looking for
+    auto target_type = deref_return_type->get_elem();
+    if (!get_struct_member(target_type, field_name))
+        return nullptr;
+
+    // Build synthetic call: expr.deref() or expr.deref_mut()
+    auto &data = node->data.dot_expr;
+
+    auto dot_node = create_node(ast::NodeType::DotExpr);
+    dot_node->token = node->token;
+    dot_node->data.dot_expr.expr = data.expr;
+    dot_node->data.dot_expr.field = deref_member->node->token;
+    dot_node->data.dot_expr.resolved_struct_member = deref_member;
+    dot_node->data.dot_expr.resolved_decl = deref_member->node;
+
+    auto call_node = create_node(ast::NodeType::FnCallExpr);
+    call_node->token = node->token;
+    call_node->data.fn_call_expr.fn_ref_expr = dot_node;
+    call_node->data.fn_call_expr.args = {};
+    resolve(call_node, scope);
+
+    // Replace the DotExpr's sub-expression with the deref call.
+    // Return the deref'd reference type so the caller can redo member lookup.
+    data.expr = call_node;
+    return deref_return_type;
 }
 
 optional<Resolver::OperatorMethodCall>

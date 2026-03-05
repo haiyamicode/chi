@@ -90,19 +90,19 @@ export struct File {
 
     impl io.Reader {
         mut func read(buf: []mut byte) uint32 {
-            return this.handle.as_mut().read(buf);
+            return this.handle.read(buf);
         }
     }
 
     impl io.Writer {
         func write(data: []byte) {
-            this.handle.as_mut().write(data);
+            this.handle.write(data);
         }
     }
 
     impl io.Closer {
         mut func close() {
-            this.handle.as_mut().close();
+            this.handle.close();
         }
     }
 }
@@ -175,3 +175,4 @@ export func list_dir(path: string) Array<string> {
     }
     return result;
 }
+

@@ -136,6 +136,18 @@ export struct Shared<T> {
         }
     }
 
+    impl ops.Deref<T> {
+        func deref() &T {
+            return &this.data.value;
+        }
+    }
+
+    impl ops.DerefMut<T> {
+        mut func deref_mut() &mut T {
+            return &mut this.data.value;
+        }
+    }
+
     impl ops.Display {
         func display() string {
             return stringf("{}", this.as_ref());
@@ -197,6 +209,22 @@ export struct Box<T: ops.AllowUnsized> {
 
     impl ops.UnwrapMut<T> {
         mut func unwrap_mut() &mut T {
+            unsafe {
+                return this._ptr;
+            }
+        }
+    }
+
+    impl ops.Deref<T> {
+        func deref() &T {
+            unsafe {
+                return this._ptr;
+            }
+        }
+    }
+
+    impl ops.DerefMut<T> {
+        mut func deref_mut() &mut T {
             unsafe {
                 return this._ptr;
             }

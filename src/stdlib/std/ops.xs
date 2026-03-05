@@ -51,6 +51,14 @@ export interface UnwrapMut<T> {
     func unwrap_mut() &mut T;
 }
 
+export interface Deref<T> {
+    func deref() &T;
+}
+
+export interface DerefMut<T> {
+    func deref_mut() &mut T;
+}
+
 export interface Slice<Out> {
     func slice(start: ?uint32, end: ?uint32) Out;
 }
