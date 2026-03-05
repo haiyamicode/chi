@@ -12,6 +12,8 @@ overwritten!
 hello.txt
 === fs.remove ===
 false
+=== File copy ===
+shared handle
 === fs.exists (nonexistent) ===
 false
 done

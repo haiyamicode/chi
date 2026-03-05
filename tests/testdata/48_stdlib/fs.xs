@@ -35,6 +35,16 @@ func main() {
     fs.remove(test_file);
     println(fs.exists(test_file));
 
+    println("=== File copy ===");
+    fs.write_file(test_file, "shared handle");
+    var f3 = fs.File.open(test_file);
+    var f4 = f3; // copy — both share the same underlying handle
+    println(f4.read_string());
+    f3.close(); // close via original
+    // f4 still valid (Shared refcount keeps FileHandle alive until both drop)
+
+    fs.remove(test_file);
+
     println("=== fs.exists (nonexistent) ===");
     println(fs.exists("/tmp/chi_fs_test_nonexistent_12345"));
 

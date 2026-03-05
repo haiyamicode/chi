@@ -30,11 +30,46 @@ func mode_str(mode: OpenMode) string {
     };
 }
 
-export struct File {
-    private handle: *void;
+struct FileHandle {
+    private raw: *void = null;
 
-    private mut func new(handle: *void) {
-        this.handle = handle;
+    mut func new(raw: *void) {
+        this.raw = raw;
+    }
+
+    mut func close() {
+        if this.raw != null {
+            unsafe {
+                __cx_fclose(this.raw);
+            }
+            this.raw = null;
+        }
+    }
+
+    func read(buf: []mut byte) uint32 {
+        unsafe {
+            return __cx_fread(this.raw, buf.as_ptr(), buf.length);
+        }
+    }
+
+    func write(data: []byte) {
+        unsafe {
+            __cx_fwrite(this.raw, data.as_ptr(), data.length);
+        }
+    }
+
+    mut func delete() {
+        this.close();
+    }
+
+    impl ops.DisallowCopy {}
+}
+
+export struct File {
+    private handle: Shared<FileHandle>;
+
+    private mut func new(raw: *void) {
+        this.handle = {FileHandle{raw}};
     }
 
     static func open(path: string, mode: OpenMode = OpenMode.Read) File {
@@ -55,36 +90,21 @@ export struct File {
 
     impl io.Reader {
         mut func read(buf: []mut byte) uint32 {
-            unsafe {
-                return __cx_fread(this.handle, buf.as_ptr(), buf.length);
-            }
+            return this.handle.as_mut().read(buf);
         }
     }
 
     impl io.Writer {
         func write(data: []byte) {
-            unsafe {
-                __cx_fwrite(this.handle, data.as_ptr(), data.length);
-            }
+            this.handle.as_mut().write(data);
         }
     }
 
     impl io.Closer {
         mut func close() {
-            if this.handle != null {
-                unsafe {
-                    __cx_fclose(this.handle);
-                }
-                this.handle = null;
-            }
+            this.handle.as_mut().close();
         }
     }
-
-    mut func delete() {
-        this.close();
-    }
-
-    impl ops.DisallowCopy {}
 }
 
 export func read_file(path: string) string {
@@ -155,4 +175,3 @@ export func list_dir(path: string) Array<string> {
     }
     return result;
 }
-

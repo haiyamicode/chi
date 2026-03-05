@@ -104,6 +104,10 @@ export struct Shared<T> {
         return &this.data.value;
     }
 
+    mut func as_mut() &mut T {
+        return &mut this.data.value;
+    }
+
     mut func set(value: T) {
         if !this.data {
             this.data = new SharedData<T>{value};
