@@ -1,0 +1,12 @@
+parse_int('42') = 42
+parse_int('-100') = -100
+parse_int('abc') = null
+parse_int('') = null
+parse_float('3.14') = 3.14
+parse_float('-0.5') = -0.5
+parse_float('abc') = null
+parse_bool('true') = true
+parse_bool('false') = false
+parse_bool('1') = true
+parse_bool('0') = false
+parse_bool('maybe') = null

@@ -1,0 +1,14 @@
+dir('/a/b/c.txt') = /a/b
+dir('file.txt') = .
+dir('/file.txt') = /
+base('/a/b/c.txt') = c.txt
+base('/a/b/') = b
+base('') = .
+ext('/a/b/c.txt') = .txt
+ext('noext') =
+is_absolute('/a') = true
+is_absolute('a') = false
+join('a', 'b') = a/b
+join('a/', 'b') = a/b
+join('', 'b') = b
+join('a', '') = a

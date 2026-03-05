@@ -2200,7 +2200,7 @@ static llvm::CmpInst::Predicate get_cmpop(TokenType op, ChiType *type) {
         case TokenType::EQ:
             return llvm::CmpInst::Predicate::FCMP_OEQ;
         case TokenType::NE:
-            return llvm::CmpInst::Predicate::FCMP_ONE;
+            return llvm::CmpInst::Predicate::FCMP_UNE;
         default:
             panic("not implemented: {}", PRINT_ENUM(op));
         }
@@ -3106,6 +3106,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         // Get reference to the container
         auto ref = compile_expr_ref(fn, data.expr);
+        if (!ref.address) {
+            auto &builder_ = *m_ctx->llvm_builder;
+            auto tmp = compile_alloc(fn, data.expr);
+            builder_.CreateStore(ref.value, tmp);
+            ref = RefValue::from_address(tmp);
+        }
 
         // Resolve the slice method
         auto method = data.resolved_method;

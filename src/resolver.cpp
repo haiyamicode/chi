@@ -1905,6 +1905,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::C_STRING:
             return create_pointer_type(get_system_types()->byte_, TypeKind::Pointer);
         case TokenType::FLOAT:
+            if (scope.value_type && scope.value_type->kind == TypeKind::Float &&
+                scope.value_type->data.float_.bit_count == 64) {
+                return scope.value_type;
+            }
             return get_system_types()->float_;
         case TokenType::KW_UNDEFINED:
             return get_system_types()->undefined;
@@ -3425,7 +3429,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         if (expr_type->kind != TypeKind::Struct && expr_type->kind != TypeKind::Subtype &&
-            expr_type->kind != TypeKind::Array && expr_type->kind != TypeKind::Span) {
+            expr_type->kind != TypeKind::Array && expr_type->kind != TypeKind::Span &&
+            expr_type->kind != TypeKind::String) {
             error(node, "cannot slice type {}", format_type_display(expr_type));
             return nullptr;
         }

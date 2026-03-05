@@ -7,7 +7,11 @@
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
+#include <cerrno>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <unistd.h>
 #include <sstream>
 #include <uv.h>
 
@@ -745,3 +749,68 @@ void cx_json_value_copy(void *data, void *result) {
 
 // SharedData refcounting helpers for type-erased pointers
 // All SharedData<T> instances have ref_count as the first field at offset 0
+
+// std/math wrappers
+extern "C" {
+double __cx_sqrt(double x) { return sqrt(x); }
+double __cx_pow(double base, double exp) { return pow(base, exp); }
+double __cx_log(double x) { return log(x); }
+double __cx_log2(double x) { return log2(x); }
+double __cx_log10(double x) { return log10(x); }
+double __cx_exp(double x) { return exp(x); }
+double __cx_sin(double x) { return sin(x); }
+double __cx_cos(double x) { return cos(x); }
+double __cx_tan(double x) { return tan(x); }
+double __cx_atan2(double y, double x) { return atan2(y, x); }
+double __cx_floor(double x) { return floor(x); }
+double __cx_ceil(double x) { return ceil(x); }
+double __cx_round(double x) { return round(x); }
+double __cx_fabs(double x) { return fabs(x); }
+double __cx_fmod(double x, double y) { return fmod(x, y); }
+
+// std/conv helpers
+// Returns 1 on success (result written to *out), 0 on failure
+int32_t __cx_parse_int(const char *str, int64_t *out) {
+    if (!str || !*str) return 0;
+    char *end;
+    errno = 0;
+    long long val = strtoll(str, &end, 10);
+    if (errno != 0 || *end != '\0' || end == str) return 0;
+    *out = (int64_t)val;
+    return 1;
+}
+
+uint32_t __cx_strlen(const char *s) {
+    if (!s) return 0;
+    return (uint32_t)strlen(s);
+}
+
+// std/os helpers
+const char *__cx_getenv(const char *key) {
+    return getenv(key);
+}
+
+void __cx_setenv(const char *key, const char *value) {
+    setenv(key, value, 1);
+}
+
+void __cx_exit(int32_t code) {
+    exit(code);
+}
+
+char *__cx_getcwd(void) {
+    static char buf[4096];
+    if (getcwd(buf, sizeof(buf))) return buf;
+    return (char *)"";
+}
+
+int32_t __cx_parse_float(const char *str, double *out) {
+    if (!str || !*str) return 0;
+    char *end;
+    errno = 0;
+    double val = strtod(str, &end);
+    if (errno != 0 || *end != '\0' || end == str) return 0;
+    *out = val;
+    return 1;
+}
+}

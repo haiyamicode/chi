@@ -1,0 +1,3 @@
+env(CHI_TEST_VAR) = hello_chi
+env(NONEXISTENT_XYZ_123) = null
+cwd is non-empty = true

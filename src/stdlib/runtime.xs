@@ -675,6 +675,202 @@ struct __CxString {
         }
     }
 
+    func byte_length() uint32 {
+        return this.length;
+    }
+
+    func byte_at(i: uint32) byte {
+        assert(i < this.length, "byte_at: index out of bounds");
+        unsafe {
+            return this.data[i];
+        }
+    }
+
+    func byte_slice(start: uint32, end: uint32) string {
+        assert(start <= end, "byte_slice: start must be <= end");
+        assert(end <= this.length, "byte_slice: end out of bounds");
+        unsafe {
+            return string.from_raw(&this.data[start], end - start);
+        }
+    }
+
+    // byte length of the UTF-8 codepoint starting at byte offset i
+    private func cp_len(i: uint32) uint32 {
+        unsafe {
+            let b = this.data[i];
+            if b < 0x80 { return 1; }
+            if b < 0xE0 { return 2; }
+            if b < 0xF0 { return 3; }
+            return 4;
+        }
+    }
+
+    // byte offset of the n-th codepoint (O(n))
+    private func cp_offset(n: uint32) uint32 {
+        var pos: uint32 = 0;
+        var count: uint32 = 0;
+        while count < n && pos < this.length {
+            pos += this.cp_len(pos);
+            count += 1;
+        }
+        return pos;
+    }
+
+    func char_length() uint32 {
+        var pos: uint32 = 0;
+        var count: uint32 = 0;
+        while pos < this.length {
+            pos += this.cp_len(pos);
+            count += 1;
+        }
+        return count;
+    }
+
+    func at(i: uint32) rune {
+        var pos = this.cp_offset(i);
+        assert(pos < this.length, "at: index out of bounds");
+        unsafe {
+            let b0 = this.data[pos] as uint32;
+            let n = this.cp_len(pos);
+            if n == 1 { return b0 as rune; }
+            if n == 2 {
+                let b1 = this.data[pos + 1] as uint32;
+                return ((b0 & 0x1F) << 6 | (b1 & 0x3F)) as rune;
+            }
+            if n == 3 {
+                let b1 = this.data[pos + 1] as uint32;
+                let b2 = this.data[pos + 2] as uint32;
+                return ((b0 & 0x0F) << 12 | (b1 & 0x3F) << 6 | (b2 & 0x3F)) as rune;
+            }
+            let b1 = this.data[pos + 1] as uint32;
+            let b2 = this.data[pos + 2] as uint32;
+            let b3 = this.data[pos + 3] as uint32;
+            return ((b0 & 0x07) << 18 | (b1 & 0x3F) << 12 | (b2 & 0x3F) << 6 | (b3 & 0x3F)) as rune;
+        }
+    }
+
+    impl ops.Slice<string> {
+        func slice(start: ?uint32, end: ?uint32) string {
+            var s: uint32 = 0;
+            if start {
+                s = start;
+            }
+            var byte_start = this.cp_offset(s);
+            var byte_end = this.length;
+            if end {
+                byte_end = this.cp_offset(end);
+            }
+            return this.byte_slice(byte_start, byte_end);
+        }
+    }
+
+    func contains(substr: string) bool {
+        if substr.length == 0 { return true; }
+        if substr.length > this.length { return false; }
+        var i: uint32 = 0;
+        let limit = this.length - substr.length;
+        while i <= limit {
+            if mem.memcmp(&this.data[i], substr.data, substr.length) == 0 {
+                return true;
+            }
+            i += 1;
+        }
+        return false;
+    }
+
+    func starts_with(prefix: string) bool {
+        if prefix.length > this.length { return false; }
+        return mem.memcmp(this.data, prefix.data, prefix.length) == 0;
+    }
+
+    func ends_with(suffix: string) bool {
+        if suffix.length > this.length { return false; }
+        unsafe {
+            return mem.memcmp(&this.data[this.length - suffix.length], suffix.data, suffix.length) == 0;
+        }
+    }
+
+    func repeat(n: uint32) string {
+        if n == 0 { return ""; }
+        var buf = Buffer{};
+        var i: uint32 = 0;
+        while i < n {
+            buf.write_string(this);
+            i += 1;
+        }
+        return buf.to_string();
+    }
+
+    func split(sep: string) Array<string> {
+        var result: Array<string> = [];
+        if sep.length == 0 {
+            result.push(this);
+            return result;
+        }
+        var start: uint32 = 0;
+        var i: uint32 = 0;
+        let limit = this.length - sep.length;
+        while i <= limit {
+            if mem.memcmp(&this.data[i], sep.data, sep.length) == 0 {
+                result.push(this.byte_slice(start, i));
+                i += sep.length;
+                start = i;
+            } else {
+                i += 1;
+            }
+        }
+        result.push(this.byte_slice(start, this.length));
+        return result;
+    }
+
+    func replace_all(old: string, new_val: string) string {
+        if old.length == 0 { return this; }
+        var buf = Buffer{};
+        var start: uint32 = 0;
+        var i: uint32 = 0;
+        let limit = this.length - old.length;
+        while i <= limit {
+            if mem.memcmp(&this.data[i], old.data, old.length) == 0 {
+                buf.write_string(this.byte_slice(start, i));
+                buf.write_string(new_val);
+                i += old.length;
+                start = i;
+            } else {
+                i += 1;
+            }
+        }
+        buf.write_string(this.byte_slice(start, this.length));
+        return buf.to_string();
+    }
+
+    func trim() string {
+        var start: uint32 = 0;
+        var end = this.length;
+        while start < end && this.data[start] <= ' ' {
+            start += 1;
+        }
+        while end > start && this.data[end - 1] <= ' ' {
+            end -= 1;
+        }
+        return this.byte_slice(start, end);
+    }
+
+    func trim_left() string {
+        var start: uint32 = 0;
+        while start < this.length && this.data[start] <= ' ' {
+            start += 1;
+        }
+        return this.byte_slice(start, this.length);
+    }
+
+    func trim_right() string {
+        var end = this.length;
+        while end > 0 && this.data[end - 1] <= ' ' {
+            end -= 1;
+        }
+        return this.byte_slice(0, end);
+    }
+
     impl ops.Add {
         func add(rhs: string) string {
             var result = string{};
