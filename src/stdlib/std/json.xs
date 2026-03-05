@@ -11,7 +11,7 @@ extern "C" {
     unsafe func cx_json_value_copy(data: *void, result: *void);
 }
 
-enum JsonKind {
+export enum ValueKind {
     Null,
     Bool,
     Int64,
@@ -22,9 +22,23 @@ enum JsonKind {
     Object
 }
 
-struct JsonValue {
+export func kind_display(kind: ValueKind) string {
+    return switch kind {
+        ValueKind.Null => "null",
+        ValueKind.Bool => "bool",
+        ValueKind.Int64 => "int64",
+        ValueKind.Uint64 => "uint64",
+        ValueKind.Double => "double",
+        ValueKind.String => "string",
+        ValueKind.Array => "array",
+        ValueKind.Object => "object",
+        else => "unknown"
+    };
+}
+
+export struct Value {
     private data: *void = null;
-    protected kind: JsonKind = JsonKind.Null;
+    protected kind: ValueKind = ValueKind.Null;
 
     mut func delete() {
         unsafe {
@@ -32,8 +46,8 @@ struct JsonValue {
         }
     }
 
-    func get(key: string) JsonValue {
-        let new_value = JsonValue{};
+    func get(key: string) Value {
+        let new_value = Value{};
         unsafe {
             var key_ptr = &key;
             var value_ptr = &new_value;
@@ -42,44 +56,44 @@ struct JsonValue {
         return new_value;
     }
 
-    func assert_kind(kind: JsonKind) {
+    func assert_kind(kind: ValueKind) {
         if this.kind != kind {
             panic(stringf("expected {}, got {}", kind_display(kind), kind_display(this.kind)));
         }
     }
 
     func to_string() string {
-        this.assert_kind(JsonKind.String);
+        this.assert_kind(ValueKind.String);
         let result = "";
         unsafe {
-            cx_json_value_convert(this.data, JsonKind.String.discriminator(), &result);
+            cx_json_value_convert(this.data, ValueKind.String.discriminator(), &result);
         }
         return result;
     }
 
     func to_bool() bool {
-        this.assert_kind(JsonKind.Bool);
+        this.assert_kind(ValueKind.Bool);
         let result = false;
         unsafe {
-            cx_json_value_convert(this.data, JsonKind.Bool.discriminator(), &result);
+            cx_json_value_convert(this.data, ValueKind.Bool.discriminator(), &result);
         }
         return result;
     }
 
     func to_int() int64 {
-        this.assert_kind(JsonKind.Int64);
+        this.assert_kind(ValueKind.Int64);
         let result: int64 = 0;
         unsafe {
-            cx_json_value_convert(this.data, JsonKind.Int64.discriminator(), &result);
+            cx_json_value_convert(this.data, ValueKind.Int64.discriminator(), &result);
         }
         return result;
     }
 
     func to_float() float64 {
-        this.assert_kind(JsonKind.Double);
+        this.assert_kind(ValueKind.Double);
         let result: float64 = 0.0;
         unsafe {
-            cx_json_value_convert(this.data, JsonKind.Double.discriminator(), &result);
+            cx_json_value_convert(this.data, ValueKind.Double.discriminator(), &result);
         }
         return result;
     }
@@ -90,11 +104,11 @@ struct JsonValue {
         }
     }
 
-    func to_array() Array<JsonValue> {
-        let result: Array<JsonValue> = [];
+    func to_array() Array<Value> {
+        let result: Array<Value> = [];
         let len = this.length();
         for i in 0..len {
-            let new_value = JsonValue{};
+            let new_value = Value{};
             unsafe {
                 cx_json_array_index(this.data, i, &new_value);
             }
@@ -103,8 +117,8 @@ struct JsonValue {
         return result;
     }
 
-    func at(index: uint32) JsonValue {
-        let new_value = JsonValue{};
+    func at(index: uint32) Value {
+        let new_value = Value{};
         unsafe {
             cx_json_array_index(this.data, index, &new_value);
         }
@@ -112,31 +126,31 @@ struct JsonValue {
     }
 
     func is_null() bool {
-        return this.kind == JsonKind.Null;
+        return this.kind == ValueKind.Null;
     }
 
     func is_string() bool {
-        return this.kind == JsonKind.String;
+        return this.kind == ValueKind.String;
     }
 
     func is_bool() bool {
-        return this.kind == JsonKind.Bool;
+        return this.kind == ValueKind.Bool;
     }
 
     func is_int() bool {
-        return this.kind == JsonKind.Int64;
+        return this.kind == ValueKind.Int64;
     }
 
     func is_float() bool {
-        return this.kind == JsonKind.Double;
+        return this.kind == ValueKind.Double;
     }
 
     func is_array() bool {
-        return this.kind == JsonKind.Array;
+        return this.kind == ValueKind.Array;
     }
 
     func is_object() bool {
-        return this.kind == JsonKind.Object;
+        return this.kind == ValueKind.Object;
     }
 
     func has(key: string) bool {
@@ -144,8 +158,8 @@ struct JsonValue {
         return !val.is_null();
     }
 
-    impl ops.CopyFrom<JsonValue> {
-        mut func copy_from(source: &JsonValue) {
+    impl ops.CopyFrom<Value> {
+        mut func copy_from(source: &Value) {
             unsafe {
                 cx_json_value_copy(source.data, &this);
             }
@@ -153,8 +167,8 @@ struct JsonValue {
     }
 }
 
-func parse(str: string) JsonValue {
-    let result = JsonValue{};
+export func parse(str: string) Value {
+    let result = Value{};
     unsafe {
         cx_parse_json(&str, &result);
     }

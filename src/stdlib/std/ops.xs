@@ -14,6 +14,8 @@ export interface CopyFrom<T> {
     func copy_from(source: &T);
 }
 
+export interface DisallowCopy {}
+
 export interface IndexMutIterable<K, V> {
     func index_mut(index: K) &mut V;
     func begin() K;

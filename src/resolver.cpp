@@ -150,6 +150,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
     m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
+    m_ctx->intrinsic_symbols["std.ops.DisallowCopy"] = IntrinsicSymbol::DisallowCopy;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
     m_ctx->intrinsic_symbols["std.ops.Sub"] = IntrinsicSymbol::Sub;
@@ -1346,6 +1347,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 var_type = expr_type;
             }
+            // DisallowCopy: error if initializing from a named value
+            if (var_type && is_non_copyable(var_type) && is_addressable(data.expr) &&
+                !data.expr->escape.moved) {
+                error(data.expr, errors::TYPE_NOT_COPYABLE,
+                      format_type_display(var_type));
+            }
         }
         if (!var_type) {
             // Failed to resolve variable type due to malformed expression
@@ -1462,6 +1469,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // For plain assignment
         if (data.op_type == TokenType::ASS) {
             check_assignment(data.op2, t2, t1);
+            // DisallowCopy: error if assigning from a named value
+            if (is_non_copyable(t1) && is_addressable(data.op2) &&
+                !data.op2->escape.moved) {
+                error(data.op2, errors::TYPE_NOT_COPYABLE, format_type_display(t1));
+            }
             return t1;
         }
         // For compound assignment operators, validate the base op
@@ -3203,11 +3215,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             // Rule of Three: struct with func delete() must implement CopyFrom
-            // (not required in managed mode — GC handles lifecycle)
+            // or DisallowCopy (not required in managed mode — GC handles lifecycle)
             if (struct_->kind == ContainerKind::Struct &&
                 !has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED) &&
                 struct_->find_member("delete") &&
-                !struct_->member_intrinsics.has_key(IntrinsicSymbol::CopyFrom)) {
+                !struct_->member_intrinsics.has_key(IntrinsicSymbol::CopyFrom) &&
+                !is_non_copyable(struct_type)) {
                 auto name = format_type_display(struct_type);
                 error(node, errors::DESTRUCTOR_WITHOUT_COPY_FROM, name, name);
             }
@@ -4719,6 +4732,7 @@ void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::No
     auto trait_symbol = resolve_intrinsic_symbol(base.node);
     if (base.kind == ContainerKind::Interface) {
         iface_impl = derived.add_interface(get_allocator(), base_type, derived_type);
+        iface_impl->inteface_symbol = trait_symbol;
     }
 
     for (auto &base_member : base.members) {
@@ -5056,6 +5070,23 @@ bool Resolver::type_needs_destruction(ChiType *type) {
         if (type_needs_destruction(field->resolved_type)) {
             return true;
         }
+    }
+    return false;
+}
+
+bool Resolver::is_non_copyable(ChiType *type) {
+    if (!type)
+        return false;
+    if (type->kind == TypeKind::Subtype) {
+        auto final_type = type->data.subtype.final_type;
+        if (final_type)
+            return is_non_copyable(final_type);
+    }
+    if (type->kind != TypeKind::Struct)
+        return false;
+    for (auto iface : type->data.struct_.interfaces) {
+        if (iface->inteface_symbol == IntrinsicSymbol::DisallowCopy)
+            return true;
     }
     return false;
 }
@@ -6065,6 +6096,12 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 if (arg->resolved_outlet && scope.parent_fn_node) {
                     scope.parent_fn_node->data.fn_def.add_sink_edge(arg->resolved_outlet, node);
                 }
+            }
+
+            // DisallowCopy: error if passing a named value by value to a non-ref param
+            if (param_type && !param_type->is_reference() && is_addressable(arg) &&
+                !arg->escape.moved && is_non_copyable(arg_type)) {
+                error(arg, errors::TYPE_NOT_COPYABLE, format_type_display(arg_type));
             }
         }
     }

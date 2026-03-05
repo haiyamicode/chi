@@ -293,6 +293,7 @@ class Resolver {
 
     bool is_borrowing_type(ChiType *type);
     bool type_needs_destruction(ChiType *type);
+    bool is_non_copyable(ChiType *type);
     bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
 
     void context_init_primitives();

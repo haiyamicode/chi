@@ -375,8 +375,7 @@ func make_tracked(name: string) TrackedVar {
     return {name};
 }
 
-func consume_tracked(t: TrackedVar) {
-}
+func consume_tracked(t: TrackedVar) {}
 
 func identity_tracked(t: TrackedVar) TrackedVar {
     return t;

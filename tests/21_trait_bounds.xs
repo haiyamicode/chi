@@ -178,6 +178,26 @@ func make_default<T: ops.Construct>() T {
     return {};
 }
 
+struct NoCopyHandle {
+    value: int = 0;
+
+    mut func delete() {}
+
+    impl ops.DisallowCopy {}
+}
+
+func make_handle(v: int) NoCopyHandle {
+    return {value: v};
+}
+
+func consume_handle(h: NoCopyHandle) {
+    printf("consumed: {}\n", h.value);
+}
+
+func ref_handle(h: &NoCopyHandle) {
+    printf("ref: {}\n", h.value);
+}
+
 func main() {
     printf("=== Type Parameter Trait Bounds Test ===\n");
     printf("\n-- Function trait bounds --\n");
@@ -275,6 +295,28 @@ func main() {
     // IntBoxDefault has new(x: int = 77) — satisfies IntConstruct
     var ih2 = IntHolder<IntBoxDefault>{};
     printf("int_construct_default: {}\n", ih2.make(33).x);
+
+    printf("\n-- DisallowCopy --\n");
+    // Allowed: init from temporary (not addressable)
+    var h1 = NoCopyHandle{value: 1};
+    printf("temp init: {}\n", h1.value);
+
+    // Allowed: explicit move
+    var h2 = move (h1);
+    printf("move: {}\n", h2.value);
+
+    // Allowed: return from function (implicit move)
+    var h3 = make_handle(42);
+    printf("return: {}\n", h3.value);
+
+    // Allowed: pass temporary to function (not addressable)
+    consume_handle(NoCopyHandle{value: 99});
+
+    // Allowed: pass via move to function
+    consume_handle(move (h2));
+
+    // Allowed: take by reference
+    ref_handle(&h3);
 
     printf("\n=== All trait bound tests passed! ===\n");
 }

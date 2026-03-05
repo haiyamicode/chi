@@ -51,4 +51,12 @@ explicit ctor: 100
 int_construct: 55
 int_construct_default: 33
 
+-- DisallowCopy --
+temp init: 1
+move: 1
+return: 42
+consumed: 99
+consumed: 1
+ref: 42
+
 === All trait bound tests passed! ===

@@ -254,7 +254,12 @@ void AstPrinter::print_node(Node *node) {
         if (data.is_unsafe) {
             emit("unsafe ");
         }
+        bool is_empty_block = data.has_braces && !data.statements.len && !data.return_expr;
         if (data.has_braces) {
+            if (is_empty_block) {
+                emit("{{}}");
+                break;
+            }
             m_indent++;
             emit("{{\n");
         }

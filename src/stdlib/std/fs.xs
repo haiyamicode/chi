@@ -84,11 +84,7 @@ export struct File {
         this.close();
     }
 
-    impl ops.CopyFrom<File> {
-        mut func copy_from(other: &File) {
-            panic("File cannot be copied");
-        }
-    }
+    impl ops.DisallowCopy {}
 }
 
 export func read_file(path: string) string {
