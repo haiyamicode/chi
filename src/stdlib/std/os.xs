@@ -27,7 +27,7 @@ export func set_env(key: string, value: string) {
     }
 }
 
-export func exit(code: int) {
+export func exit(code: int) never {
     unsafe {
         __cx_exit(code);
     }

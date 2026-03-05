@@ -91,6 +91,5 @@ constexpr auto TRAIT_METHOD_NOT_CALLABLE =
 
 constexpr auto CHAR_USE_BYTE =
     "use 'byte' instead of 'char'; for a unicode character, use 'rune'";
-
 } // namespace errors
 } // namespace cx

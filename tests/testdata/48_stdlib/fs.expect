@@ -16,4 +16,19 @@ false
 shared handle
 === fs.exists (nonexistent) ===
 false
+=== error: open nonexistent ===
+op: open
+path: /tmp/chi_no_such_file_12345
+code: 2
+has detail: true
+message: open /tmp/chi_no_such_file_12345: No such file or directory (errno 2)
+=== error: remove nonexistent ===
+op: remove
+code: 2
+=== error: list_dir nonexistent ===
+op: list_dir
+code: 2
+=== error: result mode ===
+op: open
+code: 2
 done

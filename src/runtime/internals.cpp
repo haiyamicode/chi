@@ -880,6 +880,15 @@ int32_t __cx_mkdir(const char *path) {
     return mkdir(path, 0755);
 }
 
+int32_t __cx_get_errno() {
+    return errno;
+}
+
+void __cx_strerror(int32_t errnum, CxString *result) {
+    auto msg = strerror(errnum);
+    cx_string_from_chars(msg, strlen(msg), result);
+}
+
 int32_t __cx_list_dir(const char *path, CxArray *result) {
     DIR *dir = opendir(path);
     if (!dir) return -1;

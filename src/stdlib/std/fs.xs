@@ -11,22 +11,63 @@ extern "C" {
     unsafe func __cx_file_remove(path: *byte) int32;
     unsafe func __cx_mkdir(path: *byte) int32;
     unsafe func __cx_list_dir(path: *byte, result: *void) int32;
+    unsafe func __cx_get_errno() int32;
+    unsafe func __cx_strerror(errnum: int32, result: *string);
+}
+
+func get_errno() int32 {
+    unsafe {
+        return __cx_get_errno();
+    }
+}
+
+func strerror(errnum: int32) string {
+    let result = "";
+    unsafe {
+        __cx_strerror(errnum, &result);
+    }
+    return result;
+}
+
+export struct FsError {
+    op: string = "";
+    path: string = "";
+    code: int32 = 0;
+    detail: string = "";
+
+    impl Error {
+        func message() string {
+            return stringf("{} {}: {} (errno {})", this.op, this.path, this.detail, this.code);
+        }
+    }
+}
+
+func throw_fs_error(op: string, path: string) never {
+    let code = get_errno();
+    throw new FsError{
+        op: op,
+        path: path,
+        code: code,
+        detail: strerror(code)
+    };
 }
 
 export enum OpenMode {
     Read,
     Write,
     Append,
-    ReadWrite;
+    ReadWrite,
+    WriteRead;
 
     struct {
         func mode_string() string {
             return switch this {
-                OpenMode.Read => "r",
-                OpenMode.Write => "w",
-                OpenMode.Append => "a",
-                OpenMode.ReadWrite => "r+",
-                else => "r"
+                OpenMode.Read => "rb",
+                OpenMode.Write => "wb",
+                OpenMode.Append => "ab",
+                OpenMode.ReadWrite => "r+b",
+                OpenMode.WriteRead => "w+b",
+                else => "rb"
             };
         }
     }
@@ -80,7 +121,7 @@ export struct File {
         unsafe {
             var h = __cx_fopen(p.as_ptr(), m.as_ptr());
             if h == null {
-                panic(stringf("open failed: {}", path));
+                throw_fs_error("open", path);
             }
             return {h};
         }
@@ -139,7 +180,7 @@ export func remove(path: string) {
     var cs = path.to_cstring();
     unsafe {
         if __cx_file_remove(cs.as_ptr()) != 0 {
-            panic(stringf("remove failed: {}", path));
+            throw_fs_error("remove", path);
         }
     }
 }
@@ -148,7 +189,7 @@ export func mkdir(path: string) {
     var cs = path.to_cstring();
     unsafe {
         if __cx_mkdir(cs.as_ptr()) != 0 {
-            panic(stringf("mkdir failed: {}", path));
+            throw_fs_error("mkdir", path);
         }
     }
 }
@@ -172,9 +213,8 @@ export func list_dir(path: string) Array<string> {
     var cs = path.to_cstring();
     unsafe {
         if __cx_list_dir(cs.as_ptr(), &result) != 0 {
-            panic(stringf("list_dir failed: {}", path));
+            throw_fs_error("list_dir", path);
         }
     }
     return result;
 }
-

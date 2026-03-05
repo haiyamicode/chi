@@ -164,6 +164,8 @@ CHI_RT_EXPORT void __cx_fclose(void *handle);
 CHI_RT_EXPORT int32_t __cx_file_exists(const char *path);
 CHI_RT_EXPORT int32_t __cx_file_remove(const char *path);
 CHI_RT_EXPORT int32_t __cx_mkdir(const char *path);
+CHI_RT_EXPORT int32_t __cx_get_errno();
+CHI_RT_EXPORT void __cx_strerror(int32_t errnum, CxString *result);
 CHI_RT_EXPORT int32_t __cx_list_dir(const char *path, CxArray *result);
 
 #ifdef __cplusplus

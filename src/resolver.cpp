@@ -806,6 +806,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             resolve(data.body, fn_scope);
 
+
             check_lifetime_constraints(&data);
 
             // Add params to cleanup_vars on the body block

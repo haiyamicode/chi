@@ -41,12 +41,39 @@ func main() {
     var f4 = f3; // copy — both share the same underlying handle
     println(f4.read_string());
     f3.close(); // close via original
-    // f4 still valid (Shared refcount keeps FileHandle alive until both drop)
 
     fs.remove(test_file);
 
     println("=== fs.exists (nonexistent) ===");
     println(fs.exists("/tmp/chi_fs_test_nonexistent_12345"));
+
+    println("=== error: open nonexistent ===");
+    try fs.File.open("/tmp/chi_no_such_file_12345") catch (err: fs.FsError) {
+        printf("op: {}\n", err.op);
+        printf("path: {}\n", err.path);
+        printf("code: {}\n", err.code);
+        printf("has detail: {}\n", err.detail.byte_length() > 0);
+        printf("message: {}\n", err.message());
+    };
+
+    println("=== error: remove nonexistent ===");
+    try fs.remove("/tmp/chi_no_such_file_12345") catch (err: fs.FsError) {
+        printf("op: {}\n", err.op);
+        printf("code: {}\n", err.code);
+    };
+
+    println("=== error: list_dir nonexistent ===");
+    try fs.list_dir("/tmp/chi_no_such_dir_12345") catch (err: fs.FsError) {
+        printf("op: {}\n", err.op);
+        printf("code: {}\n", err.code);
+    };
+
+    println("=== error: result mode ===");
+    var result = try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError;
+    if result.error {
+        printf("op: {}\n", result.error.op);
+        printf("code: {}\n", result.error.code);
+    }
 
     println("done");
 }
