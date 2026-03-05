@@ -318,6 +318,46 @@ func main() {
     // Allowed: take by reference
     ref_handle(&h3);
 
+    printf("\n-- Auto-deref --\n");
+    // Auto-deref through Shared: method calls
+    var inner = Point{x: 11, y: 22};
+    var shared_pt = Shared<Point>{inner};
+    printf("shared deref method: {}\n", shared_pt.show());
+
+    // Auto-deref through Shared: field access
+    printf("shared deref field x: {}\n", shared_pt.x);
+    printf("shared deref field y: {}\n", shared_pt.y);
+
+    // Auto-deref through Shared: mutating field via DerefMut
+    shared_pt.x = 33;
+    printf("shared deref mutate: {}\n", shared_pt.show());
+
+    // Auto-deref through Shared: copy shares the ref
+    var shared_pt2 = shared_pt;
+    shared_pt2.y = 44;
+    printf("shared copy deref: {}\n", shared_pt.show());
+
+    // Auto-deref through Box: method calls
+    var boxed_pt = Box<Point>.wrap(Point{x: 55, y: 66});
+    printf("box deref method: {}\n", boxed_pt.show());
+
+    // Auto-deref through Box: field access
+    printf("box deref field x: {}\n", boxed_pt.x);
+
+    // Auto-deref through Box: mutating field via DerefMut
+    boxed_pt.y = 77;
+    printf("box deref mutate: {}\n", boxed_pt.show());
+
+    // Explicit *p deref syntax on Shared
+    printf("*shared: {}\n", (*shared_pt).show());
+
+    // Explicit *p deref syntax on Box
+    printf("*box: {}\n", (*boxed_pt).show());
+
+    // *p deref with mutation
+    (*boxed_pt).x = 88;
+    printf("*box mutate: {}\n", (*boxed_pt).show());
+
     printf("\n=== All trait bound tests passed! ===\n");
 }
 

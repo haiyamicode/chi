@@ -1703,6 +1703,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 return t->get_elem();
             }
+            // Check for ops.Deref / ops.DerefMut
+            {
+                auto symbol =
+                    scope.is_lhs ? IntrinsicSymbol::DerefMut : IntrinsicSymbol::Deref;
+                auto method_call = try_resolve_operator_method(symbol, t, nullptr, data.op1,
+                                                               nullptr, node, scope);
+                // Fallback: if only DerefMut is provided, use it for reads too
+                if (!method_call && !scope.is_lhs) {
+                    method_call = try_resolve_operator_method(
+                        IntrinsicSymbol::DerefMut, t, nullptr, data.op1, nullptr, node, scope);
+                }
+                if (method_call) {
+                    data.resolved_call = method_call->call_node;
+                    auto ret = method_call->return_type;
+                    if (ret && ret->is_reference())
+                        return ret->get_elem();
+                    return ret;
+                }
+            }
             goto invalid;
         }
         case TokenType::LNOT: {

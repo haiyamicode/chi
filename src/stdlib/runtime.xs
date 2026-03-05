@@ -130,12 +130,6 @@ export struct Shared<T> {
         }
     }
 
-    impl ops.UnwrapMut<T> {
-        mut func unwrap_mut() &mut T {
-            return &mut this.data.value;
-        }
-    }
-
     impl ops.Deref<T> {
         func deref() &T {
             return &this.data.value;
@@ -204,14 +198,6 @@ export struct Box<T: ops.AllowUnsized> {
     impl where T: ops.Sized {
         static func wrap(val: T) Box<T> {
             return {mem.copy_from<T>(&val)};
-        }
-    }
-
-    impl ops.UnwrapMut<T> {
-        mut func unwrap_mut() &mut T {
-            unsafe {
-                return this._ptr;
-            }
         }
     }
 
@@ -986,33 +972,31 @@ export struct Promise<T> {
     }
 
     mut func resolve(value: T) {
-        var state = this.data.unwrap_mut();
-        if state.state != 0 {
+        if this.data.state != 0 {
             return;
         }
-        state.state = 1;
-        state.value = value;
-        for var i = 0; i < state.callbacks.length; i = i + 1 {
-            state.callbacks[i](value);
+        this.data.state = 1;
+        this.data.value = value;
+        for var i = 0; i < this.data.callbacks.length; i = i + 1 {
+            this.data.callbacks[i](value);
         }
     }
 
     func is_resolved() bool {
-        return this.data.as_ref().state == 1;
+        return this.data.state == 1;
     }
 
     func value() ?T {
-        return this.data.as_ref().value;
+        return this.data.value;
     }
 
     mut func then(callback: func (value: T)) {
-        var state = this.data.unwrap_mut();
-        if state.state == 1 {
+        if this.data.state == 1 {
             // Already resolved - invoke immediately
-            callback(state.value!);
+            callback(this.data.value!);
         } else {
             // Pending - add to callback list
-            state.callbacks.push(callback);
+            this.data.callbacks.push(callback);
         }
     }
 

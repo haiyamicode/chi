@@ -59,4 +59,17 @@ consumed: 99
 consumed: 1
 ref: 42
 
+-- Auto-deref --
+shared deref method: (11, 22)
+shared deref field x: 11
+shared deref field y: 22
+shared deref mutate: (33, 22)
+shared copy deref: (33, 44)
+box deref method: (55, 66)
+box deref field x: 55
+box deref mutate: (55, 77)
+*shared: (33, 44)
+*box: (55, 77)
+*box mutate: (88, 77)
+
 === All trait bound tests passed! ===

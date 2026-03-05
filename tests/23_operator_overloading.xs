@@ -241,17 +241,17 @@ func main() {
     var result2 = add<int>(10, 15);
     printf("int: 10 + 15 = {}\n", result2);
 
-    // Box Unwrap/UnwrapMut
+    // Box auto-deref
     var b = Box<Point>{new Point{7, 8}};
-    printf("box unwrap: {}\n", b!);
-    b!.x = 50;
-    b!.y = 60;
-    printf("box unwrap_mut: {}\n", b!);
+    printf("box deref: ({}, {})\n", b.x, b.y);
+    b.x = 50;
+    b.y = 60;
+    printf("box deref_mut: ({}, {})\n", b.x, b.y);
 
-    // Shared Unwrap (read-only)
+    // Shared auto-deref (read-only)
     let sp = Point{3, 4};
     var s = Shared<Point>{sp};
-    printf("shared unwrap: {}\n", s!);
+    printf("shared deref: ({}, {})\n", s.x, s.y);
 
     // Wrapper: only UnwrapMut, compiler should use it for reads
     let wp = Point{100, 200};
@@ -260,9 +260,9 @@ func main() {
     w!.x = 300;
     printf("wrapper write: {}\n", w!);
 
-    // Address-of unwrap: &(b!) should give &Point
-    let ref = &(b!);
-    printf("addr of unwrap: {}\n", *ref);
+    // Address-of deref: &(b.deref_mut()) should give &Point
+    let ref = b.as_mut();
+    printf("addr of deref: {}\n", *ref);
 
     // Operator on temporaries (LHS has no address)
     var tmp = Point{10, 20};

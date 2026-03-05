@@ -2352,6 +2352,13 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &builder = *m_ctx->llvm_builder.get();
         switch (data.op_type) {
         case TokenType::MUL: {
+            if (data.resolved_call) {
+                auto ref_ptr = compile_fn_call(fn, data.resolved_call);
+                auto elem = expr->resolved_type;
+                if (ChiTypeStruct::is_interface(elem))
+                    return ref_ptr;
+                return builder.CreateLoad(compile_type(elem), ref_ptr);
+            }
             auto ptr = compile_expr(fn, data.op1);
             auto elem_type = get_chitype(data.op1)->get_elem();
             // Interface is abstract — deref returns the fat pointer value itself
@@ -4225,6 +4232,10 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         auto &builder = *m_ctx->llvm_builder;
         switch (data.op_type) {
         case TokenType::MUL: {
+            if (data.resolved_call) {
+                auto ref_ptr = compile_fn_call(fn, data.resolved_call);
+                return RefValue::from_address(ref_ptr);
+            }
             // For pointer-to-interface deref, return the fat pointer variable's address
             // so interface copy can update both data and vtable
             auto op1_type = get_chitype(data.op1);
