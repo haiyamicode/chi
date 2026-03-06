@@ -282,7 +282,8 @@ void AstPrinter::print_node(Node *node) {
                 print_node(stmt);
                 if (stmt->type == NodeType::ForStmt || stmt->type == NodeType::WhileStmt) {
                     // These handlers print their own \n
-                } else if (stmt->type == NodeType::IfExpr || stmt->type == NodeType::Block) {
+                } else if (stmt->type == NodeType::IfExpr || stmt->type == NodeType::Block ||
+                           stmt->type == NodeType::SwitchExpr) {
                     emit("\n");
                 } else {
                     emit(";");

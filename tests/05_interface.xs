@@ -240,7 +240,7 @@ func describe_shape(s: &Shape) {
         &Circle => printf("circle r={}\n", s.radius),
         &Rect => printf("rect {}x{}\n", s.w, s.h),
         else => println("unknown shape")
-    };
+    }
 }
 
 func describe_animal(a: &Animal) string {
