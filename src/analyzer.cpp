@@ -160,11 +160,44 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
             auto token_node = result.token->node;
             // get associated decl from identifier
             if (token_node) {
-                if (token_node->type == ast::NodeType::Identifier &&
+                if (token_node->type == ast::NodeType::ConstructExpr) {
+                    // Click on construct type name -> jump to new() or struct
+                    auto *resolved = token_node->resolved_type;
+                    if (resolved) {
+                        auto *struct_type = resolver.resolve_struct_type(resolved);
+                        if (struct_type) {
+                            auto *ctor = struct_type->get_constructor();
+                            if (ctor && ctor->node) {
+                                result.decl = ctor->node;
+                            } else if (struct_type->node) {
+                                result.decl = struct_type->node;
+                            }
+                        }
+                    }
+                } else if (token_node->type == ast::NodeType::FieldInitExpr) {
+                    // Field name in construct expression -> jump to struct member
+                    auto &fi = token_node->data.field_init_expr;
+                    if (fi.resolved_field && fi.resolved_field->node) {
+                        result.decl = fi.resolved_field->node;
+                    }
+                } else if (token_node->type == ast::NodeType::Identifier &&
                     token_node->data.identifier.decl) {
                     result.decl = token_node->data.identifier.decl;
                 } else {
                     result.decl = token_node;
+                }
+            }
+
+            // Check if token is a field name in a construct expression
+            if (!result.decl && result.construct_expr) {
+                auto &cdata = result.construct_expr->data.construct_expr;
+                for (auto fi : cdata.field_inits) {
+                    if (fi->data.field_init_expr.field == result.token &&
+                        fi->data.field_init_expr.resolved_field &&
+                        fi->data.field_init_expr.resolved_field->node) {
+                        result.decl = fi->data.field_init_expr.resolved_field->node;
+                        break;
+                    }
                 }
             }
 
@@ -399,6 +432,61 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
     }
 }
 
+static ast::Node *find_construct_expr(ast::Node *node, Pos cursor_pos) {
+    if (!node)
+        return nullptr;
+    switch (node->type) {
+    case ast::NodeType::ConstructExpr: {
+        // Check if cursor is inside the construct's braces (not on the type name)
+        auto end = node->end_token;
+        auto *type_node = node->data.construct_expr.type;
+        // Cursor must be after the type (i.e., inside the braces)
+        long body_start_offset = node->start_token ? node->start_token->pos.offset : -1;
+        if (type_node) {
+            auto type_end = type_node->end_token ? type_node->end_token : type_node->token;
+            if (type_end)
+                body_start_offset =
+                    type_end->pos.offset + (long)type_end->to_string().size();
+        }
+        if (body_start_offset >= 0 && end &&
+            cursor_pos.offset > body_start_offset &&
+            cursor_pos.offset <= end->pos.offset) {
+            // Check inside field init values first (nested constructs)
+            for (auto item : node->data.construct_expr.field_inits) {
+                auto r = find_construct_expr(item->data.field_init_expr.value, cursor_pos);
+                if (r)
+                    return r;
+            }
+            for (auto item : node->data.construct_expr.items) {
+                auto r = find_construct_expr(item, cursor_pos);
+                if (r)
+                    return r;
+            }
+            return node;
+        }
+        return nullptr;
+    }
+    case ast::NodeType::VarDecl:
+        return find_construct_expr(node->data.var_decl.expr, cursor_pos);
+    case ast::NodeType::BinOpExpr: {
+        auto r = find_construct_expr(node->data.bin_op_expr.op1, cursor_pos);
+        return r ? r : find_construct_expr(node->data.bin_op_expr.op2, cursor_pos);
+    }
+    case ast::NodeType::ReturnStmt:
+        return find_construct_expr(node->data.return_stmt.expr, cursor_pos);
+    case ast::NodeType::FnCallExpr: {
+        for (auto arg : node->data.fn_call_expr.args) {
+            auto r = find_construct_expr(arg, cursor_pos);
+            if (r)
+                return r;
+        }
+        return nullptr;
+    }
+    default:
+        return nullptr;
+    }
+}
+
 bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
     if (!node)
         return false;
@@ -432,6 +520,9 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                                 return true;
                             }
                             find_fn_call(stmt, cursor_pos, result);
+                            auto ce = find_construct_expr(stmt, cursor_pos);
+                            if (ce)
+                                result->construct_expr = ce;
                             result->stmt = stmt;
                             return true;
                         }

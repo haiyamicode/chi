@@ -417,6 +417,84 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
     return sig_help;
 }
 
+static boost::json::object build_construct_signature_help(cx::ScanResult &result,
+                                                          cx::Resolver &resolver) {
+    boost::json::object sig_help;
+    auto *node = result.construct_expr;
+    if (!node)
+        return sig_help;
+
+    auto *resolved = node->resolved_type;
+    if (!resolved)
+        return sig_help;
+    auto *struct_ = resolver.resolve_struct_type(resolved);
+    if (!struct_)
+        return sig_help;
+    auto *constructor = struct_->get_constructor();
+    if (!constructor || !constructor->resolved_type ||
+        constructor->resolved_type->kind != cx::TypeKind::Fn)
+        return sig_help;
+
+    auto &fn = constructor->resolved_type->data.fn;
+    auto *ctor_node = constructor->node;
+    if (!ctor_node || ctor_node->type != cx::ast::NodeType::FnDef)
+        return sig_help;
+    auto *proto = ctor_node->data.fn_def.fn_proto;
+    auto &proto_params = proto->data.fn_proto.params;
+
+    // Build signature label
+    std::string type_name = resolver.format_type_display(resolved);
+    std::string label = type_name + "{";
+    boost::json::array params_json;
+
+    for (int i = 0; i < fn.params.len; i++) {
+        auto param_start = label.size();
+        if (i < proto_params.len && !proto_params[i]->name.empty()) {
+            label += proto_params[i]->name + ": ";
+        }
+        label += resolver.format_type_display(fn.params[i]);
+        auto param_end = label.size();
+
+        boost::json::object param;
+        param["label"] = boost::json::array{(int64_t)param_start, (int64_t)param_end};
+        params_json.push_back(param);
+
+        if (i < fn.params.len - 1) {
+            label += ", ";
+        }
+    }
+    label += "}";
+
+    // Compute active parameter from cursor position vs construct items
+    auto &data = node->data.construct_expr;
+    int active_param = 0;
+    for (int i = 0; i < data.items.len; i++) {
+        auto item = data.items[i];
+        auto item_start = item->start_token ? item->start_token : item->token;
+        if (item_start && result.pos.offset >= item_start->pos.offset) {
+            active_param = i;
+        }
+    }
+    // Past all items (trailing comma) → next param
+    if (data.items.len > 0) {
+        auto last = data.items[data.items.len - 1];
+        auto last_end = last->end_token ? last->end_token : last->token;
+        if (last_end &&
+            result.pos.offset > last_end->pos.offset + (long)last_end->to_string().size()) {
+            active_param = data.items.len;
+        }
+    }
+
+    boost::json::object sig;
+    sig["label"] = label;
+    sig["parameters"] = params_json;
+
+    sig_help["signatures"] = boost::json::array{sig};
+    sig_help["activeSignature"] = 0;
+    sig_help["activeParameter"] = active_param;
+    return sig_help;
+}
+
 static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &resolver) {
     boost::json::array completions = {};
     assert(result.is_dot && result.dot_expr);
@@ -460,6 +538,77 @@ static boost::json::array complete_dot(cx::ScanResult &result, cx::Resolver &res
             completion["detail"] = resolver.format_type_display(member->resolved_type);
         }
         completions.push_back(completion);
+    }
+    return completions;
+}
+
+static boost::json::array complete_construct(cx::ScanResult &result, cx::Resolver &resolver,
+                                              cx::ScopeResolver &scope_resolver,
+                                              const std::string &source) {
+    boost::json::array completions = {};
+    auto *node = result.construct_expr;
+    if (!node)
+        return completions;
+
+    auto &data = node->data.construct_expr;
+
+    // Resolve the struct type from the construct expression
+    auto *resolved = node->resolved_type;
+    if (!resolved)
+        return completions;
+    auto *struct_ = resolver.resolve_struct_type(resolved);
+    if (!struct_)
+        return completions;
+
+    // Collect already-provided field names
+    std::set<std::string> provided;
+    for (auto fi : data.field_inits) {
+        provided.insert(fi->data.field_init_expr.field->str);
+    }
+
+    // Check if cursor is right after ':' for shorthand
+    bool is_colon = false;
+    if (result.pos.offset > 0 && result.pos.offset <= source.size()) {
+        is_colon = source[result.pos.offset - 1] == ':';
+    }
+
+    // For shorthand ':' completions, collect local symbols in scope
+    std::set<std::string> local_symbols;
+    if (is_colon && result.scope) {
+        for (auto symbol : scope_resolver.get_all_symbols(result.scope)) {
+            local_symbols.insert(symbol->name);
+        }
+    }
+
+    for (auto member : struct_->members) {
+        if (member->is_method())
+            continue;
+        auto name = member->get_name();
+        if (provided.count(name))
+            continue;
+
+        if (is_colon) {
+            // Only suggest shorthand if a matching local symbol exists
+            if (!local_symbols.count(name))
+                continue;
+            boost::json::object completion;
+            completion["label"] = name;
+            completion["kind"] = "Field";
+            if (member->resolved_type) {
+                completion["detail"] = resolver.format_type_display(member->resolved_type);
+            }
+            completion["insertText"] = name;
+            completions.push_back(completion);
+        } else {
+            boost::json::object completion;
+            completion["label"] = name;
+            completion["kind"] = "Field";
+            if (member->resolved_type) {
+                completion["detail"] = resolver.format_type_display(member->resolved_type);
+            }
+            completion["insertText"] = name + ": ";
+            completions.push_back(completion);
+        }
     }
     return completions;
 }
@@ -722,7 +871,9 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
 
     if (operation == "completion") {
         boost::json::array completions;
-        if (result.scope) {
+        if (result.construct_expr) {
+            completions = complete_construct(result, resolver, scope_resolver, source_str);
+        } else if (result.scope) {
             if (result.is_dot) {
                 completions = complete_dot(result, resolver);
             } else {
@@ -744,6 +895,10 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
     } else if (operation == "signatureHelp") {
         if (result.fn_call) {
             output["signatureHelp"] = build_signature_help(result, resolver);
+        } else if (result.construct_expr) {
+            auto sh = build_construct_signature_help(result, resolver);
+            if (!sh.empty())
+                output["signatureHelp"] = sh;
         }
     } else if (operation == "info") {
         if (result.decl) {

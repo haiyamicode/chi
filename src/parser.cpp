@@ -2783,7 +2783,7 @@ Node *Parser::parse_construct_expr() {
         }
         consume();
     }
-    expect(TokenType::RBRACE);
+    node->end_token = expect(TokenType::RBRACE);
     return node;
 }
 

@@ -20,6 +20,8 @@ struct ScanResult {
     ast::Node *decl = nullptr;
     ast::Node *fn_call = nullptr;
     int active_param = 0;
+    ast::Node *construct_expr = nullptr; // set when cursor is inside a construct expression
+    bool is_construct_colon = false;     // true when cursor is right after ':' (shorthand)
 };
 
 class Analyzer {
