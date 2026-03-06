@@ -3211,7 +3211,7 @@ Node *Parser::parse_import_decl() {
         }
     } else {
         if (!m_ctx->format_mode) {
-            error(get(), "expected identifier, '*', '{', or module path in import declaration");
+            error(get(), "expected identifier, '*', '{{', or module path in import declaration");
         }
         // Error recovery: consume tokens until we find a semicolon or reasonable import syntax
         // For now, just create a dummy path to prevent null pointer crashes
@@ -3328,7 +3328,7 @@ Node *Parser::parse_export_decl() {
         node->data.export_decl.path = expect(TokenType::STRING);
     } else {
         if (!m_ctx->format_mode) {
-            error(get(), "expected '*' or '{' in export declaration");
+            error(get(), "expected '*' or '{{' in export declaration");
         }
         // Error recovery: use export keyword as dummy path to prevent crashes
         node->data.export_decl.path = kw;

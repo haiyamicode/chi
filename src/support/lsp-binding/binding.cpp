@@ -821,6 +821,131 @@ static boost::json::array generate_semantic_tokens(cx::ast::Module *module) {
 }
 
 // ============================================================================
+// Auto-import: suggest symbols from unimported stdlib modules
+// ============================================================================
+
+// Load a stdlib module by absolute path (cached).
+static cx::ast::Module *load_stdlib_module(cx::CompilationContext *ctx,
+                                           const std::string &abs_path) {
+    auto cached = ctx->source_modules.get(abs_path);
+    if (cached)
+        return *cached;
+    auto pkg = ctx->get_or_create_package("std");
+    auto src = cx::io::Buffer::from_file(abs_path);
+    auto *mod = ctx->process_source(pkg, &src, abs_path);
+    cx::Resolver mod_resolver = ctx->create_resolver();
+    mod_resolver.resolve(mod);
+    ctx->source_modules[abs_path] = mod;
+    return mod;
+}
+
+static bool is_type_export(cx::ast::Node *node) {
+    if (!node) return false;
+    auto type = node->type;
+    return type == cx::ast::NodeType::StructDecl ||
+           type == cx::ast::NodeType::EnumDecl ||
+           type == cx::ast::NodeType::Primitive;  // interfaces
+}
+
+// Suggest types (struct/enum/interface) from unimported stdlib modules.
+// These use selective import: import {File} from "std/fs";
+static void collect_auto_import_completions(
+    boost::json::array &completions,
+    cx::Analyzer &analyzer,
+    cx::ast::Module *module,
+    cx::Resolver &resolver,
+    const std::set<std::string> &in_scope_names,
+    long &index) {
+
+    auto *ctx = analyzer.get_context();
+    auto stdlib_dir = ctx->get_stdlib_path("std");
+
+    if (!fs::exists(stdlib_dir) || !fs::is_directory(stdlib_dir))
+        return;
+
+    // Collect already-imported module paths
+    std::set<std::string> imported_paths;
+    for (auto *imp : module->imports) {
+        imported_paths.insert(imp->full_path());
+    }
+
+    for (auto &entry : fs::directory_iterator(stdlib_dir)) {
+        if (!entry.is_regular_file())
+            continue;
+        auto ext = entry.path().extension().string();
+        if (ext != ".xs" && ext != ".x")
+            continue;
+
+        auto abs_path = fs::absolute(entry.path()).string();
+        if (imported_paths.count(abs_path))
+            continue;
+
+        auto mod_name = "std/" + entry.path().stem().string();
+        auto *stdlib_mod = load_stdlib_module(ctx, abs_path);
+        if (!stdlib_mod || stdlib_mod->broken)
+            continue;
+
+        for (auto *exp : stdlib_mod->exports) {
+            if (!exp || exp->name.empty())
+                continue;
+            if (!is_type_export(exp))
+                continue;
+            if (in_scope_names.count(exp->name))
+                continue;
+
+            boost::json::object completion;
+            completion["label"] = exp->name;
+            completion["kind"] = get_symbol_kind(exp);
+            if (exp->resolved_type) {
+                completion["detail"] = resolver.format_type_display(exp->resolved_type);
+            }
+            completion["autoImport"] = mod_name;
+            completion["autoImportStyle"] = "symbol";
+            completion["data"] = ++index;
+            completions.push_back(completion);
+        }
+    }
+}
+
+// Try to complete `mod_name.` as a dot-access into an unimported stdlib module.
+// Returns the module's exports as dot completions, tagged with autoImport.
+static boost::json::array complete_auto_import_dot(
+    cx::Analyzer &analyzer,
+    cx::ast::Module *module,
+    cx::Resolver &resolver,
+    const std::string &mod_name) {
+
+    boost::json::array completions;
+    auto *ctx = analyzer.get_context();
+    auto stdlib_dir = ctx->get_stdlib_path("std");
+    auto mod_path = (fs::path(stdlib_dir) / (mod_name + ".xs")).string();
+
+    if (!fs::exists(mod_path))
+        return completions;
+
+    auto abs_path = fs::absolute(mod_path).string();
+    auto *stdlib_mod = load_stdlib_module(ctx, abs_path);
+    if (!stdlib_mod || stdlib_mod->broken)
+        return completions;
+
+    auto import_path = "std/" + mod_name;
+    for (auto *exp : stdlib_mod->exports) {
+        if (!exp || exp->name.empty())
+            continue;
+        boost::json::object completion;
+        completion["label"] = exp->name;
+        completion["kind"] = get_symbol_kind(exp);
+        if (exp->resolved_type) {
+            completion["detail"] = resolver.format_type_display(exp->resolved_type);
+        }
+        completion["autoImport"] = import_path;
+        completion["autoImportStyle"] = "module";
+        completions.push_back(completion);
+    }
+    return completions;
+}
+
+// ============================================================================
 // N-API methods
 // ============================================================================
 
@@ -876,10 +1001,20 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
         } else if (result.scope) {
             if (result.is_dot) {
                 completions = complete_dot(result, resolver);
+                // If dot completions are empty (unresolved), check for stdlib module name
+                if (completions.empty() && result.dot_expr) {
+                    auto *expr = result.dot_expr->data.dot_expr.expr;
+                    if (expr && expr->token && expr->token->type == cx::TokenType::IDEN) {
+                        completions = complete_auto_import_dot(
+                            analyzer, module, resolver, expr->token->str);
+                    }
+                }
             } else {
                 long index = 0;
+                std::set<std::string> in_scope_names;
                 for (auto symbol : scope_resolver.get_all_symbols(result.scope)) {
                     ++index;
+                    in_scope_names.insert(symbol->name);
                     boost::json::object completion;
                     completion["label"] = symbol->name;
                     completion["kind"] = get_symbol_kind(symbol);
@@ -889,6 +1024,9 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
                     completion["data"] = index;
                     completions.push_back(completion);
                 }
+                // Add auto-import suggestions from unimported stdlib modules
+                collect_auto_import_completions(
+                    completions, analyzer, module, resolver, in_scope_names, index);
             }
         }
         output["completions"] = completions;
