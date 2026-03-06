@@ -911,7 +911,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         TypeList param_types;
         bool is_variadic = false;
         bool is_static = node->declspec().is_static();
-        auto container = is_static ? nullptr : scope.parent_struct;
+        auto container = (is_static || is_lambda) ? nullptr : scope.parent_struct;
 
         if (data.is_vararg) {
             is_variadic = true;

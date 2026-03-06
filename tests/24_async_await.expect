@@ -55,6 +55,17 @@ original counter after mutate: 999
 executor called
 promise resolved with: 123
 
+=== Test 12: Promise<string>.make() ===
+sync make: 'hello world'
+then callback: 'deferred string'
+captured: 'hello from capture'
+cb1: 'multi'
+cb2: 'multi'
+deferred then: 'resolved later'
+
+=== Test 13: Promise<string> in static method ===
+struct make: 'from struct'
+
 All async/await tests passed!
 timeout callback executed
 sleep resolved

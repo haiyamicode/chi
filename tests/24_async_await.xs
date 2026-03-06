@@ -162,6 +162,65 @@ func test_promise_helper() {
     println("");
 }
 
+func test_promise_string_make() {
+    println("=== Test 12: Promise<string>.make() ===");
+    // Sync resolve through make
+    var p1 = Promise<string>.make(func (resolve) {
+        resolve("hello world");
+    });
+    printf("sync make: '{}'\n", p1.value()!);
+
+    // Deferred resolve through make
+    var p2 = Promise<string>.make(func (resolve) {
+        resolve("deferred string");
+    });
+    p2.then(func (v: string) {
+        printf("then callback: '{}'\n", v);
+    });
+
+    // Make with string concatenation
+    var prefix = "hello";
+    var p3 = Promise<string>.make(func [prefix] (resolve) {
+        resolve(prefix + " from capture");
+    });
+    printf("captured: '{}'\n", p3.value()!);
+
+    // Multiple .then callbacks with string
+    var p4 = Promise<string>.make(func (resolve) {
+        resolve("multi");
+    });
+    p4.then(func (v: string) {
+        printf("cb1: '{}'\n", v);
+    });
+    p4.then(func (v: string) {
+        printf("cb2: '{}'\n", v);
+    });
+
+    // Deferred string promise - register then before resolve
+    var p5 = Promise<string>{};
+    p5.then(func (v: string) {
+        printf("deferred then: '{}'\n", v);
+    });
+    p5.resolve("resolved later");
+
+    println("");
+}
+
+struct Container {
+    static func make_promise(msg: string) Promise<string> {
+        return Promise<string>.make(func [msg] (resolve) {
+            resolve(msg);
+        });
+    }
+}
+
+func test_promise_string_in_struct() {
+    println("=== Test 13: Promise<string> in static method ===");
+    var p = Container.make_promise("from struct");
+    printf("struct make: '{}'\n", p.value()!);
+    println("");
+}
+
 func main() {
     test_manual_promise();
     test_async_no_await();
@@ -174,6 +233,8 @@ func main() {
     test_sleep();
     test_sleep_value_capture();
     test_promise_helper();
+    test_promise_string_make();
+    test_promise_string_in_struct();
     println("All async/await tests passed!");
 }
 
