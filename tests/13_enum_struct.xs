@@ -227,8 +227,7 @@ enum Color {
                 return switch this {
                     Color.Red => "red",
                     Color.Green => "green",
-                    Color.Blue => "blue",
-                    else => "unknown"
+                    Color.Blue => "blue"
                 };
             }
         }
@@ -250,8 +249,7 @@ enum Shape {
             func display() string {
                 return switch this {
                     Shape.Circle => stringf("circle(r={})", this.radius),
-                    Shape.Rect => stringf("rect({}x{})", this.w, this.h),
-                    else => "unknown"
+                    Shape.Rect => stringf("rect({}x{})", this.w, this.h)
                 };
             }
         }
@@ -336,6 +334,32 @@ func test_enum_display_override() {
     printf("reassign printf: {}\n", r2);
 }
 
+func test_switch_statement() {
+    println("=== Test: Switch statement ===");
+
+    var c = Color.Green;
+
+    // Statement switch: no semicolon, no else, non-exhaustive
+    switch c {
+        Color.Green => println("green stmt")
+    }
+
+    // Statement switch: exhaustive, no else
+    switch c {
+        Color.Red => println("red"),
+        Color.Green => println("green"),
+        Color.Blue => println("blue")
+    }
+
+    // Expression switch: exhaustive, no else needed
+    var name = switch c {
+        Color.Red => "red",
+        Color.Green => "green",
+        Color.Blue => "blue"
+    };
+    printf("expr: {}\n", name);
+}
+
 func main() {
     var node = Node.FnDef{name: "f", params: {}, ret: "int"};
     printf("node.type: {}\n", node.type);
@@ -356,5 +380,6 @@ func main() {
     test_switch_narrowing();
     test_enum_base_struct_lifecycle();
     test_enum_display_override();
+    test_switch_statement();
 }
 

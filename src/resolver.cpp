@@ -4314,6 +4314,32 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 ret_type = case_type;
             }
         }
+
+        // Check exhaustiveness: require else unless all enum variants are covered
+        bool has_else = false;
+        int covered_count = 0;
+        for (auto scase : data.cases) {
+            if (!scase) continue;
+            if (scase->data.case_expr.is_else) {
+                has_else = true;
+                break;
+            }
+            covered_count += scase->data.case_expr.clauses.len;
+        }
+        if (!has_else) {
+            auto underlying = expr_type->eval();
+            bool exhaustive = false;
+            if (underlying && underlying->kind == TypeKind::EnumValue) {
+                auto enum_ = underlying->data.enum_value.parent_enum();
+                if (enum_ && covered_count >= enum_->variants.len) {
+                    exhaustive = true;
+                }
+            }
+            if (!exhaustive && ret_type && ret_type->kind != TypeKind::Void) {
+                error(node, errors::SWITCH_EXPR_MUST_HAVE_ELSE);
+            }
+        }
+
         return ret_type ? ret_type : get_system_types()->void_;
     }
     case NodeType::CaseExpr: {

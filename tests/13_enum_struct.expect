@@ -89,3 +89,7 @@ display rect: rect(10x20)
 copy printf: red
 copy display: red
 reassign printf: blue
+=== Test: Switch statement ===
+green stmt
+green
+expr: green

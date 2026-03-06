@@ -3578,10 +3578,18 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             case_labels.add(label);
         }
 
+        bool has_else = false;
         for (int i = 0; i < data.cases.len; i++) {
             fn->use_label(case_labels[i]);
             auto scase = data.cases[i];
+            if (scase->data.case_expr.is_else) has_else = true;
             compile_block(fn, scase, scase->data.case_expr.body, done_label, var);
+        }
+
+        // No else: default label needs a terminator
+        if (!has_else) {
+            fn->use_label(default_label);
+            builder.CreateBr(done_label);
         }
 
         fn->use_label(done_label);

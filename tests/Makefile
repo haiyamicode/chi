@@ -72,6 +72,36 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	fi; \
        	rm -f $*.output
 
+# Special rule for enum struct test — also tests rejection cases
+13_enum_struct.test: 13_enum_struct.expect
+	echo Test: 13_enum_struct...
+	@$(CHI) -o $(TMP).13_enum_struct -c 13_enum_struct.xs && $(TMP).13_enum_struct 2>&1 >13_enum_struct.output
+	@if [ "x`diff -qbu 13_enum_struct.expect 13_enum_struct.output`" != "x" ]; \
+	then \
+		echo "error in test 13_enum_struct (output mismatch)"; \
+		diff -u 13_enum_struct.expect 13_enum_struct.output; \
+		rm -f 13_enum_struct.output; \
+		exit 1; \
+	fi; \
+	rm -f 13_enum_struct.output
+	@failed=0; \
+	for f in testdata/13_enum_struct_errors/*.xs; do \
+		name=$$(basename $$f); \
+		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_enum 2>&1); \
+		if [ $$? -eq 0 ]; then \
+			echo "error: $$name should have been rejected but compiled successfully"; \
+			failed=1; \
+		else \
+			expected=$$(grep '// expect-error:' $$f | head -1 | sed 's/.*expect-error: *//'); \
+			if [ -n "$$expected" ] && ! echo "$$errmsg" | grep -q "$$expected"; then \
+				echo "error: $$name wrong error (expected '$$expected')"; \
+				echo "  got: $$(echo "$$errmsg" | head -1)"; \
+				failed=1; \
+			fi; \
+		fi; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
+
 # Special rule for construct expr test — also tests rejection cases
 42_construct_expr.test: 42_construct_expr.expect
 	echo Test: 42_construct_expr...

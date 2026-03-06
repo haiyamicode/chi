@@ -1355,6 +1355,18 @@ Node *Parser::parse_stmt(bool *as_expr) {
         return node;
     }
 
+    case TokenType::KW_SWITCH: {
+        auto node = parse_switch_expr();
+        if (next_is(TokenType::SEMICOLON)) {
+            consume();
+        } else if (next_is(TokenType::RBRACE)) {
+            // Last expression in block — treat as block result
+            *as_expr = true;
+        }
+        // Otherwise: no semicolon needed (statement form)
+        return node;
+    }
+
     case TokenType::KW_FOR:
         return parse_for_stmt();
 
@@ -1384,7 +1396,6 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::NOT:
     case TokenType::INC:
     case TokenType::DEC:
-    case TokenType::KW_SWITCH:
     case TokenType::KW_TRY:
     case TokenType::KW_AWAIT: {
         if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_LET)) {
@@ -3335,17 +3346,6 @@ Node *Parser::parse_switch_expr() {
             break;
         }
         consume();
-    }
-    bool has_else = false;
-    for (auto case_expr : node->data.switch_expr.cases) {
-        // Check for null to avoid crash
-        if (case_expr && case_expr->data.case_expr.is_else) {
-            has_else = true;
-            break;
-        }
-    }
-    if (!has_else && !m_ctx->format_mode) {
-        error(kw, errors::SWITCH_EXPR_MUST_HAVE_ELSE);
     }
     expect(TokenType::RBRACE);
     m_ctx->resolver->pop_scope();
