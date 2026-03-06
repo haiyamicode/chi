@@ -2799,7 +2799,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));
             return builder.CreateCmp(cmpop, lhs, rhs);
         }
-        case TokenType::QUES_QUES: {
+        case TokenType::QUES: {
             auto result_type_l = compile_type(get_chitype(expr));
             return compile_optional_branch(
                 fn, data.op1, result_type_l, "coalesce",

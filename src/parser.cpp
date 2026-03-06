@@ -55,10 +55,6 @@ int Parser::get_op_precedence(TokenType op_type) {
     case TokenType::COMMA:
         return COMMA_PREC;
 
-    case TokenType::QUES:
-        return TERNARY_PREC;
-
-    case TokenType::QUES_QUES:
     case TokenType::LOR:
         return 2;
 
@@ -452,6 +448,13 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
         auto next_tok = lookahead(1);
         if (next_tok->type == TokenType::MUL || next_tok->type == TokenType::LBRACE) {
             return parse_export_decl();
+        }
+        // Pattern export: export IDEN* from "module" (e.g. export SDL_* from "./sdl")
+        if (next_tok->type == TokenType::IDEN) {
+            auto after_iden = lookahead(2);
+            if (after_iden->type == TokenType::MUL) {
+                return parse_export_decl();
+            }
         }
         consume(); // consume 'export'
         if (!decl_spec) decl_spec = m_ctx->allocator->create_decl_spec();
@@ -1507,6 +1510,18 @@ Node *Parser::parse_binary_expr(bool lhs, Node *parent, int prec) {
             lookahead(1)->type == TokenType::GT) { // check RSHIFT >> operator
             consume();
             tok_type = TokenType::RSHIFT;
+        }
+        // ?? null coalesce: two QUES tokens → treat as single operator at LOR precedence
+        if (op_token->type == TokenType::QUES && lookahead(1)->type == TokenType::QUES) {
+            consume(); // consume first ?
+            consume(); // consume second ?
+            auto op2 = parse_binary_expr(lhs, parent, 3); // precedence 2 + 1
+            auto node = create_node(NodeType::BinOpExpr, op_token);
+            node->data.bin_op_expr.op1 = op1;
+            node->data.bin_op_expr.op_type = TokenType::QUES;
+            node->data.bin_op_expr.op2 = op2;
+            op1 = node;
+            continue;
         }
         auto op_prec = get_op_precedence(tok_type);
         if (op_prec < prec) {

@@ -1470,7 +1470,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Propagate type context for literal inference (e.g., `x == 0` where x is uint32)
             auto ctx_type = t1;
             // For ??, propagate the unwrapped type so RHS gets T context, not ?T
-            if (data.op_type == TokenType::QUES_QUES && t1->kind == TypeKind::Optional) {
+            if (data.op_type == TokenType::QUES && t1->kind == TypeKind::Optional) {
                 ctx_type = t1->get_elem();
             }
             auto op2_scope = scope.set_value_type(ctx_type);
@@ -1544,7 +1544,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.op1, t1, get_system_types()->bool_);
             check_assignment(data.op2, t2, get_system_types()->bool_);
             return get_system_types()->bool_;
-        case TokenType::QUES_QUES: {
+        case TokenType::QUES: {
             if (t1->kind != TypeKind::Optional) {
                 error(node, "left operand of ?? must be optional, got {}", format_type_display(t1));
                 return nullptr;

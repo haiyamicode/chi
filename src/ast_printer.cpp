@@ -625,7 +625,11 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::BinOpExpr: {
         auto &data = node->data.bin_op_expr;
         print_node(data.op1);
-        emit(" {} ", get_token_symbol(data.op_type));
+        // ?? coalesce is stored as QUES since lexer no longer merges ??
+        if (data.op_type == TokenType::QUES)
+            emit(" ?? ");
+        else
+            emit(" {} ", get_token_symbol(data.op_type));
         // Strip redundant type from construct in assignments (same pattern as ReturnStmt)
         if (data.op_type == TokenType::ASS && data.op2 &&
             data.op2->type == NodeType::ConstructExpr && data.op2->data.construct_expr.type &&

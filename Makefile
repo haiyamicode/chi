@@ -45,10 +45,12 @@ analyzer_test: build
 
 formatter_test: build
 	(cd tests; make formatter_test)
+	(cd tests; make formatter_collapse_test)
 
 test_all: build
 	(cd tests; make test)
 	(cd tests; make formatter_test)
+	(cd tests; make formatter_collapse_test)
 	(cd analyzer_tests; make test)
 
 clean:

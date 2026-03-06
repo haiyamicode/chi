@@ -314,10 +314,7 @@ l0:
             t = TokenType::SEMICOLON;
             break;
         case '?':
-            if (peek() == '?') {
-                read();
-                t = TokenType::QUES_QUES;
-            } else if (peek() == '.') {
+            if (peek() == '.') {
                 read();
                 t = TokenType::QUES_DOT;
             } else {
@@ -1029,8 +1026,6 @@ string cx::get_token_symbol(TokenType token_type) {
         return "~";
     case TokenType::QUES:
         return "?";
-    case TokenType::QUES_QUES:
-        return "??";
     case TokenType::QUES_DOT:
         return "?.";
     case TokenType::AT:
