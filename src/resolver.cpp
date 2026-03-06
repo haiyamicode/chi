@@ -470,6 +470,11 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         if (from_type->kind == TypeKind::Pointer) {
             return is_explicit;
         }
+        // Plain enum to int requires explicit cast
+        if (is_explicit && from_type->kind == TypeKind::EnumValue) {
+            auto enum_type = from_type->data.enum_value.enum_type;
+            return enum_type && enum_type->data.enum_.is_plain;
+        }
         return false;
     }
     case TypeKind::Float: {
@@ -543,9 +548,16 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         }
         return false;
     case TypeKind::EnumValue:
-        return from_type->kind == TypeKind::EnumValue &&
-               is_same_type(from_type->data.enum_value.enum_type,
-                            to_type->data.enum_value.enum_type);
+        if (from_type->kind == TypeKind::EnumValue) {
+            return is_same_type(from_type->data.enum_value.enum_type,
+                                to_type->data.enum_value.enum_type);
+        }
+        // int -> plain enum with explicit cast
+        if (is_explicit && from_type->kind == TypeKind::Int) {
+            auto enum_type = to_type->data.enum_value.enum_type;
+            return enum_type && enum_type->data.enum_.is_plain;
+        }
+        return false;
     case TypeKind::ThisType:
         // ThisType should have been substituted by now in generic contexts
         // If we reach here, it means the substitution didn't happen properly
@@ -2889,9 +2901,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto allocator = get_allocator();
             vstruct_data.add_member(allocator, discriminator_field,
                                     get_dummy_var(discriminator_field), discriminator_type);
-            vstruct_data.add_member(
-                allocator, "__display_name", get_dummy_var("__display_name"),
-                get_pointer_type(get_system_types()->string, TypeKind::Reference));
             enum_type->data.enum_.enum_header_struct = vstruct;
 
             // clone the enum header to the value struct
@@ -2964,6 +2973,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             new_member->symbol = base_member->symbol;
                             base_value_struct->member_intrinsics[base_member->symbol] = new_member;
                         }
+                        // Tag enum name intrinsic methods
+                        auto name = base_member->get_name();
+                        if (name == "enum_name") {
+                            new_member->symbol = IntrinsicSymbol::EnumName;
+                            base_value_struct->member_intrinsics[IntrinsicSymbol::EnumName] = new_member;
+                        } else if (name == "discriminator_name") {
+                            new_member->symbol = IntrinsicSymbol::DiscriminatorName;
+                            base_value_struct->member_intrinsics[IntrinsicSymbol::DiscriminatorName] = new_member;
+                        }
                     }
                 }
 
@@ -2983,6 +3001,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     // Propagate interfaces from custom struct (overrides __CxEnumBase's)
                     for (auto iface : base_struct->data.struct_.interfaces) {
                         resolve_vtable(iface->interface_type, enum_data.base_value_type, node);
+                    }
+                }
+
+                // Determine if this is a plain enum (no extra data beyond discriminator)
+                enum_data.is_plain = !data.base_struct;
+                if (enum_data.is_plain) {
+                    for (auto variant : enum_data.variants) {
+                        if (variant->resolved_type->data.enum_value.variant_struct) {
+                            enum_data.is_plain = false;
+                            break;
+                        }
                     }
                 }
             } else if (enum_data.resolve_status == ResolveStatus::EmbedsResolved) {

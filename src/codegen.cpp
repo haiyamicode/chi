@@ -469,24 +469,42 @@ void Compiler::compile_enum(ast::Node *node) {
     enum_type->data.enum_.compiled_data_size = data_size;
 
     auto header_type_l = compile_type(enum_type->data.enum_.enum_header_struct);
+
+    // Emit enum name and variant name globals
+    auto &enum_data = enum_type->data.enum_;
+    auto &name_info = m_ctx->enum_name_table[&enum_data];
+    auto enum_name = node->name;
+    auto enum_name_str = (llvm::Constant *)compile_string_literal(enum_name);
+    name_info.enum_name = new llvm::GlobalVariable(
+        *m_ctx->llvm_module, enum_name_str->getType(), true,
+        llvm::GlobalValue::InternalLinkage, enum_name_str,
+        fmt::format("{}.enum_name", enum_name));
+
     for (auto variant : node->data.enum_decl.variants) {
         auto variant_display_name = variant->resolved_type->get_display_name();
-        auto display_name_str = (llvm::Constant *)compile_string_literal(variant_display_name);
-        auto display_name_var =
-            new llvm::GlobalVariable(*m_ctx->llvm_module, display_name_str->getType(), true,
-                                     llvm::GlobalValue::InternalLinkage, display_name_str,
-                                     fmt::format("{}.display_name", variant_display_name));
+        auto variant_name = variant->resolved_type->name.value_or("");
+        auto variant_name_str = (llvm::Constant *)compile_string_literal(variant_name);
+        auto disc_value = variant->data.enum_variant.resolved_value;
+        name_info.variant_names[disc_value] = new llvm::GlobalVariable(
+            *m_ctx->llvm_module, variant_name_str->getType(), true,
+            llvm::GlobalValue::InternalLinkage, variant_name_str,
+            fmt::format("{}.variant_name", variant_display_name));
+        auto display_str = fmt::format("{}.{}", enum_name, variant_name);
+        auto display_str_val = (llvm::Constant *)compile_string_literal(display_str);
+        name_info.display_names[disc_value] = new llvm::GlobalVariable(
+            *m_ctx->llvm_module, display_str_val->getType(), true,
+            llvm::GlobalValue::InternalLinkage, display_str_val,
+            fmt::format("{}.display_name", variant_display_name));
+
+        auto disc_type_l = compile_type(enum_type->data.enum_.discriminator);
         auto variant_value = llvm::ConstantStruct::get(
             (llvm::StructType *)header_type_l,
             {
-                llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
-                                       variant->data.enum_variant.resolved_value),
-                display_name_var,
+                llvm::ConstantInt::get((llvm::IntegerType *)disc_type_l, disc_value),
             });
         auto var = new llvm::GlobalVariable(*m_ctx->llvm_module, header_type_l, true,
                                             llvm::GlobalValue::InternalLinkage, variant_value,
                                             fmt::format("{}.constant", variant_display_name));
-        auto member_type = variant->resolved_type->data.enum_value.member;
         m_ctx->enum_variant_table[variant->data.enum_variant.resolved_enum_variant] = var;
     }
 
@@ -506,6 +524,9 @@ void Compiler::compile_enum(ast::Node *node) {
     auto base_value_type = enum_type->data.enum_.base_value_type;
     auto resolved_struct = base_value_type->data.enum_value.resolved_struct;
     if (resolved_struct) {
+        // Generate per-enum intrinsic functions BEFORE vtables so display() is in the vtable
+        compile_enum_name_intrinsics(&enum_data, base_value_type, resolved_struct);
+
         auto &sdata = resolved_struct->data.struct_;
         if (sdata.interfaces.len) {
             compile_struct_vtables(resolved_struct, nullptr);
@@ -519,6 +540,145 @@ void Compiler::compile_enum(ast::Node *node) {
                 }
             }
         }
+    }
+}
+
+void Compiler::compile_enum_name_intrinsics(ChiTypeEnum *enum_data, ChiType *base_value_type,
+                                            ChiType *resolved_struct) {
+    auto name_it = m_ctx->enum_name_table.get(enum_data);
+    if (!name_it) return;
+    auto &name_info = *name_it;
+
+    auto &builder_ref = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &llvm_module = *m_ctx->llvm_module;
+
+    // Save current insert point — we'll restore it after generating intrinsic functions
+    auto saved_block = builder_ref.GetInsertBlock();
+    auto saved_point = builder_ref.GetInsertPoint();
+
+    auto str_type_l = compile_type(get_resolver()->get_system_types()->string);
+    auto enum_type_l = compile_type(base_value_type);
+    auto disc_type_l = compile_type(enum_data->discriminator);
+
+    // Function type: (sret ptr, this ptr) -> void
+    auto fn_type_l = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(llvm_ctx),
+        {llvm::PointerType::get(llvm_ctx, 0), llvm::PointerType::get(llvm_ctx, 0)}, false);
+
+    auto type_display = get_resolver()->format_type_display(base_value_type);
+
+    // Helper to register a generated function in the function table.
+    // Only registers if the member has the expected intrinsic symbol (i.e., was not
+    // overridden by user code in a custom struct block).
+    auto register_fn = [&](const string &method_name, llvm::Function *llvm_fn,
+                           IntrinsicSymbol expected_symbol) {
+        for (auto member : resolved_struct->data.struct_.members) {
+            if (member->is_method() && member->get_name() == method_name) {
+                if (expected_symbol != IntrinsicSymbol::None &&
+                    member->symbol != expected_symbol) {
+                    break; // User overrode this method; don't replace
+                }
+                auto key = fmt::format("{}.{}.{}", member->node->module->global_id(),
+                                       type_display, method_name);
+                auto fn = new Function(m_ctx, llvm_fn, member->node);
+                fn->qualified_name = key;
+                m_ctx->function_table[key] = fn;
+                break;
+            }
+        }
+    };
+
+    // Generate enum_name()
+    {
+        auto fn_name = fmt::format("{}.enum_name", type_display);
+        auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage,
+                                               fn_name, llvm_module);
+        auto sret = llvm_fn->getArg(0);
+        auto entry = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+        builder_ref.SetInsertPoint(entry);
+        auto str_val = builder_ref.CreateLoad(str_type_l, name_info.enum_name);
+        builder_ref.CreateStore(str_val, sret);
+        builder_ref.CreateRetVoid();
+        register_fn("enum_name", llvm_fn, IntrinsicSymbol::EnumName);
+    }
+
+    // Generate discriminator_name()
+    {
+        auto fn_name = fmt::format("{}.discriminator_name", type_display);
+        auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage,
+                                               fn_name, llvm_module);
+        auto sret = llvm_fn->getArg(0);
+        auto this_ptr = llvm_fn->getArg(1);
+        auto entry = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+        builder_ref.SetInsertPoint(entry);
+        auto disc_gep = builder_ref.CreateStructGEP(enum_type_l, this_ptr, 0);
+        auto disc = builder_ref.CreateLoad(disc_type_l, disc_gep, "disc");
+
+        auto default_b = llvm::BasicBlock::Create(llvm_ctx, "default", llvm_fn);
+        auto sw = builder_ref.CreateSwitch(disc, default_b, name_info.variant_names.size());
+        for (auto &[disc_val, name_global] : name_info.variant_names.data) {
+            auto case_b = llvm::BasicBlock::Create(llvm_ctx, fmt::format("disc_{}", disc_val), llvm_fn);
+            sw->addCase(llvm::ConstantInt::get((llvm::IntegerType *)disc_type_l, disc_val), case_b);
+            builder_ref.SetInsertPoint(case_b);
+            auto str_val = builder_ref.CreateLoad(str_type_l, name_global);
+            builder_ref.CreateStore(str_val, sret);
+            builder_ref.CreateRetVoid();
+        }
+        builder_ref.SetInsertPoint(default_b);
+        auto empty = compile_string_literal("");
+        builder_ref.CreateStore(empty, sret);
+        builder_ref.CreateRetVoid();
+        register_fn("discriminator_name", llvm_fn, IntrinsicSymbol::DiscriminatorName);
+    }
+
+    // Generate display() — returns "EnumName.VariantName" using pre-computed globals
+    // Skip if the enum has a custom display() override
+    bool has_custom_display = enum_data->base_struct != nullptr;
+    if (has_custom_display) {
+        // Check if the custom struct block actually implements Display
+        has_custom_display = false;
+        auto base_struct_type = get_resolver()->resolve_struct_type(enum_data->base_struct);
+        if (base_struct_type) {
+            for (auto iface : base_struct_type->interfaces) {
+                if (iface->inteface_symbol == IntrinsicSymbol::Display) {
+                    has_custom_display = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (!has_custom_display) {
+        auto fn_name = fmt::format("{}.display", type_display);
+        auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage,
+                                               fn_name, llvm_module);
+        auto sret = llvm_fn->getArg(0);
+        auto this_ptr = llvm_fn->getArg(1);
+        auto entry = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+        builder_ref.SetInsertPoint(entry);
+        auto disc_gep = builder_ref.CreateStructGEP(enum_type_l, this_ptr, 0);
+        auto disc = builder_ref.CreateLoad(disc_type_l, disc_gep, "disc");
+
+        auto default_b = llvm::BasicBlock::Create(llvm_ctx, "default", llvm_fn);
+        auto sw = builder_ref.CreateSwitch(disc, default_b, name_info.display_names.size());
+        for (auto &[disc_val, display_global] : name_info.display_names.data) {
+            auto case_b = llvm::BasicBlock::Create(llvm_ctx, fmt::format("disp_{}", disc_val), llvm_fn);
+            sw->addCase(llvm::ConstantInt::get((llvm::IntegerType *)disc_type_l, disc_val), case_b);
+            builder_ref.SetInsertPoint(case_b);
+            auto str_val = builder_ref.CreateLoad(str_type_l, display_global);
+            builder_ref.CreateStore(str_val, sret);
+            builder_ref.CreateRetVoid();
+        }
+        builder_ref.SetInsertPoint(default_b);
+        auto empty = compile_string_literal("");
+        builder_ref.CreateStore(empty, sret);
+        builder_ref.CreateRetVoid();
+        register_fn("display", llvm_fn, IntrinsicSymbol::None);
+    }
+
+    // Restore insert point
+    if (saved_block) {
+        builder_ref.SetInsertPoint(saved_block, saved_point);
     }
 }
 
@@ -538,19 +698,43 @@ void Compiler::compile_concrete_enum(ChiTypeEnum *enum_data) {
     enum_data->compiled_data_size = data_size;
 
     auto header_type_l = compile_type(enum_data->enum_header_struct);
+
+    // Emit enum name and variant name globals
+    auto &name_info = m_ctx->enum_name_table[enum_data];
+    auto enum_name = enum_data->base_value_type->get_display_name();
+    // Strip ".BaseEnumValue" suffix if present
+    auto suffix = string(".BaseEnumValue");
+    if (enum_name.size() > suffix.size() &&
+        enum_name.substr(enum_name.size() - suffix.size()) == suffix) {
+        enum_name = enum_name.substr(0, enum_name.size() - suffix.size());
+    }
+    auto enum_name_str = (llvm::Constant *)compile_string_literal(enum_name);
+    name_info.enum_name = new llvm::GlobalVariable(
+        *m_ctx->llvm_module, enum_name_str->getType(), true,
+        llvm::GlobalValue::InternalLinkage, enum_name_str,
+        fmt::format("{}.enum_name", enum_name));
+
     for (auto variant : enum_data->variants) {
         auto variant_display_name = variant->resolved_type->get_display_name();
-        auto display_name_str = (llvm::Constant *)compile_string_literal(variant_display_name);
-        auto display_name_var =
-            new llvm::GlobalVariable(*m_ctx->llvm_module, display_name_str->getType(), true,
-                                     llvm::GlobalValue::InternalLinkage, display_name_str,
-                                     fmt::format("{}.display_name", variant_display_name));
+        auto variant_name_s = variant->name;
+        auto variant_name_str = (llvm::Constant *)compile_string_literal(variant_name_s);
+        auto disc_value = variant->node->data.enum_variant.resolved_value;
+        name_info.variant_names[disc_value] = new llvm::GlobalVariable(
+            *m_ctx->llvm_module, variant_name_str->getType(), true,
+            llvm::GlobalValue::InternalLinkage, variant_name_str,
+            fmt::format("{}.variant_name", variant_display_name));
+        auto display_str = fmt::format("{}.{}", enum_name, variant_name_s);
+        auto display_str_val = (llvm::Constant *)compile_string_literal(display_str);
+        name_info.display_names[disc_value] = new llvm::GlobalVariable(
+            *m_ctx->llvm_module, display_str_val->getType(), true,
+            llvm::GlobalValue::InternalLinkage, display_str_val,
+            fmt::format("{}.display_name", variant_display_name));
+
+        auto disc_type_l = compile_type(enum_data->discriminator);
         auto variant_value = llvm::ConstantStruct::get(
             (llvm::StructType *)header_type_l,
             {
-                llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx),
-                                       variant->node->data.enum_variant.resolved_value),
-                display_name_var,
+                llvm::ConstantInt::get((llvm::IntegerType *)disc_type_l, disc_value),
             });
         auto var = new llvm::GlobalVariable(*m_ctx->llvm_module, header_type_l, true,
                                             llvm::GlobalValue::InternalLinkage, variant_value,
@@ -565,6 +749,30 @@ void Compiler::compile_concrete_enum(ChiTypeEnum *enum_data) {
                 auto fn_node = member->node;
                 auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node);
                 m_ctx->pending_fns.add(fn);
+            }
+        }
+    }
+
+    // Generate per-enum intrinsic functions and vtables
+    auto base_value_type = enum_data->base_value_type;
+    if (base_value_type) {
+        auto resolved_struct = base_value_type->data.enum_value.resolved_struct;
+        if (resolved_struct) {
+            // Generate intrinsics BEFORE vtables so display() is in the vtable
+            compile_enum_name_intrinsics(enum_data, base_value_type, resolved_struct);
+
+            auto &sdata = resolved_struct->data.struct_;
+            if (sdata.interfaces.len) {
+                compile_struct_vtables(resolved_struct, nullptr);
+            }
+            for (auto member : sdata.members) {
+                if (member->is_method() && !member->resolved_type->is_placeholder) {
+                    auto method_fn = get_fn(member->node, base_value_type);
+                    if (method_fn) {
+                        member->vtable_index = m_ctx->reflection_vtable.size();
+                        m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);
+                    }
+                }
             }
         }
     }
@@ -812,6 +1020,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     emit_dbg_location(fn_def.body);
     auto return_b = fn->new_label("_return");
     fn->return_label = return_b;
+
     if (fn_def.body) {
         // Check if this is an async function with awaits
         if (fn_def.is_async()) {
@@ -2122,9 +2331,17 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         }
         if (from_type->kind == TypeKind::Pointer) {
             return m_ctx->llvm_builder->CreatePtrToInt(value, compile_type(to_type));
-        } else {
-            return compile_number_conversion(fn, value, from_type, to_type);
         }
+        // Plain enum -> int: extract discriminator and cast to target int type
+        if (from_type->kind == TypeKind::EnumValue) {
+            auto &builder = *m_ctx->llvm_builder;
+            auto enum_ = from_type->data.enum_value.parent_enum();
+            auto disc_type_l = compile_type(enum_->discriminator);
+            auto disc_val = builder.CreateExtractValue(value, {0});
+            return builder.CreateIntCast(disc_val, compile_type(to_type),
+                                         !enum_->discriminator->data.int_.is_unsigned);
+        }
+        return compile_number_conversion(fn, value, from_type, to_type);
     }
     case TypeKind::Byte:
     case TypeKind::Rune: {
@@ -2206,6 +2423,22 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         return value;
     }
     case TypeKind::Struct: {
+    }
+    case TypeKind::EnumValue: {
+        // int -> plain enum: cast to discriminator type, wrap in enum struct
+        if (from_type->kind == TypeKind::Int) {
+            auto &builder = *m_ctx->llvm_builder;
+            auto enum_ = to_type->data.enum_value.parent_enum();
+            auto disc_type = compile_type(enum_->discriminator);
+            auto disc_val = builder.CreateIntCast(value, disc_type,
+                                                  !from_type->data.int_.is_unsigned);
+            auto enum_type_l = compile_type(to_type);
+            auto alloca = builder.CreateAlloca(enum_type_l);
+            auto gep = builder.CreateStructGEP(enum_type_l, alloca, 0);
+            builder.CreateStore(disc_val, gep);
+            return builder.CreateLoad(enum_type_l, alloca);
+        }
+        return value;
     }
 
     default:

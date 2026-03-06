@@ -39,19 +39,7 @@ export enum ErrorKind {
 
 func error_kind_from(uv_err: int32) ErrorKind {
     unsafe {
-        let k = __cx_fs_error_kind(uv_err);
-        return switch k {
-            1 => ErrorKind.NotFound,
-            2 => ErrorKind.PermissionDenied,
-            3 => ErrorKind.AlreadyExists,
-            4 => ErrorKind.NotADirectory,
-            5 => ErrorKind.IsADirectory,
-            6 => ErrorKind.DirectoryNotEmpty,
-            7 => ErrorKind.NoSpace,
-            8 => ErrorKind.ReadOnlyFs,
-            9 => ErrorKind.Busy,
-            else => ErrorKind.Unknown
-        };
+        return __cx_fs_error_kind(uv_err) as ErrorKind;
     }
 }
 

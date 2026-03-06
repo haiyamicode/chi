@@ -29,7 +29,7 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Byte, Rune, String, 
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
-MAKE_ENUM(IntrinsicSymbol, None, Index, IndexMut, IndexMutIterable, CopyFrom, DisallowCopy, Display, Add, Sub, Mul, Div, Rem, Neg, BitAnd, BitOr, BitXor, BitNot, Shl, Shr, Sized, AllowUnsized, Construct, Unwrap, UnwrapMut, Deref, DerefMut, MutIterator, MutIterable, Slice, Eq, Ord, Hash)
+MAKE_ENUM(IntrinsicSymbol, None, Index, IndexMut, IndexMutIterable, CopyFrom, DisallowCopy, Display, Add, Sub, Mul, Div, Rem, Neg, BitAnd, BitOr, BitXor, BitNot, Shl, Shr, Sized, AllowUnsized, Construct, Unwrap, UnwrapMut, Deref, DerefMut, MutIterator, MutIterable, Slice, Eq, Ord, Hash, EnumName, DiscriminatorName)
 
 MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait);
 
@@ -240,6 +240,7 @@ struct ChiTypeEnum {
     array<ChiEnumVariant *> variants = {};
     map<string, ChiEnumVariant *> variant_table = {};
     ChiType *resolved_generic = nullptr; // non-null for concrete instantiations of generic enums
+    bool is_plain = true; // no base struct fields or variant data
 
     ChiEnumVariant *add_variant(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type);

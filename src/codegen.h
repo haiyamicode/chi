@@ -250,6 +250,12 @@ struct CodegenContext {
     map<string, llvm::Type *> anon_type_table = {};
     map<InterfaceImpl *, llvm::Value *> impl_table = {};
     map<ChiEnumVariant *, llvm::Value *> enum_variant_table = {};
+    struct EnumNameInfo {
+        llvm::Value *enum_name = nullptr;           // global string for enum type name
+        map<int, llvm::Value *> variant_names = {};  // discriminator -> global string for variant name
+        map<int, llvm::Value *> display_names = {};  // discriminator -> global "EnumName.VariantName"
+    };
+    map<ChiTypeEnum *, EnumNameInfo> enum_name_table = {};
     map<string, llvm::DICompileUnit *> module_cu_table = {};
     map<ChiType *, Function *> destructor_table = {};  // Generated __delete functions
     map<ChiType *, Function *> copier_table = {};      // Generated __copy functions
@@ -463,6 +469,8 @@ class Compiler {
 
     void compile_enum(ast::Node *node);
     void compile_concrete_enum(ChiTypeEnum *enum_data);
+    void compile_enum_name_intrinsics(ChiTypeEnum *enum_data, ChiType *base_value_type,
+                                      ChiType *resolved_struct);
 
     void compile_extern(ast::Node *node);
 
