@@ -1030,6 +1030,8 @@ string cx::get_token_symbol(TokenType token_type) {
         return "?.";
     case TokenType::AT:
         return "@";
+    case TokenType::ARROW:
+        return "=>";
     default:
         return PRINT_ENUM(token_type);
     }

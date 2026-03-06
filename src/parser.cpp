@@ -2743,6 +2743,14 @@ Node *Parser::parse_construct_expr() {
             field_init->data.field_init_expr.field = field;
             field_init->data.field_init_expr.value = value;
             node->data.construct_expr.field_inits.add(field_init);
+        } else if (token->type == TokenType::COLON) {
+            // Incomplete shorthand: just ':' without identifier (mid-edit)
+            // Consume and continue so the construct expression closes cleanly
+            consume();
+            if (!at_comma(TokenType::RBRACE))
+                break;
+            consume();
+            continue;
         } else if (token->type == TokenType::IDEN && lookahead(1)->type == TokenType::COLON) {
             // field initializer: field: value
             field_started = true;

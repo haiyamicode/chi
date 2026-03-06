@@ -136,6 +136,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
     ScanResult result;
     result.module = module;
     result.pos = cursor_pos;
+    if (!module || !module->root) return result;
     auto resolver = m_ctx.create_resolver();
     ScopeResolver scope_resolver(&resolver);
 
@@ -180,9 +181,11 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
                     if (fi.resolved_field && fi.resolved_field->node) {
                         result.decl = fi.resolved_field->node;
                     }
-                } else if (token_node->type == ast::NodeType::Identifier &&
-                    token_node->data.identifier.decl) {
-                    result.decl = token_node->data.identifier.decl;
+                } else if (token_node->type == ast::NodeType::Identifier) {
+                    if (token_node->data.identifier.decl) {
+                        result.decl = token_node->data.identifier.decl;
+                    }
+                    // else: leave decl null so scope fallback can resolve it
                 } else {
                     result.decl = token_node;
                 }
@@ -427,6 +430,17 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
         return false;
     case ast::NodeType::TryExpr:
         return find_fn_call(node->data.try_expr.expr, cursor_pos, result);
+    case ast::NodeType::SwitchExpr: {
+        if (find_fn_call(node->data.switch_expr.expr, cursor_pos, result))
+            return true;
+        for (auto c : node->data.switch_expr.cases) {
+            if (find_fn_call(c, cursor_pos, result))
+                return true;
+        }
+        return false;
+    }
+    case ast::NodeType::CaseExpr:
+        return find_fn_call(node->data.case_expr.body, cursor_pos, result);
     default:
         return false;
     }
@@ -554,6 +568,14 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
             if (member->type == ast::NodeType::FnDef) {
                 if (scan(member, cursor_pos, result)) {
                     return true;
+                }
+            } else if (member->type == ast::NodeType::ImplementBlock) {
+                for (auto impl_member : member->data.implement_block.members) {
+                    if (impl_member->type == ast::NodeType::FnDef) {
+                        if (scan(impl_member, cursor_pos, result)) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
