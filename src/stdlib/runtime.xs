@@ -1146,7 +1146,12 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
                 }
                 node = node.next;
             }
-            this.buckets[idx] = new MapNode<K, V>{key: key, value: value, hash: h, next: this.buckets[idx]};
+            this.buckets[idx] = new MapNode<K, V>{
+                :key,
+                :value,
+                hash: h,
+                next: this.buckets[idx]
+            };
         }
         this.count += 1;
         if this.count > this.capacity * 2 {

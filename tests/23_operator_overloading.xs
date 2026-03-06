@@ -142,7 +142,7 @@ struct Vec2 {
 }
 
 func make_vec2(x: int, y: int) Vec2 {
-    return {x: x, y: y};
+    return {:x, :y};
 }
 
 func sub<V: ops.Sub>(a: V, b: V) V {

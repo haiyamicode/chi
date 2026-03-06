@@ -145,7 +145,11 @@ func test_spread_string() {
 
 func test_spread_all_override() {
     var p = Point{x: 1, y: 2};
-    var p2 = Point{...p, x: 100, y: 200};
+    var p2 = Point{
+        ...p,
+        x: 100,
+        y: 200
+    };
     printf("p2.x={} p2.y={}\n", p2.x, p2.y);
 }
 
@@ -227,7 +231,11 @@ func test_spread_full_copy() {
 
 func test_cross_spread_basic() {
     var b = Base{x: 42, name: "hello"};
-    var e = Extended{...b, y: 10, z: 20};
+    var e = Extended{
+        ...b,
+        y: 10,
+        z: 20
+    };
     printf("e.x={} e.name={} e.y={} e.z={}\n", e.x, e.name, e.y, e.z);
     // Original still valid
     printf("b.x={} b.name={}\n", b.x, b.name);
@@ -245,7 +253,12 @@ func test_cross_spread_defaults() {
 
 func test_cross_spread_override() {
     var b = Base{x: 1, name: "old"};
-    var e = Extended{...b, name: "new", y: 5, z: 6};
+    var e = Extended{
+        ...b,
+        name: "new",
+        y: 5,
+        z: 6
+    };
     printf("e.x={} e.name={} e.y={} e.z={}\n", e.x, e.name, e.y, e.z);
     printf("b.name={}\n", b.name);
 }
@@ -264,7 +277,12 @@ func test_cross_spread_lifecycle() {
 // === Cross-type spread: superset into subset (discard extra) ===
 
 func test_cross_spread_discard() {
-    var e = Extended{x: 1, name: "hello", y: 10, z: 20};
+    var e = Extended{
+        x: 1,
+        name: "hello",
+        y: 10,
+        z: 20
+    };
     var b = Base{...e};
     printf("b.x={} b.name={}\n", b.x, b.name);
     // Original still valid
@@ -274,7 +292,12 @@ func test_cross_spread_discard() {
 // === Cross-type spread: superset into subset with override ===
 
 func test_cross_spread_discard_override() {
-    var e = Extended{x: 1, name: "old", y: 10, z: 20};
+    var e = Extended{
+        x: 1,
+        name: "old",
+        y: 10,
+        z: 20
+    };
     var b = Base{...e, name: "new"};
     printf("b.x={} b.name={}\n", b.x, b.name);
 }
@@ -282,7 +305,11 @@ func test_cross_spread_discard_override() {
 // === Cross-type spread: superset into subset with lifecycle ===
 
 func test_cross_spread_discard_lifecycle() {
-    var te = TracedExtended{t: Traced{77}, name: "big", extra: 42};
+    var te = TracedExtended{
+        t: Traced{77},
+        name: "big",
+        extra: 42
+    };
     println("before spread");
     var tb = TracedBase{...te};
     printf("tb.t.id={} tb.name={}\n", tb.t.id, tb.name);

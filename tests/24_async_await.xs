@@ -140,9 +140,11 @@ func test_sleep() {
 func test_sleep_value_capture() {
     println("=== Test 10: By-value capture with sleep ===");
     var counter = 42;
-    time.sleep(10).then(func [counter] (u: Unit) {
-        printf("captured counter: {}\n", counter);
-    });
+    time.sleep(10).then(
+        func [counter] (u: Unit) {
+            printf("captured counter: {}\n", counter);
+        }
+    );
     counter = 999;
     printf("original counter after mutate: {}\n", counter);
     println("");
@@ -150,10 +152,12 @@ func test_sleep_value_capture() {
 
 func test_promise_helper() {
     println("=== Test 11: Promise.make() ===");
-    var p = Promise<int>.make(func (resolve: func (value: int)) {
-        println("executor called");
-        resolve(123);
-    });
+    var p = Promise<int>.make(
+        func (resolve: func (value: int)) {
+            println("executor called");
+            resolve(123);
+        }
+    );
     printf("promise resolved with: {}\n", p.value()!);
     println("");
 }

@@ -110,7 +110,18 @@ func test_partial_init() {
 
 func test_struct_array() {
     println("=== struct array ===");
-    var points = [2]Point{Point{x: 1, y: 2, name: "a"}, Point{x: 3, y: 4, name: "b"}};
+    var points = [2]Point{
+        Point{
+            x: 1,
+            y: 2,
+            name: "a"
+        },
+        Point{
+            x: 3,
+            y: 4,
+            name: "b"
+        }
+    };
     for p in points {
         printf("{} ({}, {})\n", p.name, p.x, p.y);
     }
@@ -118,7 +129,18 @@ func test_struct_array() {
 
 func test_struct_copy() {
     println("=== struct copy ===");
-    var points = [2]Point{Point{x: 1, y: 2, name: "a"}, Point{x: 3, y: 4, name: "b"}};
+    var points = [2]Point{
+        Point{
+            x: 1,
+            y: 2,
+            name: "a"
+        },
+        Point{
+            x: 3,
+            y: 4,
+            name: "b"
+        }
+    };
     var points2 = points;
     points2[0].name = "modified";
     println(points[0].name);

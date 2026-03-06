@@ -2732,7 +2732,18 @@ Node *Parser::parse_construct_expr() {
             continue;
         }
 
-        if (token->type == TokenType::IDEN && lookahead(1)->type == TokenType::COLON) {
+        if (token->type == TokenType::COLON && lookahead(1)->type == TokenType::IDEN) {
+            // shorthand field initializer: :field (desugars to field: field)
+            field_started = true;
+            consume(); // consume ':'
+            auto field = get();
+            auto value = parse_identifier();
+            auto field_init = create_node(NodeType::FieldInitExpr, field);
+            field_init->data.field_init_expr.token = field;
+            field_init->data.field_init_expr.field = field;
+            field_init->data.field_init_expr.value = value;
+            node->data.construct_expr.field_inits.add(field_init);
+        } else if (token->type == TokenType::IDEN && lookahead(1)->type == TokenType::COLON) {
             // field initializer: field: value
             field_started = true;
             consume();

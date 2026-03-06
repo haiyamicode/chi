@@ -124,7 +124,11 @@ func main() {
     var point_wrapper: Wrapper<Point> = make_wrapper(func () {
         return {30, 40};
     });
-    printf("make_wrapper inferred T=Point: Point({}, {})\n", point_wrapper.value.x, point_wrapper.value.y);
+    printf(
+        "make_wrapper inferred T=Point: Point({}, {})\n",
+        point_wrapper.value.x,
+        point_wrapper.value.y
+    );
     printf("\nTest 17: Array.filter\n");
     var nums: Array<int> = [1, 2, 3, 4, 5, 6];
     var evens = nums.filter((n) => n % 2 == 0);

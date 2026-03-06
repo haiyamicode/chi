@@ -26,19 +26,19 @@ class AstPrinter {
 
     // Shadows global fmt::print — routes output to buffer when set, stdout otherwise.
     template <typename... Args> void emit(fmt::format_string<Args...> fmt, Args &&...args) {
+        auto formatted = fmt::format(fmt, std::forward<Args>(args)...);
         if (m_buffer) {
-            auto formatted = fmt::format(fmt, std::forward<Args>(args)...);
             fmt::format_to(std::back_inserter(*m_buffer), "{}", formatted);
-            // Track column position (reset on newline)
-            for (char c : formatted) {
-                if (c == '\n') {
-                    m_current_column = 0;
-                } else {
-                    m_current_column++;
-                }
-            }
         } else {
-            fmt::print(fmt, std::forward<Args>(args)...);
+            fmt::print("{}", formatted);
+        }
+        // Track column position (reset on newline)
+        for (char c : formatted) {
+            if (c == '\n') {
+                m_current_column = 0;
+            } else {
+                m_current_column++;
+            }
         }
     }
 
@@ -92,6 +92,9 @@ class AstPrinter {
     // Returns true if wrapped, false if emitted on single line.
     bool emit_wrapped_list(array<Node *> *items, const char *open, const char *close,
                            const char *separator, int extra_indent = 1);
+
+    // Emit construct body (spread + items + field_inits) with wrapping support.
+    void emit_construct_body(ConstructExpr &data);
 };
 
 void print_ast(Node *root);

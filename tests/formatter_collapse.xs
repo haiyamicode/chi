@@ -50,6 +50,9 @@ func main() {
 
     // redundant construct type in return
     var f = make_point(1, 2);
+
+    // field init shorthand collapsing: key: key → :key
+    var p = Point2{x: x, y: 5};
 }
 
 struct Point2 {

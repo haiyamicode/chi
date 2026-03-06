@@ -130,7 +130,11 @@ func test_generic_enum() {
     printf("a.is_single()={}\n", a.is_single());
 
     // Pair variant with two type param fields
-    var b = Container<int>.Pair{label: "pair", first: 10, second: 20};
+    var b = Container<int>.Pair{
+        label: "pair",
+        first: 10,
+        second: 20
+    };
     printf("b.first={}\n", b.first);
     printf("b.second={}\n", b.second);
     printf("b.get_label()={}\n", b.get_label());
@@ -195,7 +199,11 @@ func test_switch_narrowing() {
     println("=== Test: Switch narrowing ===");
 
     // Method using narrowing to access variant fields
-    var fn = Node.FnDef{name: "add", params: {}, ret: "int"};
+    var fn = Node.FnDef{
+        name: "add",
+        params: {},
+        ret: "int"
+    };
     println(fn.get_ret_or_default());
 
     var vd = Node.VarDecl{name: "x"};
@@ -208,7 +216,11 @@ func test_switch_narrowing() {
 
 func test_node_copy() {
     println("=== Test: Node copy ===");
-    var node = Node.FnDef{name: "f", params: {}, ret: "int"};
+    var node = Node.FnDef{
+        name: "f",
+        params: {},
+        ret: "int"
+    };
     var copy = node;
     printf("copy.ret={}\n", copy.ret);
     printf("copy.name={}\n", copy.name);
@@ -361,7 +373,11 @@ func test_switch_statement() {
 }
 
 func main() {
-    var node = Node.FnDef{name: "f", params: {}, ret: "int"};
+    var node = Node.FnDef{
+        name: "f",
+        params: {},
+        ret: "int"
+    };
     printf("node.type: {}\n", node.type);
     printf("node.discriminator: {}\n", node.discriminator());
     printf("node.ret: {}\n", node.ret);

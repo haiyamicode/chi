@@ -46,23 +46,31 @@ func main() {
     });
     printf("transform(5, double) [inferred] = {}\n", doubled_inferred);
     var container = Container<int>{65};
-    var zmap_result = container.zmap<byte>(func (value: int) byte {
-        return (value + 10) as byte;
-    });
+    var zmap_result = container.zmap<byte>(
+        func (value: int) byte {
+            return (value + 10) as byte;
+        }
+    );
     var final_value = zmap_result.get();
     printf("final value: {}\n", final_value);
-    var zmap_result_inferred = container.zmap(func (value: int) byte {
-        return (value + 10) as byte;
-    });
+    var zmap_result_inferred = container.zmap(
+        func (value: int) byte {
+            return (value + 10) as byte;
+        }
+    );
     var final_value_inferred = zmap_result_inferred.get();
     printf("final value [inferred]: {}\n", final_value_inferred);
-    var float_container = container.zmap<float>(func (i: int) float {
-        return i as float * 0.5;
-    });
+    var float_container = container.zmap<float>(
+        func (i: int) float {
+            return i as float * 0.5;
+        }
+    );
     printf("float result: {}\n", float_container.get());
-    var float_container_inferred = container.zmap(func (i: int) float {
-        return i as float * 0.5;
-    });
+    var float_container_inferred = container.zmap(
+        func (i: int) float {
+            return i as float * 0.5;
+        }
+    );
     printf("float result [inferred]: {}\n", float_container_inferred.get());
     var c1 = Container<int>{100};
     var c2 = Container<int>{200};

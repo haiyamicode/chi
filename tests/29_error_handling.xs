@@ -41,7 +41,7 @@ struct Resource {
 // --- Basic throw/catch ---
 
 func fail_with(msg: string) {
-    throw new MyError{msg: msg};
+    throw new MyError{:msg};
 }
 
 func succeed() int {
@@ -232,7 +232,7 @@ func test_typed_result() {
 // --- Catch block: fallback values, return, re-throw ---
 
 func fail_int(msg: string) int {
-    throw new MyError{msg: msg};
+    throw new MyError{:msg};
 }
 
 func test_catch_block() {

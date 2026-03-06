@@ -419,20 +419,7 @@ void AstPrinter::print_node(Node *node) {
                 if (cdata.items.len && !cdata.field_inits.len && !cdata.spread_expr) {
                     emit_wrapped_list(&cdata.items, "{", "}", ", ");
                 } else {
-                    emit("{{");
-                    if (cdata.spread_expr) {
-                        emit("...");
-                        print_node(cdata.spread_expr);
-                        if (cdata.field_inits.len || cdata.items.len) {
-                            emit(", ");
-                        }
-                    }
-                    print_node_list(&cdata.items);
-                    if (cdata.items.len && cdata.field_inits.len) {
-                        emit(", ");
-                    }
-                    print_node_list(&cdata.field_inits);
-                    emit("}}");
+                    emit_construct_body(cdata);
                 }
             }
         } else {
@@ -596,20 +583,7 @@ void AstPrinter::print_node(Node *node) {
             if (data.items.len && !data.field_inits.len && !data.spread_expr) {
                 emit_wrapped_list(&data.items, "{", "}", ", ");
             } else {
-                emit("{{");
-                if (data.spread_expr) {
-                    emit("...");
-                    print_node(data.spread_expr);
-                    if (data.field_inits.len || data.items.len) {
-                        emit(", ");
-                    }
-                }
-                print_node_list(&data.items);
-                if (data.items.len && data.field_inits.len) {
-                    emit(", ");
-                }
-                print_node_list(&data.field_inits);
-                emit("}}");
+                emit_construct_body(data);
             }
         } else {
             emit("{{}}");
@@ -618,8 +592,14 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::FieldInitExpr: {
         auto &data = node->data.field_init_expr;
-        emit("{}: ", data.field->str);
-        print_node(data.value);
+        // Collapse key: key → :key
+        if (data.value && data.value->type == NodeType::Identifier &&
+            data.value->name == data.field->str) {
+            emit(":{}", data.field->str);
+        } else {
+            emit("{}: ", data.field->str);
+            print_node(data.value);
+        }
         break;
     }
     case NodeType::BinOpExpr: {
@@ -1416,6 +1396,77 @@ bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const
     print_indent(m_indent);
     emit("{}", close);
     return true;
+}
+
+void AstPrinter::emit_construct_body(ConstructExpr &data) {
+    // Build a list of all elements for length calculation
+    // Format: {spread, items..., field_inits...}
+    auto format_element = [&](int idx, bool wrapped) {
+        int pos = 0;
+        if (data.spread_expr) {
+            if (idx == pos) {
+                emit("...");
+                print_node(data.spread_expr);
+                return;
+            }
+            pos++;
+        }
+        if (idx < pos + data.items.len) {
+            print_node(data.items[idx - pos]);
+            return;
+        }
+        pos += data.items.len;
+        print_node(data.field_inits[idx - pos]);
+    };
+
+    int total_elements = (data.spread_expr ? 1 : 0) + data.items.len + data.field_inits.len;
+
+    // Calculate total length if printed on one line
+    int total_length = m_current_column + 2; // for { and }
+    for (int i = 0; i < total_elements; i++) {
+        // Format each element to measure its length
+        int pos = 0;
+        string elem_str;
+        if (data.spread_expr && i == 0) {
+            elem_str = "..." + format_node_to_string(data.spread_expr);
+            pos = 1;
+        } else {
+            int adj = i - (data.spread_expr ? 1 : 0);
+            if (adj < data.items.len) {
+                elem_str = format_node_to_string(data.items[adj]);
+            } else {
+                elem_str = format_node_to_string(data.field_inits[adj - data.items.len]);
+            }
+        }
+        total_length += elem_str.size();
+        if (i < total_elements - 1)
+            total_length += 2; // ", "
+    }
+
+    if (total_length < m_max_line_length && total_elements <= 2) {
+        // Inline
+        emit("{{");
+        for (int i = 0; i < total_elements; i++) {
+            format_element(i, false);
+            if (i < total_elements - 1)
+                emit(", ");
+        }
+        emit("}}");
+    } else {
+        // Wrapped
+        emit("{{\n");
+        m_indent++;
+        for (int i = 0; i < total_elements; i++) {
+            print_indent(m_indent);
+            format_element(i, true);
+            if (i < total_elements - 1)
+                emit(",");
+            emit("\n");
+        }
+        m_indent--;
+        print_indent(m_indent);
+        emit("}}");
+    }
 }
 
 bool AstPrinter::has_blank_line_between(Node *prev, Node *next) {
