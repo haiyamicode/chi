@@ -130,7 +130,7 @@ func test_timeout() {
 
 func test_sleep() {
     println("=== Test 9: sleep() function ===");
-    time.sleep(10).then(func (u: Unit) {
+    time.sleep(10).then(func (u) {
         println("sleep resolved");
     });
     println("sleep scheduled");
@@ -140,11 +140,9 @@ func test_sleep() {
 func test_sleep_value_capture() {
     println("=== Test 10: By-value capture with sleep ===");
     var counter = 42;
-    time.sleep(10).then(
-        func [counter] (u: Unit) {
-            printf("captured counter: {}\n", counter);
-        }
-    );
+    time.sleep(10).then(func [counter] (u) {
+        printf("captured counter: {}\n", counter);
+    });
     counter = 999;
     printf("original counter after mutate: {}\n", counter);
     println("");
@@ -152,12 +150,10 @@ func test_sleep_value_capture() {
 
 func test_promise_helper() {
     println("=== Test 11: Promise.make() ===");
-    var p = Promise<int>.make(
-        func (resolve: func (value: int)) {
-            println("executor called");
-            resolve(123);
-        }
-    );
+    var p = Promise<int>.make(func (resolve) {
+        println("executor called");
+        resolve(123);
+    });
     printf("promise resolved with: {}\n", p.value()!);
     println("");
 }
@@ -180,9 +176,11 @@ func test_promise_string_make() {
 
     // Make with string concatenation
     var prefix = "hello";
-    var p3 = Promise<string>.make(func [prefix] (resolve) {
-        resolve(prefix + " from capture");
-    });
+    var p3 = Promise<string>.make(
+        func [prefix] (resolve) {
+            resolve(prefix + " from capture");
+        }
+    );
     printf("captured: '{}'\n", p3.value()!);
 
     // Multiple .then callbacks with string

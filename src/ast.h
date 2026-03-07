@@ -26,7 +26,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           TypeParam, LifetimeParam, PrefixExpr, ExternDecl, TryExpr, AwaitExpr, InferredType,
           ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier, SwitchExpr, CaseExpr, ImportSymbol,
           ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt, ImplementBlock,
-          PackExpansion, DestructureDecl, DestructureField);
+          PackExpansion, DestructureDecl, DestructureField, UnitExpr);
 
 MAKE_ENUM(ModuleKind, XS, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);

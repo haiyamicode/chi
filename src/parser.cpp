@@ -625,8 +625,14 @@ Node *Parser::parse_type_expr(bool type_only) {
     auto token = get();
     if (token->type == TokenType::LPAREN) {
         consume();
-        node = parse_type_expr(true);
-        expect(TokenType::RPAREN);
+        if (next_is(TokenType::RPAREN)) {
+            // () — unit type
+            consume();
+            node = create_node(NodeType::UnitExpr, token);
+        } else {
+            node = parse_type_expr(true);
+            expect(TokenType::RPAREN);
+        }
     } else if (token->type == TokenType::KW_FUNC) {
         consume();
         node = parse_fn_type(token);
@@ -1756,6 +1762,13 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
         if (is_arrow_lambda_ahead()) {
             return parse_fn_lambda();
         }
+        if (lookahead(1)->type == TokenType::RPAREN) {
+            // () — unit value
+            consume(); // (
+            auto node = create_node(NodeType::UnitExpr, token);
+            consume(); // )
+            return node;
+        }
         consume();
         auto node = create_node(NodeType::ParenExpr, token);
         node->data.child_expr = parse_child_expr(lhs, parent);
@@ -2150,6 +2163,12 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
             pos++;
             return try_parse_fn_type_lookahead(pos);
         }
+    }
+
+    // () — unit type
+    if (token->type == TokenType::LPAREN && lookahead(pos + 1)->type == TokenType::RPAREN) {
+        pos += 2;
+        return true;
     }
 
     // Must be an identifier-based type

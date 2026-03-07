@@ -8,7 +8,7 @@ struct Holder {
 }
 
 func wrap(f: func () int) Holder {
-    return {f: f};
+    return {:f};
 }
 
 func exploit() Holder {

@@ -18,7 +18,7 @@ func main() {
     });
 
     println("=== time.sleep ===");
-    time.sleep(1).then(func (u: Unit) {
+    time.sleep(1).then(func (u: ()) {
         println("sleep resolved");
     });
 

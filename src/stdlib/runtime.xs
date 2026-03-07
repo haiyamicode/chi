@@ -972,9 +972,6 @@ export interface Error {
     func message() string;
 }
 
-// Unit type for use as a void-like value type (e.g. Promise<Unit>)
-export struct Unit {}
-
 // Promise for async operations
 struct PromiseState<T> {
     state: uint32 = 0; // 0=pending, 1=resolved, 2=rejected
@@ -982,7 +979,7 @@ struct PromiseState<T> {
     callbacks: Array<func (value: T)> = {};
 }
 
-export struct Promise<T> {
+export struct Promise<T=()> {
     protected data: Shared<PromiseState<T>>;
 
     mut func new() {

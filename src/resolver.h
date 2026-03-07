@@ -68,6 +68,7 @@ struct SystemTypes {
     ChiType *never_ = nullptr;
     ChiType *lambda = nullptr;
     ChiType *span = nullptr;
+    ChiType *unit = nullptr;
 };
 
 // Forward declaration for GenericResolver
@@ -397,6 +398,8 @@ class Resolver {
 
     ChiType *type_placeholders_sub(ChiType *type, ChiTypeSubtype *subs);
     ChiType *type_placeholders_sub_map(ChiType *type, map<ChiType *, ChiType *> *subs);
+    ChiType *wrap_placeholders_with_infer(ChiType *type);
+    ChiType *wrap_placeholders_with_infer(ChiType *type, map<ChiType *, ChiType *> &infer_map);
 
     void type_placeholders_sub_each_selective(TypeList *list, ChiTypeSubtype *subs,
                                               TypeList *output, ast::Node *source_filter);

@@ -663,6 +663,10 @@ void AstPrinter::print_node(Node *node) {
         emit(")");
         break;
     }
+    case NodeType::UnitExpr: {
+        emit("()");
+        break;
+    }
     case NodeType::IfExpr: {
         auto &data = node->data.if_expr;
         emit("if ");

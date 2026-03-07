@@ -803,6 +803,9 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     case TypeKind::Void: {
         return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
     }
+    case TypeKind::Unit: {
+        return llvm_db.createBasicType("()", 8, llvm::dwarf::DW_ATE_unsigned);
+    }
     case TypeKind::Bool: {
         return llvm_db.createBasicType("bool", 8, llvm::dwarf::DW_ATE_boolean);
     }
@@ -3422,6 +3425,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::ParenExpr: {
         return compile_expr(fn, expr->data.child_expr);
     }
+    case ast::NodeType::UnitExpr: {
+        return llvm::Constant::getNullValue(compile_type(get_system_types()->unit));
+    }
     case ast::NodeType::IfExpr: {
         auto &data = expr->data.if_expr;
         auto ret_type = expr->resolved_type ? get_chitype(expr) : nullptr;
@@ -4618,6 +4624,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     case ast::NodeType::BinOpExpr:
     case ast::NodeType::ConstructExpr:
     case ast::NodeType::LiteralExpr:
+    case ast::NodeType::UnitExpr:
     case ast::NodeType::CastExpr:
         return RefValue::from_value(compile_expr(fn, expr));
     default:
@@ -7843,7 +7850,11 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 }
 
 llvm::Type *Compiler::_compile_type(ChiType *type) {
-    assert(!type->is_placeholder && "compile_type called on placeholder type");
+    // Allow types with stale is_placeholder when they contain resolved Infer types
+    // (from generic inference through lambda bodies). Recursive compile_type calls
+    // will extract concrete types via eval_type's Infer handler.
+    assert((!type->is_placeholder || type->kind != TypeKind::Placeholder) &&
+           "compile_type called on unresolved placeholder type");
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
     case TypeKind::This: {
@@ -7974,6 +7985,12 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     // Promise is now a Chi-native struct (TypeKind::Subtype), no special handling needed
     case TypeKind::Subtype: {
         return compile_type(type->data.subtype.final_type);
+    }
+    case TypeKind::Unit: {
+        // Unit type: 1-byte placeholder (like empty struct)
+        std::vector<llvm::Type *> members;
+        members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
+        return llvm::StructType::create(members, "()");
     }
     case TypeKind::Placeholder: {
         return compile_type(get_system_types()->void_);

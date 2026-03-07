@@ -106,6 +106,8 @@ void Resolver::context_init_primitives() {
     system_types.undefined = create_type(TypeKind::Undefined);
     system_types.zeroinit = create_type(TypeKind::ZeroInit);
     system_types.never_ = create_type(TypeKind::Never);
+    system_types.unit = create_type(TypeKind::Unit);
+    m_ctx->rt_unit_type = system_types.unit;
 
     // Create a system lambda type for LLVM compatibility
     // All lambdas use the same underlying structure: {ptr, size, data, flags}
@@ -558,6 +560,18 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
             return enum_type && enum_type->data.enum_.is_plain;
         }
         return false;
+    case TypeKind::Infer: {
+        auto &infer_data = to_type->data.infer;
+        if (infer_data.inferred_type) {
+            return can_assign(from_type, infer_data.inferred_type, is_explicit);
+        }
+        if (from_type->kind != TypeKind::Placeholder && from_type->kind != TypeKind::Infer) {
+            infer_data.inferred_type = from_type;
+            to_type->is_placeholder = false;
+            return true;
+        }
+        return false;
+    }
     case TypeKind::ThisType:
         // ThisType should have been substituted by now in generic contexts
         // If we reach here, it means the substitution didn't happen properly
@@ -2097,6 +2111,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &child = node->data.child_expr;
         return resolve(child, scope);
     }
+    case NodeType::UnitExpr: {
+        return get_system_types()->unit;
+    }
     case NodeType::DotExpr: {
         auto &data = node->data.dot_expr;
         auto field_name = data.field->str;
@@ -2474,6 +2491,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 result_type = scope.value_type;
                 {
+                    // Empty construct on unresolved Infer type — cannot determine type
+                    if (data.items.len == 0 && result_type->kind == TypeKind::Infer &&
+                        !result_type->data.infer.inferred_type) {
+                        error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
+                        return nullptr;
+                    }
                     // Empty construct on placeholder (= {}) requires a constructor
                     // interface bound whose new() has zero params
                     if (data.items.len == 0 && result_type->kind == TypeKind::Placeholder) {
@@ -3073,8 +3096,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_enum_base = node;
                 } else if (node->name == "Error") {
                     m_ctx->rt_error_type = struct_type;
-                } else if (node->name == "Unit") {
-                    m_ctx->rt_unit_type = struct_type;
                 } else if (node->name == "Sized") {
                     m_ctx->rt_sized_interface = struct_type;
                 } else if (node->name == "AllowUnsized") {
@@ -4487,6 +4508,15 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     }
 
     switch (type->kind) {
+    case TypeKind::Unit:
+        return "()";
+    case TypeKind::Infer: {
+        auto inferred = type->data.infer.inferred_type;
+        if (inferred) {
+            return format_type(inferred, for_display);
+        }
+        return for_display ? "Infer" : fmt::format("Type:{}:Infer", type->id);
+    }
     case TypeKind::This:
         return format_type(type->eval(), for_display);
     case TypeKind::Subtype: {
@@ -5546,6 +5576,33 @@ ChiType *Resolver::type_placeholders_sub_map(ChiType *type, map<ChiType *, ChiTy
     return recursive_type_replace(type, nullptr, handle_placeholder, make_recursive_call);
 }
 
+ChiType *Resolver::wrap_placeholders_with_infer(ChiType *type) {
+    map<ChiType *, ChiType *> infer_map;
+    return wrap_placeholders_with_infer(type, infer_map);
+}
+
+ChiType *Resolver::wrap_placeholders_with_infer(ChiType *type,
+                                                 map<ChiType *, ChiType *> &infer_map) {
+    auto handle_placeholder = [this, &infer_map](ChiType *placeholder,
+                                                  ChiTypeSubtype *) -> ChiType * {
+        if (auto existing = infer_map.get(placeholder)) {
+            return *existing;
+        }
+        auto infer_type = create_type(TypeKind::Infer);
+        infer_type->data.infer.placeholder = placeholder;
+        infer_type->is_placeholder = true;
+        infer_map[placeholder] = infer_type;
+        return infer_type;
+    };
+
+    auto make_recursive_call = [this, &infer_map](ChiType *type,
+                                                   ChiTypeSubtype *) -> ChiType * {
+        return wrap_placeholders_with_infer(type, infer_map);
+    };
+
+    return recursive_type_replace(type, nullptr, handle_placeholder, make_recursive_call);
+}
+
 // Type inference algorithm using visitor pattern - mirrors recursive_type_replace structure
 template <typename UnificationHandler, typename RecursiveCallHandler>
 bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
@@ -5682,6 +5739,13 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
     // Handle placeholder mapping via unification
     auto handle_placeholder = [fn, inferred_types](ChiType *placeholder,
                                                    ChiType *concrete) -> bool {
+        // If the arg type is the same placeholder, it provides no new information
+        // (e.g. lambda param inherited its type from the expected placeholder context).
+        // Just skip — don't record or check consistency.
+        if (concrete->kind == TypeKind::Placeholder && concrete == placeholder) {
+            return true;
+        }
+
         // Find the corresponding type parameter
         size_t placeholder_index = placeholder->data.placeholder.index;
         if (placeholder_index >= fn->type_params.len) {
@@ -5718,6 +5782,10 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
     for (size_t i = 0; i < fn->params.len; i++) {
         ChiType *param_type = fn->params[i];
         ChiType *arg_type = (*arg_types)[i];
+
+        // Skip deferred lambda args (null) — they couldn't be resolved without
+        // knowing the type params first
+        if (!arg_type) continue;
 
         // Attempt to unify this parameter with its argument
         if (!visit_type_recursive(param_type, arg_type, handle_placeholder, unify)) {
@@ -6073,6 +6141,13 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             // placeholders in parameter types for proper lambda parameter inference
             if (has_explicit_type_args || has_return_type_inference) {
                 param_type = type_placeholders_sub_map(param_type, &type_substitutions);
+            } else if (param_type && param_type->is_placeholder) {
+                // No type args yet — wrap placeholders with Infer so lambda bodies
+                // can fill in concrete types for argument-based inference.
+                // Lambda args resolved this way will have Infer-wrapped types cached
+                // on their nodes; the dispatch path (Path A/B) handles this by
+                // returning the specialized return type directly.
+                param_type = wrap_placeholders_with_infer(param_type);
             }
 
             auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
@@ -6146,6 +6221,12 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         // This ensures outlets, check_assignment, and track_move_sink are handled uniformly.
         auto &fn_call_data = node->data.fn_call_expr;
 
+        // When args were resolved with Infer-wrapped placeholders (no explicit type args,
+        // no return type inference), we must NOT call resolve_fn_call because it would
+        // re-resolve args that already have cached Infer types. Instead, we directly
+        // check assignments against the specialized param types and return.
+        bool used_infer_wrapping = !has_explicit_type_args && !has_return_type_inference;
+
         // Path A: static method call on a bare generic struct
         if (fn_call_data.fn_ref_expr->type == NodeType::DotExpr) {
             auto &dot = fn_call_data.fn_ref_expr->data.dot_expr;
@@ -6161,6 +6242,23 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                         dot.resolved_decl = member->node;
                         dot.field->node = member->node;
                         auto &spec_fn = member->resolved_type->data.fn;
+
+                        if (used_infer_wrapping) {
+                            for (size_t i = 0; i < n_args; i++) {
+                                auto arg = args->at(i);
+                                auto concrete_param = spec_fn.get_param_at(i);
+                                auto arg_type = node_get_type(arg);
+                                auto concrete_arg_type = type_placeholders_sub_map(arg_type, &type_substitutions);
+                                arg->resolved_type = concrete_arg_type;
+                                if (concrete_param) {
+                                    check_assignment(arg, concrete_arg_type, concrete_param);
+                                }
+                                track_move_sink(scope.parent_fn_node, arg, concrete_arg_type, node, concrete_param);
+                                ensure_temp_owner(arg, concrete_arg_type, scope);
+                            }
+                            return spec_fn.return_type;
+                        }
+
                         return resolve_fn_call(node, scope, &spec_fn, args, member->node);
                     }
                 }
@@ -6177,6 +6275,23 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         node->data.fn_call_expr.generated_fn = fn_variant;
 
         auto &spec_fn = fn_variant->resolved_type->data.fn;
+
+        if (used_infer_wrapping) {
+            for (size_t i = 0; i < n_args; i++) {
+                auto arg = args->at(i);
+                auto concrete_param = spec_fn.get_param_at(i);
+                auto arg_type = node_get_type(arg);
+                auto concrete_arg_type = type_placeholders_sub_map(arg_type, &type_substitutions);
+                arg->resolved_type = concrete_arg_type;
+                if (concrete_param) {
+                    check_assignment(arg, concrete_arg_type, concrete_param);
+                }
+                track_move_sink(scope.parent_fn_node, arg, concrete_arg_type, node, concrete_param);
+                ensure_temp_owner(arg, concrete_arg_type, scope);
+            }
+            return spec_fn.return_type;
+        }
+
         return resolve_fn_call(node, scope, &spec_fn, args, fn_variant);
     }
 

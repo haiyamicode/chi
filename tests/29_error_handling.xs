@@ -198,7 +198,7 @@ func test_result_mode() {
         printf("value = {}\n", result.value);
     }
 
-    // try f() → Result<Unit, &Error> — error case (void fn → Result<Unit, &Error>)
+    // try f() → Result<(), &Error> — error case (void fn → Result<(), &Error>)
     var result2 = try fail_with("oops");
     if result2.error {
         printf("got error: {}\n", result2.error.message());

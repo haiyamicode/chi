@@ -58,7 +58,13 @@ export struct FsError {
 }
 
 func throw_fs_error(op: string, path: string, code: int32) never {
-    throw new FsError{kind: error_kind_from(code), op: op, path: path, raw_code: code, detail: uv_strerror(code)};
+    throw new FsError{
+        kind: error_kind_from(code),
+        :op,
+        :path,
+        raw_code: code,
+        detail: uv_strerror(code)
+    };
 }
 
 // POSIX open flags (platform-dependent values from runtime)
