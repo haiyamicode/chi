@@ -383,6 +383,7 @@ struct StructDecl {
     array<Node *> members = {};
     ContainerKind kind = ContainerKind::Struct;
     array<Node *> type_params = {};
+    array<Node *> lifetime_params = {};
     DeclSpec *decl_spec = {};
 };
 
@@ -473,6 +474,7 @@ struct DotExpr {
 struct SubtypeExpr {
     Node *type = nullptr;
     array<Node *> args = {};
+    array<Node *> lifetime_args = {};
 };
 
 struct IndexExpr {

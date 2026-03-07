@@ -137,6 +137,7 @@ struct ChiTypeStruct {
     int vtable_size = 0;
     map<IntrinsicSymbol, ChiStructMember *> member_intrinsics = {};
     ChiLifetime *this_lifetime = nullptr;  // implicit 'this lifetime
+    array<ChiLifetime *> lifetime_params = {};  // explicit lifetime params from struct<'a, 'b>
 
     ChiStructMember *add_member(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type, bool is_layout_field = true);

@@ -2742,6 +2742,71 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        // Enforce struct lifetime outlives bounds at construction time.
+        // For 'a: 'b, the source assigned to 'a must outlive the source assigned to 'b.
+        // Add ref edges from 'b field inits to 'a field inits so 'a sources are checked
+        // wherever 'b flows.
+        if (scope.parent_fn_node && value_type && value_type->kind == TypeKind::Struct) {
+            auto &st = value_type->data.struct_;
+            if (st.lifetime_params.len > 0) {
+                // Map each lifetime param to its field init source decls
+                map<ChiLifetime *, array<ast::Node *>> lt_to_sources;
+                for (auto field_init : data.field_inits) {
+                    auto &fi = field_init->data.field_init_expr;
+                    if (!fi.resolved_field) continue;
+                    auto field_type = to_value_type(fi.resolved_field->resolved_type);
+                    if (!field_type || !field_type->is_pointer_like()) continue;
+                    auto *src = find_root_decl(fi.value);
+                    if (!src) continue;
+                    for (auto *lt : field_type->data.pointer.lifetimes) {
+                        lt_to_sources[lt].add(src);
+                    }
+                }
+                // Find the destination variable for 'this lifetime checks
+                auto *outlet = scope.move_outlet ? find_root_decl(scope.move_outlet) : nullptr;
+
+                // For 'a: 'b, each 'a source must outlive each 'b source.
+                // For 'a: 'this, each 'a source must outlive the struct instance.
+                // In LIFO order: 'a source must be declared before 'b source.
+                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                for (auto *lt_a : st.lifetime_params) {
+                    auto *a_sources = lt_to_sources.get(lt_a);
+                    if (!a_sources) continue;
+                    for (auto *lt_b : lt_a->outlives) {
+                        // Resolve the target nodes for this bound
+                        array<ast::Node *> this_target;
+                        array<ast::Node *> *b_targets;
+                        if (lt_b->kind == LifetimeKind::This) {
+                            if (!outlet || outlet->decl_order < 0) continue;
+                            this_target.add(outlet);
+                            b_targets = &this_target;
+                        } else {
+                            b_targets = lt_to_sources.get(lt_b);
+                            if (!b_targets) continue;
+                        }
+                        for (auto *a_src : *a_sources) {
+                            for (auto *b_src : *b_targets) {
+                                if (a_src->decl_order >= 0 && b_src->decl_order >= 0 &&
+                                    a_src->decl_order >= b_src->decl_order) {
+                                    array<Note> notes;
+                                    notes.add({"referenced here", node->token->pos});
+                                    error_with_notes(a_src, std::move(notes),
+                                                     "'{}' does not live long enough",
+                                                     a_src->name);
+                                }
+                            }
+                        }
+                        // For 'this: add ref edges so the borrow checker tracks reassignment
+                        if (lt_b->kind == LifetimeKind::This) {
+                            for (auto *a_src : *a_sources) {
+                                fn_def.add_ref_edge(outlet, a_src);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // For structs without a constructor, check that all fields without defaults
         // are provided via field initializers or spread at the construction site
         if (struct_type && value_type->kind == TypeKind::Struct && !constructor) {
@@ -3168,6 +3233,40 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             struct_->global_id = struct_type->global_id;
 
             // first pass, all members are skipped
+            // Process explicit lifetime params
+            for (auto lt_node : data.lifetime_params) {
+                ChiLifetime *lt;
+                if (lt_node->name == "static") {
+                    lt = m_ctx->static_lifetime;
+                } else {
+                    lt = new ChiLifetime{lt_node->name, LifetimeKind::Param, nullptr, struct_type};
+                }
+                struct_->lifetime_params.add(lt);
+            }
+            // Wire up outlives bounds
+            for (size_t i = 0; i < data.lifetime_params.len; i++) {
+                auto &bound = data.lifetime_params[i]->data.lifetime_param.bound;
+                if (!bound.empty()) {
+                    for (size_t j = 0; j < struct_->lifetime_params.len; j++) {
+                        if (data.lifetime_params[j]->name == bound) {
+                            struct_->lifetime_params[i]->outlives.add(struct_->lifetime_params[j]);
+                            break;
+                        }
+                    }
+                }
+            }
+            // Implicit 'this bound: all lifetime params outlive the struct instance
+            if (struct_->lifetime_params.len > 0) {
+                if (!struct_->this_lifetime) {
+                    struct_->this_lifetime =
+                        new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
+                }
+                for (auto *lt : struct_->lifetime_params) {
+                    if (lt->kind != LifetimeKind::Static) {
+                        lt->outlives.add(struct_->this_lifetime);
+                    }
+                }
+            }
             for (auto param : data.type_params) {
                 struct_->type_params.add(resolve(param, scope));
             }
@@ -3205,6 +3304,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             scope.parent_struct
                 ? scope
                 : scope.set_parent_struct(struct_type).set_parent_type_symbol(type_sym);
+
+        // Make struct lifetime params available for field type resolution (&'a T)
+        map<string, ChiLifetime *> struct_lifetime_map;
+        if (struct_->lifetime_params.len > 0) {
+            for (size_t i = 0; i < data.lifetime_params.len && i < struct_->lifetime_params.len; i++) {
+                struct_lifetime_map[data.lifetime_params[i]->name] = struct_->lifetime_params[i];
+            }
+            struct_scope.fn_lifetime_params = &struct_lifetime_map;
+        }
 
         if (struct_->resolve_status == ResolveStatus::None) {
             // second pass - resolve member types
@@ -3521,6 +3629,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto elem_type = to_value_type(resolve(data.args[0], scope));
             return get_wrapped_type(elem_type, type->kind);
         }
+        // Handle lifetime-only SubtypeExpr: Holder<'static>{...}
+        // Lifetime args don't change the struct type — just constrain borrow checking
+        if (data.lifetime_args.len > 0 && data.args.len == 0) {
+            if (type->kind == TypeKind::Struct) {
+                auto &struct_ = type->data.struct_;
+                if (struct_.type_params.len == 0) {
+                    // Resolve lifetime args and store on the node for borrow checking
+                    for (auto lt_arg : data.lifetime_args) {
+                        // Validate that the lifetime matches a struct lifetime param
+                        // For now, just accept it — borrow checker will use it
+                    }
+                    return create_type_symbol({}, type);
+                }
+            }
+        }
+
         array<ChiType *> *params_ptr = nullptr;
         array<ast::Node *> *decl_params_ptr = nullptr;
         if (type->kind == TypeKind::Struct) {

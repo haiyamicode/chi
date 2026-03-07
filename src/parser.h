@@ -174,6 +174,8 @@ class Parser {
 
     Node *parse_fn_param();
 
+    Node *parse_lifetime_param(Token *token);
+
     Node *parse_block(Scope *scope = nullptr, Token *arrow = nullptr);
 
     Node *parse_stmt(bool *as_expr);

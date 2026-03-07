@@ -660,8 +660,11 @@ Node *Parser::parse_type_expr(bool type_only) {
                 if (token->type == TokenType::GT) {
                     break;
                 }
+                // Handle lifetime args: Holder<'a>
+                if (token->type == TokenType::LIFETIME) {
+                    subtype.lifetime_args.add(parse_lifetime_param(token));
                 // Handle ...T spread in type args
-                if (token->type == TokenType::ELLIPSIS) {
+                } else if (token->type == TokenType::ELLIPSIS) {
                     consume(); // skip past ...
                     auto param = parse_type_expr(true);
                     auto expansion = create_node(NodeType::PackExpansion, token);
@@ -1182,22 +1185,9 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
             }
 
             if (param_token->type == TokenType::LIFETIME) {
-                // Lifetime parameter: 'a or 'a: 'b
-                consume();
-                if (param_token->str == "this") {
-                    error(param_token, "'this is a reserved lifetime and cannot be declared");
-                }
-                auto lt_node = create_node(NodeType::LifetimeParam, param_token);
-                lt_node->name = param_token->str;
+                auto lt_node = parse_lifetime_param(param_token);
                 lt_node->data.lifetime_param.index = lifetime_params.len;
                 lt_node->data.lifetime_param.source_decl = fn_node;
-
-                if (next_is(TokenType::COLON)) {
-                    consume();
-                    auto bound_token = expect(TokenType::LIFETIME);
-                    lt_node->data.lifetime_param.bound = bound_token->str;
-                }
-
                 lifetime_params.add(lt_node);
             } else {
                 // Type parameter: T or ...T (variadic) or T: SomeInterface
@@ -1253,6 +1243,21 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
     return proto;
 }
 
+Node *Parser::parse_lifetime_param(Token *token) {
+    consume();
+    if (token->str == "this") {
+        error(token, "'this is a reserved lifetime and cannot be declared");
+    }
+    auto lt_node = create_node(NodeType::LifetimeParam, token);
+    lt_node->name = token->str;
+    if (next_is(TokenType::COLON)) {
+        consume();
+        auto bound_token = expect(TokenType::LIFETIME);
+        lt_node->data.lifetime_param.bound = bound_token->str;
+    }
+    return lt_node;
+}
+
 Node *Parser::parse_fn_type(Token *func) {
     auto proto = create_node(NodeType::FnProto, func);
     auto &data = proto->data.fn_proto;
@@ -1266,10 +1271,7 @@ Node *Parser::parse_fn_type(Token *func) {
             if (token->type == TokenType::GT || token->type == TokenType::END)
                 break;
             if (token->type == TokenType::LIFETIME) {
-                consume();
-                auto lt_node = create_node(NodeType::LifetimeParam, token);
-                lt_node->name = token->str;
-                data.lifetime_params.add(lt_node);
+                data.lifetime_params.add(parse_lifetime_param(token));
             } else {
                 error(token, "expected lifetime parameter, got '{}'", token->to_string());
                 break;
@@ -2324,8 +2326,17 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
                 break;
             }
 
+            // Handle lifetime args: Type<'a, 'static>
+            if (token->type == TokenType::LIFETIME) {
+                pos++;
+                // Skip optional bound: 'a: 'b
+                if (lookahead(pos)->type == TokenType::COLON &&
+                    lookahead(pos + 1)->type == TokenType::LIFETIME) {
+                    pos += 2;
+                }
+            }
             // Recursively parse type argument
-            if (!try_parse_type_expr_lookahead(pos)) {
+            else if (!try_parse_type_expr_lookahead(pos)) {
                 return false;
             }
 
@@ -2642,29 +2653,41 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
             if (token->type == TokenType::GT) {
                 break;
             }
-            bool is_variadic = token->type == TokenType::ELLIPSIS;
-            if (is_variadic) consume(); // skip past ...
-            auto param_iden = expect(TokenType::IDEN);
-            auto param_node = create_node(NodeType::TypeParam, param_iden);
-            param_node->data.type_param.is_variadic = is_variadic;
+            // Lifetime param: 'a or 'a: 'b
+            if (token->type == TokenType::LIFETIME) {
+                node->data.struct_decl.lifetime_params.add(parse_lifetime_param(token));
+            } else {
+                // Type param
+                bool is_variadic = token->type == TokenType::ELLIPSIS;
+                if (is_variadic) consume(); // skip past ...
+                auto param_iden = expect(TokenType::IDEN);
+                auto param_node = create_node(NodeType::TypeParam, param_iden);
+                param_node->data.type_param.is_variadic = is_variadic;
 
-            // Check for colon syntax for type bounds: T: Trait1 + Trait2 + ...
-            if (next_is(TokenType::COLON)) {
-                consume(); // consume the colon
-                do {
-                    param_node->data.type_param.type_bounds.add(parse_type_expr(true));
-                } while (next_is(TokenType::ADD) && (consume(), true));
+                // Check for colon syntax for type bounds: T: Trait1 + Trait2 + ...
+                if (next_is(TokenType::COLON)) {
+                    consume(); // consume the colon
+                    // Check if first bound is a lifetime: T: 'a
+                    if (next_is(TokenType::LIFETIME)) {
+                        param_node->data.type_param.lifetime_bound = get()->str;
+                        consume();
+                    } else {
+                        do {
+                            param_node->data.type_param.type_bounds.add(parse_type_expr(true));
+                        } while (next_is(TokenType::ADD) && (consume(), true));
+                    }
+                }
+
+                // Check for = syntax for default type: T = int
+                if (next_is(TokenType::ASS)) {
+                    consume(); // consume the =
+                    param_node->data.type_param.default_type = parse_type_expr(true);
+                }
+
+                param_node->data.type_param.index = params.len;
+                param_node->data.type_param.source_decl = node;
+                params.add(param_node);
             }
-
-            // Check for = syntax for default type: T = int
-            if (next_is(TokenType::ASS)) {
-                consume(); // consume the =
-                param_node->data.type_param.default_type = parse_type_expr(true);
-            }
-
-            param_node->data.type_param.index = params.len;
-            param_node->data.type_param.source_decl = node;
-            params.add(param_node);
 
             if (!at_comma(TokenType::GT)) {
                 break;
