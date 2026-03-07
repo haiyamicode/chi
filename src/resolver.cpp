@@ -109,6 +109,7 @@ void Resolver::context_init_primitives() {
     system_types.unit = create_type(TypeKind::Unit);
     system_types.tuple = create_type(TypeKind::Tuple);
     m_ctx->rt_unit_type = system_types.unit;
+    m_ctx->static_lifetime = new ChiLifetime{"static", LifetimeKind::Static, nullptr, nullptr};
 
     // Create a system lambda type for LLVM compatibility
     // All lambdas use the same underlying structure: {ptr, size, data, flags}
@@ -749,15 +750,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 proto->data.fn_lambda.captures.add(type);
             }
 
-            // Borrow tracking: by-ref captures create edges in the function that
+            // Borrow tracking: captures create edges in the function that
             // owns the captured variable, so the lambda is treated as borrowing
             // from that local. Only add edges for variables owned by the immediate
             // enclosing function — deeper captures propagate through the chain.
+            // - By-ref captures: direct edge (lambda borrows the variable itself)
+            // - By-value captures: copy edges (lambda inherits the variable's
+            //   borrow dependencies — e.g., a captured &T still borrows the pointee)
             if (scope.parent_fn_node) {
+                auto &parent_fn_def = scope.parent_fn_node->data.fn_def;
                 for (auto &cap : data.captures) {
-                    if (cap.mode == ast::CaptureMode::ByRef &&
-                        cap.decl->parent_fn == scope.parent_fn_node) {
-                        scope.parent_fn_node->data.fn_def.add_ref_edge(node, cap.decl);
+                    if (cap.decl->parent_fn != scope.parent_fn_node)
+                        continue;
+                    if (cap.mode == ast::CaptureMode::ByRef) {
+                        parent_fn_def.add_ref_edge(node, cap.decl);
+                    } else {
+                        // By-value capture: copy borrow edges from the captured
+                        // variable. If it has no edges (plain value), no-op.
+                        parent_fn_def.copy_ref_edges(node, cap.decl, false);
                     }
                 }
             }
@@ -863,7 +873,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         map<string, ChiLifetime *> lifetime_map;
         array<ChiLifetime *> fn_lifetime_list;
         for (auto lt_node : data.lifetime_params) {
-            auto *lt = new ChiLifetime{lt_node->name, LifetimeKind::Param, nullptr, nullptr};
+            ChiLifetime *lt;
+            if (lt_node->name == "static") {
+                lt = m_ctx->static_lifetime;
+            } else {
+                lt = new ChiLifetime{lt_node->name, LifetimeKind::Param, nullptr, nullptr};
+            }
             lifetime_map[lt_node->name] = lt;
             fn_lifetime_list.add(lt);
         }
@@ -968,12 +983,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 param->resolved_type = param_type;
             } else if (param_type && !param_type->is_reference() && is_borrowing_type(param_type)) {
                 // Borrowing value params get lifetimes so borrows flow through calls.
+                ChiLifetime *lt = nullptr;
+                // Check for 'static lifetime on func types: func<'static>
+                auto *fn_inner = param_type->kind == TypeKind::FnLambda
+                                     ? param_type->data.fn_lambda.fn
+                                     : (param_type->kind == TypeKind::Fn ? param_type : nullptr);
+                if (fn_inner && fn_inner->kind == TypeKind::Fn) {
+                    for (auto *flt : fn_inner->data.fn.lifetime_params) {
+                        if (flt->kind == LifetimeKind::Static) {
+                            lt = flt;
+                            break;
+                        }
+                    }
+                }
                 // For lifetime-bounded placeholders (T: 'a), use the declared lifetime.
-                ChiLifetime *lt;
-                if (param_type->kind == TypeKind::Placeholder &&
+                if (!lt && param_type->kind == TypeKind::Placeholder &&
                     param_type->data.placeholder.lifetime_bound) {
                     lt = param_type->data.placeholder.lifetime_bound;
-                } else {
+                }
+                if (!lt) {
                     lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
                 }
                 pdata.borrow_lifetime = lt;
@@ -2790,6 +2818,32 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
+
+        // 'static lifetime params: check callee's param borrow_lifetimes for 'static.
+        // Void calls don't trigger add_call_borrow_edges, so we check here.
+        if (scope.parent_fn_node && !scope.is_unsafe_block) {
+            ast::FnProto *callee_proto = nullptr;
+            if (data.generated_fn) {
+                callee_proto = &data.generated_fn->data.generated_fn.fn_proto->data.fn_proto;
+            } else if (fn_decl && fn_decl->type == NodeType::FnDef) {
+                callee_proto = &fn_decl->data.fn_def.fn_proto->data.fn_proto;
+            } else if (fn_decl && fn_decl->type == NodeType::GeneratedFn) {
+                callee_proto = &fn_decl->data.generated_fn.fn_proto->data.fn_proto;
+            }
+            if (callee_proto) {
+                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                for (size_t i = 0; i < callee_proto->params.len && i < data.args.len; i++) {
+                    auto *lt = callee_proto->params[i]->data.param_decl.borrow_lifetime;
+                    if (lt && lt->kind == LifetimeKind::Static) {
+                        auto *arg = data.args[i];
+                        if (fn_def.ref_edges.has_key(arg)) {
+                            fn_def.add_terminal(arg);
+                            fn_def.terminal_lifetimes[arg] = lt;
+                        }
+                    }
+                }
+            }
+        }
 
         // Annotation-driven edge creation: for method calls where a param has
         // 'this lifetime, create edge from receiver to that arg in the caller's graph.
@@ -8227,10 +8281,23 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
         }
     }
 
+    // 'static params: add arg as terminal (value must not contain local borrows)
+    for (size_t i = 0; i < param_lts.len && i < call.args.len; i++) {
+        if (param_lts[i] && param_lts[i]->kind == LifetimeKind::Static) {
+            auto *arg = call.args[i];
+            if (fn_def.ref_edges.has_key(arg)) {
+                fn_def.add_terminal(arg);
+                fn_def.terminal_lifetimes[arg] = param_lts[i];
+            }
+        }
+    }
+
     if (!ret_lt && !conservative)
         return;
 
     for (size_t i = 0; i < param_lts.len && i < call.args.len; i++) {
+        if (param_lts[i] && param_lts[i]->kind == LifetimeKind::Static)
+            continue; // handled above as terminal
         if (param_lts[i] && ret_lt && lifetime_outlives(param_lts[i], ret_lt)) {
             add_borrow_source_edges(fn_def, call.args[i], target, true);
         } else if (conservative && !param_lts[i]) {
@@ -8333,6 +8400,23 @@ static string node_label(ast::Node *n) {
 // via copy_ref_edges already flattens intermediate nodes to leaves.
 static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *terminal,
                                           ast::Node *leaf) {
+    // 'static required: no local variable or non-static param can satisfy it
+    if (required && required->kind == LifetimeKind::Static) {
+        if (leaf->type == ast::NodeType::VarDecl)
+            return false;
+        if (leaf->type == ast::NodeType::ParamDecl) {
+            auto &pdata = leaf->data.param_decl;
+            auto *leaf_type = leaf->resolved_type;
+            ChiLifetime *param_lt = nullptr;
+            if (leaf_type && leaf_type->is_reference() && leaf_type->data.pointer.lifetimes.len > 0)
+                param_lt = leaf_type->data.pointer.lifetimes[0];
+            else if (pdata.borrow_lifetime)
+                param_lt = pdata.borrow_lifetime;
+            return param_lt && param_lt->kind == LifetimeKind::Static;
+        }
+        return false;
+    }
+
     if (leaf->type == ast::NodeType::VarDecl) {
         // Intra-function: leaf declared before terminal → leaf outlives terminal (LIFO)
         if (terminal->decl_order >= 0 && leaf->decl_order >= 0) {
@@ -8421,7 +8505,11 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
 
         // Extract required lifetime from terminal's type.
         ChiLifetime *required = nullptr;
-        if (terminal->type == ast::NodeType::ReturnStmt) {
+        // Check for explicitly-set lifetime constraint (e.g. 'static from func<'static>)
+        auto *explicit_lt = fn_def->terminal_lifetimes.get(terminal);
+        if (explicit_lt) {
+            required = *explicit_lt;
+        } else if (terminal->type == ast::NodeType::ReturnStmt) {
             // Return terminal: use the pre-calculated return type lifetime from elision
             if (fn_def->fn_proto && fn_def->fn_proto->resolved_type &&
                 fn_def->fn_proto->resolved_type->kind == TypeKind::Fn) {

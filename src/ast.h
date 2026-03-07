@@ -179,6 +179,7 @@ struct FnDef {
     map<Node *, size_t> edge_offsets = {};     // per-variable: index where current edges start
     map<Node *, long> terminal_last_use = {};  // per-terminal: offset of last reference
     array<Node *> terminals = {};              // nodes whose lifetimes extend beyond the function
+    map<Node *, ChiLifetime *> terminal_lifetimes = {}; // per-terminal: required lifetime constraint
     int32_t next_decl_order = 0;               // counter for assigning decl_order to locals
 
     // Register a terminal node (return statement, this with field assignments, etc.)
@@ -222,13 +223,15 @@ struct FnDef {
 
     // By-value copy: A inherits B's leaf terminals (the actual memory targets)
     // Traverses B's edges to find leaves, then creates edges from A to each leaf.
-    void copy_ref_edges(Node *to, Node *from) {
+    // fallback_to_source: if true (default), treat `from` itself as a leaf when it
+    //   has no edges. If false, do nothing when `from` has no edges.
+    void copy_ref_edges(Node *to, Node *from, bool fallback_to_source = true) {
         if (!to || !from || to == from)
             return;
         auto *deps = ref_edges.get(from);
         if (!deps || deps->len == 0) {
-            // from itself is a leaf terminal
-            add_ref_edge(to, from);
+            if (fallback_to_source)
+                add_ref_edge(to, from);
             return;
         }
         // Follow edges to find leaf terminals (nodes with no outgoing edges)

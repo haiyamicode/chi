@@ -171,6 +171,7 @@ enum class LifetimeKind {
     Param,   // regular parameter — owner is ParamDecl node
     This,    // implicit 'this' — owner is null
     Return,  // function return — owner is null
+    Static,  // 'static — value must not contain local borrows
 };
 
 struct ChiLifetime {

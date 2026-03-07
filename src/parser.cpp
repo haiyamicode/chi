@@ -1258,6 +1258,29 @@ Node *Parser::parse_fn_type(Token *func) {
     auto &data = proto->data.fn_proto;
     data.is_type_expr = true;
 
+    // func<'static> — lifetime params on func type
+    if (next_is(TokenType::LT)) {
+        consume();
+        for (;;) {
+            auto token = get();
+            if (token->type == TokenType::GT || token->type == TokenType::END)
+                break;
+            if (token->type == TokenType::LIFETIME) {
+                consume();
+                auto lt_node = create_node(NodeType::LifetimeParam, token);
+                lt_node->name = token->str;
+                data.lifetime_params.add(lt_node);
+            } else {
+                error(token, "expected lifetime parameter, got '{}'", token->to_string());
+                break;
+            }
+            if (!at_comma(TokenType::GT))
+                break;
+            consume();
+        }
+        expect(TokenType::GT);
+    }
+
     if (!next_is(TokenType::LPAREN)) {
         return proto;
     }
@@ -2102,8 +2125,22 @@ Node *Parser::parse_fn_call_with_type_params(Node *fn_expr, bool lhs, Node *pare
 }
 
 bool Parser::try_parse_fn_type_lookahead(int &pos) {
-    // func might not have parentheses
+    // Skip func<'static> lifetime params
     auto token = lookahead(pos);
+    if (token->type == TokenType::LT) {
+        pos++;
+        while (true) {
+            token = lookahead(pos);
+            if (token->type == TokenType::GT || token->type == TokenType::END)
+                break;
+            pos++;
+        }
+        if (token->type == TokenType::GT)
+            pos++;
+    }
+
+    // func might not have parentheses
+    token = lookahead(pos);
     if (token->type != TokenType::LPAREN) {
         return true;
     }

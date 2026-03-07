@@ -14,7 +14,7 @@ export func monotonic() uint64 {
     return __cx_time_monotonic();
 }
 
-export func timeout(delay: uint64, callback: func) {
+export func timeout(delay: uint64, callback: func<'static>) {
     unsafe {
         cx_timeout(delay, &callback);
     }

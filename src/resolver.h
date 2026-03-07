@@ -126,6 +126,7 @@ struct ResolveContext {
     ast::Node *rt_enum_base = nullptr;
     ChiType *rt_sized_interface = nullptr;
     ChiType *rt_allow_unsized_interface = nullptr;
+    ChiLifetime *static_lifetime = nullptr;
 
     explicit ResolveContext(Context *allocator) { this->allocator = allocator; }
 };
