@@ -979,7 +979,7 @@ struct PromiseState<T> {
     callbacks: Array<func (value: T)> = {};
 }
 
-export struct Promise<T=Unit> {
+export struct Promise<T = Unit> {
     protected data: Shared<PromiseState<T>>;
 
     mut func new() {

@@ -5655,7 +5655,26 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
         // Extract elements
         if (data.is_tuple) {
-            compile_tuple_destructure(fn, data, temp_ptr, source_type);
+            auto tuple_ptr = temp_ptr;
+            auto tuple_type = source_type;
+            if (data.resolved_as_tuple) {
+                // Call as_tuple() on the source value to get a tuple
+                tuple_type = data.as_tuple_result_type;
+                auto method = data.resolved_as_tuple;
+                auto variant_type_id = resolve_variant_type_id(fn, source_type);
+                auto method_node = get_variant_member_node(method, variant_type_id);
+                auto as_tuple_fn = get_fn(method_node);
+                auto fn_type = method->resolved_type;
+                auto tuple_type_l = compile_type(tuple_type);
+                tuple_ptr = builder.CreateAlloca(tuple_type_l, nullptr, "as_tuple");
+                auto sret_type = fn_type->data.fn.should_use_sret() ? tuple_type_l : nullptr;
+                std::vector<llvm::Value *> args = {temp_ptr};
+                auto result = create_fn_call_invoke(as_tuple_fn->llvm_fn, args, sret_type, nullptr, tuple_ptr);
+                if (result) {
+                    builder.CreateStore(result, tuple_ptr);
+                }
+            }
+            compile_tuple_destructure(fn, data, tuple_ptr, tuple_type);
         } else if (data.is_array) {
             compile_array_destructure(fn, data, temp_ptr, source_type);
         } else {

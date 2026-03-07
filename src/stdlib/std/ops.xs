@@ -119,6 +119,10 @@ export interface Hash {
     func hash() uint64;
 }
 
+export interface AsTuple<...T> {
+    func as_tuple() Tuple<...T>;
+}
+
 // Composite numeric interfaces
 export interface Number {
     ...Add;

@@ -182,6 +182,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Eq"] = IntrinsicSymbol::Eq;
     m_ctx->intrinsic_symbols["std.ops.Ord"] = IntrinsicSymbol::Ord;
     m_ctx->intrinsic_symbols["std.ops.Hash"] = IntrinsicSymbol::Hash;
+    m_ctx->intrinsic_symbols["std.ops.AsTuple"] = IntrinsicSymbol::AsTuple;
 }
 
 ChiType *Resolver::create_type(TypeKind kind) { return m_ctx->allocator->create_type(kind); }
@@ -3431,6 +3432,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             TypeList elements;
             for (auto arg : data.args) {
+                // Handle ...T spread: expand Tuple elements into args
+                if (arg->type == NodeType::PackExpansion) {
+                    auto inner = resolve_value(arg->data.pack_expansion.expr, scope);
+                    if (!inner) return nullptr;
+                    // If inner is a variadic placeholder, Tuple<...T> is just T
+                    if (inner->kind == TypeKind::Placeholder && inner->data.placeholder.is_variadic) {
+                        if (data.args.len == 1) {
+                            return create_type_symbol({}, inner);
+                        }
+                    }
+                    // If inner is a concrete Tuple, expand its elements
+                    if (inner->kind == TypeKind::Tuple) {
+                        for (auto elem : inner->data.tuple.elements) {
+                            elements.add(elem);
+                        }
+                        continue;
+                    }
+                    error(arg, "cannot spread non-tuple type '{}' in type arguments",
+                          format_type_display(inner));
+                    return nullptr;
+                }
                 auto resolved = resolve_value(arg, scope);
                 if (!resolved) return nullptr;
                 elements.add(resolved);
@@ -3460,37 +3482,67 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         auto &params = *params_ptr;
         auto &decl_params = *decl_params_ptr;
-        if (data.args.len > params.len) {
+
+        // Check if the last type param is variadic
+        bool has_variadic = decl_params.len > 0 &&
+                            decl_params[decl_params.len - 1]->data.type_param.is_variadic;
+        size_t non_variadic_count = has_variadic ? params.len - 1 : params.len;
+
+        if (!has_variadic && data.args.len > params.len) {
             error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.len,
                   data.args.len);
             return nullptr;
         }
-        // Check that missing args all have defaults
-        for (auto i = data.args.len; i < params.len; i++) {
-            if (!decl_params[i]->data.type_param.default_type) {
-                error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type),
-                      params.len, data.args.len);
-                return nullptr;
+        if (has_variadic && data.args.len < non_variadic_count) {
+            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type),
+                  non_variadic_count, data.args.len);
+            return nullptr;
+        }
+        // Check that missing non-variadic args all have defaults
+        if (!has_variadic) {
+            for (auto i = data.args.len; i < params.len; i++) {
+                if (!decl_params[i]->data.type_param.default_type) {
+                    error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type),
+                          params.len, data.args.len);
+                    return nullptr;
+                }
             }
         }
+        // Resolve all provided type args
+        array<ChiType *> resolved_args;
+        for (size_t i = 0; i < data.args.len; i++) {
+            auto resolved = resolve_value(data.args[i], scope);
+            if (resolved && resolved->kind == TypeKind::Void) {
+                error(data.args[i], "'void' cannot be used as a type parameter");
+                return nullptr;
+            }
+            resolved_args.add(resolved);
+        }
+        // Build final args, packing variadic excess into a Tuple
         array<ChiType *> args;
-        for (auto arg : data.args) {
-            auto resolved = resolve_value(arg, scope);
-            if (resolved && resolved->kind == TypeKind::Void) {
-                error(arg, "'void' cannot be used as a type parameter");
-                return nullptr;
+        if (has_variadic) {
+            for (size_t i = 0; i < non_variadic_count && i < resolved_args.len; i++) {
+                args.add(resolved_args[i]);
             }
-            args.add(resolved);
+            TypeList variadic_elements;
+            for (size_t i = non_variadic_count; i < resolved_args.len; i++) {
+                variadic_elements.add(resolved_args[i]);
+            }
+            args.add(get_tuple_type(variadic_elements));
+        } else {
+            for (auto a : resolved_args) args.add(a);
         }
-        // Fill in defaults for missing type args
-        for (auto i = data.args.len; i < params.len; i++) {
-            auto resolved = resolve_value(decl_params[i]->data.type_param.default_type, scope);
-            if (resolved && resolved->kind == TypeKind::Void) {
-                error(decl_params[i]->data.type_param.default_type,
-                      "'void' cannot be used as a type parameter");
-                return nullptr;
+        // Fill in defaults for missing non-variadic type args
+        if (!has_variadic) {
+            for (auto i = data.args.len; i < params.len; i++) {
+                auto resolved = resolve_value(decl_params[i]->data.type_param.default_type, scope);
+                if (resolved && resolved->kind == TypeKind::Void) {
+                    error(decl_params[i]->data.type_param.default_type,
+                          "'void' cannot be used as a type parameter");
+                    return nullptr;
+                }
+                args.add(resolved);
             }
-            args.add(resolved);
         }
 
         // Validate trait bounds on type arguments
@@ -3931,6 +3983,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         phty->data.placeholder.index = data.index;
         phty->data.placeholder.name = node->name;
+        phty->data.placeholder.is_variadic = data.is_variadic;
 
         assert(data.source_decl && "Type parameter without source declaration");
         phty->data.placeholder.source_decl = data.source_decl;
@@ -4589,10 +4642,30 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         default: {
             std::stringstream ss;
             ss << format_type(data.generic, for_display) << "<";
+            bool first = true;
             for (int i = 0; i < data.args.len; i++) {
-                ss << format_type(data.args[i], for_display);
-                if (i < data.args.len - 1) {
-                    ss << ",";
+                auto arg = data.args[i];
+                // Unpack variadic Tuple arg for display
+                bool is_variadic_param = false;
+                if (data.generic->kind == TypeKind::Struct) {
+                    auto &dp = data.generic->data.struct_.node->data.struct_decl.type_params;
+                    if (i < dp.len && dp[i]->data.type_param.is_variadic)
+                        is_variadic_param = true;
+                } else if (data.generic->kind == TypeKind::Enum) {
+                    auto &dp = data.generic->data.enum_.node->data.enum_decl.type_params;
+                    if (i < dp.len && dp[i]->data.type_param.is_variadic)
+                        is_variadic_param = true;
+                }
+                if (is_variadic_param && arg->kind == TypeKind::Tuple) {
+                    for (auto elem : arg->data.tuple.elements) {
+                        if (!first) ss << ",";
+                        first = false;
+                        ss << format_type(elem, for_display);
+                    }
+                } else {
+                    if (!first) ss << ",";
+                    first = false;
+                    ss << format_type(arg, for_display);
                 }
             }
             ss << ">";
@@ -6683,10 +6756,29 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
 void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &fields,
                                          ChiType *source_type, ResolveScope &scope,
                                          array<ast::Node *> &generated_vars) {
+    // If source is not a Tuple, check for AsTuple intrinsic
     if (source_type->kind != TypeKind::Tuple) {
-        error(parent, "cannot tuple-destructure non-tuple type '{}'",
-              format_type_display(source_type));
-        return;
+        auto stype = resolve_struct_type(source_type);
+        ChiStructMember *as_tuple_member = nullptr;
+        if (stype) {
+            auto member_p = stype->member_intrinsics.get(IntrinsicSymbol::AsTuple);
+            if (member_p) as_tuple_member = *member_p;
+        }
+        if (!as_tuple_member) {
+            error(parent, "cannot tuple-destructure non-tuple type '{}'",
+                  format_type_display(source_type));
+            return;
+        }
+        // Get the return type of as_tuple() — should be a Tuple
+        auto method_type = as_tuple_member->resolved_type;
+        if (!method_type || method_type->kind != TypeKind::Fn ||
+            method_type->data.fn.return_type->kind != TypeKind::Tuple) {
+            error(parent, "as_tuple() must return a Tuple type");
+            return;
+        }
+        source_type = method_type->data.fn.return_type;
+        parent->data.destructure_decl.resolved_as_tuple = as_tuple_member;
+        parent->data.destructure_decl.as_tuple_result_type = source_type;
     }
 
     auto &elems = source_type->data.tuple.elements;

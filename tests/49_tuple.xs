@@ -158,6 +158,33 @@ func test_destructure_rest() {
     println(tail.1);
 }
 
+// AsTuple destructuring
+import "std/ops" as ops;
+
+struct Point {
+    x: int;
+    y: int;
+
+    impl ops.AsTuple<int, int> {
+        func as_tuple() Tuple<int, int> {
+            return (this.x, this.y);
+        }
+    }
+}
+
+func test_as_tuple() {
+    var p = Point{x: 10, y: 20};
+    var (x, y) = p;
+    println(x);
+    println(y);
+
+    // Rest with AsTuple
+    var p2 = Point{x: 30, y: 40};
+    var (a, ...rest) = p2;
+    println(a);
+    println(rest.0);
+}
+
 // Reassigning tuple fields through variable
 func test_reassign() {
     var x = (10, 20);
@@ -184,6 +211,7 @@ func main() {
     test_destructure_return();
     test_destructure_nested();
     test_destructure_rest();
+    test_as_tuple();
     test_reassign();
 }
 

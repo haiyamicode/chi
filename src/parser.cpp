@@ -660,8 +660,17 @@ Node *Parser::parse_type_expr(bool type_only) {
                 if (token->type == TokenType::GT) {
                     break;
                 }
-                auto param = parse_type_expr(true);
-                subtype.args.add(param);
+                // Handle ...T spread in type args
+                if (token->type == TokenType::ELLIPSIS) {
+                    consume(); // skip past ...
+                    auto param = parse_type_expr(true);
+                    auto expansion = create_node(NodeType::PackExpansion, token);
+                    expansion->data.pack_expansion.expr = param;
+                    subtype.args.add(expansion);
+                } else {
+                    auto param = parse_type_expr(true);
+                    subtype.args.add(param);
+                }
                 if (!at_comma(TokenType::GT)) {
                     break;
                 }
@@ -1191,12 +1200,15 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
 
                 lifetime_params.add(lt_node);
             } else {
-                // Type parameter: T or T: SomeInterface
+                // Type parameter: T or ...T (variadic) or T: SomeInterface
+                bool is_variadic = token->type == TokenType::ELLIPSIS;
+                if (is_variadic) consume(); // skip past ...
                 auto param_iden = expect(TokenType::IDEN);
                 auto param_node = create_node(NodeType::TypeParam, param_iden);
                 param_node->name = param_iden->str;
                 param_node->data.type_param.index = type_params.len;
                 param_node->data.type_param.source_decl = fn_node;
+                param_node->data.type_param.is_variadic = is_variadic;
 
                 if (next_is(TokenType::COLON)) {
                     consume();
@@ -1752,8 +1764,17 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
                     if (tok->type == TokenType::GT) {
                         break;
                     }
-                    auto param = parse_type_expr(true);
-                    subtype_node->data.subtype_expr.args.add(param);
+                    // Check for ...T spread in type args
+                    if (tok->type == TokenType::ELLIPSIS) {
+                        consume(); // skip past ...
+                        auto param = parse_type_expr(true);
+                        auto expansion = create_node(NodeType::PackExpansion, tok);
+                        expansion->data.pack_expansion.expr = param;
+                        subtype_node->data.subtype_expr.args.add(expansion);
+                    } else {
+                        auto param = parse_type_expr(true);
+                        subtype_node->data.subtype_expr.args.add(param);
+                    }
                     if (!at_comma(TokenType::GT)) {
                         break;
                     }
@@ -2509,8 +2530,11 @@ Node *Parser::parse_enum_decl(DeclSpec *decl_spec) {
             if (token->type == TokenType::GT) {
                 break;
             }
+            bool is_variadic = token->type == TokenType::ELLIPSIS;
+            if (is_variadic) consume(); // skip past ...
             auto param_iden = expect(TokenType::IDEN);
             auto param_node = create_node(NodeType::TypeParam, param_iden);
+            param_node->data.type_param.is_variadic = is_variadic;
 
             // Check for colon syntax for type bounds: T: Trait1 + Trait2 + ...
             if (next_is(TokenType::COLON)) {
@@ -2581,8 +2605,11 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
             if (token->type == TokenType::GT) {
                 break;
             }
+            bool is_variadic = token->type == TokenType::ELLIPSIS;
+            if (is_variadic) consume(); // skip past ...
             auto param_iden = expect(TokenType::IDEN);
             auto param_node = create_node(NodeType::TypeParam, param_iden);
+            param_node->data.type_param.is_variadic = is_variadic;
 
             // Check for colon syntax for type bounds: T: Trait1 + Trait2 + ...
             if (next_is(TokenType::COLON)) {
@@ -2985,8 +3012,11 @@ Node *Parser::parse_typedef() {
             if (param_token->type == TokenType::GT) {
                 break;
             }
+            bool is_variadic = param_token->type == TokenType::ELLIPSIS;
+            if (is_variadic) consume(); // skip past ...
             auto param_iden = expect(TokenType::IDEN);
             auto param_node = create_node(NodeType::TypeParam, param_iden);
+            param_node->data.type_param.is_variadic = is_variadic;
             if (next_is(TokenType::COLON)) {
                 consume();
                 do {

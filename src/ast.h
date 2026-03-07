@@ -284,6 +284,7 @@ struct TypeParam {
     Node *default_type = nullptr;
     Node *source_decl = nullptr; // The struct/function that owns this type parameter
     string lifetime_bound;       // "a" for T: 'a (lifetime bound)
+    bool is_variadic = false;    // ...T variadic type parameter
 };
 
 struct LifetimeParam {
@@ -429,6 +430,8 @@ struct DestructureDecl {
     bool is_array = false;                            // array destructuring: var [a, b] = arr
     bool is_tuple = false;                            // tuple destructuring: var (a, b) = tup
     ChiStructMember *resolved_index_method = nullptr; // index_mut for array destructure
+    ChiStructMember *resolved_as_tuple = nullptr;     // as_tuple for AsTuple destructure
+    ChiType *as_tuple_result_type = nullptr;           // Tuple type returned by as_tuple
 };
 
 // composite literal

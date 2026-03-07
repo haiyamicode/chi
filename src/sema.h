@@ -29,7 +29,7 @@ MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Byte, Rune, String, 
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
-MAKE_ENUM(IntrinsicSymbol, None, Index, IndexMut, IndexMutIterable, CopyFrom, DisallowCopy, Display, Add, Sub, Mul, Div, Rem, Neg, BitAnd, BitOr, BitXor, BitNot, Shl, Shr, Sized, AllowUnsized, Construct, Unwrap, UnwrapMut, Deref, DerefMut, MutIterator, MutIterable, Slice, Eq, Ord, Hash, EnumName, DiscriminatorName)
+MAKE_ENUM(IntrinsicSymbol, None, Index, IndexMut, IndexMutIterable, CopyFrom, DisallowCopy, Display, Add, Sub, Mul, Div, Rem, Neg, BitAnd, BitOr, BitXor, BitNot, Shl, Shr, Sized, AllowUnsized, Construct, Unwrap, UnwrapMut, Deref, DerefMut, MutIterator, MutIterable, Slice, Eq, Ord, Hash, EnumName, DiscriminatorName, AsTuple)
 
 MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait, TupleField);
 
@@ -271,6 +271,7 @@ struct ChiTypePlaceholder {
         nullptr; // The struct/function declaration that owns this type parameter
     string name; // The name of the type parameter (T, U, etc.)
     ChiLifetime *lifetime_bound = nullptr; // Resolved lifetime from T: 'a
+    bool is_variadic = false; // ...T variadic type parameter
 };
 
 struct ChiTypeFnLambda {
