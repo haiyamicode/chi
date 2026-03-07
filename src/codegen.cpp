@@ -804,7 +804,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
     }
     case TypeKind::Unit: {
-        return llvm_db.createBasicType("()", 8, llvm::dwarf::DW_ATE_unsigned);
+        return llvm_db.createBasicType("Unit", 8, llvm::dwarf::DW_ATE_unsigned);
     }
     case TypeKind::Bool: {
         return llvm_db.createBasicType("bool", 8, llvm::dwarf::DW_ATE_boolean);
@@ -7990,7 +7990,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         // Unit type: 1-byte placeholder (like empty struct)
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
-        return llvm::StructType::create(members, "()");
+        return llvm::StructType::create(members, "Unit");
     }
     case TypeKind::Placeholder: {
         return compile_type(get_system_types()->void_);

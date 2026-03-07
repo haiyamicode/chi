@@ -625,14 +625,8 @@ Node *Parser::parse_type_expr(bool type_only) {
     auto token = get();
     if (token->type == TokenType::LPAREN) {
         consume();
-        if (next_is(TokenType::RPAREN)) {
-            // () — unit type
-            consume();
-            node = create_node(NodeType::UnitExpr, token);
-        } else {
-            node = parse_type_expr(true);
-            expect(TokenType::RPAREN);
-        }
+        node = parse_type_expr(true);
+        expect(TokenType::RPAREN);
     } else if (token->type == TokenType::KW_FUNC) {
         consume();
         node = parse_fn_type(token);
@@ -2163,12 +2157,6 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
             pos++;
             return try_parse_fn_type_lookahead(pos);
         }
-    }
-
-    // () — unit type
-    if (token->type == TokenType::LPAREN && lookahead(pos + 1)->type == TokenType::RPAREN) {
-        pos += 2;
-        return true;
     }
 
     // Must be an identifier-based type

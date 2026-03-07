@@ -397,7 +397,17 @@ void AstPrinter::print_node(Node *node) {
                 }
             }
 
-            if (is_array) {
+            // Check if effective type is Unit
+            bool is_unit = false;
+            if (etype && !cdata.items.len && !cdata.field_inits.len && !cdata.spread_expr) {
+                if (etype->type == NodeType::Identifier && etype->name == "Unit") {
+                    is_unit = true;
+                }
+            }
+
+            if (is_unit) {
+                emit(" = ()");
+            } else if (is_array) {
                 // Array: var x: Array<T> = [items]
                 if (etype) {
                     emit(": ");
@@ -568,6 +578,21 @@ void AstPrinter::print_node(Node *node) {
             emit_wrapped_list(&data.items, "[", "]", ", ");
             break;
         }
+        // Collapse Unit{} or {} (with Unit context) to ()
+        bool is_unit_construct = !data.items.len && !data.field_inits.len && !data.spread_expr;
+        if (is_unit_construct) {
+            if (data.type && data.type->type == NodeType::Identifier &&
+                data.type->name == "Unit") {
+                emit("()");
+                break;
+            }
+            if (!data.type && node->resolved_type &&
+                node->resolved_type->kind == cx::TypeKind::Unit) {
+                emit("()");
+                break;
+            }
+        }
+
         // Consume and reset flag so it only affects THIS construct, not nested ones
         bool suppress = m_suppress_construct_type;
         m_suppress_construct_type = false;

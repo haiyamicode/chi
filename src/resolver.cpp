@@ -141,6 +141,7 @@ void Resolver::context_init_primitives() {
     add_primitive("uint32", create_int_type(32, true));
     add_primitive("uint64", create_int_type(64, true));
     add_primitive("never", system_types.never_);
+    add_primitive("Unit", system_types.unit);
 
     // non-primitive builtins
     add_primitive("Result", system_types.result);
@@ -2532,6 +2533,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 value_type = data.is_new ? result_type->get_elem() : result_type;
             }
         }
+        // Empty construct of Unit type → rewrite to UnitExpr for formatter
+        if (value_type && value_type->kind == TypeKind::Unit && data.items.len == 0 &&
+            !data.field_inits.len && !data.spread_expr) {
+            node->type = NodeType::UnitExpr;
+            return value_type;
+        }
+
         // FixedArray construct: [N]T{items...} or array literal assigned to [N]T
         if (value_type->kind == TypeKind::FixedArray) {
             auto elem_type = value_type->data.fixed_array.elem;
@@ -4509,7 +4517,7 @@ string Resolver::format_type(ChiType *type, bool for_display) {
 
     switch (type->kind) {
     case TypeKind::Unit:
-        return "()";
+        return "Unit";
     case TypeKind::Infer: {
         auto inferred = type->data.infer.inferred_type;
         if (inferred) {

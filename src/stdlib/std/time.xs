@@ -20,7 +20,7 @@ export func timeout(delay: uint64, callback: func) {
     }
 }
 
-export func sleep(ms: uint64) Promise<()> {
+export func sleep(ms: uint64) Promise {
     return Promise.make(
         func (resolve) {
             timeout(ms, func [resolve] () {
