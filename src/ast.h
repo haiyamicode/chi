@@ -26,7 +26,7 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           TypeParam, LifetimeParam, PrefixExpr, ExternDecl, TryExpr, AwaitExpr, InferredType,
           ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier, SwitchExpr, CaseExpr, ImportSymbol,
           ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt, ImplementBlock,
-          PackExpansion, DestructureDecl, DestructureField, UnitExpr);
+          PackExpansion, DestructureDecl, DestructureField, UnitExpr, TupleExpr);
 
 MAKE_ENUM(ModuleKind, XS, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
@@ -426,6 +426,7 @@ struct DestructureDecl {
     array<Node *> generated_vars = {};                // resolver creates VarDecl nodes here
     Node *temp_var = nullptr;                         // temp to hold RHS value
     bool is_array = false;                            // array destructuring: var [a, b] = arr
+    bool is_tuple = false;                            // tuple destructuring: var (a, b) = tup
     ChiStructMember *resolved_index_method = nullptr; // index_mut for array destructure
 };
 
@@ -437,6 +438,10 @@ struct ConstructExpr {
     array<Node *> field_inits = {};
     Node *type = nullptr;
     Node *spread_expr = nullptr; // ...expr spread source
+};
+
+struct TupleExpr {
+    array<Node *> items = {};
 };
 
 struct TypedefDecl {
@@ -717,6 +722,7 @@ struct Node {
         ImplementBlockData implement_block;
         DestructureDecl destructure_decl;
         DestructureField destructure_field;
+        TupleExpr tuple_expr;
 
         NodeData() {}
 

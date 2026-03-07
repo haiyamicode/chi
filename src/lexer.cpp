@@ -137,6 +137,19 @@ l0:
     } else if (c == '.') {
         c1 = read();
         if (is_digit(c1)) {
+            // Check if previous token ends an expression — if so, this is
+            // a dot access (e.g., tuple.0), not a float literal (.0)
+            bool is_dot_access = false;
+            if (m_result->tokens.len > 1) {
+                auto prev = m_result->tokens[m_result->tokens.len - 2]->type;
+                is_dot_access = prev == TokenType::IDEN || prev == TokenType::RPAREN ||
+                                prev == TokenType::RBRACK || prev == TokenType::INT;
+            }
+            if (is_dot_access) {
+                unread();
+                m_tok.type = TokenType::DOT;
+                return;
+            }
             unread();
             read_number('.');
             return;
@@ -705,7 +718,13 @@ void Lexer::read_number(char c) {
         is_int = true; // assume long unless proven otherwise
 
         // fraction (but not if followed by another '.', which is the range operator '..')
-        if (c == '.' && peek() != '.') {
+        // Also skip if current number is a tuple field index (preceded by DOT, e.g., tuple.0.1)
+        bool is_tuple_field = false;
+        if (c == '.' && m_result->tokens.len > 1) {
+            auto prev = m_result->tokens[m_result->tokens.len - 2]->type;
+            is_tuple_field = prev == TokenType::DOT;
+        }
+        if (c == '.' && peek() != '.' && !is_tuple_field) {
             is_int = false;
             buf.push_back(c);
             c = read();

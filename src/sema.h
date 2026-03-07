@@ -25,13 +25,13 @@ struct ChiLifetime;
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Byte, Rune, String, Struct, Pointer,
           Reference, MutRef, MoveRef, Array, FixedArray, Span, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
-          Undefined, ZeroInit, Never, Unit)
+          Undefined, ZeroInit, Never, Unit, Tuple)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
 MAKE_ENUM(IntrinsicSymbol, None, Index, IndexMut, IndexMutIterable, CopyFrom, DisallowCopy, Display, Add, Sub, Mul, Div, Rem, Neg, BitAnd, BitOr, BitXor, BitNot, Shl, Shr, Sized, AllowUnsized, Construct, Unwrap, UnwrapMut, Deref, DerefMut, MutIterator, MutIterable, Slice, Eq, Ord, Hash, EnumName, DiscriminatorName)
 
-MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait);
+MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait, TupleField);
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;
@@ -209,6 +209,10 @@ struct ChiTypeResult {
     ChiType *internal = nullptr; // internal struct type
 };
 
+struct ChiTypeTuple {
+    TypeList elements = {};
+};
+
 struct ChiTypeSubtype {
     ChiType *generic = nullptr;
     TypeList args = {};
@@ -328,6 +332,7 @@ struct ChiType {
         ChiTypeEnum enum_;
         ChiTypeEnumValue enum_value;
         ChiTypeInfer infer;
+        ChiTypeTuple tuple;
 
         Data() {}
 
@@ -369,6 +374,7 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(enum_, Enum, ChiTypeEnum)
             CHITYPE_CASE_INIT_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
             CHITYPE_CASE_INIT_FIELD(infer, Infer, ChiTypeInfer)
+            CHITYPE_CASE_INIT_FIELD(tuple, Tuple, ChiTypeTuple)
         default:
             break;
         }
@@ -403,6 +409,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(enum_, Enum, ChiTypeEnum)
             CHITYPE_CASE_DESTROY_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
             CHITYPE_CASE_DESTROY_FIELD(infer, Infer, ChiTypeInfer)
+            CHITYPE_CASE_DESTROY_FIELD(tuple, Tuple, ChiTypeTuple)
         default:
             break;
         }
@@ -444,6 +451,7 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(enum_, Enum, ChiTypeEnum)
             CHITYPE_CASE_CLONE_FIELD(enum_value, EnumValue, ChiTypeEnumValue)
             CHITYPE_CASE_CLONE_FIELD(infer, Infer, ChiTypeInfer)
+            CHITYPE_CASE_CLONE_FIELD(tuple, Tuple, ChiTypeTuple)
         default:
             break;
         }

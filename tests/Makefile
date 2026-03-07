@@ -48,7 +48,8 @@ TESTS_LIST = 00_fib.test \
 		45_typedef.test \
 		46_generic_embed.test \
 		47_structural_typing.test \
-		48_stdlib.test
+		48_stdlib.test \
+		49_tuple.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

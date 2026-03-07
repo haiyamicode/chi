@@ -896,6 +896,10 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
         return parse_array_destructure_decl(var_kind);
     }
 
+    if (!as_field && next_is(TokenType::LPAREN)) {
+        return parse_tuple_destructure_decl(var_kind);
+    }
+
     bool is_embed = false;
     if (as_field && next_is(TokenType::ELLIPSIS)) {
         is_embed = true;
@@ -1076,6 +1080,55 @@ Node *Parser::parse_array_destructure_decl(VarKind kind) {
         consume();
     }
     expect(TokenType::RBRACK);
+
+    node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
+    expect(TokenType::ASS);
+    node->data.destructure_decl.expr = parse_child_expr_construct(false, node);
+    expect(TokenType::SEMICOLON);
+
+    register_destructure_bindings(this, node);
+    return node;
+}
+
+Node *Parser::parse_tuple_destructure_decl(VarKind kind) {
+    auto lparen = expect(TokenType::LPAREN);
+    auto node = create_node(NodeType::DestructureDecl, lparen);
+    node->data.destructure_decl.kind = kind;
+    node->data.destructure_decl.is_tuple = true;
+
+    for (;;) {
+        auto token = get();
+        if (token->type == TokenType::RPAREN || token->type == TokenType::END)
+            break;
+
+        auto sigil = SigilKind::None;
+        if (next_is(TokenType::AND)) {
+            consume();
+            if (next_is(TokenType::KW_MUT)) {
+                consume();
+                sigil = SigilKind::MutRef;
+            } else {
+                sigil = SigilKind::Reference;
+            }
+        }
+
+        auto binding_token = expect(TokenType::IDEN);
+        if (binding_token->type != TokenType::IDEN)
+            break;
+
+        auto field_node = create_node(NodeType::DestructureField, binding_token);
+        field_node->data.destructure_field.field_name = binding_token;
+        field_node->data.destructure_field.binding_name = binding_token;
+        field_node->data.destructure_field.sigil = sigil;
+
+        node->data.destructure_decl.fields.add(field_node);
+        field_node->parent = node;
+
+        if (!at_comma(TokenType::RPAREN))
+            break;
+        consume();
+    }
+    expect(TokenType::RPAREN);
 
     node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
     expect(TokenType::ASS);
@@ -1764,8 +1817,22 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
             return node;
         }
         consume();
+        auto first = parse_child_expr(lhs, parent);
+        if (get()->type == TokenType::COMMA) {
+            // (a, b, ...) — tuple expression
+            auto node = create_node(NodeType::TupleExpr, token);
+            node->data.tuple_expr.items.add(first);
+            while (get()->type == TokenType::COMMA) {
+                consume(); // ,
+                if (get()->type == TokenType::RPAREN) break; // trailing comma
+                node->data.tuple_expr.items.add(parse_child_expr(lhs, parent));
+            }
+            expect(TokenType::RPAREN);
+            return node;
+        }
+        // (a) — parenthesized expression
         auto node = create_node(NodeType::ParenExpr, token);
-        node->data.child_expr = parse_child_expr(lhs, parent);
+        node->data.child_expr = first;
         expect(TokenType::RPAREN);
         return node;
     }
@@ -2831,7 +2898,14 @@ Node *Parser::parse_dot_expr(Node *expr, bool is_optional_chain) {
     auto node = create_node(NodeType::DotExpr, dot);
     node->data.dot_expr.expr = expr;
     node->data.dot_expr.is_optional_chain = is_optional_chain;
-    auto field = expect_identifier();
+    // Allow integer literals for tuple field access: expr.0, expr.1
+    Token *field;
+    if (get()->type == TokenType::INT) {
+        field = read();
+        field->str = std::to_string(field->val.i);
+    } else {
+        field = expect_identifier();
+    }
     field->semantic_node = node;
     node->data.dot_expr.field = field;
 

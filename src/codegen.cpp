@@ -806,6 +806,12 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     case TypeKind::Unit: {
         return llvm_db.createBasicType("Unit", 8, llvm::dwarf::DW_ATE_unsigned);
     }
+    case TypeKind::Tuple: {
+        auto name = get_resolver()->format_type_display(type);
+        auto llvm_type = compile_type(type);
+        auto size = m_ctx->llvm_module->getDataLayout().getTypeSizeInBits(llvm_type);
+        return llvm_db.createBasicType(name, size, llvm::dwarf::DW_ATE_unsigned);
+    }
     case TypeKind::Bool: {
         return llvm_db.createBasicType("bool", 8, llvm::dwarf::DW_ATE_boolean);
     }
@@ -3258,6 +3264,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                                           dot_data.resolved_value);
         }
 
+        // Tuple field access: expr.0, expr.1
+        if (dot_data.resolved_dot_kind == DotKind::TupleField) {
+            auto tuple_val = compile_expr(fn, dot_data.expr);
+            return m_ctx->llvm_builder->CreateExtractValue(tuple_val, {(unsigned)dot_data.resolved_value});
+        }
+
         if (dot_data.is_optional_chain) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto opt_type = get_chitype(dot_data.expr);
@@ -3427,6 +3439,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::UnitExpr: {
         return llvm::Constant::getNullValue(compile_type(get_system_types()->unit));
+    }
+    case ast::NodeType::TupleExpr: {
+        auto &data = expr->data.tuple_expr;
+        auto tuple_type = compile_type(expr->resolved_type);
+        llvm::Value *tuple = llvm::UndefValue::get(tuple_type);
+        for (int i = 0; i < data.items.len; i++) {
+            auto elem = compile_expr(fn, data.items[i]);
+            tuple = m_ctx->llvm_builder->CreateInsertValue(tuple, elem, {(unsigned)i});
+        }
+        return tuple;
     }
     case ast::NodeType::IfExpr: {
         auto &data = expr->data.if_expr;
@@ -4280,6 +4302,37 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
     }
 }
 
+void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &data,
+                                         llvm::Value *source_ptr, ChiType *source_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto tuple_type_l = compile_type(source_type);
+    auto &elems = source_type->data.tuple.elements;
+
+    for (size_t i = 0; i < data.fields.len; i++) {
+        auto field_node = data.fields[i];
+        auto elem_type = elems[i];
+        auto elem_type_l = compile_type(elem_type);
+
+        // GEP to tuple element
+        auto elem_ptr = builder.CreateStructGEP(tuple_type_l, source_ptr, (unsigned)i);
+
+        // Allocate binding variable
+        assert(i < data.generated_vars.len);
+        auto var_node = data.generated_vars[i];
+        auto var_ptr = compile_alloc(fn, var_node);
+        add_var(var_node, var_ptr);
+
+        auto &field_data = field_node->data.destructure_field;
+        if (field_data.sigil == ast::SigilKind::Reference ||
+            field_data.sigil == ast::SigilKind::MutRef) {
+            builder.CreateStore(elem_ptr, var_ptr);
+        } else {
+            auto elem_value = builder.CreateLoad(elem_type_l, elem_ptr);
+            compile_store_or_copy(fn, elem_value, var_ptr, elem_type, field_node);
+        }
+    }
+}
+
 llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     auto ctn_type = get_chitype(expr);
     // Optional chaining: unwrap ?T to get pointer to T value
@@ -4392,6 +4445,13 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         }
 
         auto type = get_chitype(data.expr);
+
+        if (data.resolved_dot_kind == DotKind::TupleField) {
+            auto ref = compile_expr_ref(fn, data.expr);
+            auto tuple_type = compile_type(type);
+            auto gep = m_ctx->llvm_builder->CreateStructGEP(tuple_type, ref.address, (unsigned)data.resolved_value);
+            return RefValue::from_address(gep);
+        }
 
         llvm::Value *ptr = nullptr;
         if (data.resolved_dot_kind == DotKind::EnumVariant) {
@@ -4625,6 +4685,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     case ast::NodeType::ConstructExpr:
     case ast::NodeType::LiteralExpr:
     case ast::NodeType::UnitExpr:
+    case ast::NodeType::TupleExpr:
     case ast::NodeType::CastExpr:
         return RefValue::from_value(compile_expr(fn, expr));
     default:
@@ -5580,7 +5641,9 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         }
 
         // Extract elements
-        if (data.is_array) {
+        if (data.is_tuple) {
+            compile_tuple_destructure(fn, data, temp_ptr, source_type);
+        } else if (data.is_array) {
             compile_array_destructure(fn, data, temp_ptr, source_type);
         } else {
             compile_destructure_fields(fn, data.fields, temp_ptr, source_type);
@@ -7991,6 +8054,13 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         std::vector<llvm::Type *> members;
         members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
         return llvm::StructType::create(members, "Unit");
+    }
+    case TypeKind::Tuple: {
+        std::vector<llvm::Type *> members;
+        for (auto elem : type->data.tuple.elements) {
+            members.push_back(compile_type(elem));
+        }
+        return llvm::StructType::create(members, get_resolver()->format_type_display(type));
     }
     case TypeKind::Placeholder: {
         return compile_type(get_system_types()->void_);

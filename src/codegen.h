@@ -393,6 +393,9 @@ class Compiler {
     void compile_array_destructure(Function *fn, ast::DestructureDecl &data,
                                    llvm::Value *source_ptr, ChiType *source_type);
 
+    void compile_tuple_destructure(Function *fn, ast::DestructureDecl &data,
+                                   llvm::Value *source_ptr, ChiType *source_type);
+
     llvm::Value *compile_optional_branch(
         Function *fn, ast::Node *opt_expr, llvm::Type *result_type_l, const char *label,
         std::function<llvm::Value *(llvm::Value *unwrapped_ptr)> on_has_value,

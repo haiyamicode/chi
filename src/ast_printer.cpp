@@ -692,6 +692,16 @@ void AstPrinter::print_node(Node *node) {
         emit("()");
         break;
     }
+    case NodeType::TupleExpr: {
+        auto &data = node->data.tuple_expr;
+        emit("(");
+        for (int i = 0; i < data.items.len; i++) {
+            print_node(data.items[i]);
+            if (i < data.items.len - 1) emit(", ");
+        }
+        emit(")");
+        break;
+    }
     case NodeType::IfExpr: {
         auto &data = node->data.if_expr;
         emit("if ");
@@ -1265,7 +1275,20 @@ void AstPrinter::print_node_list(array<Node *> *list) {
 
 void AstPrinter::print_destructure_pattern(Node *node) {
     auto &data = node->data.destructure_decl;
-    if (data.is_array) {
+    if (data.is_tuple) {
+        emit("(");
+        for (size_t i = 0; i < data.fields.len; i++) {
+            if (i > 0)
+                emit(", ");
+            auto &field_data = data.fields[i]->data.destructure_field;
+            if (field_data.sigil == SigilKind::MutRef)
+                emit("&mut ");
+            else if (field_data.sigil == SigilKind::Reference)
+                emit("&");
+            emit("{}", field_data.binding_name->str);
+        }
+        emit(")");
+    } else if (data.is_array) {
         emit("[");
         for (size_t i = 0; i < data.fields.len; i++) {
             if (i > 0)

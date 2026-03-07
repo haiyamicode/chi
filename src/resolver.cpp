@@ -107,6 +107,7 @@ void Resolver::context_init_primitives() {
     system_types.zeroinit = create_type(TypeKind::ZeroInit);
     system_types.never_ = create_type(TypeKind::Never);
     system_types.unit = create_type(TypeKind::Unit);
+    system_types.tuple = create_type(TypeKind::Tuple);
     m_ctx->rt_unit_type = system_types.unit;
 
     // Create a system lambda type for LLVM compatibility
@@ -142,6 +143,7 @@ void Resolver::context_init_primitives() {
     add_primitive("uint64", create_int_type(64, true));
     add_primitive("never", system_types.never_);
     add_primitive("Unit", system_types.unit);
+    add_primitive("Tuple", system_types.tuple);
 
     // non-primitive builtins
     add_primitive("Result", system_types.result);
@@ -1313,7 +1315,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         // Resolve each field pattern
-        if (data.is_array) {
+        if (data.is_tuple) {
+            resolve_tuple_destructure(node, data.fields, expr_type, scope, data.generated_vars);
+        } else if (data.is_array) {
             resolve_array_destructure(node, data.fields, expr_type, scope, data.generated_vars);
         } else {
             resolve_destructure_fields(node, data.fields, expr_type, scope, data.generated_vars);
@@ -2115,6 +2119,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::UnitExpr: {
         return get_system_types()->unit;
     }
+    case NodeType::TupleExpr: {
+        auto &data = node->data.tuple_expr;
+        TypeList elements;
+        for (auto item : data.items) {
+            auto elem_type = resolve(item, scope);
+            if (!elem_type) return nullptr;
+            elements.add(elem_type);
+        }
+        return get_tuple_type(elements);
+    }
     case NodeType::DotExpr: {
         auto &data = node->data.dot_expr;
         auto field_name = data.field->str;
@@ -2285,6 +2299,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (field_name == "length") {
                 data.resolved_value = (int64_t)expr_type->data.fixed_array.size;
                 return get_system_types()->uint32;
+            }
+            error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(expr_type));
+            return nullptr;
+        }
+
+        // Tuple field access: expr.0, expr.1, ...
+        if (expr_type->kind == TypeKind::Tuple) {
+            auto &elems = expr_type->data.tuple.elements;
+            // Parse field name as integer index
+            char *end;
+            long idx = std::strtol(field_name.c_str(), &end, 10);
+            if (*end == '\0' && idx >= 0 && idx < elems.len) {
+                data.resolved_value = idx;
+                data.resolved_dot_kind = DotKind::TupleField;
+                return elems[idx];
             }
             error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(expr_type));
             return nullptr;
@@ -3395,6 +3424,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        if (type->kind == TypeKind::Tuple) {
+            // Tuple<> → Unit, Tuple<A, B, ...> → Tuple type
+            if (data.args.len == 0) {
+                return create_type_symbol({}, get_system_types()->unit);
+            }
+            TypeList elements;
+            for (auto arg : data.args) {
+                auto resolved = resolve_value(arg, scope);
+                if (!resolved) return nullptr;
+                elements.add(resolved);
+            }
+            return create_type_symbol({}, get_tuple_type(elements));
+        }
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional) {
             if (data.args.len != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
@@ -4518,6 +4560,17 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     switch (type->kind) {
     case TypeKind::Unit:
         return "Unit";
+    case TypeKind::Tuple: {
+        std::stringstream ss;
+        ss << "Tuple<";
+        auto &elems = type->data.tuple.elements;
+        for (int i = 0; i < elems.len; i++) {
+            ss << format_type(elems[i], for_display);
+            if (i < elems.len - 1) ss << ", ";
+        }
+        ss << ">";
+        return ss.str();
+    }
     case TypeKind::Infer: {
         auto inferred = type->data.infer.inferred_type;
         if (inferred) {
@@ -6627,6 +6680,62 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
     }
 }
 
+void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &fields,
+                                         ChiType *source_type, ResolveScope &scope,
+                                         array<ast::Node *> &generated_vars) {
+    if (source_type->kind != TypeKind::Tuple) {
+        error(parent, "cannot tuple-destructure non-tuple type '{}'",
+              format_type_display(source_type));
+        return;
+    }
+
+    auto &elems = source_type->data.tuple.elements;
+    if ((int)fields.len > elems.len) {
+        error(parent, "too many bindings in tuple destructure: expected at most {}, got {}",
+              elems.len, fields.len);
+        return;
+    }
+
+    auto kind = parent->data.destructure_decl.kind;
+
+    for (int i = 0; i < (int)fields.len; i++) {
+        auto field_node = fields[i];
+        auto &field_data = field_node->data.destructure_field;
+        auto binding_name = string(field_data.binding_name->str);
+        auto elem_type = elems[i];
+
+        auto var = get_dummy_var(binding_name);
+        var->module = parent->module;
+        var->parent_fn = scope.parent_fn_node;
+        auto var_type = field_data.sigil == ast::SigilKind::MutRef
+                            ? get_pointer_type(elem_type, TypeKind::MutRef)
+                        : field_data.sigil == ast::SigilKind::Reference
+                            ? get_pointer_type(elem_type, TypeKind::Reference)
+                            : elem_type;
+        var->resolved_type = var_type;
+        var->data.var_decl.kind = kind;
+        var->data.var_decl.initialized_at = parent;
+        var->token = field_data.binding_name;
+        var->name = binding_name;
+
+        if (scope.parent_fn_node) {
+            var->decl_order = scope.parent_fn_def()->next_decl_order++;
+        }
+
+        if (scope.block && scope.block->scope) {
+            scope.block->scope->put(binding_name, var);
+        }
+
+        if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
+            !var->escape.is_capture()) {
+            scope.block->cleanup_vars.add(var);
+            scope.parent_fn_def()->has_cleanup = true;
+        }
+
+        generated_vars.add(var);
+    }
+}
+
 ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent_stmt,
                                          ResolveScope &scope, ChiType *narrowed_type) {
     auto type = node_get_type(expr_node);
@@ -7184,6 +7293,16 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
         if (a->kind == TypeKind::FixedArray) {
             return a->data.fixed_array.size == b->data.fixed_array.size &&
                    is_same_type(a->data.fixed_array.elem, b->data.fixed_array.elem);
+        }
+        // Structural comparison for tuples
+        if (a->kind == TypeKind::Tuple) {
+            auto &a_elems = a->data.tuple.elements;
+            auto &b_elems = b->data.tuple.elements;
+            if (a_elems.len != b_elems.len) return false;
+            for (int i = 0; i < a_elems.len; i++) {
+                if (!is_same_type(a_elems[i], b_elems[i])) return false;
+            }
+            return true;
         }
     }
 
@@ -7795,6 +7914,25 @@ ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
         unreachable();
         return {};
     }
+}
+
+ChiType *Resolver::get_tuple_type(TypeList &elements) {
+    // Build cache key from element type IDs
+    std::stringstream key;
+    key << "Tuple<";
+    for (int i = 0; i < elements.len; i++) {
+        key << format_type(elements[i]);
+        if (i < elements.len - 1) key << ",";
+    }
+    key << ">";
+    auto key_str = key.str();
+    auto cached = m_ctx->tuple_types.get(key_str);
+    if (cached) return *cached;
+
+    auto tuple_type = create_type(TypeKind::Tuple);
+    tuple_type->data.tuple.elements = elements;
+    m_ctx->tuple_types[key_str] = tuple_type;
+    return tuple_type;
 }
 
 TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {

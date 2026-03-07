@@ -69,6 +69,7 @@ struct SystemTypes {
     ChiType *lambda = nullptr;
     ChiType *span = nullptr;
     ChiType *unit = nullptr;
+    ChiType *tuple = nullptr;
 };
 
 // Forward declaration for GenericResolver
@@ -112,6 +113,7 @@ struct ResolveContext {
     uint32_t lang_flags = 0;
     map<string, ChiType *> composite_types = {};
     map<ChiType *, ChiType *> promise_of = {};
+    map<string, ChiType *> tuple_types = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
     ChiType *rt_array_type = nullptr;
     ChiType *rt_span_type = nullptr;
@@ -362,6 +364,8 @@ class Resolver {
 
     ChiType *get_wrapped_type(ChiType *elem, TypeKind kind);
 
+    ChiType *get_tuple_type(TypeList &elements);
+
     ChiType *resolve_subtype(ChiType *subtype);
 
     ast::Node *get_dummy_var(const string &name, ast::Node *expr = nullptr);
@@ -378,6 +382,10 @@ class Resolver {
                                     array<ast::Node *> &generated_vars);
 
     void resolve_array_destructure(ast::Node *parent, array<ast::Node *> &fields,
+                                   ChiType *source_type, ResolveScope &scope,
+                                   array<ast::Node *> &generated_vars);
+
+    void resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &fields,
                                    ChiType *source_type, ResolveScope &scope,
                                    array<ast::Node *> &generated_vars);
 
