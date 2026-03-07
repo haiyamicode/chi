@@ -6690,9 +6690,26 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
     }
 
     auto &elems = source_type->data.tuple.elements;
-    if ((int)fields.len > elems.len) {
+
+    // Check if there's a rest pattern
+    bool has_rest = false;
+    int rest_index = -1;
+    for (int i = 0; i < (int)fields.len; i++) {
+        if (fields[i]->data.destructure_field.is_rest) {
+            has_rest = true;
+            rest_index = i;
+            break;
+        }
+    }
+
+    if (!has_rest && (int)fields.len > elems.len) {
         error(parent, "too many bindings in tuple destructure: expected at most {}, got {}",
               elems.len, fields.len);
+        return;
+    }
+    if (has_rest && (int)fields.len - 1 > elems.len) {
+        error(parent, "too many bindings in tuple destructure: expected at most {}, got {}",
+              elems.len, (int)fields.len - 1);
         return;
     }
 
@@ -6702,7 +6719,18 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
         auto field_node = fields[i];
         auto &field_data = field_node->data.destructure_field;
         auto binding_name = string(field_data.binding_name->str);
-        auto elem_type = elems[i];
+
+        ChiType *elem_type;
+        if (field_data.is_rest) {
+            // Collect remaining elements into a Tuple type
+            TypeList rest_elems;
+            for (int j = i; j < elems.len; j++) {
+                rest_elems.add(elems[j]);
+            }
+            elem_type = get_tuple_type(rest_elems);
+        } else {
+            elem_type = elems[i];
+        }
 
         auto var = get_dummy_var(binding_name);
         var->module = parent->module;

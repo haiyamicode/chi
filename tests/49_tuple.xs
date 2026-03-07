@@ -141,6 +141,23 @@ func test_destructure_nested() {
     println(y.1);
 }
 
+// Rest destructuring
+func test_destructure_rest() {
+    var (a, ...rest) = (1, 2, 3);
+    println(a);
+    println(rest.0);
+    println(rest.1);
+
+    var (x, ...y) = (10, 20);
+    println(x);
+    println(y.0);
+
+    var (head, ...tail) = ("hello", "world", "foo");
+    println(head);
+    println(tail.0);
+    println(tail.1);
+}
+
 // Reassigning tuple fields through variable
 func test_reassign() {
     var x = (10, 20);
@@ -166,6 +183,7 @@ func main() {
     test_destructure();
     test_destructure_return();
     test_destructure_nested();
+    test_destructure_rest();
     test_reassign();
 }
 

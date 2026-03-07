@@ -4310,25 +4310,38 @@ void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &dat
 
     for (size_t i = 0; i < data.fields.len; i++) {
         auto field_node = data.fields[i];
-        auto elem_type = elems[i];
-        auto elem_type_l = compile_type(elem_type);
+        auto &field_data = field_node->data.destructure_field;
 
-        // GEP to tuple element
-        auto elem_ptr = builder.CreateStructGEP(tuple_type_l, source_ptr, (unsigned)i);
-
-        // Allocate binding variable
         assert(i < data.generated_vars.len);
         auto var_node = data.generated_vars[i];
         auto var_ptr = compile_alloc(fn, var_node);
         add_var(var_node, var_ptr);
 
-        auto &field_data = field_node->data.destructure_field;
-        if (field_data.sigil == ast::SigilKind::Reference ||
-            field_data.sigil == ast::SigilKind::MutRef) {
-            builder.CreateStore(elem_ptr, var_ptr);
+        if (field_data.is_rest) {
+            // Build a sub-tuple from remaining elements
+            auto rest_type = get_chitype(var_node);
+            auto rest_type_l = compile_type(rest_type);
+            int rest_count = elems.len - (int)i;
+            for (int j = 0; j < rest_count; j++) {
+                auto src_ptr = builder.CreateStructGEP(tuple_type_l, source_ptr, (unsigned)(i + j));
+                auto dst_ptr = builder.CreateStructGEP(rest_type_l, var_ptr, (unsigned)j);
+                auto elem_type = elems[i + j];
+                auto elem_type_l = compile_type(elem_type);
+                auto val = builder.CreateLoad(elem_type_l, src_ptr);
+                builder.CreateStore(val, dst_ptr);
+            }
         } else {
-            auto elem_value = builder.CreateLoad(elem_type_l, elem_ptr);
-            compile_store_or_copy(fn, elem_value, var_ptr, elem_type, field_node);
+            auto elem_type = elems[i];
+            auto elem_type_l = compile_type(elem_type);
+            auto elem_ptr = builder.CreateStructGEP(tuple_type_l, source_ptr, (unsigned)i);
+
+            if (field_data.sigil == ast::SigilKind::Reference ||
+                field_data.sigil == ast::SigilKind::MutRef) {
+                builder.CreateStore(elem_ptr, var_ptr);
+            } else {
+                auto elem_value = builder.CreateLoad(elem_type_l, elem_ptr);
+                compile_store_or_copy(fn, elem_value, var_ptr, elem_type, field_node);
+            }
         }
     }
 }

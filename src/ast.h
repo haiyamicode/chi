@@ -417,6 +417,7 @@ struct DestructureField {
     Node *nested = nullptr;        // for nested: points to DestructureDecl
     ChiStructMember *resolved_field = nullptr;
     SigilKind sigil = SigilKind::None; // &field or &mut field
+    bool is_rest = false;              // ...rest — collects remaining elements into a tuple
 };
 
 struct DestructureDecl {

@@ -1101,8 +1101,14 @@ Node *Parser::parse_tuple_destructure_decl(VarKind kind) {
         if (token->type == TokenType::RPAREN || token->type == TokenType::END)
             break;
 
+        bool is_rest = false;
+        if (next_is(TokenType::ELLIPSIS)) {
+            consume();
+            is_rest = true;
+        }
+
         auto sigil = SigilKind::None;
-        if (next_is(TokenType::AND)) {
+        if (!is_rest && next_is(TokenType::AND)) {
             consume();
             if (next_is(TokenType::KW_MUT)) {
                 consume();
@@ -1120,10 +1126,13 @@ Node *Parser::parse_tuple_destructure_decl(VarKind kind) {
         field_node->data.destructure_field.field_name = binding_token;
         field_node->data.destructure_field.binding_name = binding_token;
         field_node->data.destructure_field.sigil = sigil;
+        field_node->data.destructure_field.is_rest = is_rest;
 
         node->data.destructure_decl.fields.add(field_node);
         field_node->parent = node;
 
+        if (is_rest)
+            break; // rest must be last
         if (!at_comma(TokenType::RPAREN))
             break;
         consume();

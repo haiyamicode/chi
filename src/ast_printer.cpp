@@ -1281,7 +1281,9 @@ void AstPrinter::print_destructure_pattern(Node *node) {
             if (i > 0)
                 emit(", ");
             auto &field_data = data.fields[i]->data.destructure_field;
-            if (field_data.sigil == SigilKind::MutRef)
+            if (field_data.is_rest)
+                emit("...");
+            else if (field_data.sigil == SigilKind::MutRef)
                 emit("&mut ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");
