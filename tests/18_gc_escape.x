@@ -39,6 +39,18 @@ func test_lambda_capture() {
     printf("Lambda executed successfully, captured object id: {}\n", result);
 }
 
+func test_lambda_capture_ref_by_value() {
+    var obj = GCBox{350};
+    var ref: &GCBox = &obj;
+    // By-value capture of a reference-typed variable
+    var lambda = func [ref] () int {
+        return ref.id;
+    };
+    println("Lambda created with by-value captured ref");
+    var result = lambda();
+    printf("By-value ref capture result: {}\n", result);
+}
+
 // Transitive: var p = &obj; return p
 func get_via_reassign() &GCBox {
     var obj = GCBox{400};
@@ -101,6 +113,9 @@ func main() {
 
     println("\nTest 5: Lambda capture escape");
     test_lambda_capture();
+
+    println("\nTest 5b: Lambda by-value capture of ref");
+    test_lambda_capture_ref_by_value();
 
     println("\nTest 6: Use-after-scope validation");
     var ref1: &GCBox = null;

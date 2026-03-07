@@ -2,6 +2,7 @@
 Test 1: Non-escaping object
 [gc] GCBox(1) created
 Local object created, should be destroyed at scope end
+[gc] GCBox(1) destroyed
 Scope ended - non-escaping object should be destroyed by now
 
 Test 2: Object escaping via ref assignment
@@ -21,11 +22,20 @@ Test 4: Non-escaping function call
 Non-escaping function returned value: 200 (object was destroyed)
 
 Test 5: Lambda capture escape
+[gc] GCBox(100) destroyed
+[gc] GCBox(2) destroyed
 [gc] GCBox(300) created
 Lambda created with captured object
 Lambda executed successfully, captured object id: 300
 
+Test 5b: Lambda by-value capture of ref
+[gc] GCBox(350) created
+Lambda created with by-value captured ref
+By-value ref capture result: 350
+[gc] GCBox(350) destroyed
+
 Test 6: Use-after-scope validation
+[gc] GCBox(300) destroyed
 [gc] GCBox(6) created
 [gc] GCBox(7) created
 Inside scope - accessing a.id: 6, b.id: 7
@@ -39,19 +49,18 @@ returned released
 refs released
 
 Test 7: Transitive escape via reassignment
-[gc] GCBox(100) destroyed
-[gc] GCBox(300) destroyed
+[gc] GCBox(7) destroyed
+[gc] GCBox(6) destroyed
 [gc] GCBox(400) created
 CRITICAL TEST: reassigned.id = 400
 
 Test 8: Transitive escape via struct field
+[gc] GCBox(400) destroyed
 [gc] GCBox(500) created
 CRITICAL TEST: holder.ref.id = 500
 
 Test 9: Transitive escape via deep chain
 [gc] GCBox(600) created
-[gc] GCBox(400) destroyed
-[gc] GCBox(500) destroyed
 CRITICAL TEST: chained.id = 600
 
 === Cleanup Phase ===
@@ -65,10 +74,7 @@ Final gc objects...
 [gc] GCBox(1003) created
 [gc] GCBox(1003) destroyed
 [gc] GCBox(1004) created
-Test completed
-[gc] GCBox(1) destroyed
-[gc] GCBox(2) destroyed
-[gc] GCBox(6) destroyed
-[gc] GCBox(7) destroyed
 [gc] GCBox(1004) destroyed
+Test completed
 [gc] GCBox(600) destroyed
+[gc] GCBox(500) destroyed

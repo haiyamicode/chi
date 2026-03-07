@@ -4784,8 +4784,11 @@ normal:
 
         auto gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, capture_idx);
 
-        auto field_type = bstruct->data.struct_.fields[capture_idx]->resolved_type;
-        if (field_type->kind != TypeKind::Reference) {
+        // Check the actual capture mode from the function's captures list
+        auto &captures = fn->node->data.fn_def.captures;
+        bool is_by_ref = capture_idx < captures.len &&
+                         captures[capture_idx].mode == ast::CaptureMode::ByRef;
+        if (!is_by_ref) {
             // By-value capture: the field IS the value
             return RefValue::from_address(gep);
         }
