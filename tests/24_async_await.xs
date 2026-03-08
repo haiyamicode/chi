@@ -1,8 +1,10 @@
 import "std/ops" as ops;
 import "std/time" as time;
 
+// --- Promise API ---
+
 func test_manual_promise() {
-    println("=== Test 1: Manual Promise with callbacks ===");
+    println("=== Manual Promise ===");
     var p = Promise<int>{};
     p.then(func (val: int) {
         printf("Callback A: {}\n", val);
@@ -10,198 +12,55 @@ func test_manual_promise() {
     p.then(func (val: int) {
         printf("Callback B: {}\n", val);
     });
-    println("Resolving promise...");
+    println("Resolving...");
     p.resolve(100);
     p.then(func (val: int) {
-        printf("Callback C (after resolve): {}\n", val);
+        printf("Callback C: {}\n", val);
     });
-    println("");
-}
-
-async func simple_async(x: int) Promise<int> {
-    printf("simple_async({})\n", x);
-    return x + 10;
-}
-
-func test_async_no_await() {
-    println("=== Test 2: Async function without awaits ===");
-    var p = simple_async(7);
-    printf("Got result: {}\n", p.value()!);
-    println("");
-}
-
-async func get_value(x: int) Promise<int> {
-    printf("get_value({})\n", x);
-    return x * 2;
-}
-
-async func compute_chain(start: int) Promise<int> {
-    println("compute_chain: starting");
-    var step1 = await get_value(start);
-    printf("  step1 = {}\n", step1);
-    var step2 = await get_value(step1);
-    printf("  step2 = {}\n", step2);
-    var step3 = await get_value(step2);
-    printf("  step3 = {}\n", step3);
-    println("compute_chain: done");
-    return step3;
-}
-
-func test_async_chain() {
-    println("=== Test 3: Async/await chaining ===");
-    var result_promise = compute_chain(5);
-    printf("Got promise, is_resolved: {}\n", result_promise.is_resolved());
-    result_promise.then(func (final_value: int) {
-        printf("Final value: {}\n", final_value);
-    });
-    println("");
-}
-
-async func nested_async(x: int) Promise<int> {
-    var inner = await get_value(x);
-    return inner + 100;
-}
-
-func test_nested() {
-    println("=== Test 4: Nested async calls ===");
-    var p = nested_async(3);
-    printf("Result: {}\n", p.value()!);
-    println("");
-}
-
-async func delayed_compute(x: int) Promise<int> {
-    return x * 3;
 }
 
 func test_promise_state() {
-    println("=== Test 5: Promise state checking ===");
+    println("=== Promise state ===");
     var p = Promise<int>{};
-    printf("Before resolve - is_resolved: {}\n", p.is_resolved());
+    printf("before: {}\n", p.is_resolved());
     p.resolve(42);
-    printf("After resolve - is_resolved: {}\n", p.is_resolved());
-    printf("Value: {}\n", p.value()!);
-    println("");
+    printf("after: {}\n", p.is_resolved());
+    printf("value: {}\n", p.value()!);
 }
 
 func test_multiple_callbacks() {
-    println("=== Test 6: Multiple callbacks on same promise ===");
+    println("=== Multiple callbacks ===");
     var p = Promise<int>{};
-    var count: int = 0;
-    p.then(func (val: int) {
-        printf("Callback 1: {}\n", val);
-    });
-    p.then(func (val: int) {
-        printf("Callback 2: {}\n", val);
-    });
-    p.then(func (val: int) {
-        printf("Callback 3: {}\n", val);
-    });
+    p.then(func (val: int) { printf("cb1: {}\n", val); });
+    p.then(func (val: int) { printf("cb2: {}\n", val); });
+    p.then(func (val: int) { printf("cb3: {}\n", val); });
     p.resolve(99);
-    println("");
 }
 
-async func compute_with_locals(a: int, b: int) Promise<int> {
-    println("compute_with_locals: starting");
-    var local1 = a * 2;
-    printf("  local1 = {}\n", local1);
-    var awaited = await get_value(b);
-    printf("  awaited = {}\n", awaited);
-    var result = local1 + awaited;
-    printf("  result = {}\n", result);
-    return result;
-}
-
-func test_locals_across_await() {
-    println("=== Test 7: Local variables across await ===");
-    var p = compute_with_locals(5, 10);
-    printf("Final: {}\n", p.value()!);
-    println("");
-}
-
-func test_timeout() {
-    println("=== Test 8: timeout() function ===");
-    var called = false;
-    time.timeout(10, func () {
-        println("timeout callback executed");
-    });
-    println("timeout scheduled");
-    println("");
-}
-
-func test_sleep() {
-    println("=== Test 9: sleep() function ===");
-    time.sleep(10).then(func (u) {
-        println("sleep resolved");
-    });
-    println("sleep scheduled");
-    println("");
-}
-
-func test_sleep_value_capture() {
-    println("=== Test 10: By-value capture with sleep ===");
-    var counter = 42;
-    time.sleep(10).then(func [counter] (u) {
-        printf("captured counter: {}\n", counter);
-    });
-    counter = 999;
-    printf("original counter after mutate: {}\n", counter);
-    println("");
-}
-
-func test_promise_helper() {
-    println("=== Test 11: Promise.make() ===");
+func test_promise_make() {
+    println("=== Promise.make ===");
     var p = Promise<int>.make(func (resolve) {
-        println("executor called");
         resolve(123);
     });
-    printf("promise resolved with: {}\n", p.value()!);
-    println("");
+    printf("value: {}\n", p.value()!);
 }
 
-func test_promise_string_make() {
-    println("=== Test 12: Promise<string>.make() ===");
-    // Sync resolve through make
+func test_promise_string() {
+    println("=== Promise<string> ===");
     var p1 = Promise<string>.make(func (resolve) {
         resolve("hello world");
     });
-    printf("sync make: '{}'\n", p1.value()!);
+    printf("p1: '{}'\n", p1.value()!);
 
-    // Deferred resolve through make
-    var p2 = Promise<string>.make(func (resolve) {
-        resolve("deferred string");
-    });
-    p2.then(func (v: string) {
-        printf("then callback: '{}'\n", v);
-    });
-
-    // Make with string concatenation
     var prefix = "hello";
-    var p3 = Promise<string>.make(
-        func [prefix] (resolve) {
-            resolve(prefix + " from capture");
-        }
-    );
-    printf("captured: '{}'\n", p3.value()!);
+    var p2 = Promise<string>.make(func [prefix] (resolve) {
+        resolve(prefix + " from capture");
+    });
+    printf("p2: '{}'\n", p2.value()!);
 
-    // Multiple .then callbacks with string
-    var p4 = Promise<string>.make(func (resolve) {
-        resolve("multi");
-    });
-    p4.then(func (v: string) {
-        printf("cb1: '{}'\n", v);
-    });
-    p4.then(func (v: string) {
-        printf("cb2: '{}'\n", v);
-    });
-
-    // Deferred string promise - register then before resolve
-    var p5 = Promise<string>{};
-    p5.then(func (v: string) {
-        printf("deferred then: '{}'\n", v);
-    });
-    p5.resolve("resolved later");
-
-    println("");
+    var p3 = Promise<string>{};
+    p3.then(func (v: string) { printf("deferred: '{}'\n", v); });
+    p3.resolve("resolved later");
 }
 
 struct Container {
@@ -212,27 +71,332 @@ struct Container {
     }
 }
 
-func test_promise_string_in_struct() {
-    println("=== Test 13: Promise<string> in static method ===");
+func test_promise_in_struct() {
+    println("=== Promise in struct ===");
     var p = Container.make_promise("from struct");
-    printf("struct make: '{}'\n", p.value()!);
-    println("");
+    printf("value: '{}'\n", p.value()!);
+}
+
+// --- Async/await helpers ---
+
+async func double_it(x: int) Promise<int> {
+    return x * 2;
+}
+
+async func add_async(a: int, b: int) Promise<int> {
+    return a + b;
+}
+
+async func greet(name: string) Promise<string> {
+    return "hello " + name;
+}
+
+// --- Async no await ---
+
+async func simple_async(x: int) Promise<int> {
+    return x + 10;
+}
+
+func test_async_no_await() {
+    println("=== Async no await ===");
+    var p = simple_async(7);
+    printf("value: {}\n", p.value()!);
+}
+
+// --- Await: var decl ---
+
+async func do_var_decl() Promise<int> {
+    var x = await double_it(5);
+    return x;
+}
+
+func test_var_decl() {
+    println("=== Var decl ===");
+    printf("value: {}\n", do_var_decl().value()!);
+}
+
+// --- Await: bare ---
+
+async func do_bare_await() Promise {
+    await time.sleep(1);
+    println("bare ok");
+}
+
+func test_bare_await() {
+    println("=== Bare await ===");
+    do_bare_await();
+}
+
+// --- Await: func arg ---
+
+async func do_await_in_func_arg() Promise<int> {
+    var result = await double_it(7);
+    printf("in func arg: {}\n", result);
+    return result;
+}
+
+func test_await_in_func_arg() {
+    println("=== Await in func arg ===");
+    printf("value: {}\n", do_await_in_func_arg().value()!);
+}
+
+// --- Await: binop ---
+
+async func do_await_in_binop() Promise<int> {
+    var x = await double_it(3) + 100;
+    return x;
+}
+
+func test_await_in_binop() {
+    println("=== Await in binop ===");
+    printf("value: {}\n", do_await_in_binop().value()!);
+}
+
+// --- Await: multiple sequential ---
+
+async func do_multiple_awaits() Promise<int> {
+    var a = await double_it(1);
+    var b = await double_it(2);
+    var c = await double_it(3);
+    return a + b + c;
+}
+
+func test_multiple_awaits() {
+    println("=== Multiple awaits ===");
+    printf("value: {}\n", do_multiple_awaits().value()!);
+}
+
+// --- Await: locals across boundaries ---
+
+async func do_locals_across() Promise<int> {
+    var before = 42;
+    var x = await double_it(10);
+    return before + x;
+}
+
+func test_locals_across() {
+    println("=== Locals across await ===");
+    printf("value: {}\n", do_locals_across().value()!);
+}
+
+// --- Await: chain ---
+
+async func compute_chain(start: int) Promise<int> {
+    var step1 = await double_it(start);
+    var step2 = await double_it(step1);
+    var step3 = await double_it(step2);
+    return step3;
+}
+
+func test_chain() {
+    println("=== Chain ===");
+    printf("value: {}\n", compute_chain(5).value()!);
+}
+
+// --- Await: nested async ---
+
+async func inner_chain(x: int) Promise<int> {
+    var a = await double_it(x);
+    return a + 1;
+}
+
+async func do_nested_chain() Promise<int> {
+    var result = await inner_chain(10);
+    return result;
+}
+
+func test_nested_chain() {
+    println("=== Nested chain ===");
+    printf("value: {}\n", do_nested_chain().value()!);
+}
+
+// --- Await: return await ---
+
+async func do_return_await() Promise<int> {
+    return await double_it(25);
+}
+
+func test_return_await() {
+    println("=== Return await ===");
+    printf("value: {}\n", do_return_await().value()!);
+}
+
+// --- Await: comparison ---
+
+async func do_await_comparison() Promise<bool> {
+    var big = await double_it(5) > 8;
+    return big;
+}
+
+func test_await_comparison() {
+    println("=== Await in comparison ===");
+    printf("value: {}\n", do_await_comparison().value()!);
+}
+
+// --- Await: interleaved with non-await stmts ---
+
+async func do_interleaved() Promise<int> {
+    var a = await double_it(1);
+    var b = await double_it(a);
+    var c = await double_it(b);
+    return a + b + c;
+}
+
+func test_interleaved() {
+    println("=== Interleaved ===");
+    printf("value: {}\n", do_interleaved().value()!);
+}
+
+// --- Await: string ---
+
+async func do_await_string() Promise<string> {
+    var msg = await greet("world");
+    return msg;
+}
+
+func test_await_string() {
+    println("=== Await string ===");
+    printf("value: '{}'\n", do_await_string().value()!);
+}
+
+// --- Await: string concat ---
+
+async func do_string_concat() Promise<string> {
+    var msg = await greet("world") + "!";
+    return msg;
+}
+
+func test_string_concat() {
+    println("=== String concat ===");
+    printf("value: '{}'\n", do_string_concat().value()!);
+}
+
+// --- Await: as last stmt (no code after) ---
+
+async func do_await_last() Promise<int> {
+    var x = await double_it(99);
+    return x;
+}
+
+func test_await_last() {
+    println("=== Await as last ===");
+    printf("value: {}\n", do_await_last().value()!);
+}
+
+// --- Await: double nested chain ---
+
+async func double_chain(x: int) Promise<int> {
+    var step1 = await double_it(x);
+    var step2 = await double_it(step1);
+    return step2;
+}
+
+async func do_double_chain() Promise<int> {
+    return await double_chain(3);
+}
+
+func test_double_chain() {
+    println("=== Double chain ===");
+    printf("value: {}\n", do_double_chain().value()!);
+}
+
+// --- Await: bare then logic ---
+
+async func do_bare_then_logic() Promise {
+    var x = 10;
+    await time.sleep(1);
+    x = x + 5;
+    printf("x = {}\n", x);
+    await time.sleep(1);
+    printf("x still = {}\n", x);
+}
+
+func test_bare_then_logic() {
+    println("=== Bare then logic ===");
+    do_bare_then_logic();
+}
+
+// --- Await: multiple bare ---
+
+async func do_multiple_bare() Promise {
+    await time.sleep(1);
+    println("after first");
+    await time.sleep(1);
+    println("after second");
+    await time.sleep(1);
+    println("after third");
+}
+
+func test_multiple_bare() {
+    println("=== Multiple bare ===");
+    do_multiple_bare();
+}
+
+// --- timeout / sleep ---
+
+func test_timeout() {
+    println("=== timeout ===");
+    time.timeout(10, func () {
+        println("timeout fired");
+    });
+    println("scheduled");
+}
+
+func test_sleep() {
+    println("=== sleep ===");
+    time.sleep(10).then(func (u) {
+        println("sleep resolved");
+    });
+    println("scheduled");
+}
+
+func test_sleep_capture() {
+    println("=== sleep capture ===");
+    var counter = 42;
+    time.sleep(10).then(func [counter] (u) {
+        printf("captured: {}\n", counter);
+    });
+    counter = 999;
+    printf("mutated: {}\n", counter);
 }
 
 func main() {
+    // Promise API
     test_manual_promise();
-    test_async_no_await();
-    test_async_chain();
-    test_nested();
     test_promise_state();
     test_multiple_callbacks();
-    test_locals_across_await();
+    test_promise_make();
+    test_promise_string();
+    test_promise_in_struct();
+
+    // Async no await
+    test_async_no_await();
+
+    // Await patterns (sync-resolved)
+    test_var_decl();
+    test_await_in_func_arg();
+    test_await_in_binop();
+    test_multiple_awaits();
+    test_locals_across();
+    test_chain();
+    test_nested_chain();
+    test_return_await();
+    test_await_comparison();
+    test_interleaved();
+    test_await_string();
+    test_string_concat();
+    test_await_last();
+    test_double_chain();
+
+    // Await patterns (async-resolved via event loop)
+    test_bare_await();
+    test_bare_then_logic();
+    test_multiple_bare();
+
+    // Timer
     test_timeout();
     test_sleep();
-    test_sleep_value_capture();
-    test_promise_helper();
-    test_promise_string_make();
-    test_promise_string_in_struct();
-    println("All async/await tests passed!");
-}
+    test_sleep_capture();
 
+    println("All tests passed!");
+}

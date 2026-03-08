@@ -1733,12 +1733,9 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
             current.await_expr = find_await_expr(stmt);
             current.await_value_type = get_chitype(current.await_expr);
 
-            // If the await is in a var decl, store it for later use
-            if (stmt->type == ast::NodeType::VarDecl) {
-                current.await_var_decl = stmt;
-            } else {
-                current.stmts.push_back(stmt);
-            }
+            // Store the statement containing the await — it will be compiled
+            // in the next continuation with AwaitExpr resolving to value_arg.
+            current.await_stmt = stmt;
 
             segments.push_back(current);
             current = AsyncSegment();
@@ -1747,15 +1744,16 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
         }
     }
 
-    // Add the final segment (code after last await, including return)
-    if (!current.stmts.empty()) {
+    // Add the final segment (code after last await).
+    // Always push if there were awaits — the continuation needs to compile the last await_stmt.
+    if (!segments.empty()) {
         segments.push_back(current);
     }
 
     // Now compute vars_to_capture for each segment
     // A var defined in segment i needs to be captured if used in segment j (j > i)
-    // Note: await_var_decl for segment i is NOT captured by segment i - it's passed as the value
-    // parameter
+    // Note: vars defined in await_stmt for segment i are passed via value parameter,
+    // not captured by segment i
     std::set<ast::Node *> defined_vars;
     for (size_t i = 0; i < segments.size(); i++) {
         // Collect vars defined in this segment's statements
@@ -1784,10 +1782,10 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
             }
         }
 
-        // Add await_var_decl to defined_vars AFTER computing this segment's captures
-        // This is because await_var_decl is passed as value parameter, not captured
-        if (segments[i].await_var_decl) {
-            defined_vars.insert(segments[i].await_var_decl);
+        // Add vars defined in await_stmt to defined_vars AFTER computing this segment's captures
+        // This is because await_stmt vars are passed via value parameter, not captured
+        if (segments[i].await_stmt && segments[i].await_stmt->type == ast::NodeType::VarDecl) {
+            defined_vars.insert(segments[i].await_stmt);
         }
     }
 
@@ -1871,7 +1869,7 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         get_continuation_capture_info(ctx, segment_index);
     auto captures_ptr = builder.CreateBitCast(data_arg, capture_struct_type->getPointerTo());
 
-    // Previous segment (needed for await_var_decl)
+    // Previous segment (needed for await_stmt)
     auto &prev_segment = ctx.segments[segment_index - 1];
 
     // Get pointer to the captured result promise (stored by value in captures)
@@ -1894,27 +1892,49 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         add_var(var, local_alloc);
     }
 
-    // Handle the await result from previous segment
-    if (prev_segment.await_var_decl) {
-        auto var = prev_segment.await_var_decl;
-        auto var_type = get_chitype(var);
-        auto var_type_l = compile_type(var_type);
-
-        // Allocate storage for the await result
-        auto var_alloc = cont_fn->entry_alloca(var_type_l, var->name);
-
-        // value_arg is the value itself (passed by value from the callback)
-        builder.CreateStore(value_arg, var_alloc);
-
-        local_vars[var] = var_alloc;
-        add_var(var, var_alloc);
-    }
-
     // Check if this is the final segment (contains return)
     bool is_final = (segment_index == (int)ctx.segments.size() - 1);
 
     // Push scope for continuation body
     cont_fn->push_scope();
+
+    // Compile the await statement from the previous segment.
+    // Set m_async_await_value so that AwaitExpr resolves to value_arg
+    // instead of calling Promise.value(). This handles any expression
+    // context: var decl, assignment, function arg, bare await, etc.
+    if (prev_segment.await_stmt) {
+        m_async_await_value = value_arg;
+
+        if (prev_segment.await_stmt->type == ast::NodeType::ReturnStmt) {
+            // return await expr — resolve the result promise with the awaited value
+            auto &data = prev_segment.await_stmt->data.return_stmt;
+            llvm::Value *ret_value;
+            if (data.expr) {
+                ret_value = compile_expr(cont_fn, data.expr);
+            } else {
+                auto inner_type = get_resolver()->get_promise_value_type(ctx.promise_type);
+                ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
+            }
+            auto promise_struct = get_resolver()->resolve_struct_type(ctx.promise_type);
+            std::optional<TypeId> variant_type_id = std::nullopt;
+            if (ctx.promise_type->kind == TypeKind::Subtype && !ctx.promise_type->is_placeholder) {
+                variant_type_id = ctx.promise_type->id;
+            }
+            auto resolve_member = promise_struct->find_member("resolve");
+            auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
+            auto resolve_method = get_fn(resolve_method_node);
+            builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
+        } else {
+            compile_stmt(cont_fn, prev_segment.await_stmt);
+
+            // Track vars defined in await_stmt so they get cleaned from var_table
+            if (prev_segment.await_stmt->type == ast::NodeType::VarDecl) {
+                local_vars[prev_segment.await_stmt] = get_var(prev_segment.await_stmt);
+            }
+        }
+
+        m_async_await_value = nullptr;
+    }
 
     // Compile the segment's statements
     for (auto stmt : segment.stmts) {
@@ -1940,13 +1960,12 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
             auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
             auto resolve_method = get_fn(resolve_method_node);
             builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
-        } else if (contains_await(stmt)) {
-            // This segment has another await - chain to next continuation
-            auto await_expr = find_await_expr(stmt);
-            emit_promise_chain(cont_fn, ctx, await_expr, segment_index + 1, local_vars,
-                               result_promise_ptr);
         } else {
             compile_stmt(cont_fn, stmt);
+        }
+        // Track VarDecls so they get cleaned from var_table after this continuation
+        if (stmt->type == ast::NodeType::VarDecl) {
+            local_vars[stmt] = get_var(stmt);
         }
     }
 
@@ -1958,6 +1977,18 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
 
     cont_fn->pop_scope();
     builder.CreateRetVoid();
+
+    // Emit cleanup landing pad if any invoke was generated
+    if (cont_fn->cleanup_landing_label) {
+        llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+        cont_fn->use_label(cont_fn->cleanup_landing_label);
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 0);
+        landing->setCleanup(true);
+        builder.CreateExtractValue(landing, {0});
+        builder.CreateExtractValue(landing, {1});
+        cont_fn->insn_noop();
+        builder.CreateResume(landing);
+    }
 
     // Clean up temporary vars from var_table
     for (auto &kv : local_vars.data) {
@@ -3226,34 +3257,45 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return builder.CreateLoad(result_type_l, result_var, "try_result");
     }
     case ast::NodeType::AwaitExpr: {
-        // For now, implement a simple synchronous await that reads the value directly
-        // from an already-resolved Promise. Full async implementation will use continuations.
+        // In async continuation context, the resolved value is passed directly
+        // via value_arg — return it without compiling the promise expression.
+        if (m_async_await_value) {
+            return m_async_await_value;
+        }
+
+        // Synchronous await fallback for already-resolved promises.
+        // Calls Promise.value() to get ?T, then unwraps.
         auto &data = expr->data.await_expr;
         auto &builder = *m_ctx->llvm_builder.get();
 
-        // Get the Promise type info
         auto promise_type = get_chitype(data.expr);
-        auto promise_struct_type_l = compile_type(promise_type->data.promise.internal);
+        auto promise_type_l = compile_type(promise_type);
 
-        // Compile the promise expression and store it
+        // Compile the promise and store it (value() takes &self)
         auto promise_val = compile_expr(fn, data.expr);
-        auto promise_ptr = builder.CreateAlloca(promise_struct_type_l, nullptr, "await_promise");
+        auto promise_ptr = builder.CreateAlloca(promise_type_l, nullptr, "await_promise");
         builder.CreateStore(promise_val, promise_ptr);
 
-        // Get the value type (what we're unwrapping from Promise<T>)
+        // Call Promise<T>.value() -> ?T
+        auto promise_struct = get_resolver()->resolve_struct_type(promise_type);
+        auto value_member = promise_struct->find_member("value");
+        assert(value_member && "Promise.value() method not found");
+        std::optional<TypeId> variant_type_id = std::nullopt;
+        if (promise_type->kind == TypeKind::Subtype && !promise_type->is_placeholder) {
+            variant_type_id = promise_type->id;
+        }
+        auto value_method_node = get_variant_member_node(value_member, variant_type_id);
+        auto value_method = get_fn(value_method_node);
+        auto optional_val = builder.CreateCall(value_method->llvm_fn, {promise_ptr});
+
+        // Unwrap ?T -> T (optional layout: { has_value, T })
         auto result_type = get_chitype(expr);
         auto result_type_l = compile_type(result_type);
-
-        // Promise struct layout: {state, value, error, on_resolve, on_reject}
-        // value is at index 1, and it's a pointer to the actual value
-        // GEP to get the value pointer field (index 1)
-        auto value_ptr_ptr =
-            builder.CreateStructGEP(promise_struct_type_l, promise_ptr, 1, "await_value_ptr");
-        auto value_ptr = builder.CreateLoad(get_llvm_ptr_type(), value_ptr_ptr, "await_value_addr");
-
-        // Load the actual value
-        auto result = builder.CreateLoad(result_type_l, value_ptr, "await_result");
-        return result;
+        auto optional_type_l = optional_val->getType();
+        auto optional_ptr = builder.CreateAlloca(optional_type_l, nullptr, "await_opt");
+        builder.CreateStore(optional_val, optional_ptr);
+        auto value_ptr = builder.CreateStructGEP(optional_type_l, optional_ptr, 1, "await_value");
+        return builder.CreateLoad(result_type_l, value_ptr, "await_result");
     }
     case ast::NodeType::DotExpr: {
         auto &dot_data = expr->data.dot_expr;
@@ -4700,6 +4742,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     case ast::NodeType::UnitExpr:
     case ast::NodeType::TupleExpr:
     case ast::NodeType::CastExpr:
+    case ast::NodeType::AwaitExpr:
         return RefValue::from_value(compile_expr(fn, expr));
     default:
         panic("compile_expr_ref not implemented: {}", PRINT_ENUM(expr->type));

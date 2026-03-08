@@ -1,72 +1,71 @@
-=== Test 1: Manual Promise with callbacks ===
-Resolving promise...
+=== Manual Promise ===
+Resolving...
 Callback A: 100
 Callback B: 100
-Callback C (after resolve): 100
-
-=== Test 2: Async function without awaits ===
-simple_async(7)
-Got result: 17
-
-=== Test 3: Async/await chaining ===
-compute_chain: starting
-get_value(5)
-  step1 = 10
-get_value(10)
-  step2 = 20
-get_value(20)
-  step3 = 40
-compute_chain: done
-Got promise, is_resolved: true
-Final value: 40
-
-=== Test 4: Nested async calls ===
-get_value(3)
-Result: 106
-
-=== Test 5: Promise state checking ===
-Before resolve - is_resolved: false
-After resolve - is_resolved: true
-Value: 42
-
-=== Test 6: Multiple callbacks on same promise ===
-Callback 1: 99
-Callback 2: 99
-Callback 3: 99
-
-=== Test 7: Local variables across await ===
-compute_with_locals: starting
-  local1 = 10
-get_value(10)
-  awaited = 20
-  result = 30
-Final: 30
-
-=== Test 8: timeout() function ===
-timeout scheduled
-
-=== Test 9: sleep() function ===
-sleep scheduled
-
-=== Test 10: By-value capture with sleep ===
-original counter after mutate: 999
-
-=== Test 11: Promise.make() ===
-executor called
-promise resolved with: 123
-
-=== Test 12: Promise<string>.make() ===
-sync make: 'hello world'
-then callback: 'deferred string'
-captured: 'hello from capture'
-cb1: 'multi'
-cb2: 'multi'
-deferred then: 'resolved later'
-
-=== Test 13: Promise<string> in static method ===
-struct make: 'from struct'
-
-All async/await tests passed!
-timeout callback executed
+Callback C: 100
+=== Promise state ===
+before: false
+after: true
+value: 42
+=== Multiple callbacks ===
+cb1: 99
+cb2: 99
+cb3: 99
+=== Promise.make ===
+value: 123
+=== Promise<string> ===
+p1: 'hello world'
+p2: 'hello from capture'
+deferred: 'resolved later'
+=== Promise in struct ===
+value: 'from struct'
+=== Async no await ===
+value: 17
+=== Var decl ===
+value: 10
+=== Await in func arg ===
+in func arg: 14
+value: 14
+=== Await in binop ===
+value: 106
+=== Multiple awaits ===
+value: 12
+=== Locals across await ===
+value: 62
+=== Chain ===
+value: 40
+=== Nested chain ===
+value: 21
+=== Return await ===
+value: 50
+=== Await in comparison ===
+value: true
+=== Interleaved ===
+value: 14
+=== Await string ===
+value: 'hello world'
+=== String concat ===
+value: 'hello world!'
+=== Await as last ===
+value: 198
+=== Double chain ===
+value: 12
+=== Bare await ===
+=== Bare then logic ===
+=== Multiple bare ===
+=== timeout ===
+scheduled
+=== sleep ===
+scheduled
+=== sleep capture ===
+mutated: 999
+All tests passed!
+bare ok
+x = 15
+after first
+x still = 15
+after second
+after third
+timeout fired
 sleep resolved
-captured counter: 42
+captured: 42

@@ -210,7 +210,7 @@ struct InvokeInfo {
 struct AsyncSegment {
     std::vector<ast::Node *> stmts;      // statements in this segment
     ast::Node *await_expr = nullptr;     // the await that ends this segment (null for final)
-    ast::Node *await_var_decl = nullptr; // the var decl containing the await (if any)
+    ast::Node *await_stmt = nullptr;     // the statement containing the await (any kind)
     ChiType *await_value_type = nullptr; // type of the awaited value
     std::set<ast::Node *> vars_to_capture; // variables needed in later segments
 };
@@ -308,6 +308,7 @@ class Compiler {
     CodegenContext *m_ctx = nullptr;
     Function *m_fn = nullptr;
     ChiType *m_fn_eval_subtype = nullptr;
+    llvm::Value *m_async_await_value = nullptr; // resolved value in async continuation context
 
     llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
 
