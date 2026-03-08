@@ -91,8 +91,7 @@ void Resolver::context_init_primitives() {
     system_types.float64 = create_float_type(64);
     system_types.void_ = create_type(TypeKind::Void);
     system_types.void_ptr = create_pointer_type(system_types.void_, TypeKind::Pointer);
-    system_types.null_ptr = create_pointer_type(system_types.void_, TypeKind::Pointer);
-    system_types.null_ptr->data.pointer.is_null = true;
+    system_types.null_ = create_type(TypeKind::Null);
     system_types.void_ref = create_pointer_type(system_types.void_, TypeKind::Reference);
     system_types.bool_ = create_type(TypeKind::Bool);
     system_types.string = create_type(TypeKind::String);
@@ -360,13 +359,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::MoveRef: {
-        // Allow null pointer to any pointer type - check this FIRST
-        if (from_type->kind == TypeKind::Pointer && from_type->data.pointer.is_null) {
-            return true;
-        }
-
-        // Allow null_ptr system type (special *void) to any pointer
-        if (from_type == get_system_types()->null_ptr) {
+        // Allow null to any pointer type
+        if (from_type->kind == TypeKind::Null) {
             return true;
         }
 
@@ -533,9 +527,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                from_type->kind == TypeKind::Result || from_type->is_pointer_like() ||
                (is_explicit && from_type->kind == TypeKind::Byte);
     case TypeKind::Optional: {
-        // Allow null pointer, same optional type, or implicit T -> ?T wrap
-        if (from_type->kind == TypeKind::Pointer) {
-            return from_type->data.pointer.is_null;
+        // Allow null, same optional type, or implicit T -> ?T wrap
+        if (from_type->kind == TypeKind::Null) {
+            return true;
         }
         return from_type == to_type || can_assign(from_type, to_type->get_elem(), is_explicit);
     }
@@ -1031,7 +1025,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto null_token = get_allocator()->create_token();
             null_token->type = TokenType::NULLP;
             null_node->token = null_token;
-            null_node->resolved_type = get_system_types()->null_ptr;
+            null_node->resolved_type = get_system_types()->null_;
             pdata.default_value = null_node;
         }
 
@@ -1576,6 +1570,30 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     return nullptr;
                 }
             }
+            // Handle null in comparisons
+            if (data.op_type == TokenType::EQ || data.op_type == TokenType::NE) {
+                bool lhs_null = t1->kind == TypeKind::Null;
+                bool rhs_null = t2->kind == TypeKind::Null;
+                // Optional null check: ?T == null / null == ?T
+                if ((lhs_null && t2->kind == TypeKind::Optional) ||
+                    (rhs_null && t1->kind == TypeKind::Optional)) {
+                    return get_system_types()->bool_;
+                }
+                // Optional-to-optional: reject (only null checks allowed)
+                else if (t1->kind == TypeKind::Optional && t2->kind == TypeKind::Optional) {
+                    error(node, "cannot compare optional values directly — "
+                          "only null checks are allowed (e.g. x == null)");
+                    return nullptr;
+                }
+                // Pointer null check: coerce null to pointer type
+                else if (lhs_null && !rhs_null && can_assign(t1, t2)) {
+                    data.op1->resolved_type = t2;
+                    t1 = t2;
+                } else if (rhs_null && !lhs_null && can_assign(t2, t1)) {
+                    data.op2->resolved_type = t1;
+                    t2 = t1;
+                }
+            }
             // Try operator method for struct types (e.g. Eq::eq for strings)
             IntrinsicSymbol cmp_sym = get_operator_intrinsic_symbol(data.op_type);
             if (cmp_sym != IntrinsicSymbol::None) {
@@ -1584,6 +1602,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (method_call.has_value()) {
                     data.resolved_call = method_call->call_node;
                 }
+            }
+            if (!data.resolved_call && t1->kind != TypeKind::Optional) {
+                check_binary_op(node, data.op_type, t1);
             }
             return get_system_types()->bool_;
         }
@@ -1986,7 +2007,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TokenType::BOOL:
             return get_system_types()->bool_;
         case TokenType::NULLP:
-            return get_system_types()->null_ptr;
+            return get_system_types()->null_;
         case TokenType::INT:
             if (scope.value_type && (scope.value_type->kind == TypeKind::Int ||
                                      scope.value_type->kind == TypeKind::Byte ||
@@ -3184,8 +3205,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
 
-                // Determine if this is a plain enum (no extra data beyond discriminator)
-                enum_data.is_plain = !data.base_struct;
+                // Determine if this is a plain enum (no variant carries data)
+                enum_data.is_plain = true;
+                if (data.base_struct) {
+                    auto base_struct = eval_struct_type(data.base_struct->resolved_type);
+                    for (auto member : base_struct->data.struct_.members) {
+                        if (member->is_field()) {
+                            enum_data.is_plain = false;
+                            break;
+                        }
+                    }
+                }
                 if (enum_data.is_plain) {
                     for (auto variant : enum_data.variants) {
                         if (variant->resolved_type->data.enum_value.variant_struct) {
@@ -4883,6 +4913,8 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "zeroinit";
     case TypeKind::Never:
         return "never";
+    case TypeKind::Null:
+        return "null";
     default:
         break;
     }
@@ -7543,12 +7575,11 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
         return true;
     }
 
-    // Special case: null_ptr (*void with is_null flag) is the same as *void
+    // Both are void pointers — same type regardless of identity
     if (a->kind == TypeKind::Pointer && b->kind == TypeKind::Pointer) {
         auto a_elem = a->get_elem();
         auto b_elem = b->get_elem();
         if (a_elem && b_elem && a_elem->kind == TypeKind::Void && b_elem->kind == TypeKind::Void) {
-            // Both are void pointers, consider them the same regardless of is_null flag
             return true;
         }
     }
@@ -8110,7 +8141,9 @@ bool Resolver::builtin_satisfies_intrinsic(ChiType *type, IntrinsicSymbol symbol
     case IntrinsicSymbol::Ord:
         return type->is_int_like() || type->kind == TypeKind::Float ||
                type->kind == TypeKind::String || type->kind == TypeKind::Bool ||
-               type->kind == TypeKind::Byte || type->kind == TypeKind::Rune;
+               type->kind == TypeKind::Byte || type->kind == TypeKind::Rune ||
+               type->is_pointer_like() ||
+               (type->kind == TypeKind::EnumValue && type->data.enum_value.parent_enum()->is_plain);
     case IntrinsicSymbol::Hash:
         return type->is_int_like() || type->kind == TypeKind::Float ||
                type->kind == TypeKind::String || type->kind == TypeKind::Bool ||

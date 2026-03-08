@@ -25,7 +25,7 @@ struct ChiLifetime;
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Byte, Rune, String, Struct, Pointer,
           Reference, MutRef, MoveRef, Array, FixedArray, Span, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
-          Undefined, ZeroInit, Never, Unit, Tuple)
+          Undefined, ZeroInit, Never, Unit, Tuple, Null)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
 
@@ -185,7 +185,6 @@ struct ChiLifetime {
 
 struct ChiTypePointer {
     ChiType *elem = nullptr;
-    bool is_null = false;
     array<ChiLifetime *> lifetimes;
 };
 
@@ -246,7 +245,7 @@ struct ChiTypeEnum {
     array<ChiEnumVariant *> variants = {};
     map<string, ChiEnumVariant *> variant_table = {};
     ChiType *resolved_generic = nullptr; // non-null for concrete instantiations of generic enums
-    bool is_plain = true; // no base struct fields or variant data
+    bool is_plain = true; // no variant carries data
 
     ChiEnumVariant *add_variant(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type);

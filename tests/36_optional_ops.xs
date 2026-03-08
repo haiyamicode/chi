@@ -63,10 +63,93 @@ func test_chaining() {
     println("");
 }
 
+func test_null_comparison() {
+    println("test_null_comparison:");
+
+    var a: ?int = 42;
+    var b: ?int = null;
+
+    // ?T != null
+    if a != null {
+        printf("a != null: true\n");
+    }
+
+    // ?T == null
+    if b == null {
+        printf("b == null: true\n");
+    }
+
+    // null == ?T (reversed)
+    if null == b {
+        printf("null == b: true\n");
+    }
+
+    // null != ?T (reversed)
+    if null != a {
+        printf("null != a: true\n");
+    }
+
+    // ?Struct == null
+    var p: ?Point = Point{x: 1, y: 2};
+    var q: ?Point = null;
+    if p != null {
+        printf("p != null: true\n");
+    }
+    if q == null {
+        printf("q == null: true\n");
+    }
+
+    println("");
+}
+
+func check_bool(name: string, opt: ?bool) {
+    if opt {
+        printf("{}: truthy\n", name);
+    } else {
+        printf("{}: falsy\n", name);
+    }
+}
+
+func check_int(name: string, opt: ?int) {
+    if opt {
+        printf("{}: truthy\n", name);
+    } else {
+        printf("{}: falsy\n", name);
+    }
+}
+
+func test_optional_truthiness() {
+    println("test_optional_truthiness:");
+
+    check_bool("null", null);
+    check_bool("?false", false);
+    check_bool("?true", true);
+
+    check_int("null", null);
+    check_int("?0", 0);
+    check_int("?42", 42);
+
+    // ?Struct: has_value only (struct is not boolish)
+    var p: ?Point = Point{x: 0, y: 0};
+    var q: ?Point = null;
+    if p {
+        printf("?Point(0,0): truthy\n");
+    }
+    if q {
+        printf("?null Point: truthy\n");
+    } else {
+        printf("?null Point: falsy\n");
+    }
+
+    println("");
+}
+
 func main() {
     test_null_coalescing();
     test_optional_chain_field();
     test_optional_chain_method();
     test_chaining();
+    test_null_comparison();
+    test_optional_truthiness();
 }
 

@@ -803,6 +803,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     case TypeKind::Void: {
         return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
     }
+    case TypeKind::Null:
     case TypeKind::Unit: {
         return llvm_db.createBasicType("Unit", 8, llvm::dwarf::DW_ATE_unsigned);
     }
@@ -1113,6 +1114,13 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 llvm::Value *Compiler::compile_constant_value(Function *fn, const ConstantValue &value,
                                               ChiType *type, llvm::Type *llvm_type) {
     auto t = llvm_type ? llvm_type : compile_type(type);
+    if (type->kind == TypeKind::Null) {
+        return llvm::ConstantPointerNull::get((llvm::PointerType *)t);
+    }
+    if (type->kind == TypeKind::Optional) {
+        // null optional: zeroed struct {has_value=false, value=zeroed}
+        return llvm::ConstantAggregateZero::get(t);
+    }
     if (type->is_pointer_like()) {
         return llvm::ConstantPointerNull::get((llvm::PointerType *)t);
     }
@@ -2333,8 +2341,38 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         auto &builder = *m_ctx->llvm_builder;
         switch (from_type->kind) {
         case TypeKind::Optional: {
-            auto from_type_l = compile_type(from_type);
             auto has_value = builder.CreateExtractValue(value, {0}, "has_value");
+            auto elem_type = from_type->get_elem();
+            // If inner type is boolish, check both has_value and truthiness of inner value
+            if (elem_type->kind == TypeKind::Bool) {
+                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
+                return builder.CreateAnd(has_value, inner);
+            }
+            if (elem_type->is_int_like() || elem_type->kind == TypeKind::Byte ||
+                elem_type->kind == TypeKind::Rune) {
+                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
+                auto zero = llvm::Constant::getNullValue(compile_type(elem_type));
+                auto nonzero = builder.CreateICmpNE(inner, zero, "nonzero");
+                return builder.CreateAnd(has_value, nonzero);
+            }
+            if (elem_type->kind == TypeKind::Float) {
+                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
+                auto zero = llvm::ConstantFP::get(compile_type(elem_type), 0.0);
+                auto nonzero = builder.CreateFCmpONE(inner, zero, "nonzero");
+                return builder.CreateAnd(has_value, nonzero);
+            }
+            if (elem_type->is_pointer_like()) {
+                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
+                auto elem_elem = elem_type->get_elem();
+                if (elem_elem && ChiTypeStruct::is_interface(elem_elem)) {
+                    // Fat pointer {data_ptr, vtable_ptr} — check data_ptr
+                    auto data_ptr = builder.CreateExtractValue(inner, {0}, "data_ptr");
+                    auto nonnull = builder.CreateICmpNE(data_ptr, get_null_ptr(), "nonnull");
+                    return builder.CreateAnd(has_value, nonnull);
+                }
+                auto nonnull = builder.CreateICmpNE(inner, get_null_ptr(), "nonnull");
+                return builder.CreateAnd(has_value, nonnull);
+            }
             return has_value;
         }
         case TypeKind::Result: {
@@ -2398,8 +2436,8 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         return value;
     }
     case TypeKind::Optional: {
-        if (from_type->kind == TypeKind::Pointer) {
-            // null pointer -> null optional
+        if (from_type->kind == TypeKind::Null) {
+            // null -> null optional
             return llvm::ConstantAggregateZero::get(compile_type(to_type));
         }
         if (from_type->kind == TypeKind::Optional) {
@@ -2424,6 +2462,14 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::MoveRef: {
+        if (from_type->kind == TypeKind::Null) {
+            auto t = compile_type(to_type);
+            if (t->isPointerTy()) {
+                return llvm::ConstantPointerNull::get((llvm::PointerType *)t);
+            }
+            // Fat pointer (interface ref): zeroed struct {null, null}
+            return llvm::ConstantAggregateZero::get(t);
+        }
         auto to_elem = to_type->get_elem();
         if (to_elem && ChiTypeStruct::is_interface(to_elem)) {
             auto from_elem = from_type->get_elem();
@@ -2832,6 +2878,25 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));
                     return builder.CreateCmp(cmpop, result, zero);
                 }
+                }
+            }
+            // Optional null check: ?T == null / null == ?T
+            {
+                auto t1 = get_chitype(data.op1);
+                auto t2 = get_chitype(data.op2);
+                bool lhs_null = t1->kind == TypeKind::Null;
+                bool rhs_null = t2->kind == TypeKind::Null;
+                if ((lhs_null || rhs_null) &&
+                    (data.op_type == TokenType::EQ || data.op_type == TokenType::NE)) {
+                    auto opt_expr = lhs_null ? data.op2 : data.op1;
+                    if (get_chitype(opt_expr)->kind == TypeKind::Optional) {
+                        auto opt_val = compile_expr(fn, opt_expr);
+                        auto has_value = builder.CreateExtractValue(opt_val, {0}, "has_value");
+                        if (data.op_type == TokenType::EQ) {
+                            return builder.CreateNot(has_value);
+                        }
+                        return has_value;
+                    }
                 }
             }
             auto lhs = compile_comparator(fn, data.op1);
@@ -8141,6 +8206,9 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             members.push_back(compile_type(elem));
         }
         return llvm::StructType::create(members, get_resolver()->format_type_display(type));
+    }
+    case TypeKind::Null: {
+        return get_llvm_ptr_type();
     }
     case TypeKind::Placeholder: {
         return compile_type(get_system_types()->void_);

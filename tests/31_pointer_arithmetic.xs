@@ -112,6 +112,18 @@ func test_ptr_indexing() {
     }
 }
 
+func test_ptr_null_compare() {
+    println("=== Test: ptr null comparisons ===");
+    var x: int = 42;
+    unsafe {
+        var p: *int = &x;
+        printf("p != null: {}\n", p != null);
+        printf("p == null: {}\n", p == null);
+        printf("null != p: {}\n", null != p);
+        printf("null == p: {}\n", null == p);
+    }
+}
+
 func main() {
     test_ptr_add_sub();
     test_ptr_diff();
@@ -121,5 +133,6 @@ func main() {
     test_inttoptr_ptrtoint();
     test_malloc_ptr_arith();
     test_ptr_indexing();
+    test_ptr_null_compare();
 }
 

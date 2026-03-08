@@ -14,3 +14,21 @@ test_chaining:
 p?.x ?? -1 = 100
 q?.y ?? -1 = -1
 
+test_null_comparison:
+a != null: true
+b == null: true
+null == b: true
+null != a: true
+p != null: true
+q == null: true
+
+test_optional_truthiness:
+null: falsy
+?false: falsy
+?true: truthy
+null: falsy
+?0: falsy
+?42: truthy
+?Point(0,0): truthy
+?null Point: falsy
+

@@ -28,3 +28,8 @@ roundtrip: true
 0 10 20 30 40
 === Test: ptr[i] ===
 p[0]=5, p[2]=15, p[3]=20
+=== Test: ptr null comparisons ===
+p != null: true
+p == null: false
+null != p: true
+null == p: false
