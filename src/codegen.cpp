@@ -5642,7 +5642,7 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new,
     assert(!chi_type->is_placeholder && "compile_alloc called on placeholder type");
 
     Function *alloc_fn = nullptr;
-    if (is_managed()) {
+    if (is_fn_managed(fn)) {
         if (is_new || decl->is_heap_allocated()) {
             alloc_fn = get_system_fn("cx_gc_alloc");
         }
@@ -5658,7 +5658,7 @@ llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new,
         llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(
             llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0));
 
-        if (is_managed() && alloc_fn->qualified_name == "cx_gc_alloc") {
+        if (is_fn_managed(fn) && alloc_fn->qualified_name == "cx_gc_alloc") {
             auto alloc_type = type ? type : chi_type;
             if (get_resolver()->type_needs_destruction(alloc_type)) {
                 auto dtor = generate_destructor(alloc_type, nullptr);
@@ -6312,7 +6312,7 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
 
 void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node *node) {
     // In managed memory mode, don't destroy heap-allocated objects locally - GC handles them
-    if (is_managed() && node->is_heap_allocated()) {
+    if (is_fn_managed(fn) && node->is_heap_allocated()) {
         return;
     }
 
@@ -7610,6 +7610,8 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
     // Create Function object
     auto fn = new Function(m_ctx, llvm_fn, nullptr);
     fn->qualified_name = fn_name;
+    if (resolved_type->data.struct_.node)
+        fn->module = resolved_type->data.struct_.node->module;
     m_ctx->functions.emplace(fn);
     m_ctx->constructor_table[struct_type] = fn;
 

@@ -58,6 +58,7 @@ struct BlockScope {
 struct Function {
     string qualified_name = "";
     ast::Node *node = nullptr;
+    ast::Module *module = nullptr; // Module context (set for synthetic functions where node is null)
     CodegenContext *ctx = nullptr;
     llvm::Function *llvm_fn = nullptr;
 
@@ -523,6 +524,13 @@ class Compiler {
     CodegenContext *get_context() { return m_ctx; }
     CompilationSettings *get_settings() { return &m_ctx->settings; }
     bool is_managed() { return has_lang_flag(get_settings()->lang_flags, LANG_FLAG_MANAGED); }
+    // True only when the current function's module is managed (.x), not for .xs modules in a .x program
+    bool is_fn_managed(Function *fn) {
+        if (!is_managed()) return false;
+        if (fn->node) return fn->node->module->kind == ast::ModuleKind::XM;
+        if (fn->module) return fn->module->kind == ast::ModuleKind::XM;
+        return false;
+    }
 
     TypeInfo *get_type_info(ChiType *type);
 

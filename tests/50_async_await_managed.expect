@@ -1,0 +1,73 @@
+=== Struct field init ===
+default payload: 77
+custom payload: 42
+nested label: 'default'
+nested payload: 77
+=== Promise API ===
+before: false
+cb: 42
+after: true
+value: 42
+=== Promise.make ===
+value: 123
+=== Promise<string> ===
+value: 'hello world'
+captured: 'captured value'
+=== Multiple promises ===
+sum: 6
+=== Async no await ===
+value: 17
+=== Var decl ===
+value: 10
+=== Func arg ===
+in func arg: 14
+value: 14
+=== Binop ===
+value: 106
+=== Multiple ===
+value: 12
+=== Locals across ===
+value: 62
+=== Chain ===
+value: 40
+=== Nested ===
+value: 21
+=== Return await ===
+value: 50
+=== Comparison ===
+value: true
+=== Interleaved ===
+value: 14
+=== String ===
+value: 'hello world'
+=== String concat ===
+value: 'hello world!'
+=== Double chain ===
+value: 12
+=== String across awaits ===
+value: 'hello world! hello chi'
+=== Multiple callers ===
+a=10, b=106, c=50
+=== Deep nesting ===
+value: 12
+=== Add async ===
+value: 14
+=== Bare await ===
+=== Bare logic ===
+=== Multiple bare ===
+=== timeout ===
+scheduled
+=== sleep ===
+scheduled
+=== sleep capture ===
+mutated: 999
+All managed async tests passed!
+bare ok
+x = 15
+after first
+x still = 15
+after second
+after third
+timeout fired
+sleep resolved
+captured: 42
