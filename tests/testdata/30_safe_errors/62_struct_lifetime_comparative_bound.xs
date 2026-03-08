@@ -15,3 +15,4 @@ func main() {
     var p = Pair{long_ref: &b, short_ref: &a};
     printf("{} {}\n", *p.long_ref, *p.short_ref);
 }
+

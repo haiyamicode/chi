@@ -7,10 +7,11 @@ struct Holder<'a> {
 }
 
 func make_holder(x: int) Holder {
-    return Holder{ref: &x};
+    return {ref: &x};
 }
 
 func main() {
     var h = make_holder(5);
     printf("held: {}\n", *h.ref);
 }
+

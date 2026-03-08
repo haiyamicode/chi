@@ -1013,7 +1013,7 @@ export struct Promise<T = Unit> {
         return this.data.value;
     }
 
-    mut func then(callback: func<'static> (value: T)) {
+    mut func then(callback: func <'static>(value: T)) {
         if this.data.state == 1 {
             // Already resolved - invoke immediately
             callback(this.data.value!);

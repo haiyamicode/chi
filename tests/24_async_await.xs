@@ -31,9 +31,15 @@ func test_promise_state() {
 func test_multiple_callbacks() {
     println("=== Multiple callbacks ===");
     var p = Promise<int>{};
-    p.then(func (val: int) { printf("cb1: {}\n", val); });
-    p.then(func (val: int) { printf("cb2: {}\n", val); });
-    p.then(func (val: int) { printf("cb3: {}\n", val); });
+    p.then(func (val: int) {
+        printf("cb1: {}\n", val);
+    });
+    p.then(func (val: int) {
+        printf("cb2: {}\n", val);
+    });
+    p.then(func (val: int) {
+        printf("cb3: {}\n", val);
+    });
     p.resolve(99);
 }
 
@@ -53,13 +59,17 @@ func test_promise_string() {
     printf("p1: '{}'\n", p1.value()!);
 
     var prefix = "hello";
-    var p2 = Promise<string>.make(func [prefix] (resolve) {
-        resolve(prefix + " from capture");
-    });
+    var p2 = Promise<string>.make(
+        func [prefix] (resolve) {
+            resolve(prefix + " from capture");
+        }
+    );
     printf("p2: '{}'\n", p2.value()!);
 
     var p3 = Promise<string>{};
-    p3.then(func (v: string) { printf("deferred: '{}'\n", v); });
+    p3.then(func (v: string) {
+        printf("deferred: '{}'\n", v);
+    });
     p3.resolve("resolved later");
 }
 
@@ -400,3 +410,4 @@ func main() {
 
     println("All tests passed!");
 }
+

@@ -131,6 +131,19 @@ void AstPrinter::print_node(Node *node) {
             if (!m_suppress_func_keyword) {
                 emit("func");
             }
+            if (data.lifetime_params.len > 0) {
+                emit("<");
+                for (int i = 0; i < data.lifetime_params.len; i++) {
+                    if (i > 0)
+                        emit(", ");
+                    auto *lt = data.lifetime_params[i];
+                    emit("'{}", lt->name);
+                    auto &bound = lt->data.lifetime_param.bound;
+                    if (!bound.empty())
+                        emit(": '{}", bound);
+                }
+                emit(">");
+            }
             return;
         }
         if (m_suppress_func_keyword) {
@@ -455,8 +468,19 @@ void AstPrinter::print_node(Node *node) {
         if (!node->name.empty()) {
             emit("{}", node->name);
         }
-        if (data.type_params.len) {
+        if (data.lifetime_params.len > 0 || data.type_params.len > 0) {
             emit("<");
+            for (int i = 0; i < data.lifetime_params.len; i++) {
+                if (i > 0)
+                    emit(", ");
+                auto *lt = data.lifetime_params[i];
+                emit("'{}", lt->name);
+                auto &bound = lt->data.lifetime_param.bound;
+                if (!bound.empty())
+                    emit(": '{}", bound);
+            }
+            if (data.lifetime_params.len > 0 && data.type_params.len > 0)
+                emit(", ");
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
@@ -773,6 +797,17 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.subtype_expr;
         print_node(data.type);
         emit("<");
+        for (int i = 0; i < data.lifetime_args.len; i++) {
+            if (i > 0)
+                emit(", ");
+            auto *lt = data.lifetime_args[i];
+            emit("'{}", lt->name);
+            auto &bound = lt->data.lifetime_param.bound;
+            if (!bound.empty())
+                emit(": '{}", bound);
+        }
+        if (data.lifetime_args.len > 0 && data.args.len > 0)
+            emit(", ");
         emit_wrapped_list(&data.args, "", "", ", ");
         emit(">");
         break;

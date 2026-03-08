@@ -15,6 +15,11 @@ func main() {
     var z = 3;
     // BAD: first borrows z (declared last), third borrows x (declared first)
     // 'a: 'b: 'c requires first's source to outlive third's source
-    var t = Triple{first: &z, second: &y, third: &x};
+    var t = Triple{
+        first: &z,
+        second: &y,
+        third: &x
+    };
     printf("{}\n", *t.first);
 }
+

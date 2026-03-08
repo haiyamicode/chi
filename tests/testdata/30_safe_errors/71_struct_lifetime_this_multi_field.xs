@@ -11,6 +11,7 @@ func main() {
     var a = 1;
     var t: TwoRefs;
     var b = 2;
-    t = TwoRefs{first: &a, second: &b};
+    t = {first: &a, second: &b};
     printf("{} {}\n", *t.first, *t.second);
 }
+

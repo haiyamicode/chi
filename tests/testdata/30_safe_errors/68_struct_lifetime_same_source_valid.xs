@@ -10,10 +10,11 @@ struct Pair<'a: 'b, 'b> {
 func bad() Pair {
     var x = 1;
     // Both fields borrow x — comparative bound is fine, but returning escapes
-    return Pair{long_ref: &x, short_ref: &x};
+    return {long_ref: &x, short_ref: &x};
 }
 
 func main() {
     var p = bad();
     printf("{}\n", *p.long_ref);
 }
+

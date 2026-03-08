@@ -10,7 +10,8 @@ func main() {
     var h: Holder;
     {
         var x = 42;
-        h = Holder{ref: &x};
+        h = {ref: &x};
     }
     printf("{}\n", *h.ref);
 }
+
