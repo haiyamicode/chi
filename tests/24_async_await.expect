@@ -1,16 +1,18 @@
 === Manual Promise ===
 Resolving...
-Callback A: 100
-Callback B: 100
-Callback C: 100
+Callback: 100
+Already resolved: 200
 === Promise state ===
 before: false
 after: true
 value: 42
-=== Multiple callbacks ===
-cb1: 99
-cb2: 99
-cb3: 99
+=== Then chain ===
+before resolve: false false false false
+chain result: 4
+after resolve: true true true true
+p2: 'n=42'
+p3: 4
+already resolved chain: 'got 21'
 === Promise.make ===
 value: 123
 === Promise<string> ===

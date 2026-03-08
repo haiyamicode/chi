@@ -1548,6 +1548,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 !data.op2->escape.moved) {
                 error(data.op2, errors::TYPE_NOT_COPYABLE, format_type_display(t1));
             }
+            // RHS is a non-addressable temp (fn call, construct, etc.):
+            // transfer ownership to the LHS — move, don't copy.
+            // Lambdas excluded: their capture refcounting requires copy semantics;
+            // for those, ensure_temp_owner creates a __tmp var for cleanup.
+            if (!is_addressable(data.op2) && !data.op2->escape.moved &&
+                should_destroy(data.op2, t2)) {
+                if (t2->kind != TypeKind::FnLambda) {
+                    data.op2->escape.moved = true;
+                } else {
+                    ensure_temp_owner(data.op2, t2, scope);
+                }
+            }
             return t1;
         }
         // For compound assignment operators, validate the base op

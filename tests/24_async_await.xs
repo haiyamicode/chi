@@ -7,15 +7,16 @@ func test_manual_promise() {
     println("=== Manual Promise ===");
     var p = Promise<int>{};
     p.then(func (val: int) {
-        printf("Callback A: {}\n", val);
-    });
-    p.then(func (val: int) {
-        printf("Callback B: {}\n", val);
+        printf("Callback: {}\n", val);
     });
     println("Resolving...");
     p.resolve(100);
-    p.then(func (val: int) {
-        printf("Callback C: {}\n", val);
+
+    // then on already-resolved promise
+    var p2 = Promise<int>{};
+    p2.resolve(200);
+    p2.then(func (val: int) {
+        printf("Already resolved: {}\n", val);
     });
 }
 
@@ -28,19 +29,33 @@ func test_promise_state() {
     printf("value: {}\n", p.value()!);
 }
 
-func test_multiple_callbacks() {
-    println("=== Multiple callbacks ===");
+func test_then_chain() {
+    println("=== Then chain ===");
+    // Multi-step chain with type changes: int -> string -> int -> void
     var p = Promise<int>{};
-    p.then(func (val: int) {
-        printf("cb1: {}\n", val);
+    var p2 = p.then(func (v: int) string {
+        return stringf("n={}", v);
     });
-    p.then(func (val: int) {
-        printf("cb2: {}\n", val);
+    var p3 = p2.then(func (s: string) int {
+        return s.length;
     });
-    p.then(func (val: int) {
-        printf("cb3: {}\n", val);
+    var p4 = p3.then(func (v: int) {
+        printf("chain result: {}\n", v);
     });
-    p.resolve(99);
+    printf("before resolve: {} {} {} {}\n",
+        p.is_resolved(), p2.is_resolved(), p3.is_resolved(), p4.is_resolved());
+    p.resolve(42);
+    printf("after resolve: {} {} {} {}\n",
+        p.is_resolved(), p2.is_resolved(), p3.is_resolved(), p4.is_resolved());
+    printf("p2: '{}'\n", p2.value()!);
+    printf("p3: {}\n", p3.value()!);
+
+    // Chain on already-resolved promise
+    var r = Promise<int>{};
+    r.resolve(7);
+    var r2 = r.then(func (v: int) int { return v * 3; });
+    var r3 = r2.then(func (v: int) string { return stringf("got {}", v); });
+    printf("already resolved chain: '{}'\n", r3.value()!);
 }
 
 func test_promise_make() {
@@ -374,7 +389,7 @@ func main() {
     // Promise API
     test_manual_promise();
     test_promise_state();
-    test_multiple_callbacks();
+    test_then_chain();
     test_promise_make();
     test_promise_string();
     test_promise_in_struct();

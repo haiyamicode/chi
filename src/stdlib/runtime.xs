@@ -974,9 +974,9 @@ export interface Error {
 
 // Promise for async operations
 struct PromiseState<T> {
-    state: uint32 = 0; // 0=pending, 1=resolved, 2=rejected
+    state: uint32 = 0; // 0=pending, 1=resolved
     value: ?T = null;
-    callbacks: Array<func (value: T)> = {};
+    callback: ?func (value: T) = null;
 }
 
 export struct Promise<T = Unit> {
@@ -1000,8 +1000,8 @@ export struct Promise<T = Unit> {
         }
         this.data.state = 1;
         this.data.value = value;
-        for var i = 0; i < this.data.callbacks.length; i = i + 1 {
-            this.data.callbacks[i](value);
+        if this.data.callback {
+            this.data.callback!(value);
         }
     }
 
@@ -1013,14 +1013,20 @@ export struct Promise<T = Unit> {
         return this.data.value;
     }
 
-    mut func then(callback: func <'static>(value: T)) {
+    private mut func on_resolve(callback: func <'static>(value: T)) {
         if this.data.state == 1 {
-            // Already resolved - invoke immediately
             callback(this.data.value!);
         } else {
-            // Pending - add to callback list
-            this.data.callbacks.push(callback);
+            this.data.callback = callback;
         }
+    }
+
+    mut func then<U>(callback: func <'static>(value: T) U) Promise<U> {
+        var result = Promise<U>{};
+        this.on_resolve(func [result, callback] (value: T) {
+            result.resolve(callback(value));
+        });
+        return result;
     }
 
     func ref_count() uint32 {

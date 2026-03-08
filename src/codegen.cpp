@@ -2114,10 +2114,10 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     auto lambda =
         build_continuation_lambda(fn, ctx, next_segment_index, local_vars, result_promise_ptr);
 
-    // Call Promise.then(callback) to register the continuation
-    // Use variant lookup to get the specialized Promise<T>.then() method
-    auto then_member = promise_struct_type->find_member("then");
-    assert(then_member && "Promise.then() method not found");
+    // Call Promise.on_resolve(callback) to register the continuation
+    // Use variant lookup to get the specialized Promise<T>.on_resolve() method
+    auto then_member = promise_struct_type->find_member("on_resolve");
+    assert(then_member && "Promise.on_resolve() method not found");
     std::optional<TypeId> variant_type_id = std::nullopt;
     if (promise_type->kind == TypeKind::Subtype && !promise_type->is_placeholder) {
         variant_type_id = promise_type->id;
