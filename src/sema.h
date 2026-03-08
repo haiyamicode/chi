@@ -511,6 +511,7 @@ struct ChiType {
         case TypeKind::Rune:
         case TypeKind::Void:
         case TypeKind::Never:
+        case TypeKind::Unit:
             return true;
         default:
             return false;

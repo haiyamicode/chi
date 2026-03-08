@@ -493,6 +493,8 @@ class Compiler {
                                                 ChiType *lambda_type);
     llvm::Value *generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
                                                 ChiType *lambda_type, NodeList *captures);
+    llvm::Value *compile_void_to_unit_lambda_wrapper(Function *fn, llvm::Value *lambda_value,
+                                                     ChiType *from_type, ChiType *to_type);
 
     // Variant lookup helpers
     std::optional<TypeId> resolve_variant_type_id(Function *fn, ChiType *type);

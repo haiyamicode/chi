@@ -265,7 +265,11 @@ bool Resolver::can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit)
     }
 
     // Check return type (covariant)
-    if (!can_assign(from_data.return_type, to_data.return_type, is_explicit)) {
+    // void-returning functions convert to Unit-returning functions transparently
+    bool return_ok = can_assign(from_data.return_type, to_data.return_type, is_explicit) ||
+                     (from_data.return_type->kind == TypeKind::Void &&
+                      to_data.return_type->kind == TypeKind::Unit);
+    if (!return_ok) {
         return false;
     }
 
@@ -908,22 +912,35 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // Infer return type from expected function type if not provided
+        // Infer return type from expected function type if not provided.
+        // Block lambdas (func (...) { ... }) without explicit return type are always void.
+        // Only arrow lambdas (func (...) => expr) infer return type from the body.
         ChiType *return_type = nullptr;
+        bool is_arrow_body = data.fn_def_node && data.fn_def_node->data.fn_def.body &&
+                             data.fn_def_node->data.fn_def.body->data.block.is_arrow;
         if (data.return_type) {
             return_type = resolve_value(data.return_type, fn_scope);
-        } else if (expected_fn) {
+        } else if (expected_fn && is_arrow_body) {
             auto expected_return = expected_fn->return_type;
-            // If expected return type is a placeholder, create an Infer type instead.
-            // This allows us to infer the actual type from the lambda body rather than
-            // copying the placeholder directly.
+            // Arrow lambda: infer return type from body expression.
             if (expected_return && expected_return->kind == TypeKind::Placeholder) {
                 auto infer_type = create_type(TypeKind::Infer);
                 infer_type->data.infer.placeholder = expected_return;
-                infer_type->is_placeholder = true; // Mark as placeholder until inferred
+                infer_type->is_placeholder = true;
                 return_type = infer_type;
+            } else if (expected_return && expected_return->kind == TypeKind::Infer &&
+                       !expected_return->data.infer.inferred_type) {
+                return_type = expected_return;
             } else {
                 return_type = expected_return;
+            }
+        } else if (expected_fn) {
+            // Block lambda without return type: use expected if concrete, else void.
+            auto expected_return = expected_fn->return_type;
+            if (expected_return && !expected_return->is_placeholder) {
+                return_type = expected_return;
+            } else {
+                return_type = get_system_types()->void_;
             }
         } else {
             return_type = get_system_types()->void_;
@@ -6081,8 +6098,8 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
     }
 
     // Handle placeholder mapping via unification
-    auto handle_placeholder = [fn, inferred_types](ChiType *placeholder,
-                                                   ChiType *concrete) -> bool {
+    auto handle_placeholder = [this, fn, inferred_types](ChiType *placeholder,
+                                                         ChiType *concrete) -> bool {
         // If the arg type is the same placeholder, it provides no new information
         // (e.g. lambda param inherited its type from the expected placeholder context).
         // Just skip — don't record or check consistency.
@@ -6102,7 +6119,12 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
             // Check consistency
             return *existing == concrete;
         } else {
-            // New inference
+            // New inference — void is not a value type, so when a placeholder
+            // is inferred from a void context (e.g. void-returning callback),
+            // bind to Unit instead.
+            if (concrete->kind == TypeKind::Void) {
+                concrete = m_ctx->rt_unit_type;
+            }
             (*inferred_types)[corresponding_type_param] = concrete;
             return true;
         }

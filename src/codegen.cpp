@@ -2432,7 +2432,23 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         if (from_type->kind == TypeKind::Fn) {
             return compile_lambda_alloc(fn, to_type, value, nullptr);
         }
-        // For FnLambda -> FnLambda, just pass through (no retain here - compile_copy handles it)
+        // For FnLambda -> FnLambda with void->Unit return conversion,
+        // wrap the lambda with a proxy that returns Unit
+        if (from_type->kind == TypeKind::FnLambda) {
+            auto from_fn = from_type->data.fn_lambda.fn;
+            auto to_fn = to_type->data.fn_lambda.fn;
+            if (from_fn->data.fn.return_type->kind == TypeKind::Void &&
+                to_fn->data.fn.return_type->kind == TypeKind::Unit) {
+                return compile_void_to_unit_lambda_wrapper(fn, value, from_type, to_type);
+            }
+        }
+        return value;
+    }
+    case TypeKind::Unit: {
+        // void -> Unit: produce zero Unit value
+        if (from_type->kind == TypeKind::Void) {
+            return llvm::Constant::getNullValue(compile_type(to_type));
+        }
         return value;
     }
     case TypeKind::Optional: {
@@ -5694,6 +5710,81 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
     }
 
     return proxy_llvm_fn;
+}
+
+llvm::Value *Compiler::compile_void_to_unit_lambda_wrapper(Function *fn, llvm::Value *lambda_value,
+                                                           ChiType *from_type, ChiType *to_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+    auto unit_type_l = compile_type(get_resolver()->get_system_types()->unit);
+    auto rt_lambda = get_resolver()->get_context()->rt_lambda_type;
+    auto lambda_type_l = compile_type(rt_lambda);
+
+    // --- Generate wrapper function: Unit(ptr data, user_args...) ---
+    // data points to the captured original __CxLambda
+    auto saved_bb = builder.GetInsertBlock();
+
+    auto &from_fn_spec = from_type->data.fn_lambda.fn->data.fn;
+    std::vector<llvm::Type *> wrapper_params = {ptr_type};
+    for (size_t i = 0; i < from_fn_spec.params.len; i++)
+        wrapper_params.push_back(compile_type(from_fn_spec.params[i]));
+
+    static int counter = 0;
+    auto wrapper_fn = llvm::Function::Create(
+        llvm::FunctionType::get(unit_type_l, wrapper_params, false),
+        llvm::Function::InternalLinkage,
+        fmt::format("__void_to_unit_wrapper_{}", counter++), m_ctx->llvm_module.get());
+
+    builder.SetInsertPoint(llvm::BasicBlock::Create(llvm_ctx, "entry", wrapper_fn));
+
+    // data arg points to captured __CxLambda: {ptr fn_ptr, i32 length, ptr captures}
+    auto data_arg = wrapper_fn->getArg(0);
+    auto inner_fn = builder.CreateLoad(ptr_type, builder.CreateStructGEP(lambda_type_l, data_arg, 0));
+    auto inner_captures = builder.CreateLoad(ptr_type, builder.CreateStructGEP(lambda_type_l, data_arg, 2));
+    auto inner_data = builder.CreateCall(get_system_fn("cx_capture_get_data")->llvm_fn, {inner_captures});
+
+    std::vector<llvm::Value *> fwd_args = {inner_data};
+    for (unsigned i = 1; i < wrapper_fn->arg_size(); i++)
+        fwd_args.push_back(wrapper_fn->getArg(i));
+
+    auto orig_bound_type = (llvm::FunctionType *)compile_type(from_type->data.fn_lambda.bound_fn);
+    builder.CreateCall(llvm::FunctionCallee(orig_bound_type, inner_fn), fwd_args);
+    builder.CreateRet(llvm::Constant::getNullValue(unit_type_l));
+
+    if (saved_bb) builder.SetInsertPoint(saved_bb);
+
+    // --- Build new __CxLambda capturing the original lambda ---
+    auto lambda_size = llvm_type_size(lambda_type_l);
+    auto [new_lambda, new_lambda_type] = compile_cxlambda_init(fn, wrapper_fn, lambda_size);
+
+    // Destructor to release the captured lambda's inner captures
+    auto dtor = generate_destructor(rt_lambda);
+    auto dtor_ptr = dtor ? builder.CreateBitCast(dtor->llvm_fn, builder.getInt8PtrTy())
+                         : llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
+    auto null_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
+    auto [cap_ptr, payload_ptr] = compile_cxcapture_create(lambda_size, null_ptr, dtor_ptr);
+
+    // Copy original lambda into payload and retain its inner captures
+    auto typed_payload = builder.CreateBitCast(payload_ptr, lambda_type_l->getPointerTo());
+    builder.CreateStore(lambda_value, typed_payload);
+    auto inner_cap_ptr = builder.CreateLoad(ptr_type, builder.CreateStructGEP(lambda_type_l, typed_payload, 2));
+
+    // Retain inner captures if non-null
+    auto has_captures = builder.CreateICmpNE(inner_cap_ptr, llvm::ConstantPointerNull::get(
+        llvm::PointerType::get(llvm_ctx, 0)));
+    auto retain_bb = llvm::BasicBlock::Create(llvm_ctx, "retain", fn->llvm_fn);
+    auto cont_bb = llvm::BasicBlock::Create(llvm_ctx, "cont", fn->llvm_fn);
+    builder.CreateCondBr(has_captures, retain_bb, cont_bb);
+
+    builder.SetInsertPoint(retain_bb);
+    builder.CreateCall(get_system_fn("cx_capture_retain")->llvm_fn, {inner_cap_ptr});
+    builder.CreateBr(cont_bb);
+
+    builder.SetInsertPoint(cont_bb);
+    compile_cxlambda_set_captures(new_lambda, cap_ptr);
+
+    return builder.CreateLoad(new_lambda_type, new_lambda);
 }
 
 llvm::Value *Compiler::compile_alloc(Function *fn, ast::Node *decl, bool is_new, ChiType *type) {

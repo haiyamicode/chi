@@ -282,6 +282,77 @@ func test_lambda_capture_lifecycle() {
     println("");
 }
 
+struct Container<T> {
+    value: T;
+
+    func transform<U>(f: func(value: T) U) Container<U> {
+        return Container<U>{value: f(this.value)};
+    }
+}
+
+func apply_unit(f: func(v: int) Unit) {
+    f(99);
+}
+
+func void_func_for_test(v: int) {
+    printf("named: {}\n", v);
+}
+
+func test_void_to_unit_conversion() {
+    println("testing void to unit conversion:");
+    var c = Container<int>{value: 42};
+
+    // Void lambda (no captures) inferred as Unit through generic
+    c.transform(func (v: int) {
+        printf("no captures: {}\n", v);
+    });
+
+    // Void lambda with captures
+    var msg = "hello";
+    c.transform(func [msg] (v: int) {
+        printf("captures: {} {}\n", msg, v);
+    });
+
+    // Lambda stored in variable first
+    var cb = func (v: int) {
+        printf("variable: {}\n", v);
+    };
+    c.transform(cb);
+
+    // Named void function through generic method
+    c.transform(void_func_for_test);
+
+    // Named void function to explicit func() Unit parameter
+    apply_unit(void_func_for_test);
+
+    // Void lambda to non-generic func() Unit parameter
+    apply_unit(func (v: int) {
+        printf("to unit param: {}\n", v);
+    });
+
+    // Void lambda with captures to func() Unit parameter
+    var n = 5;
+    apply_unit(func [n] (v: int) {
+        printf("captures to unit: {}+{}\n", n, v);
+    });
+
+    // Assign void lambda to explicitly typed func() Unit variable
+    var f: func(v: int) Unit = func (v: int) {
+        printf("explicit var: {}\n", v);
+    };
+    f(77);
+
+    // Chain: transform to string, then void callback
+    var c2 = c.transform(func (v: int) string {
+        return stringf("val={}", v);
+    });
+    c2.transform(func (v: string) {
+        printf("chained: {}\n", v);
+    });
+
+    println("");
+}
+
 func main() {
     test_basic_lambda();
     test_lambda_capture();
@@ -293,6 +364,7 @@ func main() {
     test_function_to_lambda();
     test_lambda_copy_semantics();
     test_lambda_capture_lifecycle();
+    test_void_to_unit_conversion();
     println("All lambda tests completed!");
 }
 
