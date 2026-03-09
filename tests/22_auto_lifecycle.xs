@@ -607,6 +607,60 @@ func test_method_param_cleanup() {
     println("--- scope exit ---");
 }
 
+func make_val(id: int) TrackedVal {
+    return {id};
+}
+
+struct HoldsVal {
+    data: TrackedVal;
+    mut func new(id: int) {
+        this.data = make_val(id);
+    }
+}
+
+func test_temp_move_semantics() {
+    println("=== Test 14: Temp move semantics (no unnecessary copies) ===");
+
+    // VarDecl from fn call: temp moved, not copied
+    println("--- vardecl from fn call ---");
+    var a = make_val(1);
+    printf("  a.id={}\n", a.id);
+
+    // VarDecl from construct expr: temp moved, not copied
+    println("--- vardecl from construct ---");
+    var b = TrackedVal{2};
+    printf("  b.id={}\n", b.id);
+
+    // Assignment from fn call: old destructed, temp moved
+    println("--- reassign from fn call ---");
+    var c = TrackedVal{3};
+    c = make_val(4);
+    printf("  c.id={}\n", c.id);
+
+    // Assignment from construct: old destructed, temp moved
+    println("--- reassign from construct ---");
+    var d = TrackedVal{5};
+    d = TrackedVal{6};
+    printf("  d.id={}\n", d.id);
+
+    // Struct field from fn call in constructor: temp moved
+    println("--- struct field from fn call ---");
+    var h = HoldsVal{7};
+    printf("  h.data.id={}\n", h.data.id);
+
+    // Lambda vardecl and reassign: captures not leaked
+    println("--- lambda lifecycle ---");
+    var x: int = 10;
+    var f1 = func [x] () int { return x; };
+    printf("  f1()={}\n", f1());
+    var f2 = f1;
+    printf("  f1()={}, f2()={}\n", f1(), f2());
+    f1 = func [] () int { return 99; };
+    printf("  f1()={}, f2()={}\n", f1(), f2());
+
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -621,6 +675,7 @@ func main() {
     test_expr_contexts();
     test_fn_arg_copy_semantics();
     test_method_param_cleanup();
+    test_temp_move_semantics();
     println("All tests completed!");
 }
 

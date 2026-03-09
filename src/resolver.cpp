@@ -1427,6 +1427,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(data.expr, errors::TYPE_NOT_COPYABLE,
                       format_type_display(var_type));
             }
+            // RHS is a non-addressable temp: transfer ownership (move, don't copy)
+            if (var_type && !is_addressable(data.expr) && !data.expr->escape.moved &&
+                should_destroy(data.expr, var_type)) {
+                data.expr->escape.moved = true;
+            }
         }
         if (!var_type) {
             // Failed to resolve variable type due to malformed expression
@@ -1550,15 +1555,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             // RHS is a non-addressable temp (fn call, construct, etc.):
             // transfer ownership to the LHS — move, don't copy.
-            // Lambdas excluded: their capture refcounting requires copy semantics;
-            // for those, ensure_temp_owner creates a __tmp var for cleanup.
             if (!is_addressable(data.op2) && !data.op2->escape.moved &&
                 should_destroy(data.op2, t2)) {
-                if (t2->kind != TypeKind::FnLambda) {
-                    data.op2->escape.moved = true;
-                } else {
-                    ensure_temp_owner(data.op2, t2, scope);
-                }
+                data.op2->escape.moved = true;
             }
             return t1;
         }

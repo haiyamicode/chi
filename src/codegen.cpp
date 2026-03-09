@@ -5951,14 +5951,6 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto value = compile_assignment_to_type(fn, data.expr, var_type);
                 if (value) {
                     compile_store_or_copy(fn, value, var, var_type, data.expr);
-                    // For lambda expressions with captures, compile_copy retains the captures
-                    // but the temp value (from compile_lambda_alloc) already has refcount 1.
-                    // Release the temp's captures to transfer ownership to the variable.
-                    if (!data.expr->escape.moved && var_type->kind == TypeKind::FnLambda) {
-                        auto captures_ptr = llvm_builder.CreateExtractValue(value, {2});
-                        auto release_fn = get_system_fn("cx_capture_release");
-                        llvm_builder.CreateCall(release_fn->llvm_fn, {captures_ptr});
-                    }
                 }
             }
         }

@@ -188,7 +188,6 @@ after unary
   TrackedVal.add(20, 7)
   TrackedVal.new(27)
   TrackedVal.delete(7)
-  TrackedVal.copy(27)
   f.id=27
 --- void method ---
   TrackedVal.new(30)
@@ -229,7 +228,6 @@ after unary
   TrackedVal.add(3, 3)
   TrackedVal.new(6)
   TrackedVal.delete(3)
-  TrackedVal.copy(6)
   s.id=6
 --- rvalue to method ---
   TrackedVal.new(40)
@@ -259,4 +257,34 @@ after unary
   TrackedVal.delete(15)
   TrackedVal.delete(5)
   TrackedVal.delete(10)
+=== Test 14: Temp move semantics (no unnecessary copies) ===
+--- vardecl from fn call ---
+  TrackedVal.new(1)
+  a.id=1
+--- vardecl from construct ---
+  TrackedVal.new(2)
+  b.id=2
+--- reassign from fn call ---
+  TrackedVal.new(3)
+  TrackedVal.new(4)
+  TrackedVal.delete(3)
+  c.id=4
+--- reassign from construct ---
+  TrackedVal.new(5)
+  TrackedVal.delete(5)
+  TrackedVal.new(6)
+  d.id=6
+--- struct field from fn call ---
+  TrackedVal.new(7)
+  h.data.id=7
+--- lambda lifecycle ---
+  f1()=10
+  f1()=10, f2()=10
+  f1()=99, f2()=10
+--- scope exit ---
+  TrackedVal.delete(7)
+  TrackedVal.delete(6)
+  TrackedVal.delete(4)
+  TrackedVal.delete(2)
+  TrackedVal.delete(1)
 All tests completed!
