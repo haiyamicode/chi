@@ -285,12 +285,12 @@ func test_lambda_capture_lifecycle() {
 struct Container<T> {
     value: T;
 
-    func transform<U>(f: func(value: T) U) Container<U> {
-        return Container<U>{value: f(this.value)};
+    func transform<U>(f: func (value: T) U) Container<U> {
+        return {value: f(this.value)};
     }
 }
 
-func apply_unit(f: func(v: int) Unit) {
+func apply_unit(f: func (v: int) Unit) {
     f(99);
 }
 
@@ -337,7 +337,7 @@ func test_void_to_unit_conversion() {
     });
 
     // Assign void lambda to explicitly typed func() Unit variable
-    var f: func(v: int) Unit = func (v: int) {
+    var f: func (v: int) Unit = func (v: int) {
         printf("explicit var: {}\n", v);
     };
     f(77);

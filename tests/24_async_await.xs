@@ -42,19 +42,33 @@ func test_then_chain() {
     var p4 = p3.then(func (v: int) {
         printf("chain result: {}\n", v);
     });
-    printf("before resolve: {} {} {} {}\n",
-        p.is_resolved(), p2.is_resolved(), p3.is_resolved(), p4.is_resolved());
+    printf(
+        "before resolve: {} {} {} {}\n",
+        p.is_resolved(),
+        p2.is_resolved(),
+        p3.is_resolved(),
+        p4.is_resolved()
+    );
     p.resolve(42);
-    printf("after resolve: {} {} {} {}\n",
-        p.is_resolved(), p2.is_resolved(), p3.is_resolved(), p4.is_resolved());
+    printf(
+        "after resolve: {} {} {} {}\n",
+        p.is_resolved(),
+        p2.is_resolved(),
+        p3.is_resolved(),
+        p4.is_resolved()
+    );
     printf("p2: '{}'\n", p2.value()!);
     printf("p3: {}\n", p3.value()!);
 
     // Chain on already-resolved promise
     var r = Promise<int>{};
     r.resolve(7);
-    var r2 = r.then(func (v: int) int { return v * 3; });
-    var r3 = r2.then(func (v: int) string { return stringf("got {}", v); });
+    var r2 = r.then(func (v: int) int {
+        return v * 3;
+    });
+    var r3 = r2.then(func (v: int) string {
+        return stringf("got {}", v);
+    });
     printf("already resolved chain: '{}'\n", r3.value()!);
 }
 

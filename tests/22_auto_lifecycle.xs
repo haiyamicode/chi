@@ -613,6 +613,7 @@ func make_val(id: int) TrackedVal {
 
 struct HoldsVal {
     data: TrackedVal;
+
     mut func new(id: int) {
         this.data = make_val(id);
     }
@@ -640,7 +641,7 @@ func test_temp_move_semantics() {
     // Assignment from construct: old destructed, temp moved
     println("--- reassign from construct ---");
     var d = TrackedVal{5};
-    d = TrackedVal{6};
+    d = {6};
     printf("  d.id={}\n", d.id);
 
     // Struct field from fn call in constructor: temp moved
@@ -651,11 +652,15 @@ func test_temp_move_semantics() {
     // Lambda vardecl and reassign: captures not leaked
     println("--- lambda lifecycle ---");
     var x: int = 10;
-    var f1 = func [x] () int { return x; };
+    var f1 = func [x] () int {
+        return x;
+    };
     printf("  f1()={}\n", f1());
     var f2 = f1;
     printf("  f1()={}, f2()={}\n", f1(), f2());
-    f1 = func [] () int { return 99; };
+    f1 = func () int {
+        return 99;
+    };
     printf("  f1()={}, f2()={}\n", f1(), f2());
 
     println("--- scope exit ---");

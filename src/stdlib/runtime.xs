@@ -1023,9 +1023,11 @@ export struct Promise<T = Unit> {
 
     mut func then<U>(callback: func <'static>(value: T) U) Promise<U> {
         var result = Promise<U>{};
-        this.on_resolve(func [result, callback] (value: T) {
-            result.resolve(callback(value));
-        });
+        this.on_resolve(
+            func [result, callback] (value: T) {
+                result.resolve(callback(value));
+            }
+        );
         return result;
     }
 

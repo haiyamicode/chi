@@ -2,8 +2,13 @@
 // expect-error: invalid operator '=='
 
 enum Shape {
-    Circle { radius: int; },
-    Rect { w: int; h: int; }
+    Circle {
+        radius: int;
+    },
+    Rect {
+        w: int;
+        h: int;
+    }
 }
 
 func main() {
@@ -13,3 +18,4 @@ func main() {
         println("equal");
     }
 }
+
