@@ -321,7 +321,7 @@ func main() {
     printf("\n-- Auto-deref --\n");
     // Auto-deref through Shared: method calls
     var inner = Point{x: 11, y: 22};
-    var shared_pt = Shared<Point>{inner};
+    var shared_pt = Shared<Point>.from_value(inner);
     printf("shared deref method: {}\n", shared_pt.show());
 
     // Auto-deref through Shared: field access
@@ -338,7 +338,7 @@ func main() {
     printf("shared copy deref: {}\n", shared_pt.show());
 
     // Auto-deref through Box: method calls
-    var boxed_pt = Box<Point>.wrap(Point{x: 55, y: 66});
+    var boxed_pt = Box<Point>.from_value(Point{x: 55, y: 66});
     printf("box deref method: {}\n", boxed_pt.show());
 
     // Auto-deref through Box: field access

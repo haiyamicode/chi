@@ -145,7 +145,7 @@ export struct File {
     private handle: Shared<FileHandle>;
 
     private mut func new(fd: int32) {
-        this.handle = {FileHandle{fd}};
+        this.handle = {new FileHandle{fd}};
     }
 
     static func open(path: string, mode: OpenMode = OpenMode.Read) File {

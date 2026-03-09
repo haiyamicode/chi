@@ -547,21 +547,32 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ImplementBlock: {
         auto &data = node->data.implement_block;
+        emit("impl ");
+        for (size_t i = 0; i < data.interface_types.len; i++) {
+            if (i > 0)
+                emit(", ");
+            print_node(data.interface_types[i]);
+        }
         if (data.where_clauses.len > 0) {
-            emit("impl where ");
+            if (data.interface_types.len > 0)
+                emit(" ");
+            emit("where ");
             for (size_t i = 0; i < data.where_clauses.len; i++) {
-                if (i > 0)
-                    emit(", ");
-                emit(data.where_clauses[i].param_name->str);
-                emit(": ");
+                if (i > 0) {
+                    // Same param as previous: use +
+                    if (data.where_clauses[i].param_name->str ==
+                        data.where_clauses[i - 1].param_name->str) {
+                        emit(" + ");
+                    } else {
+                        emit(", ");
+                        emit(data.where_clauses[i].param_name->str);
+                        emit(": ");
+                    }
+                } else {
+                    emit(data.where_clauses[i].param_name->str);
+                    emit(": ");
+                }
                 print_node(data.where_clauses[i].bound_type);
-            }
-        } else {
-            emit("impl ");
-            for (size_t i = 0; i < data.interface_types.len; i++) {
-                if (i > 0)
-                    emit(", ");
-                print_node(data.interface_types[i]);
             }
         }
         emit(" {{");
@@ -621,10 +632,10 @@ void AstPrinter::print_node(Node *node) {
         // Consume and reset flag so it only affects THIS construct, not nested ones
         bool suppress = m_suppress_construct_type;
         m_suppress_construct_type = false;
+        if (data.is_new) {
+            emit("new ");
+        }
         if (data.type && !suppress) {
-            if (data.is_new) {
-                emit("new ");
-            }
             print_node(data.type);
         }
         // For construct expressions, always try wrapping

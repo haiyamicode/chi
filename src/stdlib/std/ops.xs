@@ -51,11 +51,11 @@ export interface UnwrapMut<T> {
     func unwrap_mut() &mut T;
 }
 
-export interface Deref<T> {
+export interface Deref<T: Unsized + NoCopy> {
     func deref() &T;
 }
 
-export interface DerefMut<T> {
+export interface DerefMut<T: Unsized + NoCopy> {
     func deref_mut() &mut T;
 }
 

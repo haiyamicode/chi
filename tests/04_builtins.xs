@@ -76,7 +76,7 @@ func test_map() {
 
 func test_shared() {
     println("testing shared:");
-    var r1 = Shared<int>{42};
+    var r1 = Shared<int>.from_value(42);
     printf("r1.as_ref()={}, ref_count={}\n", r1.as_ref(), r1.ref_count());
     var r2: Shared<int> = r1;
     printf("after copy: ref_count={}\n", r1.ref_count());
@@ -92,7 +92,7 @@ struct NestedShared {
     data: Shared<NestedState>;
 
     mut func new() {
-        this.data = {{}};
+        this.data = Shared<NestedState>.from_value({});
     }
 
     func get_count() int {
@@ -253,7 +253,7 @@ func test_box_helper() {
 
 func test_box() {
     println("testing box:");
-    var b1 = Box.wrap(42);
+    var b1 = Box.from_value(42);
     printf("b1.as_ref()={}\n", b1.as_ref());
     var b2 = b1;
     printf("after copy: b1={}, b2={}\n", b1.as_ref(), b2.as_ref());

@@ -138,7 +138,7 @@ struct HoldsShared {
 
     mut func new(v: int) {
         println("HoldsShared.new");
-        this.data = {{v}};
+        this.data = {new RefCountedData{v}};
         printf("  ref_count after construction: {}\n", this.data.ref_count());
     }
 }
@@ -247,7 +247,7 @@ struct HoldsOptionalShared {
 
     mut func new(v: int) {
         println("HoldsOptionalShared.new");
-        this.data! = {{v}};
+        this.data! = {new OptionalData{v}};
         printf("  ref_count: {}\n", this.data!.ref_count());
     }
 }

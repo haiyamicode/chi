@@ -250,7 +250,7 @@ func main() {
 
     // Shared auto-deref (read-only)
     let sp = Point{3, 4};
-    var s = Shared<Point>{sp};
+    var s = Shared<Point>.from_value(sp);
     printf("shared deref: ({}, {})\n", s.x, s.y);
 
     // Wrapper: only UnwrapMut, compiler should use it for reads

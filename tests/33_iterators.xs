@@ -7,7 +7,7 @@ struct Node<T: ops.Construct> {
     next: ?*Node<T> = null;
 }
 
-struct LinkedListIterator<T> {
+struct LinkedListIterator<T: ops.Construct> {
     current: ?*Node<T> = null;
 
     impl ops.MutIterator<T> {
@@ -24,7 +24,7 @@ struct LinkedListIterator<T> {
     }
 }
 
-struct LinkedList<T> {
+struct LinkedList<T: ops.Construct> {
     head: ?*Node<T> = null;
 
     impl ops.MutIterable<T> {

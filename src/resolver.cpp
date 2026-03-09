@@ -3827,7 +3827,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         for (size_t i = 0; i < args.len && i < params.len; i++) {
             auto param_type = to_value_type(params[i]);
             auto type_arg = args[i];
-            if (!type_arg || type_arg->is_placeholder)
+            if (!type_arg)
                 continue;
 
             // NoCopy types require explicit NoCopy bound on the type param
@@ -6548,6 +6548,15 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                     if (type_param->kind == TypeKind::TypeSymbol) {
                         lookup_key = type_param->data.type_symbol.giving_type;
                     }
+
+                    // NoCopy types require explicit NoCopy bound on the type param
+                    auto param_type = to_value_type(type_param);
+                    if (is_non_copyable(type_arg) && !is_non_copyable(param_type)) {
+                        error(node, errors::TYPE_NOT_COPYABLE,
+                              format_type_display(type_arg));
+                        return fn->return_type;
+                    }
+
                     type_substitutions.emplace(lookup_key, type_arg);
                 }
             }
@@ -9384,8 +9393,19 @@ bool Resolver::struct_satisfies_interface(ChiType *struct_type, ChiType *iface_t
 
 bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
     auto check_arg = type_arg;
-    if (check_arg->kind == TypeKind::Subtype) {
-        check_arg = resolve_subtype(check_arg);
+
+    // Placeholder: check declared traits directly
+    if (check_arg->kind == TypeKind::Placeholder) {
+        for (auto t : get_placeholder_traits(check_arg)) {
+            if (t == trait_type)
+                return true;
+        }
+        return false;
+    }
+
+    // For subtypes, use the generic struct directly — no need to resolve
+    if (check_arg->kind == TypeKind::Subtype && check_arg->data.subtype.generic) {
+        check_arg = check_arg->data.subtype.generic;
     }
 
     // Sized is structural: everything is Sized except interfaces

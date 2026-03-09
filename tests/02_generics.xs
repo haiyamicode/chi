@@ -30,7 +30,7 @@ struct Wrapper<T> {
 
     mut func init(value: T) {
         var inner = Inner<T>{value};
-        this.data = {inner};
+        this.data = Shared<Inner<T>>.from_value(inner);
     }
 
     func get_inner() &Inner<T> {

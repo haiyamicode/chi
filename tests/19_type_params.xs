@@ -19,7 +19,7 @@ struct Container<T: ops.Add> {
         return this.value;
     }
 
-    func zmap<U>(transform: func (value: T) U) Container<U> {
+    func zmap<U: ops.Add>(transform: func (value: T) U) Container<U> {
         return {transform(this.value)};
     }
 

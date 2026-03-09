@@ -22,9 +22,9 @@ typedef Span<T> = []T;
 // --- Multi-param: full application ---
 typedef IntPair = Pair<int, int>;
 // --- Multi-param: partial application (pin first) ---
-typedef IntFirst<B> = Pair<int, B>;
+typedef IntFirst<B: ops.Construct> = Pair<int, B>;
 // --- Multi-param: partial application (pin second) ---
-typedef WithName<A> = Pair<A, string>;
+typedef WithName<A: ops.Construct> = Pair<A, string>;
 // --- Chained typedef: typedef of a generic typedef ---
 typedef IntSpan = Span<int>;
 // --- Partial application of stdlib generic ---

@@ -68,36 +68,39 @@ struct __CxEnumBase<T> {
     }
 }
 
-struct SharedData<T> {
+struct SharedHeader {
     ref_count: uint32;
-    value: T;
 
-    mut func new(v: T) {
+    mut func new() {
         this.ref_count = 1;
-        this.value = move v;
     }
 }
 
-export struct Shared<T: ops.NoCopy> {
-    private data: *SharedData<T> = null;
+export struct Shared<T: ops.Unsized + ops.NoCopy> {
+    private _header: *SharedHeader = null;
+    private _ptr: *T = null;
 
-    mut func new(value: T) {
-        this.data = new SharedData<T>{move value};
+    mut func new(ptr: &move T) {
+        this._header = new SharedHeader{};
+        unsafe {
+            this._ptr = (move ptr) as *T;
+        }
     }
 
     private mut func retain() {
-        if this.data {
-            this.data.ref_count = this.data.ref_count + 1;
+        if this._header {
+            this._header.ref_count = this._header.ref_count + 1;
         }
     }
 
     private mut func release() {
-        if this.data {
-            var rc = this.data.ref_count - 1;
-            this.data.ref_count = rc;
+        if this._header {
+            var rc = this._header.ref_count - 1;
+            this._header.ref_count = rc;
             if rc == 0 {
                 unsafe {
-                    delete this.data;
+                    delete this._ptr;
+                    delete this._header;
                 }
             }
         }
@@ -108,36 +111,51 @@ export struct Shared<T: ops.NoCopy> {
     }
 
     func as_ref() &T {
-        return &this.data.value;
+        unsafe {
+            return this._ptr;
+        }
     }
 
     mut func as_mut() &mut T {
-        return &mut this.data.value;
+        unsafe {
+            return this._ptr;
+        }
     }
 
     func ref_count() uint32 {
-        return this.data.ref_count;
+        return this._header.ref_count;
     }
 
     impl ops.Copy {
         mut func copy(source: &This) {
-            var ptr = source.data;
-            if ptr {
-                ptr.ref_count = ptr.ref_count + 1;
+            var header = source._header;
+            if header {
+                header.ref_count = header.ref_count + 1;
             }
-            this.data = ptr;
+            this._header = header;
+            this._ptr = source._ptr;
         }
     }
 
     impl ops.Deref<T> {
         func deref() &T {
-            return &this.data.value;
+            unsafe {
+                return this._ptr;
+            }
         }
     }
 
     impl ops.DerefMut<T> {
         mut func deref_mut() &mut T {
-            return &mut this.data.value;
+            unsafe {
+                return this._ptr;
+            }
+        }
+    }
+
+    impl where T: ops.Sized + ops.Copy {
+        static func from_value(val: T) Shared<T> {
+            return {mem.copy<T>(&val)};
         }
     }
 
@@ -186,7 +204,7 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    impl ops.Copy {
+    impl ops.Copy where T: ops.Copy {
         mut func copy(source: &This) {
             unsafe {
                 this._ptr = mem.copy<T>(source._ptr as &T) as *T;
@@ -194,8 +212,8 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    impl where T: ops.Sized {
-        static func wrap(val: T) Box<T> {
+    impl where T: ops.Sized + ops.Copy {
+        static func from_value(val: T) Box<T> {
             return {mem.copy<T>(&val)};
         }
     }
@@ -984,7 +1002,7 @@ export struct Promise<T = Unit> {
     protected data: Shared<PromiseState<T>>;
 
     mut func new() {
-        this.data = {{}};
+        this.data = {new {}};
     }
 
     static func make(executor: func (resolve: func (value: T))) Promise<T> {
