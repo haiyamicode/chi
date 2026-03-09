@@ -150,7 +150,7 @@ func guard_block(a: ?int, b: ?int) int {
 
 func narrow_string(name: ?string, greeting: ?string) string {
     if name && greeting {
-        return greeting.add(" ").add(name);
+        return greeting + " " + name;
     }
     return "???";
 }

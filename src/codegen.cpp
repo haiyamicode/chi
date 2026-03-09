@@ -2798,7 +2798,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::MUTREF:
         case TokenType::MOVEREF: {
             auto ref = compile_expr_ref(fn, data.op1);
-            assert(ref.address);
+            if (!ref.address) {
+                auto *ty = compile_type(get_chitype(data.op1));
+                auto *tmp = builder.CreateAlloca(ty, nullptr, "_ref_tmp");
+                builder.CreateStore(ref.value, tmp);
+                ref.address = tmp;
+            }
             auto result = ref.address;
             // For &move: null out the source after taking the pointer
             if (data.op_type == TokenType::MOVEREF) {
@@ -3057,35 +3062,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 }
             }
 
-            auto struct_type = get_resolver()->eval_struct_type(target_type);
-
-            // For specialized generic functions, check if we need operator method calls
-            // with the concrete types instead of using primitive arithmetic
-            if (struct_type) {
-                // Try to resolve operator method with concrete types
-                IntrinsicSymbol intrinsic_symbol =
-                    Resolver::get_operator_intrinsic_symbol(data.op_type);
-
-                if (intrinsic_symbol != IntrinsicSymbol::None) {
-                    auto resolver = get_resolver();
-                    // Create a minimal scope for the method call resolution
-                    ResolveScope dummy_scope = {};
-                    auto method_call = resolver->try_resolve_operator_method(
-                        intrinsic_symbol, lhs_type, rhs_type, data.op1, data.op2, expr,
-                        dummy_scope);
-                    if (method_call.has_value()) {
-                        return compile_fn_call(fn, method_call->call_node);
-                    }
-                }
-            }
-
-            // Check if this is an interface method call for an operator (from resolver).
+            // Use the operator method call resolved during the resolver pass.
             // Only use resolved_call when the concrete type is a struct — for primitive
             // types (int, float, etc.), fall through to built-in arithmetic. This handles
             // composite interface bounds (e.g. Numeric) where the resolver sets
             // resolved_call but the concrete instantiation is a primitive.
-            if (data.resolved_call && struct_type) {
-                return compile_fn_call(fn, data.resolved_call);
+            if (data.resolved_call) {
+                auto struct_type = get_resolver()->eval_struct_type(target_type);
+                if (struct_type) {
+                    return compile_fn_call(fn, data.resolved_call);
+                }
             }
 
             // Fall back to built-in arithmetic operations for primitive types
@@ -5002,39 +4988,22 @@ llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
         auto meiyan_fn_ty = llvm::FunctionType::get(i64_ty, {ptr_ty, i32_ty}, false);
         auto meiyan_fn = m_ctx->llvm_module->getOrInsertFunction("cx_meiyan", meiyan_fn_ty);
 
-        if (concrete_type->kind == TypeKind::String) {
-            // String: hash the content bytes — extract data ptr (field 0) and size (field 1)
-            auto data_ptr = builder.CreateExtractValue(receiver, {0}, "str_data");
-            auto size = builder.CreateExtractValue(receiver, {1}, "str_size");
-            return builder.CreateCall(meiyan_fn, {data_ptr, size}, "hash");
-        } else {
-            // Int/float/bool/char/rune: alloca, store, hash the raw bytes
-            auto value_type_l = compile_type(concrete_type);
-            auto tmp = fn->entry_alloca(value_type_l, "hash_tmp");
-            builder.CreateStore(receiver, tmp);
-            auto size = llvm::ConstantInt::get(
-                i32_ty, m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l));
-            return builder.CreateCall(meiyan_fn, {tmp, size}, "hash");
-        }
+        // Int/float/bool/char/rune: alloca, store, hash the raw bytes
+        auto value_type_l = compile_type(concrete_type);
+        auto tmp = fn->entry_alloca(value_type_l, "hash_tmp");
+        builder.CreateStore(receiver, tmp);
+        auto size = llvm::ConstantInt::get(
+            i32_ty, m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l));
+        return builder.CreateCall(meiyan_fn, {tmp, size}, "hash");
     } else if (method_name == "eq") {
         assert(fn_call_data.args.len == 1 && "eq() expects one argument");
         auto other = compile_expr(fn, fn_call_data.args[0]);
+        // Unwrap reference: if the arg is &T (from operator method wrapping), load to get T
+        if (get_chitype(fn_call_data.args[0])->is_reference()) {
+            other = builder.CreateLoad(compile_type(concrete_type), other, "deref_arg");
+        }
 
-        if (concrete_type->kind == TypeKind::String) {
-            // String eq: call cx_string_eq
-            auto i1_ty = llvm::Type::getInt1Ty(llvm_ctx);
-            auto ptr_ty = builder.getPtrTy();
-            auto string_eq_fn_ty = llvm::FunctionType::get(i1_ty, {ptr_ty, ptr_ty}, false);
-            auto string_eq_fn =
-                m_ctx->llvm_module->getOrInsertFunction("cx_string_eq", string_eq_fn_ty);
-            // Need pointers to both CxString structs
-            auto str_type_l = compile_type(concrete_type);
-            auto lhs_ptr = fn->entry_alloca(str_type_l, "eq_lhs");
-            auto rhs_ptr = fn->entry_alloca(str_type_l, "eq_rhs");
-            builder.CreateStore(receiver, lhs_ptr);
-            builder.CreateStore(other, rhs_ptr);
-            return builder.CreateCall(string_eq_fn, {lhs_ptr, rhs_ptr}, "eq");
-        } else if (concrete_type->kind == TypeKind::Float) {
+        if (concrete_type->kind == TypeKind::Float) {
             return builder.CreateFCmpOEQ(receiver, other, "eq");
         } else {
             // Int-like, bool, char, rune: icmp eq
@@ -5044,6 +5013,10 @@ llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
         // Ord::cmp — returns int (lhs - rhs for numeric types)
         assert(fn_call_data.args.len == 1 && "cmp() expects one argument");
         auto other = compile_expr(fn, fn_call_data.args[0]);
+        // Unwrap reference: if the arg is &T (from operator method wrapping), load to get T
+        if (get_chitype(fn_call_data.args[0])->is_reference()) {
+            other = builder.CreateLoad(compile_type(concrete_type), other, "deref_arg");
+        }
 
         if (concrete_type->kind == TypeKind::Float) {
             // Float comparison: convert to int result (-1, 0, 1)
@@ -8348,7 +8321,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return get_llvm_ptr_type();
     }
     default:
-        panic("not implemented");
+        panic("compile_type not implemented for TypeKind::{}", (int)type->kind);
     }
     return nullptr;
 }

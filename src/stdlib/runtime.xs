@@ -36,6 +36,7 @@ extern "C" {
     unsafe func cx_string_concat(dest: *string, s1: *string, s2: *string);
     unsafe func cx_cstring_copy(src: *byte) *byte;
     unsafe func cx_debug(ptr: *void);
+    unsafe func cx_meiyan(key: *void, count: int32) uint64;
     unsafe func cx_capture_new(payload_size: uint32, captures_ti: *void, dtor: *void) *void;
     unsafe func cx_capture_retain(capture_ptr: *void);
     unsafe func cx_capture_release(capture_ptr: *void);
@@ -779,17 +780,17 @@ struct __CxString {
     }
 
     impl ops.Add {
-        func add(rhs: string) string {
+        func add(rhs: &This) string {
             var result = string{};
             unsafe {
-                cx_string_concat(&result as *string, &this as *string, &rhs as *string);
+                cx_string_concat(&result as *string, &this as *string, rhs as *string);
             }
             return result;
         }
     }
 
     impl ops.Eq {
-        func eq(other: string) bool {
+        func eq(other: &This) bool {
             if this.length != other.length {
                 return false;
             }
@@ -798,7 +799,7 @@ struct __CxString {
     }
 
     impl ops.Ord {
-        func cmp(other: string) int {
+        func cmp(other: &This) int {
             var min_len = this.length;
             if other.length < min_len {
                 min_len = other.length;
@@ -814,6 +815,14 @@ struct __CxString {
                 return 1;
             }
             return 0;
+        }
+    }
+
+    impl ops.Hash {
+        func hash() uint64 {
+            unsafe {
+                return cx_meiyan(this.data as *void, this.length as int32);
+            }
         }
     }
 }

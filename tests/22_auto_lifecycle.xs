@@ -527,7 +527,7 @@ struct TrackedVal {
     }
 
     impl ops.Add {
-        func add(rhs: TrackedVal) TrackedVal {
+        func add(rhs: &This) TrackedVal {
             printf("  TrackedVal.add({}, {})\n", this.id, rhs.id);
             return {this.id + rhs.id};
         }

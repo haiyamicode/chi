@@ -184,10 +184,8 @@ after unary
 --- operator method (a + b) ---
   TrackedVal.new(20)
   TrackedVal.new(7)
-  TrackedVal.copy(7)
   TrackedVal.add(20, 7)
   TrackedVal.new(27)
-  TrackedVal.delete(7)
   f.id=27
 --- void method ---
   TrackedVal.new(30)
@@ -210,24 +208,18 @@ after unary
 --- compound assignment (+=) ---
   TrackedVal.new(100)
   TrackedVal.new(50)
-  TrackedVal.copy(50)
   TrackedVal.add(100, 50)
   TrackedVal.new(150)
-  TrackedVal.delete(50)
   TrackedVal.delete(100)
   m.id=150
 --- chained operators ---
   TrackedVal.new(1)
   TrackedVal.new(2)
   TrackedVal.new(3)
-  TrackedVal.copy(2)
   TrackedVal.add(1, 2)
   TrackedVal.new(3)
-  TrackedVal.delete(2)
-  TrackedVal.copy(3)
   TrackedVal.add(3, 3)
   TrackedVal.new(6)
-  TrackedVal.delete(3)
   s.id=6
 --- rvalue to method ---
   TrackedVal.new(40)

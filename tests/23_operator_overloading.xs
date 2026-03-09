@@ -4,7 +4,7 @@ struct MyInt {
     value: int = 0;
 
     impl ops.Add {
-        func add(rhs: MyInt) MyInt {
+        func add(rhs: &This) MyInt {
             return {value: this.value + rhs.value};
         }
     }
@@ -26,7 +26,7 @@ struct Point {
     }
 
     impl ops.Add {
-        func add(other: Point) Point {
+        func add(other: &This) Point {
             return {this.x + other.x, this.y + other.y};
         }
     }
@@ -67,27 +67,27 @@ struct Vec2 {
     }
 
     impl ops.Add {
-        func add(rhs: Vec2) Vec2 {
+        func add(rhs: &This) Vec2 {
             return {x: this.x + rhs.x, y: this.y + rhs.y};
         }
     }
     impl ops.Sub {
-        func sub(rhs: Vec2) Vec2 {
+        func sub(rhs: &This) Vec2 {
             return {x: this.x - rhs.x, y: this.y - rhs.y};
         }
     }
     impl ops.Mul {
-        func mul(rhs: Vec2) Vec2 {
+        func mul(rhs: &This) Vec2 {
             return {x: this.x * rhs.x, y: this.y * rhs.y};
         }
     }
     impl ops.Div {
-        func div(rhs: Vec2) Vec2 {
+        func div(rhs: &This) Vec2 {
             return {x: this.x / rhs.x, y: this.y / rhs.y};
         }
     }
     impl ops.Rem {
-        func rem(rhs: Vec2) Vec2 {
+        func rem(rhs: &This) Vec2 {
             return {x: this.x % rhs.x, y: this.y % rhs.y};
         }
     }
@@ -97,17 +97,17 @@ struct Vec2 {
         }
     }
     impl ops.BitAnd {
-        func bitand(rhs: Vec2) Vec2 {
+        func bitand(rhs: &This) Vec2 {
             return {x: this.x & rhs.x, y: this.y & rhs.y};
         }
     }
     impl ops.BitOr {
-        func bitor(rhs: Vec2) Vec2 {
+        func bitor(rhs: &This) Vec2 {
             return {x: this.x | rhs.x, y: this.y | rhs.y};
         }
     }
     impl ops.BitXor {
-        func bitxor(rhs: Vec2) Vec2 {
+        func bitxor(rhs: &This) Vec2 {
             return {x: this.x ^ rhs.x, y: this.y ^ rhs.y};
         }
     }
@@ -117,23 +117,23 @@ struct Vec2 {
         }
     }
     impl ops.Shl {
-        func shl(rhs: Vec2) Vec2 {
+        func shl(rhs: &This) Vec2 {
             return {x: this.x << rhs.x, y: this.y << rhs.y};
         }
     }
     impl ops.Shr {
-        func shr(rhs: Vec2) Vec2 {
+        func shr(rhs: &This) Vec2 {
             return {x: this.x >> rhs.x, y: this.y >> rhs.y};
         }
     }
     impl ops.Eq {
-        func eq(other: Vec2) bool {
+        func eq(other: &This) bool {
             return this.x == other.x && this.y == other.y;
         }
     }
     impl ops.Ord {
         // Compare by magnitude squared (x*x + y*y)
-        func cmp(other: Vec2) int {
+        func cmp(other: &This) int {
             var lhs = this.x * this.x + this.y * this.y;
             var rhs = other.x * other.x + other.y * other.y;
             return lhs - rhs;

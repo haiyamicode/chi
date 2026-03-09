@@ -118,8 +118,8 @@ func test_string() {
     var s1 = "Hello";
     printf("s1.length={}\n", s1.length);
     printf("s1.is_empty()={}\n", s1.is_empty());
-    var s2 = s1.add(" World");
-    printf("s1.add(\" World\")={}\n", s2);
+    var s2 = s1 + " World";
+    printf("s1 + \" World\"={}\n", s2);
     var empty = "";
     printf("empty.is_empty()={}\n", empty.is_empty());
     println("");
@@ -201,7 +201,7 @@ struct MapTestPoint {
     }
 
     impl ops.Eq {
-        func eq(other: MapTestPoint) bool {
+        func eq(other: &This) bool {
             return this.x == other.x && this.y == other.y;
         }
     }

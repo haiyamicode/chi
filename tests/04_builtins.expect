@@ -60,7 +60,7 @@ ns.get_count()=0
 testing string:
 s1.length=5
 s1.is_empty()=false
-s1.add(" World")=Hello World
+s1 + " World"=Hello World
 empty.is_empty()=true
 
 testing box:

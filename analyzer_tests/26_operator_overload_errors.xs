@@ -6,7 +6,7 @@ struct Point implements ops.Add {
     y: int;
 
     // Missing function body
-    func add(other: Point) Point
+    func add(other: &This) Point
 
     // Incomplete function
     func subtract(

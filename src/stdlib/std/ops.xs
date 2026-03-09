@@ -24,7 +24,7 @@ export interface IndexMutIterable<K, V> {
 }
 
 export interface Add {
-    func add(rhs: This) This;
+    func add(rhs: &This) This;
 }
 
 export interface Sized {}
@@ -64,19 +64,19 @@ export interface Slice<Out> {
 }
 
 export interface Sub {
-    func sub(rhs: This) This;
+    func sub(rhs: &This) This;
 }
 
 export interface Mul {
-    func mul(rhs: This) This;
+    func mul(rhs: &This) This;
 }
 
 export interface Div {
-    func div(rhs: This) This;
+    func div(rhs: &This) This;
 }
 
 export interface Rem {
-    func rem(rhs: This) This;
+    func rem(rhs: &This) This;
 }
 
 export interface Neg {
@@ -84,15 +84,15 @@ export interface Neg {
 }
 
 export interface BitAnd {
-    func bitand(rhs: This) This;
+    func bitand(rhs: &This) This;
 }
 
 export interface BitOr {
-    func bitor(rhs: This) This;
+    func bitor(rhs: &This) This;
 }
 
 export interface BitXor {
-    func bitxor(rhs: This) This;
+    func bitxor(rhs: &This) This;
 }
 
 export interface Not {
@@ -100,19 +100,19 @@ export interface Not {
 }
 
 export interface Shl {
-    func shl(rhs: This) This;
+    func shl(rhs: &This) This;
 }
 
 export interface Shr {
-    func shr(rhs: This) This;
+    func shr(rhs: &This) This;
 }
 
 export interface Eq {
-    func eq(other: This) bool;
+    func eq(other: &This) bool;
 }
 
 export interface Ord {
-    func cmp(other: This) int;
+    func cmp(other: &This) int;
 }
 
 export interface Hash {

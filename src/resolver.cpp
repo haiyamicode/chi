@@ -2978,6 +2978,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     for (size_t i = 0; i < callee_params.len && i < data.args.len; i++) {
                         auto *pt = callee_params[i]->resolved_type;
                         if (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0) {
+                            // Only add edge if the param has a 'this lifetime
+                            bool has_this_lifetime = false;
+                            for (auto *lt : pt->data.pointer.lifetimes) {
+                                if (lt->kind == LifetimeKind::This) {
+                                    has_this_lifetime = true;
+                                    break;
+                                }
+                            }
+                            if (!has_this_lifetime) continue;
                             auto *arg_decl = find_root_decl(data.args[i]);
                             if (arg_decl) {
                                 fn_def.add_ref_edge(receiver_decl, arg_decl);
@@ -8167,8 +8176,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
 bool Resolver::builtin_satisfies_intrinsic(ChiType *type, IntrinsicSymbol symbol) {
     switch (symbol) {
     case IntrinsicSymbol::Add:
-        return type->is_int_like() || type->kind == TypeKind::Float ||
-               type->kind == TypeKind::String;
+        return type->is_int_like() || type->kind == TypeKind::Float;
     case IntrinsicSymbol::Sub:
     case IntrinsicSymbol::Mul:
     case IntrinsicSymbol::Div:
@@ -8178,13 +8186,13 @@ bool Resolver::builtin_satisfies_intrinsic(ChiType *type, IntrinsicSymbol symbol
     case IntrinsicSymbol::Eq:
     case IntrinsicSymbol::Ord:
         return type->is_int_like() || type->kind == TypeKind::Float ||
-               type->kind == TypeKind::String || type->kind == TypeKind::Bool ||
+               type->kind == TypeKind::Bool ||
                type->kind == TypeKind::Byte || type->kind == TypeKind::Rune ||
                type->is_pointer_like() ||
                (type->kind == TypeKind::EnumValue && type->data.enum_value.parent_enum()->is_plain);
     case IntrinsicSymbol::Hash:
         return type->is_int_like() || type->kind == TypeKind::Float ||
-               type->kind == TypeKind::String || type->kind == TypeKind::Bool ||
+               type->kind == TypeKind::Bool ||
                type->kind == TypeKind::Byte || type->kind == TypeKind::Rune;
     case IntrinsicSymbol::BitAnd:
     case IntrinsicSymbol::BitOr:
@@ -9046,8 +9054,13 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
                     if (fn_data.params.len == 0) {
                         return_type = fn_data.return_type;
                     }
-                } else if (fn_data.params.len == 1 && can_assign(t2, fn_data.params[0])) {
-                    return_type = fn_data.return_type;
+                } else if (fn_data.params.len == 1) {
+                    auto param = fn_data.params[0];
+                    // Unwrap reference for operator params (e.g. &This → This)
+                    auto param_elem = param->kind == TypeKind::Reference ? param->get_elem() : param;
+                    if (can_assign(t2, param_elem)) {
+                        return_type = fn_data.return_type;
+                    }
                 }
             }
         }
@@ -9094,8 +9107,10 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
     if (method_member && return_type) {
         auto call_node = create_node(NodeType::FnCallExpr);
         call_node->token = node->token;
+        call_node->module = node->module;
         auto dot_node = create_node(NodeType::DotExpr);
         dot_node->token = node->token;
+        dot_node->module = node->module;
 
         // populate generated dot expression
         auto &dot_data = dot_node->data.dot_expr;
@@ -9107,7 +9122,24 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
         // populate generated call
         auto &call_data = call_node->data.fn_call_expr;
         call_data.fn_ref_expr = dot_node;
-        call_data.args = op2 ? array<ast::Node *>{op2} : array<ast::Node *>{};
+        if (op2) {
+            auto method_type = method_member->resolved_type;
+            auto param = method_type->data.fn.params[0];
+            // If the param is a reference (e.g. &This), wrap op2 in a take-address node
+            if (param->kind == TypeKind::Reference) {
+                auto ref_node = create_node(NodeType::UnaryOpExpr);
+                ref_node->token = op2->token;
+                ref_node->module = op2->module;
+                ref_node->data.unary_op_expr.op1 = op2;
+                ref_node->data.unary_op_expr.op_type = TokenType::AND;
+                ref_node->resolved_type = get_pointer_type(t2, TypeKind::Reference);
+                call_data.args = {ref_node};
+            } else {
+                call_data.args = {op2};
+            }
+        } else {
+            call_data.args = {};
+        }
         resolve(call_node, scope);
 
         return OperatorMethodCall{call_node, return_type};
@@ -9300,12 +9332,21 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         return !(check_arg->kind == TypeKind::Struct && ChiTypeStruct::is_interface(check_arg));
     }
 
+    // Resolve built-in types backed by structs (e.g. string → __CxString)
+    // so their Chi impl blocks are checked for trait satisfaction
+    auto resolved_struct = eval_struct_type(check_arg);
+    if (resolved_struct && resolved_struct->kind == TypeKind::Struct) {
+        check_arg = resolved_struct;
+    }
+
     if (check_arg->kind == TypeKind::Struct) {
         if (struct_satisfies_interface(check_arg, trait_type)) return true;
         // Constructor interface: check ctor compatibility
         if (is_constructor_interface_compatible(check_arg, trait_type))
             return true;
-    } else {
+    }
+    // Built-in types without struct backing: check intrinsics
+    if (check_arg->kind != TypeKind::Struct) {
         // Built-in types: check all required intrinsics are satisfied
         auto required = interface_get_intrinsics(trait_type);
         if (required.len > 0) {
