@@ -3388,6 +3388,26 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (struct_->resolve_status == ResolveStatus::None) {
             // second pass - resolve member types
+
+            // Early-register implemented interfaces so they're visible during
+            // field type resolution (e.g. is_non_copyable). Full vtable
+            // resolution still happens in pass 3.
+            for (auto member : data.members) {
+                if (member->type != NodeType::ImplementBlock)
+                    continue;
+                auto &impl_data = member->data.implement_block;
+                if (impl_data.interface_types.len == 0 || impl_data.where_clauses.len > 0)
+                    continue;
+                for (auto iface_node : impl_data.interface_types) {
+                    auto impl_trait = resolve_value(iface_node, struct_scope);
+                    if (!impl_trait)
+                        continue;
+                    auto iface_impl = struct_->add_interface(
+                        get_allocator(), impl_trait, struct_type);
+                    iface_impl->inteface_symbol = resolve_intrinsic_symbol(iface_node);
+                }
+            }
+
             for (auto member : data.members) {
                 if (member->type == NodeType::ImplementBlock) {
                     for (auto impl_member : member->data.implement_block.members) {
@@ -3798,10 +3818,31 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Validate trait bounds on type arguments
         for (size_t i = 0; i < args.len && i < params.len; i++) {
             auto param_type = to_value_type(params[i]);
-            if (!param_type || param_type->data.placeholder.traits.len == 0)
-                continue;
             auto type_arg = args[i];
             if (!type_arg || type_arg->is_placeholder)
+                continue;
+
+            // Non-copyable types require an explicit DisallowCopy bound
+            if (is_non_copyable(type_arg)) {
+                bool has_nocopy_bound = false;
+                if (param_type) {
+                    for (auto t : param_type->data.placeholder.traits) {
+                        if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
+                            resolve_intrinsic_symbol(t->data.struct_.node) ==
+                                IntrinsicSymbol::DisallowCopy) {
+                            has_nocopy_bound = true;
+                            break;
+                        }
+                    }
+                }
+                if (!has_nocopy_bound) {
+                    error(node, errors::TYPE_NOT_COPYABLE,
+                          format_type_display(type_arg));
+                    return nullptr;
+                }
+            }
+
+            if (!param_type || param_type->data.placeholder.traits.len == 0)
                 continue;
             for (auto trait : param_type->data.placeholder.traits) {
                 if (!check_trait_bound(type_arg, trait)) {

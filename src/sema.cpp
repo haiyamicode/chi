@@ -66,6 +66,9 @@ ChiStructMember *ChiTypeStruct::find_static_member(const string &name) {
 }
 
 InterfaceImpl *ChiTypeStruct::add_interface(Context *allocator, ChiType *iface, ChiType *impl) {
+    auto existing = interface_table.get(iface);
+    if (existing)
+        return *existing;
     auto entry = allocator->create_interface_impl();
     entry->interface_type = iface;
     entry->impl_type = impl;
