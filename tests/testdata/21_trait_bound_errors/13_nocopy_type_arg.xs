@@ -1,4 +1,4 @@
-// Using a DisallowCopy type as a type argument must be rejected
+// Using a NoCopy type as a type argument must be rejected
 // expect-error: cannot be copied
 import "std/ops" as ops;
 
@@ -7,7 +7,7 @@ struct Handle {
 
     mut func delete() {}
 
-    impl ops.DisallowCopy {}
+    impl ops.NoCopy {}
 }
 
 struct Wrapper<T> {

@@ -1,4 +1,4 @@
-// Copying a DisallowCopy type via assignment must be rejected
+// Copying a NoCopy type via assignment must be rejected
 // expect-error: cannot be copied
 import "std/ops" as ops;
 
@@ -7,7 +7,7 @@ struct Handle {
 
     mut func delete() {}
 
-    impl ops.DisallowCopy {}
+    impl ops.NoCopy {}
 }
 
 func main() {

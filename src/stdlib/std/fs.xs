@@ -138,7 +138,7 @@ struct FileHandle {
         this.close();
     }
 
-    impl ops.DisallowCopy {}
+    impl ops.NoCopy {}
 }
 
 export struct File {

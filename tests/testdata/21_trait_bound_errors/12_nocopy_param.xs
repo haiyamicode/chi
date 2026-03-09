@@ -1,4 +1,4 @@
-// Passing a DisallowCopy type by value to a function must be rejected
+// Passing a NoCopy type by value to a function must be rejected
 // expect-error: cannot be copied
 import "std/ops" as ops;
 
@@ -7,7 +7,7 @@ struct Handle {
 
     mut func delete() {}
 
-    impl ops.DisallowCopy {}
+    impl ops.NoCopy {}
 }
 
 func take_handle(h: Handle) {

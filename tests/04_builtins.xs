@@ -80,8 +80,7 @@ func test_shared() {
     printf("r1.as_ref()={}, ref_count={}\n", r1.as_ref(), r1.ref_count());
     var r2: Shared<int> = r1;
     printf("after copy: ref_count={}\n", r1.ref_count());
-    r1.set(100);
-    printf("after r1.set(100): r2.as_ref()={}\n", r2.as_ref());
+    printf("r2.as_ref()={}\n", r2.as_ref());
 }
 
 struct NestedState {

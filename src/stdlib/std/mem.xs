@@ -19,7 +19,7 @@ export unsafe func alloc<T>() &move T {
     return cx_malloc(sizeof T, null) as *T as &move T;
 }
 
-export func copy<T: ops.AllowUnsized>(val: &T) &move T {
+export func copy<T: ops.Unsized>(val: &T) &move T {
     unsafe {
         var ref = cx_malloc(sizeof val, null) as *T as &move T;
         __copy(ref as *T, val as *T, false);

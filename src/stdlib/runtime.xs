@@ -78,11 +78,11 @@ struct SharedData<T> {
     }
 }
 
-export struct Shared<T> {
+export struct Shared<T: ops.NoCopy> {
     private data: *SharedData<T> = null;
 
     mut func new(value: T) {
-        this.data = new SharedData<T>{value};
+        this.data = new SharedData<T>{move value};
     }
 
     private mut func retain() {
@@ -113,14 +113,6 @@ export struct Shared<T> {
 
     mut func as_mut() &mut T {
         return &mut this.data.value;
-    }
-
-    mut func set(value: T) {
-        if !this.data {
-            this.data = new SharedData<T>{value};
-        } else {
-            this.data.value = move value;
-        }
     }
 
     func ref_count() uint32 {
@@ -156,7 +148,7 @@ export struct Shared<T> {
     }
 }
 
-export struct Box<T: ops.AllowUnsized> {
+export struct Box<T: ops.Unsized + ops.NoCopy> {
     private _ptr: *T = null;
 
     mut func new(ptr: &move T) {
@@ -227,7 +219,7 @@ export struct Box<T: ops.AllowUnsized> {
     impl ops.Display {
         func display() string {
             unsafe {
-                return stringf("{}", *this._ptr);
+                return stringf("{}", this.as_ref());
             }
         }
     }

@@ -183,7 +183,7 @@ struct NoCopyHandle {
 
     mut func delete() {}
 
-    impl ops.DisallowCopy {}
+    impl ops.NoCopy {}
 }
 
 func make_handle(v: int) NoCopyHandle {
@@ -296,7 +296,7 @@ func main() {
     var ih2 = IntHolder<IntBoxDefault>{};
     printf("int_construct_default: {}\n", ih2.make(33).x);
 
-    printf("\n-- DisallowCopy --\n");
+    printf("\n-- NoCopy --\n");
     // Allowed: init from temporary (not addressable)
     var h1 = NoCopyHandle{value: 1};
     printf("temp init: {}\n", h1.value);

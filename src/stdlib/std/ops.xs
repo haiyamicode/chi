@@ -14,7 +14,7 @@ export interface Copy {
     func copy(source: &This);
 }
 
-export interface DisallowCopy {}
+export interface NoCopy {}
 
 export interface IndexMutIterable<K, V> {
     func index_mut(index: K) &mut V;
@@ -29,7 +29,7 @@ export interface Add {
 
 export interface Sized {}
 
-export interface AllowUnsized {}
+export interface Unsized {}
 
 export interface Construct {
     func new();

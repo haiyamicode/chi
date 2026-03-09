@@ -51,7 +51,7 @@ explicit ctor: 100
 int_construct: 55
 int_construct_default: 33
 
--- DisallowCopy --
+-- NoCopy --
 temp init: 1
 move: 1
 return: 42

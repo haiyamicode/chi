@@ -155,7 +155,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
     m_ctx->intrinsic_symbols["std.ops.Copy"] = IntrinsicSymbol::Copy;
-    m_ctx->intrinsic_symbols["std.ops.DisallowCopy"] = IntrinsicSymbol::DisallowCopy;
+    m_ctx->intrinsic_symbols["std.ops.NoCopy"] = IntrinsicSymbol::NoCopy;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
     m_ctx->intrinsic_symbols["std.ops.Sub"] = IntrinsicSymbol::Sub;
@@ -170,7 +170,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Shl"] = IntrinsicSymbol::Shl;
     m_ctx->intrinsic_symbols["std.ops.Shr"] = IntrinsicSymbol::Shr;
     m_ctx->intrinsic_symbols["std.ops.Sized"] = IntrinsicSymbol::Sized;
-    m_ctx->intrinsic_symbols["std.ops.AllowUnsized"] = IntrinsicSymbol::AllowUnsized;
+    m_ctx->intrinsic_symbols["std.ops.Unsized"] = IntrinsicSymbol::Unsized;
     m_ctx->intrinsic_symbols["std.ops.Construct"] = IntrinsicSymbol::Construct;
     m_ctx->intrinsic_symbols["std.ops.Unwrap"] = IntrinsicSymbol::Unwrap;
     m_ctx->intrinsic_symbols["std.ops.UnwrapMut"] = IntrinsicSymbol::UnwrapMut;
@@ -1421,7 +1421,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 var_type = expr_type;
             }
-            // DisallowCopy: error if initializing from a named value
+            // NoCopy: error if initializing from a named value
             if (var_type && is_non_copyable(var_type) && is_addressable(data.expr) &&
                 !data.expr->escape.moved) {
                 error(data.expr, errors::TYPE_NOT_COPYABLE,
@@ -1553,7 +1553,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // For plain assignment
         if (data.op_type == TokenType::ASS) {
             check_assignment(data.op2, t2, t1);
-            // DisallowCopy: error if assigning from a named value
+            // NoCopy: error if assigning from a named value
             if (is_non_copyable(t1) && is_addressable(data.op2) &&
                 !data.op2->escape.moved) {
                 error(data.op2, errors::TYPE_NOT_COPYABLE, format_type_display(t1));
@@ -3361,7 +3361,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_error_type = struct_type;
                 } else if (node->name == "Sized") {
                     m_ctx->rt_sized_interface = struct_type;
-                } else if (node->name == "AllowUnsized") {
+                } else if (node->name == "Unsized") {
                     m_ctx->rt_allow_unsized_interface = struct_type;
                 }
             }
@@ -3402,9 +3402,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto impl_trait = resolve_value(iface_node, struct_scope);
                     if (!impl_trait)
                         continue;
+                    auto trait_struct = resolve_struct_type(impl_trait);
+                    if (!trait_struct)
+                        continue;
                     auto iface_impl = struct_->add_interface(
                         get_allocator(), impl_trait, struct_type);
-                    iface_impl->inteface_symbol = resolve_intrinsic_symbol(iface_node);
+                    iface_impl->inteface_symbol =
+                        resolve_intrinsic_symbol(trait_struct->node);
                 }
             }
 
@@ -3603,7 +3607,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             // Rule of Three: struct with func delete() must implement Copy
-            // or DisallowCopy (not required in managed mode — GC handles lifecycle)
+            // or NoCopy (not required in managed mode — GC handles lifecycle)
             if (struct_->kind == ContainerKind::Struct &&
                 !has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED) &&
                 struct_->find_member("delete") &&
@@ -3822,24 +3826,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!type_arg || type_arg->is_placeholder)
                 continue;
 
-            // Non-copyable types require an explicit DisallowCopy bound
-            if (is_non_copyable(type_arg)) {
-                bool has_nocopy_bound = false;
-                if (param_type) {
-                    for (auto t : param_type->data.placeholder.traits) {
-                        if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
-                            resolve_intrinsic_symbol(t->data.struct_.node) ==
-                                IntrinsicSymbol::DisallowCopy) {
-                            has_nocopy_bound = true;
-                            break;
-                        }
-                    }
-                }
-                if (!has_nocopy_bound) {
-                    error(node, errors::TYPE_NOT_COPYABLE,
-                          format_type_display(type_arg));
-                    return nullptr;
-                }
+            // NoCopy types require explicit NoCopy bound on the type param
+            if (is_non_copyable(type_arg) && !is_non_copyable(param_type)) {
+                error(node, errors::TYPE_NOT_COPYABLE,
+                      format_type_display(type_arg));
+                return nullptr;
             }
 
             if (!param_type || param_type->data.placeholder.traits.len == 0)
@@ -4232,35 +4223,36 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             phty->data.placeholder.traits.add(to_value_type(resolve(bound, scope)));
         }
 
-        // Implicit Sized bound: all type params get Sized unless AllowUnsized
+        // Implicit Sized bound: all type params get Sized unless Unsized
         if (m_ctx->rt_sized_interface) {
             bool has_allow_unsized = false;
             bool has_sized = false;
             for (auto t : phty->data.placeholder.traits) {
                 if (t && t->kind == TypeKind::Struct && t->data.struct_.node) {
                     auto sym = resolve_intrinsic_symbol(t->data.struct_.node);
-                    if (sym == IntrinsicSymbol::AllowUnsized)
+                    if (sym == IntrinsicSymbol::Unsized)
                         has_allow_unsized = true;
                     if (sym == IntrinsicSymbol::Sized)
                         has_sized = true;
                 }
             }
             if (has_allow_unsized) {
-                // Remove AllowUnsized from the list — it's an opt-out, not a real bound
+                // Remove Unsized from the list — it's an opt-out, not a real bound
                 array<ChiType *> filtered;
                 for (auto t : phty->data.placeholder.traits) {
                     if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
                         resolve_intrinsic_symbol(t->data.struct_.node) ==
-                            IntrinsicSymbol::AllowUnsized)
+                            IntrinsicSymbol::Unsized)
                         continue;
                     filtered.add(t);
                 }
                 phty->data.placeholder.traits = filtered;
             } else if (!has_sized) {
-                // No AllowUnsized and no explicit Sized: add implicit Sized
+                // No Unsized and no explicit Sized: add implicit Sized
                 phty->data.placeholder.traits.add(m_ctx->rt_sized_interface);
             }
         }
+
 
         // Resolve lifetime bound: T: 'a
         if (!data.lifetime_bound.empty() && scope.fn_lifetime_params) {
@@ -5640,10 +5632,19 @@ bool Resolver::is_non_copyable(ChiType *type) {
         if (final_type)
             return is_non_copyable(final_type);
     }
+    if (type->kind == TypeKind::Placeholder) {
+        for (auto t : type->data.placeholder.traits) {
+            if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
+                resolve_intrinsic_symbol(t->data.struct_.node) ==
+                    IntrinsicSymbol::NoCopy)
+                return true;
+        }
+        return false;
+    }
     if (type->kind != TypeKind::Struct)
         return false;
     for (auto iface : type->data.struct_.interfaces) {
-        if (iface->inteface_symbol == IntrinsicSymbol::DisallowCopy)
+        if (iface->inteface_symbol == IntrinsicSymbol::NoCopy)
             return true;
     }
     return false;
@@ -6761,7 +6762,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 }
             }
 
-            // DisallowCopy: error if passing a named value by value to a non-ref param
+            // NoCopy: error if passing a named value by value to a non-ref param
             if (param_type && !param_type->is_reference() && is_addressable(arg) &&
                 !arg->escape.moved && is_non_copyable(arg_type)) {
                 error(arg, errors::TYPE_NOT_COPYABLE, format_type_display(arg_type));
@@ -9371,6 +9372,18 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
     if (trait_type->kind == TypeKind::Struct && trait_type->data.struct_.node &&
         resolve_intrinsic_symbol(trait_type->data.struct_.node) == IntrinsicSymbol::Sized) {
         return !(check_arg->kind == TypeKind::Struct && ChiTypeStruct::is_interface(check_arg));
+    }
+
+    // NoCopy bound: allows all types through (both copyable and non-copyable)
+    if (trait_type->kind == TypeKind::Struct && trait_type->data.struct_.node &&
+        resolve_intrinsic_symbol(trait_type->data.struct_.node) == IntrinsicSymbol::NoCopy) {
+        return true;
+    }
+
+    // Copy is structural: all types satisfy Copy by default, except types implementing NoCopy
+    if (trait_type->kind == TypeKind::Struct && trait_type->data.struct_.node &&
+        resolve_intrinsic_symbol(trait_type->data.struct_.node) == IntrinsicSymbol::Copy) {
+        return !is_non_copyable(check_arg);
     }
 
     // Resolve built-in types backed by structs (e.g. string → __CxString)
