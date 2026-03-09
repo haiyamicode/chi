@@ -1519,7 +1519,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             t2 = resolve(data.op2, var_scope);
             if (scope.parent_fn_node) {
                 auto lhs_decl = find_root_decl(data.op1);
-                if (lhs_decl && !scope.is_unsafe_block && t2 && is_borrowing_type(t2)) {
+                // `new Foo{...}` produces an owning pointer, not a borrow —
+                // skip borrow edges so args inside `new` aren't treated as borrowed by the LHS.
+                bool is_new_expr = data.op2->type == NodeType::ConstructExpr &&
+                                   data.op2->data.construct_expr.is_new;
+                if (lhs_decl && !scope.is_unsafe_block && t2 && is_borrowing_type(t2) &&
+                    !is_new_expr) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     fn_def.bump_edge_offset(lhs_decl);
                     add_borrow_source_edges(fn_def, data.op2, lhs_decl);

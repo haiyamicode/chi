@@ -73,7 +73,7 @@ struct SharedData<T> {
 
     mut func new(v: T) {
         this.ref_count = 1;
-        this.value = v;
+        this.value = move v;
     }
 }
 
@@ -118,7 +118,7 @@ export struct Shared<T> {
         if !this.data {
             this.data = new SharedData<T>{value};
         } else {
-            this.data.value = value;
+            this.data.value = move value;
         }
     }
 
@@ -340,7 +340,7 @@ export struct Array<T> {
                 cx_array_reserve(&this, sizeof T, values.length);
             }
             for value in values {
-                this.push(value);
+                this.push(move value);
             }
         }
     }
@@ -354,7 +354,7 @@ export struct Array<T> {
     mut func push(item: T) {
         unsafe {
             var ptr = cx_array_add(&this, sizeof T) as *T;
-            *ptr = item;
+            *ptr = move item;
         }
     }
 
@@ -989,7 +989,7 @@ export struct Promise<T = Unit> {
     static func make(executor: func (resolve: func (value: T))) Promise<T> {
         var p = Promise<T>{};
         executor(func [p] (value) {
-            p.resolve(value);
+            p.resolve(move value);
         });
         return p;
     }
@@ -999,9 +999,9 @@ export struct Promise<T = Unit> {
             return;
         }
         this.data.state = 1;
-        this.data.value = value;
+        this.data.value = move value;
         if this.data.callback {
-            this.data.callback!(value);
+            this.data.callback!(this.data.value!);
         }
     }
 
