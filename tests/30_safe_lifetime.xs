@@ -263,7 +263,7 @@ func consume_heavy(h: Heavy) {
     printf("consumed: {}\n", h.value);
 }
 
-// move x skips copy_from, sinks source
+// move x skips copy, sinks source
 func test_value_move() {
     printf("=== value move ===\n");
     var a = Heavy{value: 42};
@@ -271,7 +271,7 @@ func test_value_move() {
     printf("b.value = {}\n", b.value);
 }
 
-// Regular copy invokes copy_from
+// Regular copy invokes copy
 func test_value_copy() {
     printf("=== value copy ===\n");
     var a = Heavy{value: 99};

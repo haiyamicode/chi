@@ -17,7 +17,7 @@ extern "C" {
     unsafe func cx_malloc(size: uint32, ignored: *void) *void;
     unsafe func cx_free(address: *void);
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
-    unsafe func __copy_from(dest: *void, src: *void, destruct_old: bool);
+    unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
     unsafe func cx_runtime_start(stack: *void);
     unsafe func cx_set_program_vtable(ptr: *void);
     unsafe func cx_runtime_stop();
@@ -196,14 +196,14 @@ export struct Box<T: ops.AllowUnsized> {
     impl ops.Copy {
         mut func copy(source: &This) {
             unsafe {
-                this._ptr = mem.copy_from<T>(source._ptr as &T) as *T;
+                this._ptr = mem.copy<T>(source._ptr as &T) as *T;
             }
         }
     }
 
     impl where T: ops.Sized {
         static func wrap(val: T) Box<T> {
-            return {mem.copy_from<T>(&val)};
+            return {mem.copy<T>(&val)};
         }
     }
 

@@ -968,8 +968,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             emit_dbg_location(param);
 
             // Bitwise store only — caller is responsible for copy semantics.
-            // For rvalue args (temps), this avoids a redundant copy_from + destroy.
-            // For named var args, the caller does copy_from before passing.
+            // For rvalue args (temps), this avoids a redundant copy + destroy.
+            // For named var args, the caller does copy before passing.
             builder.CreateStore(llvm_param, var);
             add_var(param, var);
 
@@ -1220,7 +1220,7 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
     auto arg_value = compile_assignment_to_type(fn, expr, param_type);
 
     // Caller-side copy: for non-moved args (named vars) passed to by-value
-    // params, do copy_from here since the callee only does a bitwise store.
+    // params, do copy here since the callee only does a bitwise store.
     // Moved args (rvalues) are already fresh values — ownership transfers.
     if (!expr->escape.moved && param_type && !param_type->is_reference() &&
         get_resolver()->type_needs_destruction(param_type)) {
@@ -2046,7 +2046,7 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
         builder.CreateBitCast(captures_payload_ptr, capture_struct_type->getPointerTo());
 
     // Zero-init the payload before populating (needed for compile_copy on Promise,
-    // since copy_from may release the old value which would be garbage otherwise)
+    // since copy may release the old value which would be garbage otherwise)
     builder.CreateMemSet(captures_payload_ptr,
                          llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
                          capture_size, {});
@@ -2100,7 +2100,7 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     auto promise_type_l = compile_type(promise_type);
 
     // Allocate storage for the promise and properly copy it
-    // Using compile_copy ensures copy_from is called, which increments Shared ref count
+    // Using compile_copy ensures copy is called, which increments Shared ref count
     auto awaited_promise_ptr = fn->entry_alloca(promise_type_l, "awaited");
     // Zero-initialize the destination before copy to avoid garbage in Shared.data
     auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(promise_type_l);
@@ -2811,7 +2811,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             return result;
         }
         case TokenType::KW_MOVE: {
-            // move x — bitwise load + zero source (skip copy_from)
+            // move x — bitwise load + zero source (skip copy)
             auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
             auto type = get_chitype(data.op1);
@@ -3795,7 +3795,7 @@ void Compiler::compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Val
             compile_destruction_for_type(fn, dest, type);
         m_ctx->llvm_builder->CreateStore(value, dest);
     } else {
-        // Named value — deep copy via copy_from
+        // Named value — deep copy via copy
         compile_copy_with_ref(fn, RefValue::from_value(value), dest, type, expr, destruct_old);
     }
 }
@@ -3886,7 +3886,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     }
     case TypeKind::FnLambda: {
         // For lambda types, we need to manually copy fields and increment refcount
-        // because __CxLambda<T1> and __CxLambda<T2> can't use copy_from across types
+        // because __CxLambda<T1> and __CxLambda<T2> can't use copy across types
         auto &builder = *m_ctx->llvm_builder;
         auto llvm_type = compile_type(type);
 
@@ -3979,7 +3979,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             auto copy_fn = *copy_fn_p;
             auto from_address = src.address ? src.address : nullptr;
             if (!from_address) {
-                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy_from");
+                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy");
                 builder.CreateStore(ensure_value(), from_address);
             }
             if (destruct_old) {
@@ -5071,14 +5071,14 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
 
-    // Handle __copy_from(dest, src, destruct_old) intrinsic
+    // Handle __copy(dest, src, destruct_old) intrinsic
     {
         auto callee_decl = data.fn_ref_expr->get_decl();
-        if (callee_decl && callee_decl->name == "__copy_from" && data.args.len == 3) {
+        if (callee_decl && callee_decl->name == "__copy" && data.args.len == 3) {
             auto dest_ptr = compile_expr(fn, data.args[0]);
             auto src_ptr = compile_expr(fn, data.args[1]);
             auto elem_type = get_chitype(data.args[0])->get_elem();
-            assert(elem_type && "first arg of __copy_from must be a pointer type");
+            assert(elem_type && "first arg of __copy must be a pointer type");
             // Third arg must be a compile-time bool literal
             bool destruct_old = true;
             if (data.args[2]->type == ast::NodeType::LiteralExpr &&
@@ -5357,7 +5357,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         if (is_variadic && !is_extern && i >= va_start) {
             emit_dbg_location(data.args[i]);
 
-            // Check for pack expansion - use Array.copy_from to append all elements
+            // Check for pack expansion - use Array.copy to append all elements
             if (data.args[i]->type == ast::NodeType::PackExpansion) {
                 auto &pack_data = data.args[i]->data.pack_expansion;
                 auto src_ptr = compile_expr_ref(fn, pack_data.expr).address;
@@ -5365,12 +5365,12 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 // Call dest_array.copy(&src_array)
                 auto array_type = fn_spec.params.last(); // variadic param is Array<any>
                 auto array_struct = get_resolver()->resolve_struct_type(array_type);
-                auto copy_from_member = array_struct->find_member("copy");
-                assert(copy_from_member && "Array.copy() method not found");
-                auto copy_from_method_node =
-                    get_variant_member_node(copy_from_member, std::nullopt);
-                auto copy_from_fn = get_fn(copy_from_method_node);
-                builder.CreateCall(copy_from_fn->llvm_fn, {va_ptr, src_ptr});
+                auto copy_member = array_struct->find_member("copy");
+                assert(copy_member && "Array.copy() method not found");
+                auto copy_method_node =
+                    get_variant_member_node(copy_member, std::nullopt);
+                auto copy_fn = get_fn(copy_method_node);
+                builder.CreateCall(copy_fn->llvm_fn, {va_ptr, src_ptr});
                 continue;
             }
 
@@ -7587,7 +7587,7 @@ Function *Compiler::generate_copier_fixed_array(ChiType *type) {
     auto fn_type_l =
         llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type, ptr_type}, false);
     auto type_name = get_resolver()->format_type_display(type);
-    auto fn_name = fmt::format("{}.__copy_from", type_name);
+    auto fn_name = fmt::format("{}.__copy", type_name);
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
                                           m_ctx->llvm_module.get());
     auto fn = new Function(m_ctx, llvm_fn, nullptr);
@@ -7925,7 +7925,7 @@ Function *Compiler::get_fn(ast::Node *node) {
 
     // On-demand proto compilation: the function's module may not have been
     // compiled yet (e.g. a generic stdlib type like Box<T> references a user
-    // type's copy_from during the stdlib module pass). Compile the proto now
+    // type's copy during the stdlib module pass). Compile the proto now
     // and schedule the body for later. This is safe because compile_fn_proto
     // only creates the LLVM declaration — no recursion into get_fn.
     if (!entry && node->type == ast::NodeType::FnDef && node->resolved_type &&

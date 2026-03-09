@@ -6698,7 +6698,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             ensure_temp_owner(arg, arg_type, scope);
 
             // Mark rvalue/moved args — caller transfers ownership to callee
-            // via bitwise pass, so callee skips copy_from and caller
+            // via bitwise pass, so callee skips copy and caller
             // skips destroying the temp.
             bool is_explicit_move = arg->type == NodeType::UnaryOpExpr &&
                                     arg->data.unary_op_expr.op_type == TokenType::KW_MOVE;
