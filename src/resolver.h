@@ -298,6 +298,12 @@ class Resolver {
     bool is_borrowing_type(ChiType *type);
     bool type_needs_destruction(ChiType *type);
     bool is_non_copyable(ChiType *type);
+
+    // Active where-clause trait bounds for placeholders (scoped, not mutated)
+    map<ChiType *, array<ChiType *>> m_where_traits;
+
+    // Returns all traits for a placeholder: declared traits + active where-clause bounds
+    array<ChiType *> get_placeholder_traits(ChiType *ph);
     bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
 
     void context_init_primitives();

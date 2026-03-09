@@ -2351,9 +2351,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (expr_type->is_pointer_like()) {
             check_type = expr_type->get_elem();
         }
-        if (check_type->kind == TypeKind::Placeholder &&
-            check_type->data.placeholder.traits.len > 0) {
-            for (auto trait_type : check_type->data.placeholder.traits) {
+        if (check_type->kind == TypeKind::Placeholder) {
+            auto all_traits = get_placeholder_traits(check_type);
+            for (auto trait_type : all_traits) {
                 if (trait_type->kind == TypeKind::Struct &&
                     ChiTypeStruct::is_interface(trait_type)) {
                     auto trait_struct = &trait_type->data.struct_;
@@ -2559,7 +2559,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             value_type = resolve_value(data.type, scope);
             if (data.items.len == 0 && value_type->kind == TypeKind::Placeholder) {
                 bool has_construct_bound = false;
-                for (auto t : value_type->data.placeholder.traits) {
+                for (auto t : get_placeholder_traits(value_type)) {
                     if (!t || t->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(t))
                         continue;
                     auto *new_member = t->data.struct_.find_member("new");
@@ -2614,7 +2614,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     // interface bound whose new() has zero params
                     if (data.items.len == 0 && result_type->kind == TypeKind::Placeholder) {
                         bool has_construct_bound = false;
-                        for (auto t : result_type->data.placeholder.traits) {
+                        for (auto t : get_placeholder_traits(result_type)) {
                             if (!t || t->kind != TypeKind::Struct ||
                                 !ChiTypeStruct::is_interface(t))
                                 continue;
@@ -2703,7 +2703,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Placeholder type with positional args: resolve args against
             // a matching constructor interface bound's new() signature
             ChiStructMember *iface_new = nullptr;
-            for (auto t : value_type->data.placeholder.traits) {
+            for (auto t : get_placeholder_traits(value_type)) {
                 if (!t || t->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(t))
                     continue;
                 auto *nm = t->data.struct_.find_member("new");
@@ -3556,18 +3556,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type == NodeType::ImplementBlock) {
                     auto &impl_data = member->data.implement_block;
 
-                    // For where-blocks, temporarily set placeholder traits so method
-                    // bodies can access trait methods on the constrained type params
-                    array<std::pair<ChiType *, array<ChiType *>>> saved_traits;
-                    if (impl_data.interface_types.len == 0 && impl_data.where_clauses.len > 0) {
+                    // For where-blocks, set scoped where-clause traits
+                    array<ChiType *> where_placeholders;
+                    if (impl_data.where_clauses.len > 0) {
                         for (auto &clause : impl_data.where_clauses) {
                             auto param_name = clause.param_name->str;
                             for (auto tp : struct_->type_params) {
                                 auto ph = to_value_type(tp);
                                 if (ph->kind == TypeKind::Placeholder && ph->name == param_name) {
-                                    saved_traits.add({ph, ph->data.placeholder.traits});
-                                    ph->data.placeholder.traits.add(
+                                    m_where_traits[ph].add(
                                         resolve_value(clause.bound_type, scope));
+                                    bool already_tracked = false;
+                                    for (auto p : where_placeholders) {
+                                        if (p == ph) { already_tracked = true; break; }
+                                    }
+                                    if (!already_tracked)
+                                        where_placeholders.add(ph);
                                     break;
                                 }
                             }
@@ -3578,9 +3582,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         resolve_fn_body(impl_member);
                     }
 
-                    // Restore original placeholder traits
-                    for (auto &[ph, old_traits] : saved_traits) {
-                        ph->data.placeholder.traits = old_traits;
+                    // Clear scoped where-clause traits
+                    for (auto ph : where_placeholders) {
+                        m_where_traits.data.erase(ph);
                     }
                 } else {
                     resolve_fn_body(member);
@@ -3833,9 +3837,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
 
-            if (!param_type || param_type->data.placeholder.traits.len == 0)
+            if (!param_type)
                 continue;
-            for (auto trait : param_type->data.placeholder.traits) {
+            auto param_traits = get_placeholder_traits(param_type);
+            if (param_traits.len == 0)
+                continue;
+            for (auto trait : param_traits) {
                 if (!check_trait_bound(type_arg, trait)) {
                     error(node, "Type '{}' does not satisfy trait bound '{}'",
                           format_type_display(type_arg), format_type_display(trait));
@@ -5624,6 +5631,16 @@ bool Resolver::type_needs_destruction(ChiType *type) {
     return false;
 }
 
+array<ChiType *> Resolver::get_placeholder_traits(ChiType *ph) {
+    auto traits = ph->data.placeholder.traits;
+    auto it = m_where_traits.get(ph);
+    if (it) {
+        for (auto t : *it)
+            traits.add(t);
+    }
+    return traits;
+}
+
 bool Resolver::is_non_copyable(ChiType *type) {
     if (!type)
         return false;
@@ -5633,13 +5650,17 @@ bool Resolver::is_non_copyable(ChiType *type) {
             return is_non_copyable(final_type);
     }
     if (type->kind == TypeKind::Placeholder) {
-        for (auto t : type->data.placeholder.traits) {
-            if (t && t->kind == TypeKind::Struct && t->data.struct_.node &&
-                resolve_intrinsic_symbol(t->data.struct_.node) ==
-                    IntrinsicSymbol::NoCopy)
-                return true;
+        bool has_nocopy = false;
+        for (auto t : get_placeholder_traits(type)) {
+            if (!t || t->kind != TypeKind::Struct || !t->data.struct_.node)
+                continue;
+            auto sym = resolve_intrinsic_symbol(t->data.struct_.node);
+            if (sym == IntrinsicSymbol::Copy)
+                return false;
+            if (sym == IntrinsicSymbol::NoCopy)
+                has_nocopy = true;
         }
-        return false;
+        return has_nocopy;
     }
     if (type->kind != TypeKind::Struct)
         return false;
@@ -6641,7 +6662,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 return fn->return_type;
             }
 
-            for (auto trait : lookup_key->data.placeholder.traits) {
+            for (auto trait : get_placeholder_traits(lookup_key)) {
                 if (!check_trait_bound(type_arg, trait)) {
                     error(node, "Type '{}' does not satisfy trait bound '{}'",
                           format_type_display(type_arg), format_type_display(trait));
@@ -8262,8 +8283,8 @@ void Resolver::check_binary_op(ast::Node *node, TokenType op_type, ChiType *type
         : false;
 
     // Handle placeholder types with appropriate trait bounds
-    if (!ok && type->kind == TypeKind::Placeholder && type->data.placeholder.traits.len > 0) {
-        for (auto trait_type : type->data.placeholder.traits) {
+    if (!ok && type->kind == TypeKind::Placeholder) {
+        for (auto trait_type : get_placeholder_traits(type)) {
             if (ok)
                 break;
             if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
@@ -9109,9 +9130,8 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
     }
 
     // Try placeholder type with trait bounds
-    if (!method_member && t1->kind == TypeKind::Placeholder &&
-        t1->data.placeholder.traits.len > 0) {
-        for (auto trait_type : t1->data.placeholder.traits) {
+    if (!method_member && t1->kind == TypeKind::Placeholder) {
+        for (auto trait_type : get_placeholder_traits(t1)) {
             if (method_member)
                 break;
             if (trait_type->kind == TypeKind::Struct && ChiTypeStruct::is_interface(trait_type)) {
