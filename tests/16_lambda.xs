@@ -12,8 +12,8 @@ struct TrackedBox {
         printf("TrackedBox({}) destroyed\n", this.id);
     }
 
-    impl ops.CopyFrom<TrackedBox> {
-        mut func copy_from(source: &TrackedBox) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             printf("TrackedBox({}) copied from TrackedBox({})\n", this.id, source.id);
             this.id = source.id;
         }

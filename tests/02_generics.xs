@@ -65,8 +65,8 @@ struct RefHolder<T> {
         }
     }
 
-    impl ops.CopyFrom<RefHolder<T>> {
-        mut func copy_from(source: &RefHolder<T>) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.data = source.data;
         }
     }
@@ -105,8 +105,8 @@ struct Arr<T> {
         }
     }
 
-    impl ops.CopyFrom<Arr<T>> {
-        mut func copy_from(source: &Arr<T>) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.data = source.data;
             this.size = source.size;
             this.capacity = source.capacity;

@@ -72,8 +72,8 @@ struct Circle {
         }
     }
 
-    impl ops.CopyFrom<Circle> {
-        mut func copy_from(source: &Circle) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.radius = source.radius;
         }
     }
@@ -97,8 +97,8 @@ struct Rect {
         }
     }
 
-    impl ops.CopyFrom<Rect> {
-        mut func copy_from(source: &Rect) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.w = source.w;
             this.h = source.h;
         }

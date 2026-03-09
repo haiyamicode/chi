@@ -11,8 +11,8 @@ struct Bar {
         printf("delete bar {}\n", this.id);
     }
 
-    impl ops.CopyFrom<Bar> {
-        mut func copy_from(source: &Bar) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
         }
     }
@@ -33,8 +33,8 @@ struct Foo {
         printf("delete foo {}\n", this.id);
     }
 
-    impl ops.CopyFrom<Foo> {
-        mut func copy_from(source: &Foo) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
             this.bar1 = source.bar1;
             this.bar2 = source.bar2;

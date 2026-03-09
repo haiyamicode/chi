@@ -31,8 +31,8 @@ struct Resource {
         printf("Resource.delete({})\n", this.name);
     }
 
-    impl ops.CopyFrom<Resource> {
-        mut func copy_from(source: &Resource) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.name = source.name;
         }
     }

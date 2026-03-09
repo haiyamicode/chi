@@ -10,8 +10,8 @@ export interface IndexMut<K, V> {
     func index_mut(index: K) &mut V;
 }
 
-export interface CopyFrom<T> {
-    func copy_from(source: &T);
+export interface Copy {
+    func copy(source: &This);
 }
 
 export interface DisallowCopy {}

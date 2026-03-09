@@ -137,8 +137,8 @@ struct Traced {
         printf("  Traced.delete({})\n", this.id);
     }
 
-    impl ops.CopyFrom<Traced> {
-        mut func copy_from(source: &Traced) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
             printf("  Traced.copy({})\n", source.id);
         }
@@ -154,8 +154,8 @@ struct TracedValue {
         }
     }
 
-    impl ops.CopyFrom<TracedValue> {
-        mut func copy_from(source: &TracedValue) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
         }
     }

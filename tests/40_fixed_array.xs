@@ -22,8 +22,8 @@ struct Traced {
         }
     }
 
-    impl ops.CopyFrom<Traced> {
-        mut func copy_from(source: &Traced) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
             if source.id != 0 {
                 printf("Traced({}) copied\n", source.id);

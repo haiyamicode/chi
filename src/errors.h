@@ -81,8 +81,8 @@ constexpr auto MOVE_REF_IN_STRUCT_FIELD =
     "'&move' references cannot be used as struct fields; use Box<T> instead";
 constexpr auto UNSAFE_CALL_IN_SAFE_MODE =
     "call to unsafe function '{}' is not allowed in safe mode";
-constexpr auto DESTRUCTOR_WITHOUT_COPY_FROM =
-    "struct '{}' defines 'func delete()' but does not implement 'ops.CopyFrom<{}>'; "
+constexpr auto DESTRUCTOR_WITHOUT_COPY =
+    "struct '{}' defines 'func delete()' but does not implement 'ops.Copy'; "
     "types with custom destructors must define copy semantics";
 constexpr auto TYPE_NOT_COPYABLE =
     "type '{}' cannot be copied (implements ops.DisallowCopy)";

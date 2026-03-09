@@ -154,7 +154,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
-    m_ctx->intrinsic_symbols["std.ops.CopyFrom"] = IntrinsicSymbol::CopyFrom;
+    m_ctx->intrinsic_symbols["std.ops.Copy"] = IntrinsicSymbol::Copy;
     m_ctx->intrinsic_symbols["std.ops.DisallowCopy"] = IntrinsicSymbol::DisallowCopy;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
     m_ctx->intrinsic_symbols["std.ops.Add"] = IntrinsicSymbol::Add;
@@ -3573,15 +3573,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
 
-            // Rule of Three: struct with func delete() must implement CopyFrom
+            // Rule of Three: struct with func delete() must implement Copy
             // or DisallowCopy (not required in managed mode — GC handles lifecycle)
             if (struct_->kind == ContainerKind::Struct &&
                 !has_lang_flag(node->module->get_lang_flags(), LANG_FLAG_MANAGED) &&
                 struct_->find_member("delete") &&
-                !struct_->member_intrinsics.has_key(IntrinsicSymbol::CopyFrom) &&
+                !struct_->member_intrinsics.has_key(IntrinsicSymbol::Copy) &&
                 !is_non_copyable(struct_type)) {
                 auto name = format_type_display(struct_type);
-                error(node, errors::DESTRUCTOR_WITHOUT_COPY_FROM, name, name);
+                error(node, errors::DESTRUCTOR_WITHOUT_COPY, name);
             }
 
             struct_->resolve_status = ResolveStatus::Done;
@@ -5463,8 +5463,8 @@ bool Resolver::is_borrowing_type(ChiType *type) {
     }
     case TypeKind::Struct: {
         auto &st = type->data.struct_;
-        if (st.member_intrinsics.has_key(IntrinsicSymbol::CopyFrom)) {
-            // CopyFrom handles the container's own data, but if any type parameter
+        if (st.member_intrinsics.has_key(IntrinsicSymbol::Copy)) {
+            // Copy handles the container's own data, but if any type parameter
             // is borrowing, the borrow propagates through copied elements
             for (auto tp : st.type_params) {
                 if (is_borrowing_type(tp))
@@ -8827,6 +8827,21 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
 
 bool Resolver::compare_impl_type(ChiType *base, ChiType *impl) {
     if (base == impl) {
+        return true;
+    }
+    // Unwrap matching wrapper types and compare inner types
+    if (base->kind == impl->kind && base->is_pointer_like()) {
+        return compare_impl_type(base->get_elem(), impl->get_elem());
+    }
+    // A generic struct Foo and its self-referencing Subtype Foo<T> (where T is its own
+    // placeholder) are equivalent — this arises when &This in an interface method gets
+    // substituted with the raw struct, but the impl method resolves &This to the Subtype.
+    if (base->kind == TypeKind::Struct && impl->kind == TypeKind::Subtype &&
+        impl->data.subtype.generic == base) {
+        return true;
+    }
+    if (impl->kind == TypeKind::Struct && base->kind == TypeKind::Subtype &&
+        base->data.subtype.generic == impl) {
         return true;
     }
     if (base->kind == TypeKind::Fn) {

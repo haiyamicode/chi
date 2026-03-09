@@ -189,8 +189,8 @@ struct Resource {
         printf("Resource.delete({})\n", this.name);
     }
 
-    impl ops.CopyFrom<Resource> {
-        mut func copy_from(source: &Resource) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.name = source.name;
         }
     }
@@ -251,8 +251,8 @@ struct Heavy {
         printf("Heavy.delete({})\n", this.value);
     }
 
-    impl ops.CopyFrom<Heavy> {
-        mut func copy_from(source: &Heavy) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             printf("Heavy.copy({})\n", source.value);
             this.value = source.value;
         }

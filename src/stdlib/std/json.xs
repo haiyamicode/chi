@@ -162,8 +162,8 @@ export struct Value {
         return !val.is_null();
     }
 
-    impl ops.CopyFrom<Value> {
-        mut func copy_from(source: &Value) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             unsafe {
                 cx_json_value_copy(source.data, &this);
             }

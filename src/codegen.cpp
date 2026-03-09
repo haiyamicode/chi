@@ -3974,7 +3974,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         if (!sty)
             break; // Not a struct type, fall through to default copy
         auto &builder = *m_ctx->llvm_builder;
-        auto copy_fn_p = sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+        auto copy_fn_p = sty->member_intrinsics.get(IntrinsicSymbol::Copy);
         if (copy_fn_p) {
             auto copy_fn = *copy_fn_p;
             auto from_address = src.address ? src.address : nullptr;
@@ -3989,7 +3989,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             builder.CreateMemSet(
                 dest, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
                 size, {});
-            // Use variant lookup to get the specialized copy_from method
+            // Use variant lookup to get the specialized copy method
             auto eval_t = eval_type(type);
             std::optional<TypeId> variant_type_id = std::nullopt;
             if (eval_t && eval_t->kind == TypeKind::Subtype && !eval_t->is_placeholder) {
@@ -4006,8 +4006,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             return;
         }
 
-        // For structs without CopyFrom, check if any field needs destruction
-        // (transitively — handles nested structs with CopyFrom/destructor fields).
+        // For structs without Copy, check if any field needs destruction
+        // (transitively — handles nested structs with Copy/destructor fields).
         // If so, copy field-by-field to ensure proper deep copy semantics.
         if (type->kind == TypeKind::Struct) {
             auto own = type->data.struct_.own_fields();
@@ -5362,11 +5362,11 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 auto &pack_data = data.args[i]->data.pack_expansion;
                 auto src_ptr = compile_expr_ref(fn, pack_data.expr).address;
 
-                // Call dest_array.copy_from(&src_array)
+                // Call dest_array.copy(&src_array)
                 auto array_type = fn_spec.params.last(); // variadic param is Array<any>
                 auto array_struct = get_resolver()->resolve_struct_type(array_type);
-                auto copy_from_member = array_struct->find_member("copy_from");
-                assert(copy_from_member && "Array.copy_from() method not found");
+                auto copy_from_member = array_struct->find_member("copy");
+                assert(copy_from_member && "Array.copy() method not found");
                 auto copy_from_method_node =
                     get_variant_member_node(copy_from_member, std::nullopt);
                 auto copy_from_fn = get_fn(copy_from_method_node);
@@ -7133,7 +7133,7 @@ Function *Compiler::generate_any_copier(ChiType *type) {
     bool needs_copier = get_resolver()->type_needs_destruction(type);
     if (!needs_copier && type->kind == TypeKind::Struct) {
         auto sty = get_resolver()->resolve_struct_type(eval_type(type));
-        if (sty && sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom))
+        if (sty && sty->member_intrinsics.get(IntrinsicSymbol::Copy))
             needs_copier = true;
     }
     if (!needs_copier)
@@ -7407,7 +7407,7 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
         // Also check if any field has CopyFrom (copy semantics without destructor)
         auto check_field_copier = [&](ChiType *field_type) -> bool {
             auto sty = get_resolver()->resolve_struct_type(eval_type(field_type));
-            return sty && sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+            return sty && sty->member_intrinsics.get(IntrinsicSymbol::Copy);
         };
         if (bvs) {
             for (auto field : bvs->data.struct_.fields) {
@@ -7487,7 +7487,7 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
         if (get_resolver()->type_needs_destruction(field_type))
             return true;
         auto sty = get_resolver()->resolve_struct_type(eval_type(field_type));
-        return sty && sty->member_intrinsics.get(IntrinsicSymbol::CopyFrom);
+        return sty && sty->member_intrinsics.get(IntrinsicSymbol::Copy);
     };
 
     // 3. Check if any variant has fields needing deep copy

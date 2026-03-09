@@ -12,8 +12,8 @@ struct Inner1 {
         printf("  Inner1.delete({})\n", this.id);
     }
 
-    impl ops.CopyFrom<Inner1> {
-        mut func copy_from(source: &Inner1) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
         }
     }
@@ -70,8 +70,8 @@ struct OrderedField {
         printf("  OrderedField.delete('{}')\n", this.name);
     }
 
-    impl ops.CopyFrom<OrderedField> {
-        mut func copy_from(source: &OrderedField) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.name = source.name;
         }
     }
@@ -93,8 +93,8 @@ struct OrderedContainer {
         println("OrderedContainer.delete (user)");
     }
 
-    impl ops.CopyFrom<OrderedContainer> {
-        mut func copy_from(source: &OrderedContainer) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.first = source.first;
             this.second = source.second;
             this.third = source.third;
@@ -126,8 +126,8 @@ struct RefCountedData {
         printf("  RefCountedData.delete({})\n", this.value);
     }
 
-    impl ops.CopyFrom<RefCountedData> {
-        mut func copy_from(source: &RefCountedData) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.value = source.value;
         }
     }
@@ -162,8 +162,8 @@ struct Level3 {
         printf("    Level3.delete({})\n", this.id);
     }
 
-    impl ops.CopyFrom<Level3> {
-        mut func copy_from(source: &Level3) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
         }
     }
@@ -182,8 +182,8 @@ struct Level2 {
         printf("  Level2.delete({})\n", this.id);
     }
 
-    impl ops.CopyFrom<Level2> {
-        mut func copy_from(source: &Level2) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
             this.child = source.child;
         }
@@ -203,8 +203,8 @@ struct Level1 {
         printf("Level1.delete({})\n", this.id);
     }
 
-    impl ops.CopyFrom<Level1> {
-        mut func copy_from(source: &Level1) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
             this.child = source.child;
         }
@@ -235,8 +235,8 @@ struct OptionalData {
         printf("  OptionalData.delete({})\n", this.value);
     }
 
-    impl ops.CopyFrom<OptionalData> {
-        mut func copy_from(source: &OptionalData) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.value = source.value;
         }
     }
@@ -287,8 +287,8 @@ struct DirectStruct {
         printf("  DirectStruct.delete({})\n", this.id);
     }
 
-    impl ops.CopyFrom<DirectStruct> {
-        mut func copy_from(source: &DirectStruct) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
         }
     }
@@ -349,8 +349,8 @@ struct TrackedVar {
         printf("  TrackedVar.delete('{}')\n", this.name);
     }
 
-    impl ops.CopyFrom<TrackedVar> {
-        mut func copy_from(source: &TrackedVar) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.name = source.name;
             printf("  TrackedVar.copy('{}')\n", source.name);
         }
@@ -519,8 +519,8 @@ struct TrackedVal {
         printf("  TrackedVal.delete({})\n", this.id);
     }
 
-    impl ops.CopyFrom<TrackedVal> {
-        mut func copy_from(source: &TrackedVal) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
             printf("  TrackedVal.copy({})\n", source.id);
         }

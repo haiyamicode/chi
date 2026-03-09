@@ -126,8 +126,8 @@ export struct Shared<T> {
         return this.data.ref_count;
     }
 
-    impl ops.CopyFrom<Shared<T>> {
-        mut func copy_from(source: &Shared<T>) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             var ptr = source.data;
             if ptr {
                 ptr.ref_count = ptr.ref_count + 1;
@@ -193,8 +193,8 @@ export struct Box<T: ops.AllowUnsized> {
         }
     }
 
-    impl ops.CopyFrom<Box<T>> {
-        mut func copy_from(source: &Box<T>) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             unsafe {
                 this._ptr = mem.copy_from<T>(source._ptr as &T) as *T;
             }
@@ -268,8 +268,8 @@ struct __CxLambda {
         }
     }
 
-    impl ops.CopyFrom<__CxLambda> {
-        mut func copy_from(source: &__CxLambda) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             // Retain the source captures
             if source.captures {
                 unsafe {
@@ -432,8 +432,8 @@ export struct Array<T> {
         }
     }
 
-    impl ops.CopyFrom<Array<T>> {
-        mut func copy_from(source: &Array<T>) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             for item in source {
                 this.push(item);
             }
@@ -516,8 +516,8 @@ export struct CString {
         return this.data;
     }
 
-    impl ops.CopyFrom<CString> {
-        mut func copy_from(source: &CString) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             unsafe {
                 this.data = cx_cstring_copy(source.data);
             }
@@ -1035,9 +1035,9 @@ export struct Promise<T = Unit> {
         return this.data.ref_count();
     }
 
-    impl ops.CopyFrom<Promise<T>> {
-        func copy_from(source: &Promise<T>) {
-            this.data.copy_from(&source.data);
+    impl ops.Copy {
+        func copy(source: &This) {
+            this.data.copy(&source.data);
         }
     }
 }
@@ -1258,8 +1258,8 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    impl ops.CopyFrom<Map<K, V>> {
-        mut func copy_from(source: &Map<K, V>) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.new();
             var ks = source.keys();
             for k in ks {

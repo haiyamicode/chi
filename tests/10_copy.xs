@@ -21,8 +21,8 @@ struct Foo {
         }
     }
 
-    impl ops.CopyFrom<Foo> {
-        mut func copy_from(b: &Foo) {
+    impl ops.Copy {
+        mut func copy(b: &This) {
             this.new(stringf("{}_copy", b.id));
             unsafe {
                 *this.p = *b.p;
@@ -60,8 +60,8 @@ struct Traced {
         printf("Traced({}) destroyed\n", this.id);
     }
 
-    impl ops.CopyFrom<Traced> {
-        mut func copy_from(source: &Traced) {
+    impl ops.Copy {
+        mut func copy(source: &This) {
             this.id = source.id;
             printf("Traced({}) copied\n", source.id);
         }
