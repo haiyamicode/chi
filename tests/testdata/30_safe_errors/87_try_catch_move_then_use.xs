@@ -4,15 +4,21 @@ import "std/ops" as ops;
 
 struct Heavy {
     value: int;
+
     mut func delete() {}
+
     impl ops.Copy {
-        mut func copy(source: &This) { this.value = source.value; }
+        mut func copy(source: &This) {
+            this.value = source.value;
+        }
     }
 }
 
 struct TestError {
     impl Error {
-        func message() string { return "test"; }
+        func message() string {
+            return "test";
+        }
     }
 }
 
@@ -29,3 +35,4 @@ func main() {
     };
     consume(move h); // error: may have been moved
 }
+

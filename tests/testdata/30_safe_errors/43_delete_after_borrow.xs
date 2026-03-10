@@ -8,7 +8,9 @@ struct Data {
 func main() {
     var x = new Data{value: 42};
     var r: &Data = x;
-    unsafe { delete x; }
+    unsafe {
+        delete x;
+    }
     printf("{}\n", r.value);
 }
 

@@ -2,7 +2,7 @@
 // local -> lambda A -> var B = A -> return B
 // expect-error: does not live long enough
 
-func make_fn() func () int {
+func make_fn() (func () int) {
     var x = 42;
     var a = func () int {
         return x;

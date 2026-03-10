@@ -622,7 +622,9 @@ func test_switch_else_alive() {
 
 struct TestError {
     impl Error {
-        func message() string { return "test error"; }
+        func message() string {
+            return "test error";
+        }
     }
 }
 

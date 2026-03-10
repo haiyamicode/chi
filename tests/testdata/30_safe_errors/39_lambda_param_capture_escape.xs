@@ -2,7 +2,7 @@
 // The parameter dies when the function returns.
 // expect-error: does not live long enough
 
-func capture_param(x: int) func () int {
+func capture_param(x: int) (func () int) {
     return func () int {
         return x;
     };

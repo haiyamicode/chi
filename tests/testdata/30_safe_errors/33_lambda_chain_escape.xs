@@ -2,7 +2,7 @@
 // The transitive capture chain must be detected.
 // expect-error: does not live long enough
 
-func make_chain() func () int {
+func make_chain() (func () int) {
     var secret = 777;
     var step1 = func () int {
         return secret;

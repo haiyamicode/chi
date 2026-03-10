@@ -11,7 +11,9 @@ func main() {
     for i in 0..1 {
         r = x;
     }
-    unsafe { delete x; }
+    unsafe {
+        delete x;
+    }
     printf("{}\n", r.value);
 }
 

@@ -11,7 +11,9 @@ func main() {
     {
         r = x;
     }
-    unsafe { delete x; }
+    unsafe {
+        delete x;
+    }
     printf("{}\n", r.value);
 }
 

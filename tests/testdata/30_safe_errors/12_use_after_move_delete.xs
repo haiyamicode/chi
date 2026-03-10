@@ -9,12 +9,16 @@ struct Obj {
 }
 
 func take(ptr: &move Obj) {
-    unsafe { delete ptr; }
+    unsafe {
+        delete ptr;
+    }
 }
 
 func main() {
     var a = new Obj{1};
     take(a);
-    unsafe { delete a; } // error: 'a' used after move
+    unsafe {
+        delete a; // error: 'a' used after move
+    }
 }
 

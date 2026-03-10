@@ -955,13 +955,13 @@ void AstPrinter::print_node(Node *node) {
         print_node(data.expr);
         if (data.catch_block) {
             if (data.catch_expr) {
-                emit(" catch (");
-                if (data.catch_err_var) {
-                    emit(data.catch_err_var->name);
-                    emit(": ");
-                }
+                emit(" catch ");
                 print_node(data.catch_expr);
-                emit(") ");
+                if (data.catch_err_var) {
+                    emit(" as ");
+                    emit(data.catch_err_var->name);
+                }
+                emit(" ");
             } else {
                 emit(" catch ");
             }

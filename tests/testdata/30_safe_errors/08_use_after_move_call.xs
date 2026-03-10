@@ -9,7 +9,9 @@ struct Obj {
 }
 
 func take(ptr: &move Obj) {
-    unsafe { delete ptr; }
+    unsafe {
+        delete ptr;
+    }
 }
 
 func main() {
