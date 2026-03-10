@@ -1983,7 +1983,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 block_data.scope->put(data.catch_err_var->name, data.catch_err_var);
             }
 
+            // Fork flow state for branch-aware analysis
+            assert(scope.parent_fn_node);
+            auto *fn_def = &scope.parent_fn_node->data.fn_def;
+            auto pre_catch = fn_def->flow.fork();
+
             resolve(data.catch_block, scope);
+
+            if (always_terminates(data.catch_block)) {
+                // Catch always exits: restore pre-catch flow
+                fn_def->flow = pre_catch;
+            } else {
+                // Catch may fall through: merge with pre-catch (no-error path)
+                fn_def->flow.merge(pre_catch);
+            }
+
             return expr_type;
         }
 
@@ -4679,10 +4693,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
 
+            // Fork flow state for branch-aware analysis
+            assert(scope.parent_fn_node);
+            auto *fn_def = &scope.parent_fn_node->data.fn_def;
+            auto pre_branch = fn_def->flow.fork();
+
             ChiType *ret_type = scope.value_type;
+            array<ast::FlowState> case_flows;
+            bool all_terminate = true;
+            bool has_else = false;
+            int covered_count = 0;
+
             for (auto scase : data.cases) {
                 if (!scase)
                     continue;
+
+                if (scase->data.case_expr.is_else)
+                    has_else = true;
+                else
+                    covered_count += scase->data.case_expr.clauses.len;
 
                 if (!scase->data.case_expr.is_else) {
                     for (auto clause : scase->data.case_expr.clauses) {
@@ -4723,7 +4752,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
 
+                // Restore pre-branch flow before resolving each case
+                fn_def->flow = pre_branch;
                 auto case_type = resolve(scase, scope);
+
+                if (!always_terminates(scase->data.case_expr.body)) {
+                    case_flows.add(fn_def->flow.fork());
+                    all_terminate = false;
+                }
+
                 if (ret_type) {
                     check_assignment(scase, case_type, ret_type);
                     scase->resolved_type = ret_type;
@@ -4731,16 +4768,54 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     ret_type = case_type;
                 }
             }
+
+            // Determine exhaustiveness for type switch
+            // (type switches on interfaces are generally not exhaustive unless has_else)
+            bool exhaustive = has_else;
+
+            // Merge flow states
+            if (all_terminate && exhaustive) {
+                // All cases terminate and switch is exhaustive: nothing runs after
+            } else if (case_flows.len == 0) {
+                // All cases terminate but not exhaustive: no-match path continues
+                fn_def->flow = pre_branch;
+            } else {
+                // Start with first non-terminating case's flow
+                fn_def->flow = case_flows[0];
+                for (int i = 1; i < case_flows.len; i++) {
+                    fn_def->flow.merge(case_flows[i]);
+                }
+                if (!exhaustive) {
+                    // Non-exhaustive: also merge with pre-branch (no-match path)
+                    fn_def->flow.merge(pre_branch);
+                }
+            }
+
             return ret_type ? ret_type : get_system_types()->void_;
         }
 
         auto expr_comparator = resolve_comparator(expr_type, scope);
 
+        // Fork flow state for branch-aware analysis
+        assert(scope.parent_fn_node);
+        auto *fn_def = &scope.parent_fn_node->data.fn_def;
+        auto pre_branch = fn_def->flow.fork();
+
         ChiType *ret_type = scope.value_type;
+        array<ast::FlowState> case_flows;
+        bool all_terminate = true;
+        bool has_else = false;
+        int covered_count = 0;
+
         for (auto scase : data.cases) {
             // Skip null case expressions
             if (!scase)
                 continue;
+
+            if (scase->data.case_expr.is_else)
+                has_else = true;
+            else
+                covered_count += scase->data.case_expr.clauses.len;
 
             // Resolve clauses BEFORE body so we can inject narrowed vars
             if (!scase->data.case_expr.is_else) {
@@ -4782,7 +4857,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
 
+            // Restore pre-branch flow before resolving each case
+            fn_def->flow = pre_branch;
             auto case_type = resolve(scase, scope);
+
+            if (!always_terminates(scase->data.case_expr.body)) {
+                case_flows.add(fn_def->flow.fork());
+                all_terminate = false;
+            }
 
             if (ret_type) {
                 check_assignment(scase, case_type, ret_type);
@@ -4792,20 +4874,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // Check exhaustiveness: require else unless all enum variants are covered
-        bool has_else = false;
-        int covered_count = 0;
-        for (auto scase : data.cases) {
-            if (!scase) continue;
-            if (scase->data.case_expr.is_else) {
-                has_else = true;
-                break;
-            }
-            covered_count += scase->data.case_expr.clauses.len;
-        }
-        if (!has_else) {
+        // Determine exhaustiveness
+        bool exhaustive = has_else;
+        if (!exhaustive) {
             auto underlying = expr_type->eval();
-            bool exhaustive = false;
             if (underlying && underlying->kind == TypeKind::EnumValue) {
                 auto enum_ = underlying->data.enum_value.parent_enum();
                 if (enum_ && covered_count >= enum_->variants.len) {
@@ -4814,6 +4886,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             if (!exhaustive && ret_type && ret_type->kind != TypeKind::Void) {
                 error(node, errors::SWITCH_EXPR_MUST_HAVE_ELSE);
+            }
+        }
+
+        // Merge flow states
+        if (all_terminate && exhaustive) {
+            // All cases terminate and switch is exhaustive: nothing runs after
+        } else if (case_flows.len == 0) {
+            // All cases terminate but not exhaustive: no-match path continues
+            fn_def->flow = pre_branch;
+        } else {
+            // Start with first non-terminating case's flow
+            fn_def->flow = case_flows[0];
+            for (int i = 1; i < case_flows.len; i++) {
+                fn_def->flow.merge(case_flows[i]);
+            }
+            if (!exhaustive) {
+                // Non-exhaustive: also merge with pre-branch (no-match path)
+                fn_def->flow.merge(pre_branch);
             }
         }
 

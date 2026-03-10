@@ -125,4 +125,25 @@ result: 1
 === branch else alive ===
 h alive in else: 700
 Heavy.delete(700)
+=== switch maybe move ===
+consumed: 800
+Heavy.delete(800)
+after switch
+=== switch all move ===
+consumed: 900
+Heavy.delete(900)
+after switch
+=== switch guard clause ===
+h alive: 1000
+Heavy.delete(1000)
+=== switch else alive ===
+h alive in else: 1100
+Heavy.delete(1100)
+=== try catch maybe move ===
+consumed: 1200
+Heavy.delete(1200)
+after try
+=== try catch guard ===
+h alive: 1300
+Heavy.delete(1300)
 Heavy.delete(20)

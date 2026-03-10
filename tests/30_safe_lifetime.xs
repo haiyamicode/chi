@@ -568,6 +568,91 @@ func test_branch_else_alive() {
     }
 }
 
+// Switch: move in one case only (maybe-move, needs drop flag)
+func test_switch_maybe_move() {
+    printf("=== switch maybe move ===\n");
+    var h = Heavy{value: 800};
+    var x = 1;
+    switch x {
+        1 => consume_heavy(move h),
+        else => {}
+    }
+    printf("after switch\n");
+}
+
+// Switch: move in all cases of exhaustive switch (definite sink)
+func test_switch_all_move() {
+    printf("=== switch all move ===\n");
+    var h = Heavy{value: 900};
+    var x = 1;
+    switch x {
+        1 => consume_heavy(move h),
+        else => consume_heavy(move h)
+    }
+    printf("after switch\n");
+}
+
+// Switch: guard clause — one case moves and returns
+func test_switch_guard_clause() {
+    printf("=== switch guard clause ===\n");
+    var h = Heavy{value: 1000};
+    var x = 2;
+    switch x {
+        1 => {
+            consume_heavy(move h);
+            return;
+        },
+        else => {}
+    }
+    printf("h alive: {}\n", h.value);
+}
+
+// Switch: else branch sees variable alive
+func test_switch_else_alive() {
+    printf("=== switch else alive ===\n");
+    var h = Heavy{value: 1100};
+    var x = 99;
+    switch x {
+        1 => consume_heavy(move h),
+        else => printf("h alive in else: {}\n", h.value)
+    }
+}
+
+// --- Try/catch branch-aware tests ---
+
+struct TestError {
+    impl Error {
+        func message() string { return "test error"; }
+    }
+}
+
+func may_throw(should_throw: bool) {
+    if should_throw {
+        throw new TestError{};
+    }
+}
+
+// Try/catch: move in catch only (maybe-move, needs drop flag)
+func test_try_catch_maybe_move() {
+    printf("=== try catch maybe move ===\n");
+    var h = Heavy{value: 1200};
+    try may_throw(true) catch {
+        consume_heavy(move h);
+    };
+    printf("after try\n");
+}
+
+// Try/catch: catch with return (guard clause pattern)
+func test_try_catch_guard() {
+    printf("=== try catch guard ===\n");
+    var h = Heavy{value: 1300};
+    try may_throw(false) catch {
+        consume_heavy(move h);
+        return;
+    };
+    printf("h alive: {}\n", h.value);
+}
+
 func get_val_lt<'a, T: 'a>(val: T) T {
     return val;
 }
@@ -620,5 +705,11 @@ func main() {
     test_branch_nested_mixed();
     test_branch_both_terminate();
     test_branch_else_alive();
+    test_switch_maybe_move();
+    test_switch_all_move();
+    test_switch_guard_clause();
+    test_switch_else_alive();
+    test_try_catch_maybe_move();
+    test_try_catch_guard();
 }
 
