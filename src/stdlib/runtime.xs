@@ -1057,11 +1057,8 @@ export struct Promise<T = Unit> {
         return this.data.value;
     }
 
-    func error() ?(&Error) {
-        if this.data.error {
-            return {this.data.error!.as_ref()};
-        }
-        return null;
+    func error() ?&Error {
+        return this.data.error?.as_ref();
     }
 
     private mut func on_resolve(callback: func <'static>(value: T)) {
@@ -1087,21 +1084,17 @@ export struct Promise<T = Unit> {
                 result.resolve(callback(value));
             }
         );
-        this.on_reject(
-            func [result] (err: Shared<Error>) {
-                result.reject_shared(err);
-            }
-        );
+        this.on_reject(func [result] (err: Shared<Error>) {
+            result.reject_shared(err);
+        });
         return result;
     }
 
     mut func catch(callback: func <'static>(err: Shared<Error>) T) Promise<T> {
         var result = Promise<T>{};
-        this.on_resolve(
-            func [result] (value: T) {
-                result.resolve(value);
-            }
-        );
+        this.on_resolve(func [result] (value: T) {
+            result.resolve(value);
+        });
         this.on_reject(
             func [result, callback] (err: Shared<Error>) {
                 result.resolve(callback(err));
