@@ -61,7 +61,6 @@ struct SystemTypes {
     ChiType *bool_ = nullptr;
     ChiType *array = nullptr;
     ChiType *optional = nullptr;
-    ChiType *result = nullptr;
     ChiType *promise = nullptr;
     ChiType *undefined = nullptr;
     ChiType *zeroinit = nullptr;
@@ -118,6 +117,7 @@ struct ResolveContext {
     ChiType *rt_array_type = nullptr;
     ChiType *rt_span_type = nullptr;
     ChiType *rt_promise_type = nullptr;
+    ChiType *rt_result_type = nullptr;
     ChiType *rt_lambda_type = nullptr;
     ChiType *rt_string_type = nullptr;
     ChiType *rt_error_type = nullptr;
@@ -368,6 +368,7 @@ class Resolver {
     void finalize_placeholder_lambda_params(ChiType *fn_type);
 
     ChiType *get_result_type(ChiType *value, ChiType *err);
+    bool is_result_type(ChiType *type);
 
     ChiType *get_wrapped_type(ChiType *elem, TypeKind kind);
 

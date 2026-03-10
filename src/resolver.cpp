@@ -99,8 +99,7 @@ void Resolver::context_init_primitives() {
     system_types.array = create_type(TypeKind::Array);
     system_types.span = create_type(TypeKind::Span);
     system_types.optional = create_type(TypeKind::Optional);
-    system_types.result = create_type(TypeKind::Result);
-    // Promise is now defined as a Chi-native struct in runtime.xs
+    // Result and Promise are now defined as Chi-native structs in runtime.xs
     // system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
     system_types.zeroinit = create_type(TypeKind::ZeroInit);
@@ -145,10 +144,7 @@ void Resolver::context_init_primitives() {
     add_primitive("Unit", system_types.unit);
     add_primitive("Tuple", system_types.tuple);
 
-    // non-primitive builtins
-    add_primitive("Result", system_types.result);
-    // Promise is now defined as a Chi-native struct in runtime.xs
-    // add_primitive("Promise", system_types.promise);
+    // Result and Promise are discovered from runtime.xs struct declarations
 
     // intrinsic symbols
     m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
@@ -528,7 +524,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Bool:
         // Allow implicit conversion from any int type to bool
         return from_type->is_int_like() || from_type->kind == TypeKind::Optional ||
-               from_type->kind == TypeKind::Result || from_type->is_pointer_like() ||
+               from_type->is_pointer_like() ||
                (is_explicit && from_type->kind == TypeKind::Byte);
     case TypeKind::Optional: {
         // Allow null, same optional type, or implicit T -> ?T wrap
@@ -1843,8 +1839,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (data.is_suffix) {
                 if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
-                } else if (t->kind == TypeKind::Result) {
-                    return t->data.result.value;
                 }
                 // Check for ops.Unwrap / ops.UnwrapMut
                 {
@@ -3434,6 +3428,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_array_type = struct_type;
                 } else if (node->name == "Promise") {
                     m_ctx->rt_promise_type = struct_type;
+                } else if (node->name == "Result") {
+                    m_ctx->rt_result_type = struct_type;
                 } else if (node->name == "__CxLambda") {
                     m_ctx->rt_lambda_type = struct_type;
                 } else if (node->name == "__CxString") {
@@ -5135,9 +5131,6 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     case TypeKind::FixedArray:
         return fmt::format("[{}]{}", type->data.fixed_array.size,
                            format_type(type->data.fixed_array.elem, for_display));
-    case TypeKind::Result:
-        return fmt::format("Result<{},{}>", format_type(type->get_elem(), for_display),
-                           format_type(type->data.result.error, for_display));
     case TypeKind::Unknown:
         return "unknown";
     case TypeKind::Undefined:
@@ -5637,8 +5630,6 @@ bool Resolver::is_borrowing_type(ChiType *type) {
     case TypeKind::Array:
     case TypeKind::Span:
         return is_borrowing_type(type->get_elem());
-    case TypeKind::Result:
-        return is_borrowing_type(type->get_elem()) || is_borrowing_type(type->data.result.error);
     case TypeKind::Subtype: {
         auto final_type = type->data.subtype.final_type;
         return final_type ? is_borrowing_type(final_type) : false;
@@ -5723,10 +5714,7 @@ bool Resolver::type_needs_destruction(ChiType *type) {
         return type_needs_destruction(type->data.fixed_array.elem);
     }
 
-    // Result always needs destruction — it owns the error object's heap allocation
-    if (type->kind == TypeKind::Result) {
-        return true;
-    }
+
 
     // &move T owns the pointee — RAII auto-destroy + free at scope exit
     if (type->kind == TypeKind::MoveRef) {
@@ -6514,8 +6502,6 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
         auto rt_string = m_ctx->rt_string_type;
         assert(rt_string);
         sty = rt_string;
-    } else if (sty->kind == TypeKind::Result) {
-        sty = sty->data.result.internal;
     } else if (sty->kind == TypeKind::EnumValue) {
         sty = sty->data.enum_value.resolved_struct;
     } else if (sty->kind == TypeKind::FnLambda) {
@@ -7358,8 +7344,7 @@ ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent
     }
     ast::Node *var_expr = expr_node;
     if (!narrowed_type) {
-        narrowed_type =
-            type->kind == TypeKind::Optional ? type->get_elem() : type->data.result.value;
+        narrowed_type = type->get_elem();
         auto expr = create_node(ast::NodeType::UnaryOpExpr);
         expr->token = expr_node->token;
         expr->data.unary_op_expr.is_suffix = true;
@@ -7412,7 +7397,7 @@ void Resolver::collect_narrowables(ast::Node *expr, bool when_truthy, array<ast:
     if (expr->type == NodeType::Identifier) {
         if (when_truthy) {
             auto type = node_get_type(expr);
-            if (type && (type->kind == TypeKind::Optional || type->kind == TypeKind::Result)) {
+            if (type && type->kind == TypeKind::Optional) {
                 out.add(expr);
             }
         }
@@ -7422,7 +7407,7 @@ void Resolver::collect_narrowables(ast::Node *expr, bool when_truthy, array<ast:
     if (expr->type == NodeType::DotExpr) {
         if (when_truthy) {
             auto type = node_get_type(expr);
-            if (type && (type->kind == TypeKind::Optional || type->kind == TypeKind::Result)) {
+            if (type && type->kind == TypeKind::Optional) {
                 out.add(expr);
             }
         }
@@ -7675,32 +7660,24 @@ ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
         value = m_ctx->rt_unit_type;
     }
 
-    auto key = fmt::format("Result<{},{}>", format_type_id(value), format_type_id(err));
-    if (auto cached = m_ctx->composite_types.get(key)) {
-        return *cached;
+    // Use the Chi-native Result<T, E> struct from runtime.xs
+    auto result = m_ctx->rt_result_type;
+    assert(result && "Result struct not found in runtime");
+
+    TypeList args;
+    args.add(value);
+    args.add(err);
+    return get_subtype(result, &args);
+}
+
+bool Resolver::is_result_type(ChiType *type) {
+    if (!m_ctx->rt_result_type) {
+        return false;
     }
-
-    auto result_type = create_type(TypeKind::Result);
-    auto &data = result_type->data.result;
-    data.value = value;
-    data.error = err;
-    result_type->global_id = key;
-    m_ctx->composite_types[key] = result_type;
-
-    // create internal struct for accessing the fields
-    data.internal = create_type(TypeKind::Struct);
-    auto &struct_ = data.internal->data.struct_;
-    auto dummy_node = create_node(NodeType::StructDecl);
-    dummy_node->name = key;
-    dummy_node->resolved_type = result_type;
-    struct_.node = dummy_node;
-    struct_.kind = ContainerKind::Struct;
-    struct_.node = nullptr;
-
-    auto err_optional = get_pointer_type(err, TypeKind::Optional);
-    struct_.add_member(get_allocator(), "error", dummy_node, err_optional);
-    struct_.add_member(get_allocator(), "value", dummy_node, value);
-    return result_type;
+    if (type->kind == TypeKind::Subtype) {
+        return type->data.subtype.generic == m_ctx->rt_result_type;
+    }
+    return false;
 }
 
 ChiType *Resolver::create_int_type(int bit_count, bool is_unsigned) {

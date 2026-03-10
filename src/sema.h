@@ -24,7 +24,7 @@ struct ChiLifetime;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Byte, Rune, String, Struct, Pointer,
           Reference, MutRef, MoveRef, Array, FixedArray, Span, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
-          Result, FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
+          FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
           Undefined, ZeroInit, Never, Unit, Tuple, Null)
 
 MAKE_ENUM(Visibility, Public, Private, Protected)
@@ -204,12 +204,6 @@ struct ChiTypeSpan {
     bool is_mut = false;
 };
 
-struct ChiTypeResult {
-    ChiType *value = nullptr;
-    ChiType *error = nullptr;
-    ChiType *internal = nullptr; // internal struct type
-};
-
 struct ChiTypeTuple {
     TypeList elements = {};
 };
@@ -327,7 +321,7 @@ struct ChiType {
         ChiTypeFloat float_;
         ChiTypeSubtype subtype;
         ChiTypePlaceholder placeholder;
-        ChiTypeResult result;
+
         ChiTypeFnLambda fn_lambda;
         ChiTypePromise promise;
         ChiTypeModule module;
@@ -369,7 +363,7 @@ struct ChiType {
             CHITYPE_CASE_INIT_FIELD(int_, Int, ChiTypeInt)
             CHITYPE_CASE_INIT_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_INIT_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
-            CHITYPE_CASE_INIT_FIELD(result, Result, ChiTypeResult)
+
             CHITYPE_CASE_INIT_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_INIT_FIELD(promise, Promise, ChiTypePromise)
             CHITYPE_CASE_INIT_FIELD(module, Module, ChiTypeModule)
@@ -404,7 +398,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(int_, Int, ChiTypeInt)
             CHITYPE_CASE_DESTROY_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_DESTROY_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
-            CHITYPE_CASE_DESTROY_FIELD(result, Result, ChiTypeResult)
+
             CHITYPE_CASE_DESTROY_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_DESTROY_FIELD(promise, Promise, ChiTypePromise)
             CHITYPE_CASE_DESTROY_FIELD(module, Module, ChiTypeModule)
@@ -446,7 +440,7 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(int_, Int, ChiTypeInt)
             CHITYPE_CASE_CLONE_FIELD(float_, Float, ChiTypeFloat)
             CHITYPE_CASE_CLONE_FIELD(placeholder, Placeholder, ChiTypePlaceholder)
-            CHITYPE_CASE_CLONE_FIELD(result, Result, ChiTypeResult)
+
             CHITYPE_CASE_CLONE_FIELD(fn_lambda, FnLambda, ChiTypeFnLambda)
             CHITYPE_CASE_CLONE_FIELD(promise, Promise, ChiTypePromise)
             CHITYPE_CASE_CLONE_FIELD(module, Module, ChiTypeModule)

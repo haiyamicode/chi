@@ -995,6 +995,11 @@ export interface Error {
     func message() string;
 }
 
+export struct Result<T, E> {
+    error: ?E = null;
+    value: ?T = null;
+}
+
 // Promise for async operations
 struct PromiseState<T> {
     state: uint32 = 0; // 0=pending, 1=resolved, 2=rejected

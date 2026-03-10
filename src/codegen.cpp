@@ -2605,14 +2605,6 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             }
             return has_value;
         }
-        case TypeKind::Result: {
-            // Result is truthy when err.has_value is false (no error)
-            // Result internal struct: { ?E err, T value }
-            // ?E is { bool has_value, E }
-            auto has_err = builder.CreateExtractValue(value, {0, 0}, "has_err");
-            return builder.CreateXor(
-                has_err, llvm::ConstantInt::getTrue(compile_type(get_system_types()->bool_)));
-        }
         case TypeKind::Pointer:
         case TypeKind::Reference:
         case TypeKind::MutRef:
@@ -2972,34 +2964,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
 
-                if (data.op1->resolved_type->kind == TypeKind::Result) {
-                    // Result! — force unwrap value (panic if error)
-                    auto ref = compile_expr_ref(fn, data.op1);
-                    auto result_type = data.op1->resolved_type;
-                    auto result_type_l = compile_type(result_type);
-                    // Result internal struct: { ?E err, T value }
-                    // err is ?E which is { bool has_value, E }
-                    auto err_type =
-                        result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
-                    auto err_type_l = compile_type(err_type);
-                    auto err_p = builder.CreateStructGEP(result_type_l, ref.address, 0);
-                    auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
-                    auto has_err =
-                        builder.CreateLoad(compile_type(get_system_types()->bool_), has_err_p);
-                    // Assert no error: has_err must be false → negate for assert
-                    auto is_ok = builder.CreateXor(has_err, llvm::ConstantInt::getTrue(compile_type(
-                                                                get_system_types()->bool_)));
-                    auto assert = get_system_fn("assert");
-                    emit_dbg_location(expr);
-                    auto msg = compile_string_literal("unwrapping error Result");
-                    auto opt_msg =
-                        compile_conversion(fn, msg, get_system_types()->string,
-                                           get_resolver()->get_wrapped_type(
-                                               get_system_types()->string, TypeKind::Optional));
-                    builder.CreateCall(assert->llvm_fn, {is_ok, opt_msg});
-                    auto value_p = builder.CreateStructGEP(result_type_l, ref.address, 1);
-                    return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
-                }
                 if (data.resolved_call) {
                     auto ref_ptr = compile_fn_call(fn, data.resolved_call);
                     auto elem = expr->resolved_type;
@@ -3007,7 +2971,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         return ref_ptr;
                     return builder.CreateLoad(compile_type(elem), ref_ptr);
                 }
-                panic("unreachable: suffix ! on non-optional/result type");
+                panic("unreachable: suffix ! on non-optional type");
             } else {
                 auto value = compile_assignment_to_type(fn, data.op1, get_system_types()->bool_);
                 return builder.CreateXor(
@@ -3474,6 +3438,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         } else {
             // === RESULT MODE: try f() → Result<T, E> ===
 
+            // Result is now a runtime struct: { ?E error, ?T value }
+            // Get the resolved struct type for field access
+            auto result_struct = get_resolver()->resolve_struct_type(result_type);
+            auto err_field_type = result_struct->fields[0]->resolved_type; // ?E
+            auto err_field_type_l = compile_type(err_field_type);
+
             if (data.catch_expr) {
                 auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
                 auto caught_type_id =
@@ -3491,28 +3461,22 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 fn->use_label(nomatch_b);
                 builder.CreateResume(landing);
 
-                // Type matches: populate result with &ConcreteError
+                // Type matches: populate result.error with &ConcreteError
                 fn->use_label(match_b);
-                auto err_type =
-                    result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
-                auto err_type_l = compile_type(err_type);
                 auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
-                auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
+                auto has_err_p = builder.CreateStructGEP(err_field_type_l, err_p, 0);
                 builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
                                     has_err_p);
-                auto err_value_p = builder.CreateStructGEP(err_type_l, err_p, 1);
+                auto err_value_p = builder.CreateStructGEP(err_field_type_l, err_p, 1);
                 builder.CreateStore(error_data, err_value_p);
             } else {
-                // Catch-all: populate result with Error interface
-                auto err_type =
-                    result_type->data.result.internal->data.struct_.fields[0]->resolved_type;
-                auto err_type_l = compile_type(err_type);
+                // Catch-all: populate result.error with Error interface
                 auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
-                auto has_err_p = builder.CreateStructGEP(err_type_l, err_p, 0);
+                auto has_err_p = builder.CreateStructGEP(err_field_type_l, err_p, 0);
                 builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
                                     has_err_p);
-                auto err_value_p = builder.CreateStructGEP(err_type_l, err_p, 1);
-                auto iface_type_l = compile_type(err_type->get_elem());
+                auto err_value_p = builder.CreateStructGEP(err_field_type_l, err_p, 1);
+                auto iface_type_l = compile_type(err_field_type->get_elem());
                 auto data_p = builder.CreateStructGEP(iface_type_l, err_value_p, 0);
                 builder.CreateStore(error_data, data_p);
                 auto vtable_p = builder.CreateStructGEP(iface_type_l, err_value_p, 1);
@@ -3534,13 +3498,20 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 }
             }
         } else {
-            // Result mode: store value into Result.value field (index 1)
-            auto value_p = builder.CreateStructGEP(result_type_l, result_var, 1);
+            // Result mode: store value into Result.value field (?T at index 1)
+            auto result_struct = get_resolver()->resolve_struct_type(result_type);
+            auto val_field_type = result_struct->fields[1]->resolved_type; // ?T
+            auto val_field_type_l = compile_type(val_field_type);
+            auto val_p = builder.CreateStructGEP(result_type_l, result_var, 1);
+            auto has_val_p = builder.CreateStructGEP(val_field_type_l, val_p, 0);
+            builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
+                                has_val_p);
+            auto val_value_p = builder.CreateStructGEP(val_field_type_l, val_p, 1);
             if (invoke.sret) {
                 auto sret_loaded = builder.CreateLoad(invoke.sret_type, invoke.sret);
-                builder.CreateStore(sret_loaded, value_p);
+                builder.CreateStore(sret_loaded, val_value_p);
             } else if (value && !value->getType()->isVoidTy()) {
-                builder.CreateStore(value, value_p);
+                builder.CreateStore(value, val_value_p);
             }
         }
         builder.CreateBr(continue_b);
@@ -4034,12 +4005,6 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         }
         return src.value;
     };
-
-    // Result delegates to its internal struct type
-    if (type->kind == TypeKind::Result) {
-        compile_copy_with_ref(fn, src, dest, type->data.result.internal, expr, destruct_old);
-        return;
-    }
 
     // Optional: copy has_value flag + deep-copy inner value
     if (type->kind == TypeKind::Optional) {
@@ -6908,9 +6873,9 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
-    // Handle optionals, structs, results, and enum values via generated __delete
+    // Handle optionals, structs, and enum values via generated __delete
     if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct &&
-        type->kind != TypeKind::Result && type->kind != TypeKind::EnumValue) {
+        type->kind != TypeKind::EnumValue) {
         return;
     }
 
@@ -7141,11 +7106,6 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     // Handle Optional types
     if (resolved_type->kind == TypeKind::Optional) {
         return generate_destructor_optional(type, resolved_type);
-    }
-
-    // Handle Result types — owns the error object's heap allocation
-    if (resolved_type->kind == TypeKind::Result) {
-        return generate_destructor_result(type, resolved_type);
     }
 
     // Handle EnumValue types — switch on discriminator to destroy variant fields
@@ -7537,12 +7497,6 @@ Function *Compiler::generate_destructor_optional(ChiType *type, ChiType *resolve
     }
 
     return fn;
-}
-
-Function *Compiler::generate_destructor_result(ChiType *type, ChiType *resolved_type) {
-    // TODO: implement once TypeInfo destructor is in place
-    m_ctx->destructor_table[type] = nullptr;
-    return nullptr;
 }
 
 Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_type) {
@@ -8552,10 +8506,6 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
         members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), 23));
         return llvm::StructType::create(members, "Any");
-    }
-    case TypeKind::Result: {
-        auto &data = type->data.result;
-        return compile_type(data.internal);
     }
     case TypeKind::Struct: {
         auto key = get_resolver()->format_type_id(type);

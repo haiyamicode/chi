@@ -231,8 +231,6 @@ ChiType *ChiType::get_elem() {
         return data.fixed_array.elem;
     case TypeKind::Span:
         return data.span.elem;
-    case TypeKind::Result:
-        return data.result.value;
     case TypeKind::Promise:
         return data.promise.value;
     case TypeKind::This:
