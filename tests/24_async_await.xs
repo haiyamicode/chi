@@ -375,6 +375,7 @@ func test_multiple_bare() {
 
 struct TestError {
     code: int = 0;
+
     impl Error {
         func message() string {
             return stringf("error {}", this.code);
@@ -460,29 +461,35 @@ func test_async_throw_immediate() {
     println("=== async throw immediate ===");
     var p = async_throw_immediate();
     printf("rejected: {}\n", p.is_rejected());
-    p.catch(func (err: Shared<Error>) int {
-        printf("caught: {}\n", err.as_ref().message());
-        return -1;
-    });
+    p.catch(
+        func (err: Shared<Error>) int {
+            printf("caught: {}\n", err.as_ref().message());
+            return -1;
+        }
+    );
 }
 
 func test_async_throw_after_delay() {
     println("=== async throw after delay ===");
     var p = async_throw_after_delay();
     printf("immediate rejected: {}\n", p.is_rejected());
-    p.catch(func (err: Shared<Error>) int {
-        printf("delayed caught: {}\n", err.as_ref().message());
-        return -1;
-    });
+    p.catch(
+        func (err: Shared<Error>) int {
+            printf("delayed caught: {}\n", err.as_ref().message());
+            return -1;
+        }
+    );
 }
 
 func test_async_called_throws() {
     println("=== async called throws ===");
     var p = async_called_throws_after_delay();
-    p.catch(func (err: Shared<Error>) int {
-        printf("called caught: {}\n", err.as_ref().message());
-        return -1;
-    });
+    p.catch(
+        func (err: Shared<Error>) int {
+            printf("called caught: {}\n", err.as_ref().message());
+            return -1;
+        }
+    );
 }
 
 func test_async_resolve_after_delay() {
