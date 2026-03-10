@@ -420,6 +420,79 @@ func test_resolve_after_reject() {
     printf("is_rejected: {}\n", p.is_rejected());
 }
 
+// --- Async throw → rejection ---
+
+func might_throw(should_throw: bool) int {
+    if should_throw {
+        throw new TestError{code: 42};
+    }
+    return 10;
+}
+
+// immediate throw (no await)
+async func async_throw_immediate() Promise<int> {
+    throw new TestError{code: 10};
+    return 0;
+}
+
+// throw after delay
+async func async_throw_after_delay() Promise<int> {
+    var y = await time.sleep(50);
+    throw new TestError{code: 20};
+    return 0;
+}
+
+// called fn throws after delay
+async func async_called_throws_after_delay() Promise<int> {
+    var y = await time.sleep(100);
+    var x = might_throw(true);
+    return x;
+}
+
+// normal resolve after delay
+async func async_resolves_after_delay() Promise<int> {
+    var before = 42;
+    var y = await time.sleep(150);
+    return before;
+}
+
+func test_async_throw_immediate() {
+    println("=== async throw immediate ===");
+    var p = async_throw_immediate();
+    printf("rejected: {}\n", p.is_rejected());
+    p.catch(func (err: Shared<Error>) int {
+        printf("caught: {}\n", err.as_ref().message());
+        return -1;
+    });
+}
+
+func test_async_throw_after_delay() {
+    println("=== async throw after delay ===");
+    var p = async_throw_after_delay();
+    printf("immediate rejected: {}\n", p.is_rejected());
+    p.catch(func (err: Shared<Error>) int {
+        printf("delayed caught: {}\n", err.as_ref().message());
+        return -1;
+    });
+}
+
+func test_async_called_throws() {
+    println("=== async called throws ===");
+    var p = async_called_throws_after_delay();
+    p.catch(func (err: Shared<Error>) int {
+        printf("called caught: {}\n", err.as_ref().message());
+        return -1;
+    });
+}
+
+func test_async_resolve_after_delay() {
+    println("=== async resolve after delay ===");
+    var p = async_resolves_after_delay();
+    p.then(func (v: int) {
+        printf("resolved: {}\n", v);
+    });
+}
+
 // --- timeout / sleep ---
 
 func test_timeout() {
@@ -486,6 +559,12 @@ func main() {
     test_reject_chain();
     test_reject_after_resolve();
     test_resolve_after_reject();
+
+    // Async throw → rejection
+    test_async_throw_immediate();
+    test_async_throw_after_delay();
+    test_async_called_throws();
+    test_async_resolve_after_delay();
 
     // Timer
     test_timeout();

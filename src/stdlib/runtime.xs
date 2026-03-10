@@ -1095,6 +1095,21 @@ export struct Promise<T = Unit> {
         return result;
     }
 
+    mut func catch(callback: func <'static>(err: Shared<Error>) T) Promise<T> {
+        var result = Promise<T>{};
+        this.on_resolve(
+            func [result] (value: T) {
+                result.resolve(value);
+            }
+        );
+        this.on_reject(
+            func [result, callback] (err: Shared<Error>) {
+                result.resolve(callback(err));
+            }
+        );
+        return result;
+    }
+
     func ref_count() uint32 {
         return this.data.ref_count();
     }

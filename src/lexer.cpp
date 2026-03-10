@@ -1085,6 +1085,8 @@ string Token::get_name() const {
         return "new";
     case TokenType::KW_DELETE:
         return "delete";
+    case TokenType::KW_CATCH:
+        return "catch";
     default:
         return "";
     }

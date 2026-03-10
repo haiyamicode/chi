@@ -1039,7 +1039,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             compile_block(fn, node, fn_def.body, return_b);
         }
     }
-    if (fn->get_def()->has_try_or_cleanup()) {
+    if (fn->get_def()->has_try_or_cleanup() || fn->async_reject_promise_ptr) {
         fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
     }
 
@@ -1080,32 +1080,47 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     // cleanup landing pad (for handling exceptions)
     if (fn->cleanup_landing_label) {
         fn->use_label(fn->cleanup_landing_label);
-        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 0);
-        landing->setCleanup(true);
-        builder.CreateExtractValue(landing, {0});
-        builder.CreateExtractValue(landing, {1});
-        // Destroy function body block's vars (conservative: covers all function-level locals)
-        if (fn->get_def()->body) {
-            auto &body_block = fn->get_def()->body->data.block;
-            compile_block_cleanup(fn, &body_block, nullptr, body_block.exit_flow);
-        }
-        for (auto &owner : fn->error_owner_vars) {
-            auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
-            auto is_nonnull =
-                builder.CreateICmpNE(owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
-            auto do_free_b = fn->new_label("_err_cleanup");
-            auto skip_free_b = fn->new_label("_err_cleanup_done");
-            builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
-            fn->use_label(do_free_b);
-            if (owner.concrete_type) {
-                compile_destruction_for_type(fn, owned_ptr, owner.concrete_type);
+
+        if (fn->async_reject_promise_ptr) {
+            // Async function: catch typed errors and reject the promise
+            auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+            landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
+            emit_async_reject_landing_pad(fn, landing);
+            // Store rejected promise into return_value and return normally
+            auto promise_type_l = compile_type(fn->async_promise_type);
+            auto rejected_promise =
+                builder.CreateLoad(promise_type_l, fn->async_reject_promise_ptr);
+            builder.CreateStore(rejected_promise, fn->return_value);
+            builder.CreateBr(fn->return_label);
+        } else {
+            // Normal function: cleanup and re-throw
+            auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 0);
+            landing->setCleanup(true);
+            builder.CreateExtractValue(landing, {0});
+            builder.CreateExtractValue(landing, {1});
+            // Destroy function body block's vars (conservative: covers all function-level locals)
+            if (fn->get_def()->body) {
+                auto &body_block = fn->get_def()->body->data.block;
+                compile_block_cleanup(fn, &body_block, nullptr, body_block.exit_flow);
             }
-            builder.CreateCall(get_system_fn("cx_free")->llvm_fn, {owned_ptr});
-            builder.CreateBr(skip_free_b);
-            fn->use_label(skip_free_b);
+            for (auto &owner : fn->error_owner_vars) {
+                auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
+                auto is_nonnull = builder.CreateICmpNE(
+                    owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
+                auto do_free_b = fn->new_label("_err_cleanup");
+                auto skip_free_b = fn->new_label("_err_cleanup_done");
+                builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
+                fn->use_label(do_free_b);
+                if (owner.concrete_type) {
+                    compile_destruction_for_type(fn, owned_ptr, owner.concrete_type);
+                }
+                builder.CreateCall(get_system_fn("cx_free")->llvm_fn, {owned_ptr});
+                builder.CreateBr(skip_free_b);
+                fn->use_label(skip_free_b);
+            }
+            fn->insn_noop();
+            builder.CreateResume(landing);
         }
-        fn->insn_noop();
-        builder.CreateResume(landing);
     }
 
     llvm::verifyFunction(*fn->llvm_fn);
@@ -1884,6 +1899,10 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
     // Get pointer to the captured result promise (stored by value in captures)
     auto result_promise_ptr = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
 
+    // Enable async reject: any throw in this continuation will reject the promise
+    cont_fn->async_reject_promise_ptr = result_promise_ptr;
+    cont_fn->async_promise_type = ctx.promise_type;
+
     // Extract captured variables and add to var table
     map<ast::Node *, llvm::Value *> local_vars;
     for (size_t i = 0; i < captured_vars_ordered.size(); i++) {
@@ -1947,6 +1966,7 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
 
     // Compile the segment's statements
     for (auto stmt : segment.stmts) {
+        if (cont_fn->get_scope()->branched) break;
         if (stmt->type == ast::NodeType::ReturnStmt) {
             // For return in async function, resolve the result promise
             auto &data = stmt->data.return_stmt;
@@ -1978,25 +1998,27 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         }
     }
 
+    bool cont_branched = cont_fn->get_scope()->branched;
+
     // If segment has an await (not final), chain to next continuation
-    if (segment.await_expr && !is_final) {
+    if (segment.await_expr && !is_final && !cont_branched) {
         emit_promise_chain(cont_fn, ctx, segment.await_expr, segment_index + 1, local_vars,
                            result_promise_ptr);
     }
 
     cont_fn->pop_scope();
-    builder.CreateRetVoid();
+    if (!cont_branched) {
+        builder.CreateRetVoid();
+    }
 
-    // Emit cleanup landing pad if any invoke was generated
+    // Emit async reject landing pad if any invoke was generated
     if (cont_fn->cleanup_landing_label) {
         llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
         cont_fn->use_label(cont_fn->cleanup_landing_label);
-        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 0);
-        landing->setCleanup(true);
-        builder.CreateExtractValue(landing, {0});
-        builder.CreateExtractValue(landing, {1});
-        cont_fn->insn_noop();
-        builder.CreateResume(landing);
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+        landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
+        emit_async_reject_landing_pad(cont_fn, landing);
+        builder.CreateRetVoid();
     }
 
     // Clean up temporary vars from var_table
@@ -2152,7 +2174,25 @@ void Compiler::compile_async_fn_body(Function *fn) {
 
     // Check if there are any awaits - if the first segment has no await_expr, there are no awaits
     if (ctx.segments.empty() || !ctx.segments[0].await_expr) {
-        // No awaits - just compile normally
+        // No awaits - compile normally but with async reject enabled.
+        // Pre-initialize the result promise so reject can use it if a throw happens.
+        auto result_promise_ptr = fn->entry_alloca(promise_struct_type_l, "result_promise");
+        auto promise_struct = get_resolver()->resolve_struct_type(return_type);
+        auto new_member = promise_struct->find_member("new");
+        std::optional<TypeId> variant_type_id = std::nullopt;
+        if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
+            variant_type_id = return_type->id;
+        }
+        auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+        auto new_method = get_fn(new_method_node);
+        builder.CreateCall(new_method->llvm_fn, {result_promise_ptr});
+
+        // Store as return value so the function returns this promise
+        auto result_promise = builder.CreateLoad(promise_struct_type_l, result_promise_ptr);
+        builder.CreateStore(result_promise, fn->return_value);
+
+        fn->async_reject_promise_ptr = result_promise_ptr;
+        fn->async_promise_type = return_type;
         compile_block(fn, fn->node, body, fn->return_label);
         return;
     }
@@ -2195,6 +2235,10 @@ void Compiler::compile_async_fn_body(Function *fn) {
     // Restore builder position to parent function's first segment label
     fn->use_label(first_segment_label);
 
+    // Enable async reject: any throw in the first segment will reject the promise
+    fn->async_reject_promise_ptr = ctx.result_promise_ptr;
+    fn->async_promise_type = ctx.promise_type;
+
     // Now compile the first segment (code before first await)
     auto &first_segment = ctx.segments[0];
     map<ast::Node *, llvm::Value *> local_vars;
@@ -2203,6 +2247,7 @@ void Compiler::compile_async_fn_body(Function *fn) {
     fn->push_scope();
 
     for (auto stmt : first_segment.stmts) {
+        if (fn->get_scope()->branched) break;
         if (stmt->type == ast::NodeType::VarDecl) {
             compile_stmt(fn, stmt);
             local_vars[stmt] = get_var(stmt);
@@ -2212,19 +2257,103 @@ void Compiler::compile_async_fn_body(Function *fn) {
     }
 
     // Handle the first await - chain to continuation for segment 1
-    if (first_segment.await_expr) {
+    if (first_segment.await_expr && !fn->get_scope()->branched) {
         emit_promise_chain(fn, ctx, first_segment.await_expr, 1, local_vars,
                            ctx.result_promise_ptr);
     }
 
+    bool first_segment_branched = fn->get_scope()->branched;
     fn->pop_scope();
 
-    // Store result promise in return_value
-    auto result_promise = builder.CreateLoad(promise_struct_type_l, ctx.result_promise_ptr);
-    builder.CreateStore(result_promise, fn->return_value);
+    if (!first_segment_branched) {
+        // Store result promise in return_value
+        auto result_promise = builder.CreateLoad(promise_struct_type_l, ctx.result_promise_ptr);
+        builder.CreateStore(result_promise, fn->return_value);
 
-    // Jump to return label
-    builder.CreateBr(fn->return_label);
+        // Jump to return label
+        builder.CreateBr(fn->return_label);
+    }
+    // Note: async_reject_promise_ptr stays set — the cleanup landing pad
+    // in compile_fn_body epilogue will emit the async reject logic.
+}
+
+void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    // Distinguish panic (null thrown_ptr) vs typed error
+    auto thrown_ptr = builder.CreateExtractValue(landing, {0}, "thrown_ptr");
+    auto is_typed = builder.CreateICmpNE(
+        thrown_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()), "is_typed_error");
+
+    auto typed_error_b = fn->new_label("_async_typed_error");
+    auto panic_b = fn->new_label("_async_panic");
+    builder.CreateCondBr(is_typed, typed_error_b, panic_b);
+
+    // Panic path: re-throw (unrecoverable)
+    fn->use_label(panic_b);
+    builder.CreateResume((llvm::LandingPadInst *)landing);
+
+    // Typed error path: catch and reject the promise
+    fn->use_label(typed_error_b);
+
+    auto error_data = builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {}, "error_data");
+    auto error_vtable =
+        builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {}, "error_vtable");
+    emit_async_promise_reject(fn, error_data, error_vtable);
+}
+
+void Compiler::emit_async_promise_reject(Function *fn, llvm::Value *data_ptr,
+                                         llvm::Value *vtable_ptr) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    // Build FatIFacePointer<Error> = { data_ptr, vtable_ptr }
+    auto rt_error = get_resolver()->get_context()->rt_error_type;
+    auto move_ref_error = get_resolver()->get_pointer_type(rt_error, TypeKind::MoveRef);
+    auto fat_iface_type_l = compile_type(move_ref_error);
+    llvm::Value *fat_ptr = llvm::UndefValue::get(fat_iface_type_l);
+    fat_ptr = builder.CreateInsertValue(fat_ptr, data_ptr, {0});
+    fat_ptr = builder.CreateInsertValue(fat_ptr, vtable_ptr, {1});
+
+    // Resolve and call promise.reject(err)
+    auto promise_struct = get_resolver()->resolve_struct_type(fn->async_promise_type);
+    std::optional<TypeId> variant_type_id = std::nullopt;
+    if (fn->async_promise_type->kind == TypeKind::Subtype &&
+        !fn->async_promise_type->is_placeholder) {
+        variant_type_id = fn->async_promise_type->id;
+    }
+    auto reject_member = promise_struct->find_member("reject");
+    assert(reject_member && "Promise.reject() method not found");
+    auto reject_method_node = get_variant_member_node(reject_member, variant_type_id);
+    auto reject_method = get_fn(reject_method_node);
+    builder.CreateCall(reject_method->llvm_fn, {fn->async_reject_promise_ptr, fat_ptr});
+}
+
+llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
+                                                   llvm::Value *dest) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    InvokeInfo invoke;
+    auto next_label = fn->new_label("_invoke_next");
+    invoke.normal = next_label;
+    if (!fn->cleanup_landing_label) {
+        fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
+    }
+    invoke.landing = fn->cleanup_landing_label;
+    auto ret = compile_fn_call(fn, call_expr, &invoke, dest);
+    fn->use_label(next_label);
+    fn->has_cleanup_invoke = true;
+    if (dest) {
+        if (invoke.sret) {
+            // Struct return: already written to dest via sret
+        } else if (ret) {
+            builder.CreateStore(ret, dest);
+        }
+        return nullptr;
+    }
+    if (invoke.sret) {
+        return builder.CreateLoad(invoke.sret_type, invoke.sret);
+    }
+    return ret;
 }
 
 llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *value,
@@ -2652,7 +2781,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto dest = get_var(expr->resolved_outlet);
             auto type_l = compile_type(get_chitype(expr));
-            compile_fn_call(fn, expr, nullptr, dest);
+            if (fn->async_reject_promise_ptr) {
+                compile_fn_call_with_invoke(fn, expr, dest);
+            } else {
+                compile_fn_call(fn, expr, nullptr, dest);
+            }
             return builder.CreateLoad(type_l, dest);
         }
         auto &call_data = expr->data.fn_call_expr;
@@ -2676,22 +2809,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 [&]() -> llvm::Value * { return llvm::ConstantAggregateZero::get(result_type_l); });
         }
 
-        if (fn->get_def()->has_cleanup) {
-            auto &builder = *m_ctx->llvm_builder.get();
-            InvokeInfo invoke;
-            auto next_label = fn->new_label("_invoke_next");
-            invoke.normal = next_label;
-            if (!fn->cleanup_landing_label) {
-                fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
-            }
-            invoke.landing = fn->cleanup_landing_label;
-            auto result = compile_fn_call(fn, expr, &invoke);
-            fn->use_label(next_label);
-            fn->has_cleanup_invoke = true;
-            if (invoke.sret) {
-                return builder.CreateLoad(invoke.sret_type, invoke.sret);
-            }
-            return result;
+        if (fn->get_def()->has_cleanup || fn->async_reject_promise_ptr) {
+            return compile_fn_call_with_invoke(fn, expr);
         }
         return compile_fn_call(fn, expr);
     }
@@ -5478,8 +5597,13 @@ llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
     }
     // For non-sret with destination, store the return value
     if (sret_dest && !sret_type) {
-        builder.CreateStore(ret, sret_dest);
-        return nullptr;
+        if (!invoke) {
+            builder.CreateStore(ret, sret_dest);
+            return nullptr;
+        }
+        // With invoke: can't store here (invoke is a terminator).
+        // Return the value so the caller can store after switching to normal label.
+        return ret;
     }
     return sret_type ? builder.CreateLoad(sret_type, sret_var) : ret;
 }
@@ -5968,7 +6092,11 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                                          fn_call_data.fn_ref_expr->data.dot_expr.is_optional_chain;
                 if (!is_lambda && !is_optional_chain) {
                     // Pass var directly as sret destination - avoids intermediate copy
-                    compile_fn_call(fn, data.expr, nullptr, var);
+                    if (fn->async_reject_promise_ptr) {
+                        compile_fn_call_with_invoke(fn, data.expr, var);
+                    } else {
+                        compile_fn_call(fn, data.expr, nullptr, var);
+                    }
                 } else {
                     // Lambda calls - use original path
                     auto value = compile_assignment_to_type(fn, data.expr, var_type);
@@ -6075,11 +6203,30 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         assert(vtable);
         auto type_info = compile_type_info(elem_type);
 
-        // Call cx_throw(type_info, data_ptr, vtable_ptr, type_id)
-        auto throw_fn = get_system_fn("cx_throw");
-        auto type_id = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
-        llvm_builder.CreateCall(throw_fn->llvm_fn, {type_info, error_ref, vtable, type_id});
-        llvm_builder.CreateUnreachable();
+        if (fn->async_reject_promise_ptr) {
+            // In async context: convert throw to promise.reject() instead of cx_throw
+            emit_async_promise_reject(fn, error_ref, vtable);
+
+            if (fn->return_label) {
+                // Parent async function: store rejected promise and branch to return
+                auto promise_type_l = compile_type(fn->async_promise_type);
+                auto rejected_promise =
+                    llvm_builder.CreateLoad(promise_type_l, fn->async_reject_promise_ptr);
+                llvm_builder.CreateStore(rejected_promise, fn->return_value);
+                llvm_builder.CreateBr(fn->return_label);
+            } else {
+                // Async continuation: just return void
+                llvm_builder.CreateRetVoid();
+            }
+        } else {
+            // Normal context: call cx_throw
+            auto throw_fn = get_system_fn("cx_throw");
+            auto type_id =
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
+            llvm_builder.CreateCall(throw_fn->llvm_fn,
+                                    {type_info, error_ref, vtable, type_id});
+            llvm_builder.CreateUnreachable();
+        }
         scope->branched = true;
         break;
     }

@@ -80,6 +80,8 @@ struct Function {
     std::list<LoopLabels> loop_labels;
     std::vector<ast::Block *> active_blocks;  // block cleanup stack (inner to outer)
     bool has_cleanup_invoke = false;
+    llvm::Value *async_reject_promise_ptr = nullptr; // non-null in async: landing pad rejects promise
+    ChiType *async_promise_type = nullptr;           // Promise<T> type for reject call
 
     // Parameter information
     std::vector<ParameterInfo> parameter_info;
@@ -517,6 +519,10 @@ class Compiler {
                             int next_segment_index, map<ast::Node *, llvm::Value *> &local_vars,
                             llvm::Value *result_promise_ptr);
     void compile_async_fn_body(Function *fn);
+    void emit_async_reject_landing_pad(Function *fn, llvm::Value *landing);
+    void emit_async_promise_reject(Function *fn, llvm::Value *data_ptr, llvm::Value *vtable_ptr);
+    llvm::Value *compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
+                                             llvm::Value *dest = nullptr);
 
     void compile_struct_vtables(ChiType *type, ChiType *lookup_type = nullptr);
     llvm::Value *compile_type_info(ChiType *type);

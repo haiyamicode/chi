@@ -110,6 +110,7 @@ Token *Parser::expect_identifier() {
     case TokenType::KW_THIS_TYPE:
     case TokenType::KW_NEW:
     case TokenType::KW_DELETE:
+    case TokenType::KW_CATCH:
         return token;
 
     default:
@@ -484,7 +485,7 @@ FnKind Parser::parse_fn_identifier(Token **iden) {
             *iden = token;
         } else {
             fn_kind = FnKind::Method;
-            *iden = expect(TokenType::IDEN);
+            *iden = expect_identifier();
         }
     } else {
         *iden = expect(TokenType::IDEN);

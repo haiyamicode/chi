@@ -68,6 +68,13 @@ value: 10
 === resolve after reject ===
 is_resolved: false
 is_rejected: true
+=== async throw immediate ===
+rejected: true
+caught: error 10
+=== async throw after delay ===
+immediate rejected: false
+=== async called throws ===
+=== async resolve after delay ===
 === timeout ===
 scheduled
 === sleep ===
@@ -84,3 +91,6 @@ after third
 timeout fired
 sleep resolved
 captured: 42
+delayed caught: error 20
+called caught: error 42
+resolved: 42
