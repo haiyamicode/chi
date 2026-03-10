@@ -97,4 +97,32 @@ Resource.delete(rho)
 after block
 === generic lifetime bound ===
 r = 42
+=== branch maybe move ===
+consumed: 100
+Heavy.delete(100)
+after if (true)
+after if (false)
+Heavy.delete(101)
+=== branch guard clause ===
+h alive: 200
+Heavy.delete(200)
+=== branch both move ===
+consumed: 300
+Heavy.delete(300)
+after if
+=== branch nested maybe move ===
+consumed: 400
+Heavy.delete(400)
+after nested if
+=== branch nested mixed ===
+consumed: 500
+Heavy.delete(500)
+after nested mixed
+=== branch both terminate ===
+consumed: 600
+Heavy.delete(600)
+result: 1
+=== branch else alive ===
+h alive in else: 700
+Heavy.delete(700)
 Heavy.delete(20)

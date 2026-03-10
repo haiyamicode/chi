@@ -1086,7 +1086,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         builder.CreateExtractValue(landing, {1});
         // Destroy function body block's vars (conservative: covers all function-level locals)
         if (fn->get_def()->body) {
-            compile_block_cleanup(fn, &fn->get_def()->body->data.block);
+            auto &body_block = fn->get_def()->body->data.block;
+            compile_block_cleanup(fn, &body_block, nullptr, body_block.exit_flow);
         }
         for (auto &owner : fn->error_owner_vars) {
             auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
@@ -2827,6 +2828,15 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 ref.address,
                 llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0), size,
                 {});
+            // Clear drop flag for maybe-moved variables
+            auto *src_decl = data.op1->type == ast::NodeType::Identifier
+                                 ? data.op1->data.identifier.decl
+                                 : nullptr;
+            if (src_decl && m_ctx->drop_flags.has_key(src_decl)) {
+                builder.CreateStore(
+                    llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx),
+                    m_ctx->drop_flags[src_decl]);
+            }
             return value;
         }
         case TokenType::INC:
@@ -5938,6 +5948,13 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         add_var(stmt, var);
         auto var_type = get_chitype(stmt);
 
+        // Allocate drop flag for maybe-moved variables
+        if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(stmt)) {
+            auto flag = fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), stmt->name + ".alive");
+            llvm_builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), flag);
+            m_ctx->drop_flags[stmt] = flag;
+        }
+
         if (data.expr) {
             if (data.expr->type == ast::NodeType::FnCallExpr) {
                 auto &fn_call_data = data.expr->data.fn_call_expr;
@@ -6028,8 +6045,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             move_returned_var = data.expr->data.identifier.decl;
         }
         // Destroy all active block-local vars (inner to outer) before returning
+        // Use innermost block's exit_flow — it has the correct flow state at this return point
+        auto &return_flow = fn->active_blocks.back()->exit_flow;
         for (int i = fn->active_blocks.size() - 1; i >= 0; i--) {
-            compile_block_cleanup(fn, fn->active_blocks[i], move_returned_var);
+            compile_block_cleanup(fn, fn->active_blocks[i], move_returned_var, return_flow);
         }
         llvm_builder.CreateBr(fn->return_label);
         scope->branched = true;
@@ -6066,8 +6085,9 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto loop = fn->get_loop();
         auto &builder = *m_ctx->llvm_builder.get();
         // Destroy block-local vars between current scope and the loop boundary
+        auto &break_flow = fn->active_blocks.back()->exit_flow;
         for (int i = fn->active_blocks.size() - 1; i >= (int)loop->active_blocks_depth; i--) {
-            compile_block_cleanup(fn, fn->active_blocks[i]);
+            compile_block_cleanup(fn, fn->active_blocks[i], nullptr, break_flow);
         }
         if (token->type == TokenType::KW_BREAK) {
             builder.CreateBr(loop->end);
@@ -6452,18 +6472,34 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
 }
 
-void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node *skip_var) {
-    auto *fn_def = fn->get_def();
+void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node *skip_var,
+                                     ast::FlowState &flow) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto &llvm_ctx = *m_ctx->llvm_ctx.get();
     for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
         auto var = block->cleanup_vars[i];
         if (var == skip_var)
             continue; // Move-returned: skip destruction
-        if (fn_def->is_sunk(var))
-            continue;
         // Skip variables not yet compiled (e.g. early return before var decl)
         if (!m_ctx->var_table.has_key(var))
             continue;
-        compile_destruction(fn, get_var(var), var);
+        if (flow.is_maybe_sunk(var)) {
+            // Maybe-moved: check drop flag at runtime
+            auto *flag = m_ctx->drop_flags.get(var);
+            assert(flag);
+            auto alive = builder.CreateLoad(llvm::Type::getInt1Ty(llvm_ctx), *flag, "alive");
+            auto *do_destroy = llvm::BasicBlock::Create(llvm_ctx, "drop", fn->llvm_fn);
+            auto *skip_destroy = llvm::BasicBlock::Create(llvm_ctx, "drop.skip", fn->llvm_fn);
+            builder.CreateCondBr(alive, do_destroy, skip_destroy);
+            builder.SetInsertPoint(do_destroy);
+            compile_destruction(fn, get_var(var), var);
+            builder.CreateBr(skip_destroy);
+            builder.SetInsertPoint(skip_destroy);
+        } else if (flow.is_sunk(var)) {
+            continue; // Definitely moved: skip destruction
+        } else {
+            compile_destruction(fn, get_var(var), var);
+        }
     }
 }
 
@@ -7848,7 +7884,7 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
     // Destroy block-local vars (only if block didn't already branch away via return/break
     // and current BB isn't already terminated by a nested return/break)
     if (!scope->branched && !builder.GetInsertBlock()->getTerminator()) {
-        compile_block_cleanup(fn, &data);
+        compile_block_cleanup(fn, &data, nullptr, data.exit_flow);
     }
     fn->active_blocks.pop_back();
     fn->pop_scope();

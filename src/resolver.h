@@ -445,6 +445,7 @@ class Resolver {
                          ast::Node *dest, ChiType *dest_type);
 
     void check_lifetime_constraints(ast::FnDef *fn_def);
+    void check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &flow);
 
     bool compare_impl_type(ChiType *base, ChiType *impl);
 

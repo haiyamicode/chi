@@ -1246,7 +1246,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
             if (fn_def.is_sunk(data.decl)) {
-                auto *target = fn_def.sink_edges[data.decl];
+                auto *target = fn_def.flow.sink_target(data.decl);
                 bool is_delete = target && target->type == NodeType::PrefixExpr &&
                                  target->data.prefix_expr.prefix->type == TokenType::KW_DELETE;
                 array<Note> notes;
@@ -1261,7 +1261,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Track last-use position for sink check (NLL-like)
         if (scope.parent_fn_node && node->token) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
-            fn_def.terminal_last_use[data.decl] = node->token->pos.offset;
+            fn_def.flow.terminal_last_use[data.decl] = node->token->pos.offset;
         }
 
         // Convert function to lambda when used as value (not in call context)
@@ -2972,9 +2972,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto *lt = callee_proto->params[i]->data.param_decl.borrow_lifetime;
                     if (lt && lt->kind == LifetimeKind::Static) {
                         auto *arg = data.args[i];
-                        if (fn_def.ref_edges.has_key(arg)) {
+                        if (fn_def.flow.ref_edges.has_key(arg)) {
                             fn_def.add_terminal(arg);
-                            fn_def.terminal_lifetimes[arg] = lt;
+                            fn_def.flow.terminal_lifetimes[arg] = lt;
                         }
                     }
                 }
@@ -3054,10 +3054,40 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         check_assignment(data.condition, cond_type, get_system_types()->bool_);
+
+        // Fork flow state for branch-aware analysis
+        assert(scope.parent_fn_node);
+        auto *fn_def = &scope.parent_fn_node->data.fn_def;
+        auto pre_branch = fn_def->flow.fork();
+
         auto then_type = resolve(data.then_block, scope);
+        bool then_terminates = always_terminates(data.then_block);
+
         ChiType *else_type = nullptr;
         if (data.else_node) {
+            auto then_flow = fn_def->flow.fork();
+            fn_def->flow = pre_branch;
             else_type = resolve(data.else_node, scope);
+            bool else_terminates = always_terminates(data.else_node);
+            if (then_terminates && else_terminates) {
+                // Both terminate: doesn't matter, nothing runs after
+            } else if (then_terminates) {
+                // Only then terminates: else flow continues
+            } else if (else_terminates) {
+                // Only else terminates: then flow continues
+                fn_def->flow = then_flow;
+            } else {
+                // Neither terminates: merge both
+                fn_def->flow.merge(then_flow);
+            }
+        } else {
+            if (then_terminates) {
+                // Guard clause: then always exits, restore pre-branch
+                fn_def->flow = pre_branch;
+            } else {
+                // Then may fall through: merge with pre-branch (no-else path)
+                fn_def->flow.merge(pre_branch);
+            }
         }
 
         // Guard clause narrowing: identifiers narrowed when condition is falsy
@@ -3101,6 +3131,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             child_scope = child_scope.set_is_unsafe_block(true);
         }
+        // Snapshot flow state and run lifetime checks at block exit
+        assert(scope.parent_fn_node);
+        auto snapshot_flow = [&]() {
+            auto &fn_def = scope.parent_fn_node->data.fn_def;
+            data.exit_flow = fn_def.flow.fork();
+            check_lifetime_constraints(&fn_def, data.exit_flow);
+        };
         for (auto stmt : data.statements) {
             auto stmt_type = resolve(stmt, child_scope);
             ensure_temp_owner(stmt, stmt_type, child_scope);
@@ -3113,10 +3150,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.return_expr->index = data.statements.len;
                 data.statements.add(data.return_expr);
                 data.return_expr = nullptr;
+                snapshot_flow();
                 return get_system_types()->void_;
             }
+            snapshot_flow();
             return type;
         }
+        snapshot_flow();
         return get_system_types()->void_;
     }
     case NodeType::EnumDecl: {
@@ -4330,7 +4370,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     fn_def.add_sink_edge(deleted_decl, node);
                     // Propagate sink to the data this variable currently points to
-                    auto *edges = fn_def.ref_edges.get(deleted_decl);
+                    auto *edges = fn_def.flow.ref_edges.get(deleted_decl);
                     if (edges) {
                         size_t offset = fn_def.current_edge_offset(deleted_decl);
                         for (size_t i = offset; i < edges->len; i++) {
@@ -8587,9 +8627,9 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
     for (size_t i = 0; i < param_lts.len && i < call.args.len; i++) {
         if (param_lts[i] && param_lts[i]->kind == LifetimeKind::Static) {
             auto *arg = call.args[i];
-            if (fn_def.ref_edges.has_key(arg)) {
+            if (fn_def.flow.ref_edges.has_key(arg)) {
                 fn_def.add_terminal(arg);
-                fn_def.terminal_lifetimes[arg] = param_lts[i];
+                fn_def.flow.terminal_lifetimes[arg] = param_lts[i];
             }
         }
     }
@@ -8771,44 +8811,49 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
 }
 
 // Check lifetime constraints for all terminals in a function.
+// Wrapper: checks lifetime constraints on the function's current flow state
+void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
+    check_lifetime_constraints(fn_def, fn_def->flow);
+}
+
 // DFS from each terminal following ref_edges. For every reachable node,
 // satisfies_lifetime_constraint(required, node) determines if the constraint holds.
-void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
+void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &flow) {
     // Any local with outgoing ref_edges is a terminal (intra-function ordering)
-    for (auto &[from, _] : fn_def->ref_edges.data) {
+    for (auto &[from, _] : flow.ref_edges.data) {
         if (from->decl_order >= 0) {
-            fn_def->add_terminal(from);
+            flow.add_terminal(from);
         }
     }
 
-    if (fn_def->terminals.len == 0 && fn_def->ref_edges.data.size() == 0)
+    if (flow.terminals.len == 0 && flow.ref_edges.data.size() == 0)
         return;
     bool is_safe = has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE);
     bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE);
 
     auto fn_name = fn_def->fn_proto ? fn_def->fn_proto->name : "<lambda>";
 
-    if (verbose && fn_def->ref_edges.data.size() > 0) {
+    if (verbose && flow.ref_edges.data.size() > 0) {
         fmt::print("[lifetime] === {} ===\n", fn_name);
         fmt::print("[lifetime] edges:\n");
-        for (auto &[from, tos] : fn_def->ref_edges.data) {
+        for (auto &[from, tos] : flow.ref_edges.data) {
             for (auto *to : tos) {
                 fmt::print("[lifetime]   {} -> {}\n", node_label(from), node_label(to));
             }
         }
-        fmt::print("[lifetime] terminals ({}):\n", fn_def->terminals.len);
-        for (size_t i = 0; i < fn_def->terminals.len; i++) {
-            fmt::print("[lifetime]   {}\n", node_label(fn_def->terminals[i]));
+        fmt::print("[lifetime] terminals ({}):\n", flow.terminals.len);
+        for (size_t i = 0; i < flow.terminals.len; i++) {
+            fmt::print("[lifetime]   {}\n", node_label(flow.terminals[i]));
         }
     }
 
-    for (size_t t = 0; t < fn_def->terminals.len; t++) {
-        auto *terminal = fn_def->terminals[t];
+    for (size_t t = 0; t < flow.terminals.len; t++) {
+        auto *terminal = flow.terminals[t];
 
         // Extract required lifetime from terminal's type.
         ChiLifetime *required = nullptr;
         // Check for explicitly-set lifetime constraint (e.g. 'static from func<'static>)
-        auto *explicit_lt = fn_def->terminal_lifetimes.get(terminal);
+        auto *explicit_lt = flow.terminal_lifetimes.get(terminal);
         if (explicit_lt) {
             required = *explicit_lt;
         } else if (terminal->type == ast::NodeType::ReturnStmt) {
@@ -8845,7 +8890,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
                        required ? "'" + required->name : "'fn");
         }
 
-        auto *deps = fn_def->ref_edges.get(terminal);
+        auto *deps = flow.ref_edges.get(terminal);
         if (!deps)
             continue;
 
@@ -8878,7 +8923,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
                 }
             }
 
-            if (auto *next = fn_def->ref_edges.get(node)) {
+            if (auto *next = flow.ref_edges.get(node)) {
                 for (size_t i = 0; i < next->len; i++)
                     stack.add(next->items[i]);
             }
@@ -8891,21 +8936,21 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def) {
     // Also uses terminal_last_use for NLL-like precision: if the terminal's last use
     // is before the sink point, it's safe (the dangling ref is never dereferenced).
     if (is_safe) {
-        for (size_t t = 0; t < fn_def->terminals.len; t++) {
-            auto *terminal = fn_def->terminals[t];
+        for (size_t t = 0; t < flow.terminals.len; t++) {
+            auto *terminal = flow.terminals[t];
             // Skip terminals that were themselves sunk — the direct use-after-delete
             // check at Identifier resolution handles that case
-            if (fn_def->is_sunk(terminal))
+            if (flow.is_sunk(terminal))
                 continue;
-            auto *deps = fn_def->ref_edges.get(terminal);
+            auto *deps = flow.ref_edges.get(terminal);
             if (!deps)
                 continue;
-            size_t offset = fn_def->current_edge_offset(terminal);
-            auto *last_use = fn_def->terminal_last_use.get(terminal);
+            size_t offset = flow.current_edge_offset(terminal);
+            auto *last_use = flow.terminal_last_use.get(terminal);
             for (size_t i = offset; i < deps->len; i++) {
                 auto *node = deps->items[i];
-                if (fn_def->is_sunk(node)) {
-                    auto *sink_target = fn_def->sink_edges[node];
+                if (flow.is_sunk(node)) {
+                    auto *sink_target = flow.sink_target(node);
                     // Move ownership: if the sunk node was moved INTO this terminal, skip
                     // (e.g. var b = move a; — b owns the data, a is sunk with dest=b)
                     if (sink_target == terminal)

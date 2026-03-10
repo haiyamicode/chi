@@ -241,6 +241,7 @@ struct CodegenContext {
     std::vector<llvm::Constant *> reflection_vtable = {};
 
     map<ast::Node *, llvm::Value *> var_table = {};
+    map<ast::Node *, llvm::Value *> drop_flags = {}; // maybe-moved vars: i1 alloca (true=alive)
     map<string, llvm::Type *> type_table = {};
     map<TypeId, box<TypeInfo>> info_table = {};
     map<string, Function *> function_table = {};
@@ -329,7 +330,8 @@ class Compiler {
 
     inline llvm::Type *compile_type_of(ast::Node *node);
 
-    void compile_block_cleanup(Function *fn, ast::Block *block, ast::Node *skip_var = nullptr);
+    void compile_block_cleanup(Function *fn, ast::Block *block, ast::Node *skip_var,
+                               ast::FlowState &flow);
     void compile_destruction(Function *fn, llvm::Value *address, ast::Node *node);
     void compile_destruction_for_type(Function *fn, llvm::Value *address, ChiType *type);
     void compile_heap_free(Function *fn, llvm::Value *ptr, ChiType *elem_type);

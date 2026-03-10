@@ -473,6 +473,101 @@ func test_move_ptr_block() {
     // a was moved — not destroyed
 }
 
+// --- Branch-aware lifetime analysis ---
+
+// Maybe-move: moved in one branch, drop flag handles cleanup
+func test_branch_maybe_move() {
+    printf("=== branch maybe move ===\n");
+    var h = Heavy{value: 100};
+    if true {
+        consume_heavy(move h);
+    }
+    printf("after if (true)\n");
+
+    var h2 = Heavy{value: 101};
+    if false {
+        consume_heavy(move h2);
+    }
+    printf("after if (false)\n");
+}
+
+// Guard clause: move + return in then branch, no drop flag needed
+func test_branch_guard_clause() {
+    printf("=== branch guard clause ===\n");
+    var h = Heavy{value: 200};
+    if false {
+        consume_heavy(move h);
+        return;
+    }
+    printf("h alive: {}\n", h.value);
+}
+
+// Both branches move: definite sink, no cleanup at function end
+func test_branch_both_move() {
+    printf("=== branch both move ===\n");
+    var h = Heavy{value: 300};
+    if true {
+        consume_heavy(move h);
+    } else {
+        consume_heavy(move h);
+    }
+    printf("after if\n");
+}
+
+// Nested branches: maybe-move through nested ifs
+func test_branch_nested_maybe_move() {
+    printf("=== branch nested maybe move ===\n");
+    var h = Heavy{value: 400};
+    if true {
+        if true {
+            consume_heavy(move h);
+        }
+    }
+    printf("after nested if\n");
+}
+
+// Nested: move in inner if, outer else — different paths
+func test_branch_nested_mixed() {
+    printf("=== branch nested mixed ===\n");
+    var h = Heavy{value: 500};
+    if true {
+        consume_heavy(move h);
+    } else {
+        if true {
+            consume_heavy(move h);
+        } else {
+            consume_heavy(move h);
+        }
+    }
+    printf("after nested mixed\n");
+}
+
+// Guard clause with else: move in both, both terminate
+func test_branch_both_terminate() {
+    printf("=== branch both terminate ===\n");
+    var h = Heavy{value: 600};
+    var result = 0;
+    if true {
+        consume_heavy(move h);
+        result = 1;
+    } else {
+        consume_heavy(move h);
+        result = 2;
+    }
+    printf("result: {}\n", result);
+}
+
+// Else branch sees variable as alive (not poisoned by then's move)
+func test_branch_else_alive() {
+    printf("=== branch else alive ===\n");
+    var h = Heavy{value: 700};
+    if false {
+        consume_heavy(move h);
+    } else {
+        printf("h alive in else: {}\n", h.value);
+    }
+}
+
 func get_val_lt<'a, T: 'a>(val: T) T {
     return val;
 }
@@ -518,5 +613,12 @@ func main() {
     test_move_in_loop();
     test_move_ptr_block();
     test_generic_lifetime_bound();
+    test_branch_maybe_move();
+    test_branch_guard_clause();
+    test_branch_both_move();
+    test_branch_nested_maybe_move();
+    test_branch_nested_mixed();
+    test_branch_both_terminate();
+    test_branch_else_alive();
 }
 
