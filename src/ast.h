@@ -331,7 +331,8 @@ struct WhereClause {
 struct ImplementBlockData {
     array<Node *> interface_types = {};
     array<Node *> members = {};
-    array<WhereClause> where_clauses = {}; // Non-empty = conditional where-block
+    array<WhereClause> where_clauses = {};          // Non-empty = conditional where-block
+    WhereCondition *resolved_where_cond = nullptr;  // Built in pass 1, before member resolution
 };
 
 struct ExternDecl {

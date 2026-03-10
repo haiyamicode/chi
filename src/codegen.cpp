@@ -3843,14 +3843,17 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             // Deep-copy inner value (field 1) only if has_value
             auto bb_copy = fn->new_label("opt_copy_value");
             auto bb_done = fn->new_label("opt_copy_done");
+            auto saved_loc = builder.getCurrentDebugLocation();
             builder.CreateCondBr(hv, bb_copy, bb_done);
             fn->use_label(bb_copy);
+            builder.SetCurrentDebugLocation(saved_loc);
             auto src_val = builder.CreateStructGEP(opt_type_l, from_address, 1);
             auto dst_val = builder.CreateStructGEP(opt_type_l, dest, 1);
             auto inner = builder.CreateLoad(compile_type(elem_type), src_val);
             compile_copy(fn, inner, dst_val, elem_type, expr);
             builder.CreateBr(bb_done);
             fn->use_label(bb_done);
+            builder.SetCurrentDebugLocation(saved_loc);
             return;
         }
         // For Optional with trivially-copyable inner type, fall through to default
@@ -7057,6 +7060,7 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
 
     return fn;
 }
+
 
 Function *Compiler::generate_copier(ChiType *type) {
     // Don't generate copiers for placeholder types

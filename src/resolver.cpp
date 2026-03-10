@@ -3413,6 +3413,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             for (auto param : data.type_params) {
                 struct_->type_params.add(resolve(param, scope));
             }
+
+            // Build where conditions on impl blocks early (before member resolution)
+            // so that subtypes created during other structs' field resolution can
+            // filter members by where condition.
+            for (auto member : data.members) {
+                if (member->type != NodeType::ImplementBlock)
+                    continue;
+                auto &impl_data = member->data.implement_block;
+                if (impl_data.where_clauses.len == 0)
+                    continue;
+                impl_data.resolved_where_cond =
+                    build_where_condition(impl_data, struct_, scope);
+            }
+
             struct_->resolve_status = ResolveStatus::None;
             type_sym = create_type_symbol(node->name, struct_type);
             if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
@@ -3485,8 +3499,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             for (auto member : data.members) {
                 if (member->type == NodeType::ImplementBlock) {
-                    for (auto impl_member : member->data.implement_block.members) {
-                        resolve_struct_member(struct_type, impl_member, struct_scope);
+                    auto &impl_data = member->data.implement_block;
+                    for (auto impl_member : impl_data.members) {
+                        auto *sm = resolve_struct_member(struct_type, impl_member, struct_scope);
+                        if (sm && impl_data.resolved_where_cond)
+                            sm->where_condition = impl_data.resolved_where_cond;
                     }
                 } else if (member->type == NodeType::VarDecl &&
                            member->data.var_decl.is_embed && !member->data.var_decl.is_field) {
@@ -3513,12 +3530,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     continue;
                 auto &impl_data = member->data.implement_block;
 
-                // Skip where-blocks (handled below)
+                // Skip non-interface where-blocks (members tagged in pass 2)
                 if (impl_data.interface_types.len == 0)
                     continue;
 
-                // Build where condition for `impl Interface where T: Bound` blocks
-                auto *impl_where_cond = build_where_condition(impl_data, struct_, scope);
+                // Use where condition built in pass 1
+                auto *impl_where_cond = impl_data.resolved_where_cond;
 
                 for (auto iface_node : impl_data.interface_types) {
                     auto impl_trait = resolve_value(iface_node, scope);
@@ -3561,25 +3578,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
 
-            // Resolve where-blocks: tag members with where conditions
-            for (auto member : data.members) {
-                if (member->type != NodeType::ImplementBlock)
-                    continue;
-                auto &impl_data = member->data.implement_block;
-                if (impl_data.interface_types.len > 0 || impl_data.where_clauses.len == 0)
-                    continue;
-
-                auto *cond = build_where_condition(impl_data, struct_, scope);
-
-                for (auto impl_member : impl_data.members) {
-                    auto *sm = struct_->find_member(impl_member->name);
-                    if (sm)
-                        sm->where_condition = cond;
-                    auto *ssm = struct_->find_static_member(impl_member->name);
-                    if (ssm)
-                        ssm->where_condition = cond;
-                }
-            }
 
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
         } else if (struct_->resolve_status == ResolveStatus::EmbedsResolved) {

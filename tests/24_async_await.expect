@@ -55,6 +55,19 @@ value: 12
 === Bare await ===
 === Bare then logic ===
 === Multiple bare ===
+=== reject ===
+is_resolved: false
+is_rejected: true
+=== reject chain ===
+p rejected: true
+p2 rejected: true
+=== reject after resolve ===
+is_resolved: true
+is_rejected: false
+value: 10
+=== resolve after reject ===
+is_resolved: false
+is_rejected: true
 === timeout ===
 scheduled
 === sleep ===

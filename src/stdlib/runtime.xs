@@ -997,9 +997,11 @@ export interface Error {
 
 // Promise for async operations
 struct PromiseState<T> {
-    state: uint32 = 0; // 0=pending, 1=resolved
+    state: uint32 = 0; // 0=pending, 1=resolved, 2=rejected
     value: ?T = null;
+    error: ?Shared<Error> = null;
     callback: ?func (value: T) = null;
+    err_callback: ?func (err: Shared<Error>) = null;
 }
 
 export struct Promise<T = Unit> {
@@ -1028,19 +1030,53 @@ export struct Promise<T = Unit> {
         }
     }
 
+    mut func reject(err: &move Error) {
+        this.reject_shared(Shared<Error>{move err});
+    }
+
+    private mut func reject_shared(shared_err: Shared<Error>) {
+        if this.data.state != 0 {
+            return;
+        }
+        this.data.state = 2;
+        this.data.error = {move shared_err};
+        if this.data.err_callback {
+            this.data.err_callback!(this.data.error!);
+        }
+    }
+
     func is_resolved() bool {
         return this.data.state == 1;
+    }
+
+    func is_rejected() bool {
+        return this.data.state == 2;
     }
 
     func value() ?T {
         return this.data.value;
     }
 
+    func error() ?(&Error) {
+        if this.data.error {
+            return {this.data.error!.as_ref()};
+        }
+        return null;
+    }
+
     private mut func on_resolve(callback: func <'static>(value: T)) {
         if this.data.state == 1 {
             callback(this.data.value!);
-        } else {
+        } else if this.data.state == 0 {
             this.data.callback = callback;
+        }
+    }
+
+    private mut func on_reject(callback: func <'static>(err: Shared<Error>)) {
+        if this.data.state == 2 {
+            callback(this.data.error!);
+        } else if this.data.state == 0 {
+            this.data.err_callback = callback;
         }
     }
 
@@ -1049,6 +1085,11 @@ export struct Promise<T = Unit> {
         this.on_resolve(
             func [result, callback] (value: T) {
                 result.resolve(callback(value));
+            }
+        );
+        this.on_reject(
+            func [result] (err: Shared<Error>) {
+                result.reject_shared(err);
             }
         );
         return result;

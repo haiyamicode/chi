@@ -371,6 +371,55 @@ func test_multiple_bare() {
     do_multiple_bare();
 }
 
+// --- Promise reject ---
+
+struct TestError {
+    code: int = 0;
+    impl Error {
+        func message() string {
+            return stringf("error {}", this.code);
+        }
+    }
+}
+
+func test_reject() {
+    println("=== reject ===");
+    var p = Promise<int>{};
+    p.reject(new TestError{code: 42});
+    printf("is_resolved: {}\n", p.is_resolved());
+    printf("is_rejected: {}\n", p.is_rejected());
+}
+
+func test_reject_chain() {
+    println("=== reject chain ===");
+    var p = Promise<int>{};
+    var p2 = p.then(func (v: int) string {
+        return stringf("v={}", v);
+    });
+    p.reject(new TestError{code: 99});
+    printf("p rejected: {}\n", p.is_rejected());
+    printf("p2 rejected: {}\n", p2.is_rejected());
+}
+
+func test_reject_after_resolve() {
+    println("=== reject after resolve ===");
+    var p = Promise<int>{};
+    p.resolve(10);
+    p.reject(new TestError{code: 1});
+    printf("is_resolved: {}\n", p.is_resolved());
+    printf("is_rejected: {}\n", p.is_rejected());
+    printf("value: {}\n", p.value()!);
+}
+
+func test_resolve_after_reject() {
+    println("=== resolve after reject ===");
+    var p = Promise<int>{};
+    p.reject(new TestError{code: 2});
+    p.resolve(10);
+    printf("is_resolved: {}\n", p.is_resolved());
+    printf("is_rejected: {}\n", p.is_rejected());
+}
+
 // --- timeout / sleep ---
 
 func test_timeout() {
@@ -431,6 +480,12 @@ func main() {
     test_bare_await();
     test_bare_then_logic();
     test_multiple_bare();
+
+    // Reject
+    test_reject();
+    test_reject_chain();
+    test_reject_after_resolve();
+    test_resolve_after_reject();
 
     // Timer
     test_timeout();
