@@ -207,6 +207,7 @@ struct InvokeInfo {
     label_t *landing = nullptr;
     llvm::Value *sret = nullptr;
     llvm::Type *sret_type = nullptr;
+    bool used = false; // true when an invoke was actually emitted
 };
 
 // Async/await support structures

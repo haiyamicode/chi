@@ -2333,15 +2333,19 @@ llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call
                                                    llvm::Value *dest) {
     auto &builder = *m_ctx->llvm_builder.get();
     InvokeInfo invoke;
-    auto next_label = fn->new_label("_invoke_next");
-    invoke.normal = next_label;
     if (!fn->cleanup_landing_label) {
         fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
     }
     invoke.landing = fn->cleanup_landing_label;
+    // Don't create normal label eagerly — the invoke sites create it on-demand.
+    // This avoids orphaned blocks when compile_fn_call bypasses invoke
+    // (e.g., builtin trait calls like int.hash() that can't throw).
+    invoke.normal = nullptr;
     auto ret = compile_fn_call(fn, call_expr, &invoke, dest);
-    fn->use_label(next_label);
-    fn->has_cleanup_invoke = true;
+    if (invoke.used) {
+        fn->use_label(invoke.normal);
+        fn->has_cleanup_invoke = true;
+    }
     if (dest) {
         if (invoke.sret) {
             // Struct return: already written to dest via sret
@@ -2781,7 +2785,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto dest = get_var(expr->resolved_outlet);
             auto type_l = compile_type(get_chitype(expr));
-            if (fn->async_reject_promise_ptr) {
+            if (fn->get_def()->has_cleanup || fn->async_reject_promise_ptr) {
                 compile_fn_call_with_invoke(fn, expr, dest);
             } else {
                 compile_fn_call(fn, expr, nullptr, dest);
@@ -5205,8 +5209,7 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
             compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, elem_type,
                                   nullptr, destruct_old);
         }
-        if (invoke)
-            builder.CreateBr(invoke->normal);
+        // Intrinsics can't throw — no invoke needed, just continue linearly
         return true;
     }
 
@@ -5218,8 +5221,7 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         auto size = compile_expr(fn, data.args[2]);
         builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), src_ptr, llvm::MaybeAlign(), size);
         builder.CreateMemSet(src_ptr, builder.getInt8(0), size, llvm::MaybeAlign());
-        if (invoke)
-            builder.CreateBr(invoke->normal);
+        // Intrinsics can't throw — no invoke needed, just continue linearly
         return true;
     }
 
@@ -5268,7 +5270,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         if (use_sret) {
             // For struct returns, allocate space and pass as first argument
             auto return_type_l = compile_type(return_type);
-            sret_var = fn->entry_alloca(return_type_l, "lambda_sret");
+            sret_var = sret_dest ? sret_dest : fn->entry_alloca(return_type_l, "lambda_sret");
             args.push_back(sret_var);
         }
 
@@ -5286,7 +5288,12 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         llvm::FunctionCallee callee(bound_fn_type_l, fn_ptr);
         llvm::Value *ret = nullptr;
         if (invoke) {
+            if (!invoke->normal) {
+                invoke->normal = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "_invoke_next",
+                                                          fn->llvm_fn);
+            }
             ret = builder.CreateInvoke(callee, invoke->normal, invoke->landing, args);
+            invoke->used = true;
             if (use_sret) {
                 // For invoke with sret, the load happens later in the normal block
                 invoke->sret = sret_var;
@@ -5299,9 +5306,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             // For sret, load and return the struct value
             if (use_sret) {
                 if (sret_dest) {
-                    auto type_l = compile_type(return_type);
-                    auto val = builder.CreateLoad(type_l, sret_var);
-                    builder.CreateStore(val, sret_dest);
+                    // sret_dest was used directly as sret_var, result is already there
                     return nullptr;
                 }
                 return builder.CreateLoad(compile_type(return_type), sret_var);
@@ -5581,7 +5586,12 @@ llvm::Value *Compiler::create_fn_call_invoke(llvm::FunctionCallee callee,
 
     llvm::Value *ret = nullptr;
     if (invoke) {
+        if (!invoke->normal) {
+            invoke->normal = llvm::BasicBlock::Create(llvm_ctx, "_invoke_next",
+                                                      builder.GetInsertBlock()->getParent());
+        }
         ret = builder.CreateInvoke(callee, invoke->normal, invoke->landing, args);
+        invoke->used = true;
         if (sret_type) {
             invoke->sret = sret_var;
             invoke->sret_type = sret_type;
@@ -6092,7 +6102,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                                          fn_call_data.fn_ref_expr->data.dot_expr.is_optional_chain;
                 if (!is_lambda && !is_optional_chain) {
                     // Pass var directly as sret destination - avoids intermediate copy
-                    if (fn->async_reject_promise_ptr) {
+                    if (fn->get_def()->has_cleanup || fn->async_reject_promise_ptr) {
                         compile_fn_call_with_invoke(fn, data.expr, var);
                     } else {
                         compile_fn_call(fn, data.expr, nullptr, var);
