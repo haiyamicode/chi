@@ -353,6 +353,20 @@ func test_void_to_unit_conversion() {
     println("");
 }
 
+func make_tracked_lambda(id: int) (func () int) {
+    var box = TrackedBox{id};
+    return func [box] () int {
+        return box.id;
+    };
+}
+
+func test_lambda_return_capture() {
+    println("testing returned lambda capture lifecycle:");
+    var f = make_tracked_lambda(7);
+    printf("f() = {}\n", f());
+    println("");
+}
+
 func main() {
     test_basic_lambda();
     test_lambda_capture();
@@ -365,6 +379,7 @@ func main() {
     test_lambda_copy_semantics();
     test_lambda_capture_lifecycle();
     test_void_to_unit_conversion();
+    test_lambda_return_capture();
     println("All lambda tests completed!");
 }
 

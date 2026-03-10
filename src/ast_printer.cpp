@@ -211,7 +211,10 @@ void AstPrinter::print_node(Node *node) {
         }
         if (data.return_type) {
             emit(" ");
+            bool wrap = data.return_type->type == NodeType::FnProto;
+            if (wrap) emit("(");
             print_node(data.return_type);
+            if (wrap) emit(")");
         }
         break;
     }

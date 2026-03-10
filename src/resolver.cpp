@@ -2144,20 +2144,28 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             track_move_sink(scope.parent_fn_node, data.expr, expr_type, node, return_type);
         }
 
-        // Return-move optimization: when returning a simple local/param variable,
-        // mark the expression as moved (bitwise copy instead of deep copy).
-        // The codegen will skip destruction of this variable at the return site.
-        if (data.expr && !data.expr->escape.moved && data.expr->type == NodeType::Identifier &&
-            data.expr->data.identifier.kind == ast::IdentifierKind::Value) {
-            auto *decl = data.expr->data.identifier.decl;
-            if (decl && (decl->type == NodeType::VarDecl || decl->type == NodeType::ParamDecl)) {
-                bool is_field = decl->type == NodeType::VarDecl && decl->data.var_decl.is_field;
-                if (!is_field) {
-                    auto *var_type = node_get_type(decl);
-                    if (var_type && type_needs_destruction(var_type)) {
-                        data.expr->escape.moved = true;
+        // Return-move optimization: transfer ownership instead of copy.
+        // For named locals/params, skip their destruction at the return site.
+        // For non-addressable temps (e.g. lambda expressions), avoid creating
+        // a copy that would leak since the temp has no cleanup.
+        if (data.expr && !data.expr->escape.moved) {
+            if (data.expr->type == NodeType::Identifier &&
+                data.expr->data.identifier.kind == ast::IdentifierKind::Value) {
+                auto *decl = data.expr->data.identifier.decl;
+                if (decl &&
+                    (decl->type == NodeType::VarDecl || decl->type == NodeType::ParamDecl)) {
+                    bool is_field =
+                        decl->type == NodeType::VarDecl && decl->data.var_decl.is_field;
+                    if (!is_field) {
+                        auto *var_type = node_get_type(decl);
+                        if (var_type && type_needs_destruction(var_type)) {
+                            data.expr->escape.moved = true;
+                        }
                     }
                 }
+            } else if (!is_addressable(data.expr) && expr_type &&
+                       should_destroy(data.expr, expr_type)) {
+                data.expr->escape.moved = true;
             }
         }
 

@@ -64,4 +64,11 @@ captures to unit: 5+99
 explicit var: 77
 chained: val=42
 
+testing returned lambda capture lifecycle:
+TrackedBox(7) constructed
+TrackedBox(0) copied from TrackedBox(7)
+TrackedBox(7) destroyed
+f() = 7
+
+TrackedBox(7) destroyed
 All lambda tests completed!
