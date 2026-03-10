@@ -500,6 +500,79 @@ func test_async_resolve_after_delay() {
     });
 }
 
+// --- Nested rejection propagation ---
+
+async func nested_inner_throws() Promise<int> {
+    throw new TestError{code: 77};
+    return 0;
+}
+
+async func nested_outer_immediate() Promise<int> {
+    var x = await nested_inner_throws();
+    return x + 1;
+}
+
+async func nested_inner_delayed() Promise<int> {
+    var y = await time.sleep(200);
+    throw new TestError{code: 88};
+    return 0;
+}
+
+async func nested_outer_delayed() Promise<int> {
+    var x = await nested_inner_delayed();
+    return x + 1;
+}
+
+async func nested_3level_bottom() Promise<int> {
+    var y = await time.sleep(250);
+    throw new TestError{code: 33};
+    return 0;
+}
+
+async func nested_3level_middle() Promise<int> {
+    var x = await nested_3level_bottom();
+    return x + 1;
+}
+
+async func nested_3level_top() Promise<int> {
+    var x = await nested_3level_middle();
+    return x + 1;
+}
+
+func test_nested_rejection_immediate() {
+    println("=== nested rejection immediate ===");
+    var p = nested_outer_immediate();
+    printf("rejected: {}\n", p.is_rejected());
+    p.catch(
+        func (err: Shared<Error>) int {
+            printf("nested caught: {}\n", err.as_ref().message());
+            return -1;
+        }
+    );
+}
+
+func test_nested_rejection_delayed() {
+    println("=== nested rejection delayed ===");
+    var p = nested_outer_delayed();
+    p.catch(
+        func (err: Shared<Error>) int {
+            printf("nested delayed caught: {}\n", err.as_ref().message());
+            return -1;
+        }
+    );
+}
+
+func test_nested_rejection_3level() {
+    println("=== nested rejection 3level ===");
+    var p = nested_3level_top();
+    p.catch(
+        func (err: Shared<Error>) int {
+            printf("3level caught: {}\n", err.as_ref().message());
+            return -1;
+        }
+    );
+}
+
 // --- timeout / sleep ---
 
 func test_timeout() {
@@ -572,6 +645,11 @@ func main() {
     test_async_throw_after_delay();
     test_async_called_throws();
     test_async_resolve_after_delay();
+
+    // Nested rejection propagation
+    test_nested_rejection_immediate();
+    test_nested_rejection_delayed();
+    test_nested_rejection_3level();
 
     // Timer
     test_timeout();

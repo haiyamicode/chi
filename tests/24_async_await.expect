@@ -75,6 +75,11 @@ caught: error 10
 immediate rejected: false
 === async called throws ===
 === async resolve after delay ===
+=== nested rejection immediate ===
+rejected: true
+nested caught: error 77
+=== nested rejection delayed ===
+=== nested rejection 3level ===
 === timeout ===
 scheduled
 === sleep ===
@@ -94,3 +99,5 @@ captured: 42
 delayed caught: error 20
 called caught: error 42
 resolved: 42
+nested delayed caught: error 88
+3level caught: error 33

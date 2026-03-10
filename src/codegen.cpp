@@ -2107,6 +2107,94 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
     return builder.CreateLoad(lambda_struct_type_l, lambda_alloca);
 }
 
+llvm::Value *Compiler::build_rejection_forwarder_lambda(Function *fn, AsyncContext &ctx,
+                                                        llvm::Value *result_promise_ptr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &llvm_module = *m_ctx->llvm_module;
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+
+    // Capture struct: just { Promise<T> result_promise }
+    std::vector<llvm::Type *> capture_types = {ctx.promise_struct_type};
+    auto capture_struct_type = llvm::StructType::get(llvm_ctx, capture_types);
+    auto capture_size = llvm_module.getDataLayout().getTypeAllocSize(capture_struct_type);
+
+    // Find reject_shared method on Promise<T>
+    auto promise_struct = get_resolver()->resolve_struct_type(ctx.promise_type);
+    std::optional<TypeId> variant_type_id = std::nullopt;
+    if (ctx.promise_type->kind == TypeKind::Subtype && !ctx.promise_type->is_placeholder) {
+        variant_type_id = ctx.promise_type->id;
+    }
+    auto reject_shared_member = promise_struct->find_member("reject_shared");
+    assert(reject_shared_member && "Promise.reject_shared() method not found");
+    auto reject_shared_node = get_variant_member_node(reject_shared_member, variant_type_id);
+    auto reject_shared_fn = get_fn(reject_shared_node);
+
+    // Get Shared<Error> LLVM type from reject_shared's parameter
+    auto reject_shared_fn_type = reject_shared_fn->llvm_fn->getFunctionType();
+    auto shared_error_type_l = reject_shared_fn_type->getParamType(1); // arg 0 is &self
+
+    // Create the forwarder function: void __fnname_reject_fwd(void* data, Shared<Error> err)
+    auto void_type = llvm::Type::getVoidTy(llvm_ctx);
+    auto fwd_fn_type = llvm::FunctionType::get(void_type, {ptr_type, shared_error_type_l}, false);
+    auto fwd_fn_name = fn->qualified_name + "__reject_fwd";
+    auto fwd_llvm_fn =
+        llvm::Function::Create(fwd_fn_type, llvm::Function::PrivateLinkage, fwd_fn_name, llvm_module);
+
+    // Generate the forwarder body
+    auto saved_insert = builder.GetInsertBlock();
+    auto entry_b = llvm::BasicBlock::Create(llvm_ctx, "_entry", fwd_llvm_fn);
+    builder.SetInsertPoint(entry_b);
+
+    auto data_arg = fwd_llvm_fn->getArg(0);
+    auto err_arg = fwd_llvm_fn->getArg(1);
+
+    auto captures_ptr = builder.CreateBitCast(data_arg, capture_struct_type->getPointerTo());
+    auto promise_ptr = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
+
+    // Call reject_shared(&self=promise_ptr, err=shared_error)
+    builder.CreateCall(reject_shared_fn->llvm_fn, {promise_ptr, err_arg});
+    builder.CreateRetVoid();
+
+    llvm::verifyFunction(*fwd_llvm_fn);
+
+    // Restore builder to caller's position
+    builder.SetInsertPoint(saved_insert);
+
+    // Build capture and lambda (same pattern as build_continuation_lambda)
+    auto null_ti = llvm::ConstantPointerNull::get(ptr_type);
+
+    // Generate destructor for capture struct (contains Promise which needs destruction)
+    llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(ptr_type);
+    if (get_resolver()->type_needs_destruction(ctx.promise_type)) {
+        auto dtor = generate_destructor_continuation(capture_struct_type, ctx.promise_type, {});
+        if (dtor) {
+            dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, ptr_type);
+        }
+    }
+
+    auto [capture_ptr, captures_payload_ptr] =
+        compile_cxcapture_create((uint32_t)capture_size, null_ti, dtor_ptr);
+    auto typed_captures_ptr =
+        builder.CreateBitCast(captures_payload_ptr, capture_struct_type->getPointerTo());
+
+    // Zero-init then copy result promise
+    builder.CreateMemSet(captures_payload_ptr,
+                         llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
+                         capture_size, {});
+    auto result_gep = builder.CreateStructGEP(capture_struct_type, typed_captures_ptr, 0);
+    auto result_promise_val = builder.CreateLoad(ctx.promise_struct_type, result_promise_ptr);
+    compile_copy(fn, result_promise_val, result_gep, ctx.promise_type);
+
+    // Build __CxLambda struct
+    emit_dbg_location(fn->node);
+    auto [lambda_alloca, lambda_struct_type_l] =
+        compile_cxlambda_init(fn, fwd_llvm_fn, (uint32_t)capture_size);
+    compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
+
+    return builder.CreateLoad(lambda_struct_type_l, lambda_alloca);
+}
+
 void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
                                   int next_segment_index,
                                   map<ast::Node *, llvm::Value *> &local_vars,
@@ -2149,6 +2237,14 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     auto then_method = get_fn(then_method_node);
     emit_dbg_location(await_expr);
     builder.CreateCall(then_method->llvm_fn, {awaited_promise_ptr, lambda});
+
+    // Also register on_reject to propagate rejection to the result promise
+    auto reject_lambda = build_rejection_forwarder_lambda(fn, ctx, result_promise_ptr);
+    auto on_reject_member = promise_struct_type->find_member("on_reject");
+    assert(on_reject_member && "Promise.on_reject() method not found");
+    auto on_reject_node = get_variant_member_node(on_reject_member, variant_type_id);
+    auto on_reject_method = get_fn(on_reject_node);
+    builder.CreateCall(on_reject_method->llvm_fn, {awaited_promise_ptr, reject_lambda});
 }
 
 void Compiler::compile_async_fn_body(Function *fn) {

@@ -516,6 +516,8 @@ class Compiler {
     llvm::Value *build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,
                                            map<ast::Node *, llvm::Value *> &local_vars,
                                            llvm::Value *result_promise_ptr);
+    llvm::Value *build_rejection_forwarder_lambda(Function *fn, AsyncContext &ctx,
+                                                  llvm::Value *result_promise_ptr);
     void emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
                             int next_segment_index, map<ast::Node *, llvm::Value *> &local_vars,
                             llvm::Value *result_promise_ptr);
