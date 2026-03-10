@@ -238,7 +238,9 @@ func test_raii() {
 func test_early_delete() {
     printf("=== early delete ===\n");
     var a = new Resource{"epsilon"};
-    delete a;
+    unsafe {
+        delete a;
+    }
     // a is sunk — RAII does not destroy again
 }
 
@@ -371,7 +373,9 @@ func test_block_scoped_borrow() {
         printf("r.name = {}\n", r.name);
     }
     // r is out of scope, safe to delete
-    delete x;
+    unsafe {
+        delete x;
+    }
 }
 
 // Block destruction order: inner vars destroyed before outer

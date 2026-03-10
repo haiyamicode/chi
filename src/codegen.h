@@ -416,6 +416,7 @@ class Compiler {
         Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call);
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr,
                                  llvm::Value *sret_dest = nullptr);
+    bool compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invoke);
     llvm::Value *compile_builtin_trait_call(Function *fn, ast::Node *expr,
                                             ChiType *concrete_type, const std::string &method_name,
                                             ast::FnCallExpr &fn_call_data);

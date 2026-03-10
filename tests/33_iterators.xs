@@ -48,9 +48,11 @@ func test_basic_iteration() {
     }
     println("");
 
-    delete n1;
-    delete n2;
-    delete n3;
+    unsafe {
+        delete n1;
+        delete n2;
+        delete n3;
+    }
 }
 
 func test_mutation() {
@@ -70,9 +72,11 @@ func test_mutation() {
     }
     println("");
 
-    delete n1;
-    delete n2;
-    delete n3;
+    unsafe {
+        delete n1;
+        delete n2;
+        delete n3;
+    }
 }
 
 func test_empty_list() {
@@ -94,7 +98,9 @@ func test_single_element() {
         printf("{}\n", *item);
     }
 
-    delete n1;
+    unsafe {
+        delete n1;
+    }
 }
 
 func test_manual_iterator() {
@@ -117,8 +123,10 @@ func test_manual_iterator() {
         println("done");
     }
 
-    delete n1;
-    delete n2;
+    unsafe {
+        delete n1;
+        delete n2;
+    }
 }
 
 func main() {

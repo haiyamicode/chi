@@ -101,7 +101,7 @@ func test_unsafe_and_move(r: &move int) {
         var p = dangerous_alloc(10);
     }
     var x = move r;
-    delete x;
+    unsafe { delete x; }
 }
 
 // &mut type in signature
@@ -142,7 +142,7 @@ func test_lambda_ref_types() {
 
     // func type with &move param (exercises fn type lookahead)
     var f: func (n: &move int) = func (n: &move int) {
-        delete n;
+        unsafe { delete n; }
     };
 }
 

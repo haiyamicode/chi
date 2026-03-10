@@ -18,6 +18,7 @@ extern "C" {
     unsafe func cx_free(address: *void);
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
+    unsafe func __move(dest: *void, src: *void, size: uint32);
     unsafe func cx_runtime_start(stack: *void);
     unsafe func cx_set_program_vtable(ptr: *void);
     unsafe func cx_runtime_stop();
@@ -358,6 +359,9 @@ export struct Array<T> {
 
     mut func delete() {
         unsafe {
+            for var i: uint32 = 0; i < this.length; i++ {
+                delete this.data[i];
+            }
             cx_free(this.data as *void);
         }
     }
@@ -365,7 +369,7 @@ export struct Array<T> {
     mut func push(item: T) {
         unsafe {
             var ptr = cx_array_add(&this, sizeof T) as *T;
-            *ptr = move item;
+            mem.write(ptr, move item);
         }
     }
 

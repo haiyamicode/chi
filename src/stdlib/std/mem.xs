@@ -5,6 +5,7 @@ extern "C" {
     unsafe func cx_free(address: *void);
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
+    unsafe func __move(dest: *void, src: *void, size: uint32);
 }
 
 export extern "C" {
@@ -33,5 +34,9 @@ export unsafe func free(address: *void) {
 
 export unsafe func memset(address: *void, v: uint8, n: uint32) {
     cx_memset(address, v, n);
+}
+
+export unsafe func write<T>(dest: *T, value: T) {
+    __move(dest as *void, &value, sizeof T);
 }
 

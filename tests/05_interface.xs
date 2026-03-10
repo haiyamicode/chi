@@ -141,12 +141,16 @@ func test_heap_and_delete() {
     printf("{}: area={}\n", s.name(), s.area());
     s = r;
     printf("{}: area={}\n", s.name(), s.area());
-    delete c;
-    delete r;
+    unsafe {
+        delete c;
+        delete r;
+    }
     var d = new Circle{radius: 9};
     var si: &Shape = d;
     printf("{}: area={}\n", si.name(), si.area());
-    delete d;
+    unsafe {
+        delete d;
+    }
 }
 
 func test_function_params() {

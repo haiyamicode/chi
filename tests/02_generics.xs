@@ -149,7 +149,9 @@ func main() {
     printf("box_stack.value={}\n", box_stack.value);
     var box_heap = new GenericBox<int>{};
     printf("box_heap.value={}\n", box_heap.value);
-    delete box_heap;
+    unsafe {
+        delete box_heap;
+    }
     var a = Arr<int>{};
     a.push(1);
     a.push(2);

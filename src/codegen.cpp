@@ -3470,11 +3470,18 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::KW_DELETE: {
             emit_dbg_location(expr);
-            auto ptr = compile_expr(fn, data.expr);
-            auto ptr_type = get_chitype(data.expr);
-            auto elem_type =
-                (ptr_type && ptr_type->is_pointer_like()) ? ptr_type->get_elem() : nullptr;
-            compile_heap_free(fn, ptr, elem_type);
+            auto expr_type = get_chitype(data.expr);
+            if (expr_type->is_pointer_like()) {
+                // Pointer delete: destroy + free
+                auto ptr = compile_expr(fn, data.expr);
+                auto elem_type = expr_type->get_elem();
+                compile_heap_free(fn, ptr, elem_type);
+            } else {
+                // Value delete: destroy in-place, no free
+                auto ref = compile_expr_ref(fn, data.expr);
+                assert(ref.address);
+                compile_destruction_for_type(fn, ref.address, expr_type);
+            }
             return nullptr;
         }
         default:
@@ -5039,42 +5046,61 @@ llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
     return nullptr;
 }
 
+bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invoke) {
+    auto &data = expr->data.fn_call_expr;
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto callee_decl = data.fn_ref_expr->get_decl();
+    if (!callee_decl)
+        return false;
+
+    // __copy(dest, src, destruct_old) — deep copy via copy constructor
+    if (callee_decl->name == "__copy" && data.args.len == 3) {
+        auto dest_ptr = compile_expr(fn, data.args[0]);
+        auto src_ptr = compile_expr(fn, data.args[1]);
+        auto elem_type = get_chitype(data.args[0])->get_elem();
+        assert(elem_type && "first arg of __copy must be a pointer type");
+        bool destruct_old = true;
+        if (data.args[2]->type == ast::NodeType::LiteralExpr &&
+            data.args[2]->token->type == TokenType::BOOL) {
+            destruct_old = data.args[2]->token->val.b;
+        }
+        if (ChiTypeStruct::is_interface(elem_type)) {
+            auto dest_data = builder.CreateExtractValue(dest_ptr, {0}, "dest_data");
+            auto src_data = builder.CreateExtractValue(src_ptr, {0}, "src_data");
+            auto src_vtable = builder.CreateExtractValue(src_ptr, {1}, "src_vtable");
+            call_vtable_copier(fn, src_vtable, dest_data, src_data);
+        } else {
+            compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, elem_type,
+                                  nullptr, destruct_old);
+        }
+        if (invoke)
+            builder.CreateBr(invoke->normal);
+        return true;
+    }
+
+    // __move(dest, src, size) — raw memcpy + zero source, no destruction on either side
+    // Used for placement stores into uninitialized memory.
+    if (callee_decl->name == "__move" && data.args.len == 3) {
+        auto dest_ptr = compile_expr(fn, data.args[0]);
+        auto src_ptr = compile_expr(fn, data.args[1]);
+        auto size = compile_expr(fn, data.args[2]);
+        builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), src_ptr, llvm::MaybeAlign(), size);
+        builder.CreateMemSet(src_ptr, builder.getInt8(0), size, llvm::MaybeAlign());
+        if (invoke)
+            builder.CreateBr(invoke->normal);
+        return true;
+    }
+
+    return false;
+}
+
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke,
                                        llvm::Value *sret_dest) {
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
 
-    // Handle __copy(dest, src, destruct_old) intrinsic
-    {
-        auto callee_decl = data.fn_ref_expr->get_decl();
-        if (callee_decl && callee_decl->name == "__copy" && data.args.len == 3) {
-            auto dest_ptr = compile_expr(fn, data.args[0]);
-            auto src_ptr = compile_expr(fn, data.args[1]);
-            auto elem_type = get_chitype(data.args[0])->get_elem();
-            assert(elem_type && "first arg of __copy must be a pointer type");
-            // Third arg must be a compile-time bool literal
-            bool destruct_old = true;
-            if (data.args[2]->type == ast::NodeType::LiteralExpr &&
-                data.args[2]->token->type == TokenType::BOOL) {
-                destruct_old = data.args[2]->token->val.b;
-            }
-
-            if (ChiTypeStruct::is_interface(elem_type)) {
-                // For interface types, dest_ptr and src_ptr are fat pointers {data, vtable}.
-                auto dest_data = builder.CreateExtractValue(dest_ptr, {0}, "dest_data");
-                auto src_data = builder.CreateExtractValue(src_ptr, {0}, "src_data");
-                auto src_vtable = builder.CreateExtractValue(src_ptr, {1}, "src_vtable");
-                call_vtable_copier(fn, src_vtable, dest_data, src_data);
-            } else {
-                compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, elem_type,
-                                      nullptr, destruct_old);
-            }
-            if (invoke) {
-                builder.CreateBr(invoke->normal);
-            }
-            return nullptr;
-        }
-    }
+    if (compile_intrinsic(fn, expr, invoke))
+        return nullptr;
 
     if (data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda) {
         auto ref = compile_expr_ref(fn, data.fn_ref_expr);
@@ -5140,7 +5166,17 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             ret = builder.CreateCall(callee, args);
             // For sret, load and return the struct value
             if (use_sret) {
+                if (sret_dest) {
+                    auto type_l = compile_type(return_type);
+                    auto val = builder.CreateLoad(type_l, sret_var);
+                    builder.CreateStore(val, sret_dest);
+                    return nullptr;
+                }
                 return builder.CreateLoad(compile_type(return_type), sret_var);
+            }
+            if (sret_dest) {
+                builder.CreateStore(ret, sret_dest);
+                return nullptr;
             }
             return ret;
         }
@@ -6177,14 +6213,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             auto index = *indexp;
             llvm::Value *item_var = nullptr;
             if (data.bind) {
-                item_var = builder.CreateAlloca(compile_type(data.bind->resolved_type), nullptr,
-                                                "_bind_item_var");
+                item_var =
+                    fn->entry_alloca(compile_type(data.bind->resolved_type), "_bind_item_var");
                 add_var(data.bind, item_var);
             }
             llvm::Value *index_var = nullptr;
             if (data.index_bind) {
                 auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
-                index_var = builder.CreateAlloca(idx_type, nullptr, "_bind_index_var");
+                index_var = fn->entry_alloca(idx_type, "_bind_index_var");
                 add_var(data.index_bind, index_var);
             }
 
@@ -6275,14 +6311,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
             llvm::Value *item_var = nullptr;
             if (data.bind) {
-                item_var = builder.CreateAlloca(compile_type(data.bind->resolved_type), nullptr,
-                                                "_bind_item_var");
+                item_var =
+                    fn->entry_alloca(compile_type(data.bind->resolved_type), "_bind_item_var");
                 add_var(data.bind, item_var);
             }
             auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
             llvm::Value *index_var = nullptr;
             if (data.index_bind) {
-                index_var = builder.CreateAlloca(idx_type, nullptr, "_bind_index_var");
+                index_var = fn->entry_alloca(idx_type, "_bind_index_var");
                 builder.CreateStore(llvm::ConstantInt::get(idx_type, 0), index_var);
                 add_var(data.index_bind, index_var);
             }

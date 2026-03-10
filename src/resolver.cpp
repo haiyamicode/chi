@@ -2938,6 +2938,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
 
+        // __move(dest, src, size): sink the source variable so it's not destroyed at scope exit
+        if (fn_decl && fn_decl->name == "__move" && data.args.len == 3 &&
+            scope.parent_fn_node) {
+            auto *src_decl = find_root_decl(data.args[1]);
+            if (src_decl) {
+                scope.parent_fn_node->data.fn_def.add_sink_edge(src_decl, node);
+            }
+        }
+
         // 'static lifetime params: check callee's param borrow_lifetimes for 'static.
         // Void calls don't trigger add_call_borrow_edges, so we check here.
         if (scope.parent_fn_node && !scope.is_unsafe_block) {
@@ -3511,7 +3520,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             struct_->resolve_status = ResolveStatus::EmbedsResolved;
-        } else {
+        } else if (struct_->resolve_status == ResolveStatus::EmbedsResolved) {
             // fourth pass - resolve field defaults and method bodies
             for (auto member : data.members) {
                 if (member->type == NodeType::VarDecl && member->data.var_decl.is_field &&
@@ -4292,12 +4301,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
             auto expr_type = resolve(data.expr, scope);
-            if (!expr_type->is_raw_pointer() && expr_type->kind != TypeKind::MoveRef) {
+            bool is_pointer = expr_type->is_raw_pointer() || expr_type->kind == TypeKind::MoveRef;
+            bool is_value = !is_pointer && type_needs_destruction(expr_type);
+            if (!is_pointer && !is_value) {
                 error(node, errors::INVALID_OPERATOR, data.prefix->to_string(),
                       format_type_display(expr_type));
             }
-            if (expr_type->is_raw_pointer() && !scope.is_unsafe_block) {
-                error(node, "'delete' on raw pointer requires unsafe block");
+            if (!scope.is_unsafe_block) {
+                if (expr_type->is_raw_pointer()) {
+                    error(node, "'delete' on raw pointer requires unsafe block");
+                } else {
+                    error(node, "'delete' requires unsafe block");
+                }
                 return nullptr;
             }
             // delete sinks the variable and its current borrow leaves
@@ -5538,6 +5553,10 @@ bool Resolver::is_borrowing_type(ChiType *type) {
 bool Resolver::type_needs_destruction(ChiType *type) {
     if (!type)
         return false;
+
+    // Placeholders conservatively always need destruction — the concrete type may have a destructor
+    if (type->kind == TypeKind::Placeholder)
+        return true;
 
     // Any may contain a destructible value
     if (type->kind == TypeKind::Any)

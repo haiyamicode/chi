@@ -63,7 +63,9 @@ func test_assign_construct() {
     printf("before: {}\n", p.id);
     *p = {20};
     printf("after: {}\n", p.id);
-    delete p;
+    unsafe {
+        delete p;
+    }
 }
 
 func main() {
