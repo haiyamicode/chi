@@ -48,7 +48,7 @@ func main() {
     println(fs.exists("/tmp/chi_fs_test_nonexistent_12345"));
 
     println("=== error: open nonexistent ===");
-    try fs.File.open("/tmp/chi_no_such_file_12345") catch (err: fs.FsError) {
+    try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError as err {
         printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
         printf("path: {}\n", err.path);
@@ -58,13 +58,13 @@ func main() {
     };
 
     println("=== error: remove nonexistent ===");
-    try fs.remove("/tmp/chi_no_such_file_12345") catch (err: fs.FsError) {
+    try fs.remove("/tmp/chi_no_such_file_12345") catch fs.FsError as err {
         printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
     };
 
     println("=== error: list_dir nonexistent ===");
-    try fs.list_dir("/tmp/chi_no_such_dir_12345") catch (err: fs.FsError) {
+    try fs.list_dir("/tmp/chi_no_such_dir_12345") catch fs.FsError as err {
         printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
     };

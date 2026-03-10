@@ -69,7 +69,7 @@ func test_typed_catch() {
     println("=== typed catch ===");
 
     // Catch specific error type with binding
-    try fail_with("typed") catch (err: MyError) {
+    try fail_with("typed") catch MyError as err {
         printf("caught MyError: {}\n", err.message());
     };
 }
@@ -126,7 +126,7 @@ func test_destructor_unwind() {
 
 func test_error_cleanup() {
     println("=== error cleanup ===");
-    try fail_with("heap string error") catch (err: MyError) {
+    try fail_with("heap string error") catch MyError as err {
         printf("msg: {}\n", err.message());
     };
     println("after cleanup");
@@ -251,7 +251,7 @@ func test_catch_block() {
     printf("success = {}\n", y);
 
     // Typed catch with fallback expression using the error
-    var z = try fail_int("bad") catch (err: MyError) {
+    var z = try fail_int("bad") catch MyError as err {
         printf("handling: {}\n", err.message());
         0
     };
@@ -261,7 +261,7 @@ func test_catch_block() {
 // Re-throw: catch one error, throw a different one
 func test_rethrow() {
     println("=== rethrow ===");
-    try fail_with("original") catch (err: MyError) {
+    try fail_with("original") catch MyError as err {
         printf("caught: {}\n", err.message());
         throw new OtherError{code: 42};
     };
@@ -269,7 +269,7 @@ func test_rethrow() {
 
 // Branching in catch: one path returns fallback, other re-throws
 func branching_catch(rethrow: bool) int {
-    var x = try fail_int("boom") catch (err: MyError) {
+    var x = try fail_int("boom") catch MyError as err {
         if rethrow {
             throw new OtherError{code: 123};
         }

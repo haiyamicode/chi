@@ -1475,6 +1475,27 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::KW_WHILE:
         return parse_while_stmt();
 
+    case TokenType::KW_TRY: {
+        auto expr = parse_expr();
+        if (expr->type == NodeType::TryExpr && expr->data.try_expr.catch_block) {
+            // try ... catch { ... } — semicolon optional (statement form)
+            if (next_is(TokenType::SEMICOLON)) {
+                consume();
+            } else if (next_is(TokenType::RBRACE)) {
+                *as_expr = true;
+            }
+            // Otherwise: no semicolon needed (statement form)
+        } else {
+            // try f() catch ErrorType — expression form, needs semicolon
+            if (next_is(TokenType::SEMICOLON)) {
+                consume();
+            } else {
+                *as_expr = true;
+            }
+        }
+        return expr;
+    }
+
     case TokenType::KW_VAR:
     case TokenType::KW_LET:
     case TokenType::KW_THIS:
@@ -1498,7 +1519,6 @@ Node *Parser::parse_stmt(bool *as_expr) {
     case TokenType::NOT:
     case TokenType::INC:
     case TokenType::DEC:
-    case TokenType::KW_TRY:
     case TokenType::KW_AWAIT: {
         if (next_is(TokenType::KW_VAR) || next_is(TokenType::KW_LET)) {
             return parse_var_decl(false);
@@ -1702,38 +1722,28 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
         node->data.try_expr.expr = parse_binary_expr(lhs, parent, UNARY_PREC);
         if (next_is(TokenType::KW_CATCH)) {
             consume();
-            if (next_is(TokenType::LPAREN)) {
-                // catch (Type) or catch (name: Type)
-                consume();
-                Scope *catch_scope = nullptr;
-                if (get()->type == TokenType::IDEN && lookahead(1)->type == TokenType::COLON) {
-                    // catch (err: FileError) { ... }
-                    auto name_token = get();
-                    consume(); // name
-                    expect(TokenType::COLON);
-                    node->data.try_expr.catch_expr = parse_type_expr(true);
-                    // Create implicit var for the error binding
-                    auto var = create_node(NodeType::VarDecl, name_token);
-                    var->name = name_token->str;
-                    node->data.try_expr.catch_err_var = var;
-                    // Declare in a scope so the block can reference it
-                    catch_scope = m_ctx->resolver->push_scope(node);
-                    m_ctx->resolver->declare_symbol(var->name, var);
-                } else {
-                    // catch (FileError) { ... }
-                    node->data.try_expr.catch_expr = parse_type_expr(true);
-                }
-                expect(TokenType::RPAREN);
-                node->data.try_expr.catch_block = parse_block();
-                if (catch_scope) {
-                    m_ctx->resolver->pop_scope();
-                }
-            } else if (next_is(TokenType::LBRACE)) {
+            if (next_is(TokenType::LBRACE)) {
                 // catch { ... } — catch-all
                 node->data.try_expr.catch_block = parse_block();
             } else {
-                // Old syntax: catch FileError (no block, Result mode)
+                // catch Type — parse the error type
                 node->data.try_expr.catch_expr = parse_primary_expr(false, node);
+                if (next_is(TokenType::KW_AS)) {
+                    // catch MyError as err { ... } — typed catch with binding
+                    consume();
+                    auto name_token = expect(TokenType::IDEN);
+                    auto var = create_node(NodeType::VarDecl, name_token);
+                    var->name = name_token->str;
+                    node->data.try_expr.catch_err_var = var;
+                    auto catch_scope = m_ctx->resolver->push_scope(node);
+                    m_ctx->resolver->declare_symbol(var->name, var);
+                    node->data.try_expr.catch_block = parse_block();
+                    m_ctx->resolver->pop_scope();
+                } else if (next_is(TokenType::LBRACE)) {
+                    // catch MyError { ... } — typed catch without binding
+                    node->data.try_expr.catch_block = parse_block();
+                }
+                // else: catch MyError — Result mode, no block
             }
         }
         return node;
