@@ -144,6 +144,16 @@ struct GenericCaller<T: ops.Construct> {
     }
 }
 
+// Self-expanding generic: method returns same generic with deeper type args.
+// Should compile fine as long as the chain isn't deeply used.
+struct SelfExpanding<T> {
+    value: ?T = null;
+
+    func wrap() SelfExpanding<Container<T>> {
+        return SelfExpanding<Container<T>>{};
+    }
+}
+
 func main() {
     var box_stack = GenericBox<int>{};
     printf("box_stack.value={}\n", box_stack.value);
@@ -181,5 +191,11 @@ func main() {
     printf("struct_chain: {}\n", gc.call_chain());
     var gcs = GenericCaller<string>{val: "method"};
     printf("struct_free_str: {}\n", gcs.call_free_fn());
+
+    // Self-expanding generic: shallow use should compile and run
+    var se = SelfExpanding<int>{ value: 10 };
+    printf("se.value={}\n", se.value!);
+    var se2 = se.wrap();
+    printf("se_wrapped\n");
 }
 

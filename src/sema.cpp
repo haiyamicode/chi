@@ -218,6 +218,79 @@ ChiType *ChiTypeFn::get_param_at(size_t index) {
 
 int ChiTypeFn::get_va_start() { return params.len - (int)(is_variadic && !is_extern); }
 
+bool ChiType::has_unresolved_subtype() {
+    switch (kind) {
+    case TypeKind::Subtype:
+        return !data.subtype.final_type;
+    case TypeKind::Pointer:
+    case TypeKind::Optional:
+    case TypeKind::Reference:
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef:
+    case TypeKind::Array:
+    case TypeKind::Span:
+    case TypeKind::FixedArray:
+        return get_elem()->has_unresolved_subtype();
+    case TypeKind::Fn: {
+        if (data.fn.return_type && data.fn.return_type->has_unresolved_subtype())
+            return true;
+        for (auto param : data.fn.params)
+            if (param && param->has_unresolved_subtype())
+                return true;
+        return false;
+    }
+    case TypeKind::FnLambda:
+        return data.fn_lambda.fn && data.fn_lambda.fn->has_unresolved_subtype();
+    case TypeKind::Tuple:
+        for (auto elem : data.tuple.elements)
+            if (elem && elem->has_unresolved_subtype())
+                return true;
+        return false;
+    default:
+        return false;
+    }
+}
+
+int ChiType::subtype_depth() {
+    switch (kind) {
+    case TypeKind::Subtype: {
+        int max_depth = 0;
+        for (auto arg : data.subtype.args)
+            max_depth = std::max(max_depth, arg->subtype_depth());
+        return 1 + max_depth;
+    }
+    case TypeKind::Pointer:
+    case TypeKind::Optional:
+    case TypeKind::Reference:
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef:
+    case TypeKind::Array:
+    case TypeKind::Span:
+    case TypeKind::FixedArray:
+        return get_elem()->subtype_depth();
+    case TypeKind::Fn: {
+        int max_depth = 0;
+        if (data.fn.return_type)
+            max_depth = data.fn.return_type->subtype_depth();
+        for (auto param : data.fn.params)
+            if (param)
+                max_depth = std::max(max_depth, param->subtype_depth());
+        return max_depth;
+    }
+    case TypeKind::FnLambda:
+        return data.fn_lambda.fn ? data.fn_lambda.fn->subtype_depth() : 0;
+    case TypeKind::Tuple: {
+        int max_depth = 0;
+        for (auto elem : data.tuple.elements)
+            if (elem)
+                max_depth = std::max(max_depth, elem->subtype_depth());
+        return max_depth;
+    }
+    default:
+        return 0;
+    }
+}
+
 ChiType *ChiType::get_elem() {
     switch (kind) {
     case TypeKind::Pointer:

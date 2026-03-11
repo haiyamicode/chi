@@ -14,3 +14,5 @@ chain_str: chain
 struct_free: 200
 struct_chain: 200
 struct_free_str: method
+se.value=10
+se_wrapped

@@ -275,6 +275,8 @@ inline llvm::Type *Compiler::compile_type_of(cx::ast::Node *node) {
     return compile_type(get_chitype(node));
 }
 
+
+
 void Compiler::compile_struct(ast::Node *node) {
     auto struct_type = get_resolver()->to_value_type(get_chitype(node));
     if (ChiTypeStruct::is_interface(struct_type)) {
@@ -329,6 +331,11 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             }
 
             auto fn_type = get_chitype(fn_node);
+
+            // Skip methods whose signatures reference unresolved subtypes
+            // (from infinite generic expansion, e.g. MyBox<Wrapper<Wrapper<...>>>)
+            if (fn_type->has_unresolved_subtype())
+                continue;
 
             // For generic methods, compile their specialized versions instead
             if (fn_type->is_placeholder) {
@@ -443,7 +450,8 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     }
 
     for (auto member : struct_type->data.struct_.members) {
-        if (member->is_method() && !member->resolved_type->is_placeholder) {
+        if (member->is_method() && !member->resolved_type->is_placeholder &&
+            !member->resolved_type->has_unresolved_subtype()) {
             auto method_fn = get_fn(member->node, struct_type);
             member->vtable_index = m_ctx->reflection_vtable.size();
             m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);

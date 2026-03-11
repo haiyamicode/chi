@@ -343,7 +343,7 @@ class Resolver {
 
     bool is_struct_type(ChiType *type);
 
-    ChiType *eval_struct_type(ChiType *type);
+    ChiType *eval_struct_type(ChiType *type, ast::Node *origin = nullptr);
 
     ChiTypeStruct *resolve_struct_type(ChiType *type);
 
@@ -376,7 +376,7 @@ class Resolver {
 
     ChiType *get_tuple_type(TypeList &elements);
 
-    ChiType *resolve_subtype(ChiType *subtype);
+    ChiType *resolve_subtype(ChiType *subtype, ast::Node *origin = nullptr);
 
     ast::Node *get_dummy_var(const string &name, ast::Node *expr = nullptr);
 

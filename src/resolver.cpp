@@ -2405,7 +2405,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
-        auto stype = eval_struct_type(expr_type);
+        auto stype = eval_struct_type(expr_type, node);
         if (!stype) {
             error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(expr_type));
             return nullptr;
@@ -2422,7 +2422,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (deref_ref_type) {
                 // data.expr was replaced with deref call; redo lookup on deref'd type
                 expr_type = deref_ref_type;
-                stype = eval_struct_type(expr_type);
+                stype = eval_struct_type(expr_type, node);
             }
         }
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
@@ -6451,7 +6451,7 @@ ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
     return stype ? &stype->data.struct_ : nullptr;
 }
 
-ChiType *Resolver::eval_struct_type(ChiType *type) {
+ChiType *Resolver::eval_struct_type(ChiType *type, ast::Node *origin) {
     if (!type)
         return nullptr;
     auto sty = type;
@@ -6499,7 +6499,7 @@ ChiType *Resolver::eval_struct_type(ChiType *type) {
         }
     }
     if (sty->kind == TypeKind::Subtype) {
-        sty = resolve_subtype(sty);
+        sty = resolve_subtype(sty, origin);
     }
     if (sty->kind != TypeKind::Struct) {
         return nullptr;
@@ -8207,10 +8207,17 @@ ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
     return specialized_fn_type;
 }
 
-ChiType *Resolver::resolve_subtype(ChiType *subtype) {
+ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
     auto &data = subtype->data.subtype;
     if (data.final_type) {
         return data.final_type;
+    }
+
+    if (subtype->subtype_depth() > MAX_GENERIC_DEPTH) {
+        auto err_node = origin ? origin : data.root_node;
+        error(err_node, errors::GENERIC_DEPTH_EXCEEDED,
+              format_type_display(subtype), MAX_GENERIC_DEPTH);
+        return subtype;
     }
 
     if (!data.generic)
@@ -9683,6 +9690,8 @@ void GenericResolver::resolve_pending(Resolver *resolver) {
         for (auto &pair : struct_envs.get()) {
             auto &entry = pair.second;
             if (entry.subtype && !entry.subtype->data.subtype.final_type) {
+                if (entry.subtype->subtype_depth() > MAX_GENERIC_DEPTH)
+                    continue;
                 resolver->resolve_subtype(entry.subtype);
                 made_progress = true;
             }

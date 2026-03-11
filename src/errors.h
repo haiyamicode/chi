@@ -91,5 +91,12 @@ constexpr auto TRAIT_METHOD_NOT_CALLABLE =
 
 constexpr auto CHAR_USE_BYTE =
     "use 'byte' instead of 'char'; for a unicode character, use 'rune'";
+constexpr auto GENERIC_DEPTH_EXCEEDED =
+    "generic type '{}' exceeds maximum nesting depth ({}); this likely indicates infinite type expansion";
+
 } // namespace errors
+
+// Compiler limits
+constexpr int MAX_GENERIC_DEPTH = 16;
+
 } // namespace cx

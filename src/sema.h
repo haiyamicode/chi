@@ -493,6 +493,11 @@ struct ChiType {
         return this;
     }
 
+    // Check if this type tree contains any unresolved Subtype (no final_type).
+    bool has_unresolved_subtype();
+    // Measure the nesting depth of generic type args in this type tree.
+    int subtype_depth();
+
     bool is_primitive_abi_type() {
         switch (kind) {
         case TypeKind::Int:
