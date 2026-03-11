@@ -2725,10 +2725,12 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             auto data_p = builder.CreateStructGEP(iface_type_l, vp, 0);
             builder.CreateStore(value, data_p);
             auto vtable_p = builder.CreateStructGEP(iface_type_l, vp, 1);
-            // Resolve generic instantiations (Subtype) to their concrete struct type,
+            // Unwrap generic instantiations (Subtype) to their concrete struct type,
             // which has the interface_table populated by can_assign/struct_satisfies_interface.
-            if (from_elem && from_elem->kind == TypeKind::Subtype)
-                from_elem = get_resolver()->resolve_subtype(from_elem);
+            if (from_elem && from_elem->kind == TypeKind::Subtype) {
+                assert(from_elem->data.subtype.final_type && "unresolved subtype in codegen");
+                from_elem = from_elem->data.subtype.final_type;
+            }
             if (from_elem && from_elem->kind == TypeKind::Struct &&
                 !ChiTypeStruct::is_interface(from_elem)) {
                 // &Concrete → &Interface: look up vtable from impl table
