@@ -12,7 +12,7 @@
 namespace cx {
 
 // Compiler limits
-constexpr int MAX_GENERIC_DEPTH = 8;
+constexpr int MAX_GENERIC_DEPTH = 99;
 namespace ast {
 struct Node;
 enum class NodeType;

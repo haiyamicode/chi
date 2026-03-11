@@ -112,7 +112,8 @@ ChiType *Compiler::eval_type(ChiType *type) {
 
     // Resolve special type kinds
     if (type->kind == TypeKind::Subtype) {
-        if (!type->data.subtype.final_type && type->subtype_depth() >= MAX_GENERIC_DEPTH) {
+        if (!type->data.subtype.final_type) {
+            // Unresolved subtype — deferred from method signature substitution
             return get_system_types()->uint8;
         }
         return type->data.subtype.final_type;
@@ -254,11 +255,17 @@ void Compiler::compile_module(ast::Module *module) {
             // Skip method bodies whose fn signature reaches the generic depth
             // limit — their bodies reference types beyond what the resolver created
             if (fn->fn_type && fn->fn_type->subtype_depth() >= MAX_GENERIC_DEPTH) {
-                // Emit a stub body so the linker doesn't complain about missing symbols
+                // Emit a safe stub body — these may be called at runtime by
+                // destructor chains of deep generic types (e.g. Shared<T>)
                 auto &builder = *m_ctx->llvm_builder.get();
                 auto bb = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "entry", fn->llvm_fn);
                 builder.SetInsertPoint(bb);
-                builder.CreateUnreachable();
+                auto ret_type = fn->llvm_fn->getReturnType();
+                if (ret_type->isVoidTy()) {
+                    builder.CreateRetVoid();
+                } else {
+                    builder.CreateRet(llvm::Constant::getNullValue(ret_type));
+                }
                 continue;
             }
             m_fn = fn;
@@ -344,11 +351,6 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             }
 
             auto fn_type = get_chitype(fn_node);
-
-            // Skip methods whose signatures reference unresolved subtypes
-            // (from infinite generic expansion, e.g. MyBox<Wrapper<Wrapper<...>>>)
-            if (fn_type->has_unresolved_subtype())
-                continue;
 
             // For generic methods, compile their specialized versions instead
             if (fn_type->is_placeholder) {
@@ -8428,8 +8430,28 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     // Allow types with stale is_placeholder when they contain resolved Infer types
     // (from generic inference through lambda bodies). Recursive compile_type calls
     // will extract concrete types via eval_type's Infer handler.
-    assert((!type->is_placeholder || type->kind != TypeKind::Placeholder) &&
-           "compile_type called on unresolved placeholder type");
+    if (type->is_placeholder && type->kind == TypeKind::Placeholder) {
+        fmt::print(stderr, "PLACEHOLDER in compile_type: {} (name: {})\n",
+                   get_resolver()->format_type_display(type), type->name.value_or("?"));
+        if (m_fn) {
+            fmt::print(stderr, "  in fn: {} (depth: {})\n",
+                       get_resolver()->format_type_display(m_fn->fn_type),
+                       m_fn->fn_type ? m_fn->fn_type->subtype_depth() : -1);
+            if (m_fn->fn_type && m_fn->fn_type->data.fn.container_ref)
+                fmt::print(stderr, "  container: {}\n",
+                           get_resolver()->format_type_display(m_fn->fn_type->data.fn.container_ref));
+            fmt::print(stderr, "  has type_env: {}\n", m_fn->type_env != nullptr);
+            fmt::print(stderr, "  container_type: {}\n", m_fn->container_type ? m_fn->container_type->global_id : "null");
+            fmt::print(stderr, "  fn llvm name: {}\n", m_fn->llvm_fn ? m_fn->llvm_fn->getName().str() : "null");
+            if (m_fn->container_type) {
+                auto entry = get_resolver()->get_generics()->struct_envs.get(m_fn->container_type->global_id);
+                fmt::print(stderr, "  in struct_envs: {}\n", entry != nullptr);
+            }
+            if (m_fn->node)
+                fmt::print(stderr, "  node name: {}\n", m_fn->node->name);
+        }
+        assert(false && "compile_type called on unresolved placeholder type");
+    }
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     switch (type->kind) {
     case TypeKind::This: {

@@ -8045,13 +8045,22 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
 
     // Record to monomorphization plan (struct_envs tracks both the subtype and its type env)
     if (!sub->is_placeholder) {
+        bool is_method_sig = m_resolving_subtype &&
+                             m_resolving_subtype->data.subtype.generic == generic &&
+                             sub->subtype_depth() > m_resolving_subtype->subtype_depth();
+        if (is_method_sig) {
+            fmt::print(stderr, "DEFER: {} (depth {}) while resolving {} (depth {})\n",
+                       sub->global_id, sub->subtype_depth(),
+                       m_resolving_subtype->global_id, m_resolving_subtype->subtype_depth());
+        }
         map<ChiType *, ChiType *> subs;
         for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
             // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in
             // struct members contain raw Placeholder types, not TypeSymbol wrappers
             subs[to_value_type(gen.type_params[i])] = type_args->at(i);
         }
-        m_ctx->generics.record_struct(sub->global_id, sub->global_id, generic, sub, subs);
+        m_ctx->generics.record_struct(sub->global_id, sub->global_id, generic, sub, subs,
+                                      is_method_sig);
     }
 
     return sub;
@@ -8234,6 +8243,26 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
         return subtype;
     }
 
+    // Ensure this subtype is recorded in struct_envs and not deferred
+    if (!subtype->is_placeholder) {
+        auto existing = m_ctx->generics.struct_envs.get(subtype->global_id);
+        if (existing) {
+            // Clear deferred flag — this subtype is actively being resolved
+            existing->from_method_sig = false;
+        } else {
+            auto &gen = data.generic->data.struct_;
+            map<ChiType *, ChiType *> subs;
+            for (size_t i = 0; i < gen.type_params.len && i < data.args.len; i++) {
+                subs[to_value_type(gen.type_params[i])] = data.args[i];
+            }
+            m_ctx->generics.record_struct(subtype->global_id, subtype->global_id,
+                                          data.generic, subtype, subs);
+        }
+    }
+
+    auto prev_resolving = m_resolving_subtype;
+    m_resolving_subtype = subtype;
+
     auto &base = data.generic->data.struct_;
     auto sty = create_type(TypeKind::Struct);
     sty->name = format_type_id(subtype);
@@ -8390,6 +8419,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
         }
         scpy.interface_table[concrete_iface_type] = iface_impl;
     }
+    m_resolving_subtype = prev_resolving;
     m_subtype_origin = prev_origin;
     return sty;
 }
@@ -9682,7 +9712,8 @@ void GenericResolver::record_fn(const string &id, const string &name, ast::Node 
 }
 
 void GenericResolver::record_struct(const string &id, const string &name, ChiType *generic,
-                                    ChiType *subtype, map<ChiType *, ChiType *> subs) {
+                                    ChiType *subtype, map<ChiType *, ChiType *> subs,
+                                    bool from_method_sig) {
     if (struct_envs.get(id)) {
         return; // Already recorded
     }
@@ -9692,6 +9723,7 @@ void GenericResolver::record_struct(const string &id, const string &name, ChiTyp
     entry.generic_type = generic;
     entry.subtype = subtype;
     entry.subs = subs;
+    entry.from_method_sig = from_method_sig;
     struct_envs[id] = entry;
 }
 
@@ -9703,6 +9735,8 @@ void GenericResolver::resolve_pending(Resolver *resolver) {
             auto &entry = pair.second;
             if (entry.subtype && !entry.subtype->data.subtype.final_type) {
                 if (entry.subtype->subtype_depth() > MAX_GENERIC_DEPTH)
+                    continue;
+                if (entry.from_method_sig)
                     continue;
                 resolver->resolve_subtype(entry.subtype);
                 made_progress = true;
