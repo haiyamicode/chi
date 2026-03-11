@@ -17,6 +17,9 @@ dep:
 build:
 	cd $(BUILD_DIR) && cmake -G "Unix Makefiles" -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_BUILD_TYPE=${BUILD_MODE} .. && $(MAKE)
 
+rebuild:
+	. $(LOCAL_DIR)/init_env.sh && cd $(BUILD_DIR) && rm -f CMakeCache.txt && cmake -G "Unix Makefiles" -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_BUILD_TYPE=${BUILD_MODE} $(CMAKE_ARGS) .. && $(MAKE)
+
 install:
 	cd $(BUILD_DIR) && $(MAKE) install
 
