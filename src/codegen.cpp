@@ -112,6 +112,9 @@ ChiType *Compiler::eval_type(ChiType *type) {
 
     // Resolve special type kinds
     if (type->kind == TypeKind::Subtype) {
+        if (!type->data.subtype.final_type && type->subtype_depth() >= MAX_GENERIC_DEPTH) {
+            return get_system_types()->uint8;
+        }
         return type->data.subtype.final_type;
     }
     if (type->kind == TypeKind::This && m_fn) {
@@ -248,6 +251,16 @@ void Compiler::compile_module(ast::Module *module) {
         auto list = m_ctx->pending_fns;
         m_ctx->pending_fns.clear();
         for (auto fn : list) {
+            // Skip method bodies whose fn signature reaches the generic depth
+            // limit — their bodies reference types beyond what the resolver created
+            if (fn->fn_type && fn->fn_type->subtype_depth() >= MAX_GENERIC_DEPTH) {
+                // Emit a stub body so the linker doesn't complain about missing symbols
+                auto &builder = *m_ctx->llvm_builder.get();
+                auto bb = llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "entry", fn->llvm_fn);
+                builder.SetInsertPoint(bb);
+                builder.CreateUnreachable();
+                continue;
+            }
             m_fn = fn;
             compile_fn_def(fn->node, fn);
             m_fn = nullptr;
@@ -8385,6 +8398,7 @@ void Compiler::compile_extern(ast::Node *node) {
 }
 
 llvm::Type *Compiler::compile_type(ChiType *type) {
+    assert(type && "compile_type called with null type");
     if (type->kind == TypeKind::EnumValue) {
         if (type->data.enum_value.member) {
             return compile_type(type->data.enum_value.parent_enum()->base_value_type);
@@ -8392,9 +8406,7 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
     }
 
     type = eval_type(type);
-    if (type->subtype_depth() >= MAX_GENERIC_DEPTH) {
-        return llvm::Type::getInt8Ty(*m_ctx->llvm_ctx);
-    }
+    assert(type && "eval_type returned null in compile_type");
     auto key = get_resolver()->format_type_id(type);
     // *Interface, &Interface, Mut<Interface>, and bare Interface are all the same fat pointer type
     if ((type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
