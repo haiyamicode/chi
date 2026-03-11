@@ -679,7 +679,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // fourth pass: resolve function and method bodies
+        // fourth pass: resolve generic subtypes (signatures only, before bodies)
+        m_ctx->generics.resolve_pending(this);
+
+        // fifth pass: resolve function and method bodies
         scope.skip_fn_bodies = false;
         for (auto decl : data.top_level_decls) {
             if (decl->type == NodeType::StructDecl || decl->type == NodeType::EnumDecl ||
@@ -688,31 +691,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // final pass: ensure subtypes are resolved
+        // sixth pass: resolve any new generic subtypes created during body resolution
+        m_ctx->generics.resolve_pending(this);
+
+        // final pass: finalize placeholder lambdas
         for (auto decl : data.top_level_decls) {
-            if (decl->type == NodeType::StructDecl && decl->data.struct_decl.type_params.len > 0) {
-                auto &struct_ = decl->data.struct_decl;
-                if (struct_.type_params.len > 0) {
-                    auto struct_type = to_value_type(decl->resolved_type);
-                    for (auto subtype : struct_type->data.struct_.subtypes) {
-                        resolve_subtype(subtype);
-                    }
-                }
-            }
-            // Finalize placeholder lambdas after __CxLambda is resolved
             if (decl->type == NodeType::FnDef) {
                 auto fn_type = to_value_type(decl->resolved_type);
                 finalize_placeholder_lambda_params(fn_type);
             }
-            // if (decl->type == NodeType::FnDef &&
-            //     decl->data.fn_def.fn_proto->data.fn_proto.type_params.len > 0) {
-            //     auto fn_type = to_value_type(decl->resolved_type);
-            //     if (fn_type && fn_type->kind == TypeKind::Fn) {
-            //         for (auto variant : fn_type->data.fn.variants) {
-            //             resolve_fn_subtype(variant->data.generated_fn.subtype);
-            //         }
-            //     }
-            // }
         }
         return nullptr;
     }
@@ -6971,12 +6958,19 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     auto type = create_type(TypeKind::Array);
     type->data.array.elem = elem;
     m_ctx->array_of[elem] = type;
-    type->data.array.internal = nullptr;
     type->is_placeholder = elem->is_placeholder;
     // Use to_string for element type since elem->global_id may be empty for anonymous types like
     // lambdas
     auto elem_str = elem->global_id.empty() ? format_type_id(elem) : elem->global_id;
     type->global_id = fmt::format("runtime.Array<{}>", elem_str);
+    // Eagerly create the internal subtype so it's tracked in struct_envs
+    if (m_ctx->rt_array_type && !type->is_placeholder) {
+        array<ChiType *> args;
+        args.add(elem);
+        type->data.array.internal = get_subtype(to_value_type(m_ctx->rt_array_type), &args);
+    } else {
+        type->data.array.internal = nullptr;
+    }
     return type;
 }
 
@@ -6991,6 +6985,14 @@ ChiType *Resolver::get_span_type(ChiType *elem, bool is_mut) {
     type->is_placeholder = elem->is_placeholder;
     auto elem_str = elem->global_id.empty() ? format_type_id(elem) : elem->global_id;
     type->global_id = fmt::format("runtime.__CxSpan<{}>", elem_str);
+    // Eagerly create the internal subtype so it's tracked in struct_envs
+    if (m_ctx->rt_span_type && !type->is_placeholder) {
+        array<ChiType *> args;
+        args.add(elem);
+        type->data.span.internal = get_subtype(to_value_type(m_ctx->rt_span_type), &args);
+    } else {
+        type->data.span.internal = nullptr;
+    }
     return type;
 }
 
@@ -8039,13 +8041,8 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
         }
     }
     gen.subtypes.add(sub);
-    // Only resolve concrete subtypes - placeholder subtypes shouldn't be resolved
-    // until we have concrete type arguments (the base may not have interfaces yet)
-    if (gen.resolve_status >= ResolveStatus::MemberTypesKnown && !sub->is_placeholder) {
-        resolve_subtype(sub);
-    }
 
-    // Record to monomorphization plan
+    // Record to monomorphization plan (struct_envs tracks both the subtype and its type env)
     if (!sub->is_placeholder) {
         map<ChiType *, ChiType *> subs;
         for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
@@ -8053,7 +8050,7 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
             // struct members contain raw Placeholder types, not TypeSymbol wrappers
             subs[to_value_type(gen.type_params[i])] = type_args->at(i);
         }
-        m_ctx->generics.record_struct(sub->global_id, sub->global_id, generic, subs);
+        m_ctx->generics.record_struct(sub->global_id, sub->global_id, generic, sub, subs);
     }
 
     return sub;
@@ -8218,6 +8215,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype) {
 
     if (!data.generic)
         return subtype;
+
     auto &base = data.generic->data.struct_;
     auto sty = create_type(TypeKind::Struct);
     sty->name = format_type_id(subtype);
@@ -9665,7 +9663,7 @@ void GenericResolver::record_fn(const string &id, const string &name, ast::Node 
 }
 
 void GenericResolver::record_struct(const string &id, const string &name, ChiType *generic,
-                                    map<ChiType *, ChiType *> subs) {
+                                    ChiType *subtype, map<ChiType *, ChiType *> subs) {
     if (struct_envs.get(id)) {
         return; // Already recorded
     }
@@ -9673,8 +9671,23 @@ void GenericResolver::record_struct(const string &id, const string &name, ChiTyp
     entry.name = name;
     entry.node = generic->data.struct_.node;
     entry.generic_type = generic;
+    entry.subtype = subtype;
     entry.subs = subs;
     struct_envs[id] = entry;
+}
+
+void GenericResolver::resolve_pending(Resolver *resolver) {
+    bool made_progress = true;
+    while (made_progress) {
+        made_progress = false;
+        for (auto &pair : struct_envs.get()) {
+            auto &entry = pair.second;
+            if (entry.subtype && !entry.subtype->data.subtype.final_type) {
+                resolver->resolve_subtype(entry.subtype);
+                made_progress = true;
+            }
+        }
+    }
 }
 
 void GenericResolver::dump(Resolver *resolver) {

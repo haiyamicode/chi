@@ -80,6 +80,7 @@ struct TypeEnvEntry {
     map<ChiType *, ChiType *> subs;        // placeholder → concrete type
     ast::Node *node = nullptr;             // source node (FnDef or StructDecl)
     ChiType *generic_type = nullptr;       // the generic type being instantiated
+    ChiType *subtype = nullptr;            // the Subtype node (for struct instantiations)
 };
 
 // Records all generic instantiations during resolution
@@ -90,7 +91,8 @@ struct GenericResolver {
     void record_fn(const string &id, const string &name, ast::Node *node,
                    ChiType *generic_fn, map<ChiType *, ChiType *> subs);
     void record_struct(const string &id, const string &name, ChiType *generic,
-                       map<ChiType *, ChiType *> subs);
+                       ChiType *subtype, map<ChiType *, ChiType *> subs);
+    void resolve_pending(Resolver *resolver);
     void dump(Resolver *resolver);
 };
 

@@ -286,6 +286,9 @@ void Compiler::compile_struct(ast::Node *node) {
             if (subtype->is_placeholder) {
                 continue;
             }
+            if (!subtype->data.subtype.final_type) {
+                continue;
+            }
             // Track this struct specialization for comparison with GenericResolver
             m_ctx->compiled_generic_structs.insert(subtype->global_id);
             _compile_struct(node, subtype);
@@ -8527,6 +8530,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     }
     // Promise is now a Chi-native struct (TypeKind::Subtype), no special handling needed
     case TypeKind::Subtype: {
+        assert(type->data.subtype.final_type && "compile_type called on unresolved subtype");
         return compile_type(type->data.subtype.final_type);
     }
     case TypeKind::Unit: {
