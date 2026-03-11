@@ -8392,6 +8392,9 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
     }
 
     type = eval_type(type);
+    if (type->subtype_depth() >= MAX_GENERIC_DEPTH) {
+        return llvm::Type::getInt8Ty(*m_ctx->llvm_ctx);
+    }
     auto key = get_resolver()->format_type_id(type);
     // *Interface, &Interface, Mut<Interface>, and bare Interface are all the same fat pointer type
     if ((type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||

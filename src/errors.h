@@ -67,7 +67,8 @@ constexpr auto UNINITIALIZED_FIELD = "field '{}' of type '{}' has not been initi
 constexpr auto INVALID_SWITCH_TYPE = "switch type {} must be an enum or integer";
 constexpr auto INVALID_VARIABLE_TYPE = "cannot declare variable of type {}";
 constexpr auto ASSIGNMENT_TO_CONST = "assignment to const value '{}'";
-constexpr auto SWITCH_EXPR_MUST_HAVE_ELSE = "non-exhaustive switch expression must have an else clause";
+constexpr auto SWITCH_EXPR_MUST_HAVE_ELSE =
+    "non-exhaustive switch expression must have an else clause";
 constexpr auto EXPORT_DECL_MUST_HAVE_SYMBOLS = "export declaration must have symbol or alias";
 constexpr auto CANNOT_MODIFY_CONST = "cannot modify immutable constant '{}'";
 constexpr auto INVALID_MUT_TYPE = "Mut can only be used for reference type, got '{}'";
@@ -84,19 +85,14 @@ constexpr auto UNSAFE_CALL_IN_SAFE_MODE =
 constexpr auto DESTRUCTOR_WITHOUT_COPY =
     "struct '{}' defines 'func delete()' but does not implement 'ops.Copy'; "
     "types with custom destructors must define copy semantics";
-constexpr auto TYPE_NOT_COPYABLE =
-    "type '{}' cannot be copied (implements ops.NoCopy)";
+constexpr auto TYPE_NOT_COPYABLE = "type '{}' cannot be copied (implements ops.NoCopy)";
 constexpr auto TRAIT_METHOD_NOT_CALLABLE =
     "trait method '{}' on generic type {} must be called, not used as a value";
 
-constexpr auto CHAR_USE_BYTE =
-    "use 'byte' instead of 'char'; for a unicode character, use 'rune'";
-constexpr auto GENERIC_DEPTH_EXCEEDED =
-    "generic type '{}' exceeds maximum nesting depth ({}); this likely indicates infinite type expansion";
+constexpr auto CHAR_USE_BYTE = "use 'byte' instead of 'char'; for a unicode character, use 'rune'";
+constexpr auto GENERIC_DEPTH_EXCEEDED = "generic type '{}' exceeds maximum nesting depth ({}); "
+                                        "this likely indicates infinite type expansion";
 
 } // namespace errors
-
-// Compiler limits
-constexpr int MAX_GENERIC_DEPTH = 16;
 
 } // namespace cx

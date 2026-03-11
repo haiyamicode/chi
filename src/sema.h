@@ -10,6 +10,9 @@
 #include "lexer.h"
 
 namespace cx {
+
+// Compiler limits
+constexpr int MAX_GENERIC_DEPTH = 8;
 namespace ast {
 struct Node;
 enum class NodeType;
