@@ -8033,6 +8033,7 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
     auto sub = create_type(TypeKind::Subtype);
     sub->data.subtype.generic = generic;
     sub->data.subtype.root_node = gen.node;
+    if (m_subtype_origin) sub->data.subtype.origin_node = m_subtype_origin;
     sub->global_id = fmt::format("{}<{}>", gen.global_id, format_type_list(type_args));
     for (auto arg : *type_args) {
         sub->data.subtype.args.add(arg);
@@ -8209,19 +8210,29 @@ ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
 
 ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
     auto &data = subtype->data.subtype;
+    auto effective_origin = origin ? origin : (m_subtype_origin ? m_subtype_origin : data.origin_node);
+    if (effective_origin && !data.origin_node) {
+        data.origin_node = effective_origin;
+    }
+    auto prev_origin = m_subtype_origin;
+    m_subtype_origin = effective_origin;
     if (data.final_type) {
+        m_subtype_origin = prev_origin;
         return data.final_type;
     }
 
     if (subtype->subtype_depth() > MAX_GENERIC_DEPTH) {
-        auto err_node = origin ? origin : data.root_node;
+        auto err_node = origin ? origin : (data.origin_node ? data.origin_node : data.root_node);
         error(err_node, errors::GENERIC_DEPTH_EXCEEDED,
               format_type_display(subtype), MAX_GENERIC_DEPTH);
+        m_subtype_origin = prev_origin;
         return subtype;
     }
 
-    if (!data.generic)
+    if (!data.generic) {
+        m_subtype_origin = prev_origin;
         return subtype;
+    }
 
     auto &base = data.generic->data.struct_;
     auto sty = create_type(TypeKind::Struct);
@@ -8379,6 +8390,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
         }
         scpy.interface_table[concrete_iface_type] = iface_impl;
     }
+    m_subtype_origin = prev_origin;
     return sty;
 }
 

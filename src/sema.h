@@ -216,6 +216,7 @@ struct ChiTypeSubtype {
     TypeList args = {};
     ChiType *final_type = nullptr;
     ast::Node *root_node = nullptr;
+    ast::Node *origin_node = nullptr; // user code that triggered this subtype's creation
     ast::Node *generated_fn = nullptr;
 };
 

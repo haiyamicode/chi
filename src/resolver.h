@@ -189,6 +189,7 @@ enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0, IS_FN_LAMBDA = 1 << 1 }
 class Resolver {
     ResolveContext *m_ctx = nullptr;
     ast::Module *m_module = nullptr;
+    ast::Node *m_subtype_origin = nullptr; // propagated origin during resolve_subtype
 
     Context *get_allocator() { return m_ctx->allocator; }
 
