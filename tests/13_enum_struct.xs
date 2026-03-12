@@ -99,7 +99,6 @@ enum Container<T> {
                 else => false
             };
         }
-
     }
 }
 
@@ -132,7 +131,7 @@ enum IntExpr {
 }
 
 func make_empty_container<T>(label: string) Container<T> {
-    return Container<T>.Empty{label: label};
+    return Container<T>.Empty{:label};
 }
 
 func accept_empty_container(value: Container<int>) {
