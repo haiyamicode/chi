@@ -522,10 +522,19 @@ void Compiler::compile_enum(ast::Node *node) {
 
     // compile base struct methods
     if (auto base_struct = enum_type->data.enum_.base_struct) {
+        auto base_value_type = enum_type->data.enum_.base_value_type;
+        auto type_env_entry = get_resolver()->get_generics()->struct_envs.get(enum_type->global_id);
         for (auto member : base_struct->data.struct_.members) {
             if (member->is_method()) {
                 auto fn_node = member->node;
                 auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node);
+                if (type_env_entry && type_env_entry->subtype) {
+                    fn->container_subtype = &type_env_entry->subtype->data.subtype;
+                    fn->container_type = type_env_entry->subtype;
+                    fn->type_env = &type_env_entry->subs;
+                } else {
+                    fn->container_type = base_value_type;
+                }
                 m_ctx->pending_fns.add(fn);
             }
         }
@@ -756,10 +765,22 @@ void Compiler::compile_concrete_enum(ChiTypeEnum *enum_data) {
 
     // Compile base struct methods (same as compile_enum)
     if (auto base_struct = enum_data->base_struct) {
+        auto base_value_type = enum_data->base_value_type;
+        auto enum_type_id = base_value_type && base_value_type->data.enum_value.enum_type
+            ? base_value_type->data.enum_value.enum_type->global_id
+            : "";
+        auto type_env_entry = get_resolver()->get_generics()->struct_envs.get(enum_type_id);
         for (auto member : base_struct->data.struct_.members) {
             if (member->is_method()) {
                 auto fn_node = member->node;
                 auto fn = compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node);
+                if (type_env_entry && type_env_entry->subtype) {
+                    fn->container_subtype = &type_env_entry->subtype->data.subtype;
+                    fn->container_type = type_env_entry->subtype;
+                    fn->type_env = &type_env_entry->subs;
+                } else {
+                    fn->container_type = base_value_type;
+                }
                 m_ctx->pending_fns.add(fn);
             }
         }
@@ -8399,15 +8420,23 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     auto new_fn = add_fn(fn_l, fn, ftype);
 
-    // Store the specialized type and look up TypeEnv from GenericResolver
+    auto fn_id = get_resolver()->resolve_global_id(fn);
     if (subtype) {
         new_fn->specialized_subtype = subtype;
-        // Look up the TypeEnv for this function specialization
-        auto fn_id = get_resolver()->resolve_global_id(fn);
-        if (auto entry = get_resolver()->get_generics()->fn_envs.get(fn_id)) {
-            new_fn->type_env = &entry->subs;
-        } else if (getenv("DUMP_GENERICS")) {
-            print("WARNING: No TypeEnv found for function: {}\n", fn_id);
+    }
+    if (auto entry = get_resolver()->get_generics()->fn_envs.get(fn_id)) {
+        new_fn->type_env = &entry->subs;
+    } else if (subtype && getenv("DUMP_GENERICS")) {
+        print("WARNING: No TypeEnv found for function: {}\n", fn_id);
+    }
+
+    if (ftype->kind == TypeKind::Fn && ftype->data.fn.container_ref) {
+        auto container = ftype->data.fn.container_ref->get_elem();
+        if (!new_fn->container_type) {
+            new_fn->container_type = container;
+        }
+        if (container && container->kind == TypeKind::Subtype) {
+            new_fn->container_subtype = &container->data.subtype;
         }
     }
 
@@ -8485,13 +8514,15 @@ void Compiler::compile_extern(ast::Node *node) {
 
 llvm::Type *Compiler::compile_type(ChiType *type) {
     assert(type && "compile_type called with null type");
-    if (type->kind == TypeKind::EnumValue) {
-        if (type->data.enum_value.member) {
-            return compile_type(type->data.enum_value.parent_enum()->base_value_type);
-        }
-    }
 
     type = eval_type(type);
+    if (type->kind == TypeKind::EnumValue && type->data.enum_value.member) {
+        auto base_value_type = type->data.enum_value.parent_enum()->base_value_type;
+        if (m_fn && m_fn->type_env && base_value_type && base_value_type->is_placeholder) {
+            base_value_type = get_resolver()->type_placeholders_sub_map(base_value_type, m_fn->type_env);
+        }
+        return compile_type(base_value_type);
+    }
     assert(type && "eval_type returned null in compile_type");
     auto key = get_resolver()->format_type_id(type);
     // *Interface, &Interface, Mut<Interface>, and bare Interface are all the same fat pointer type

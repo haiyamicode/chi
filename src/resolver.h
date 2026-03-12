@@ -475,6 +475,7 @@ class Resolver {
     ChiType *resolve_enum_value_parent_type(ChiType *enum_type);
     void update_enum_value_member(ChiType *enum_value_type, ChiEnumVariant *member);
     bool is_enum_value_placeholder(ChiType *enum_type);
+    void record_specialized_fn_env(ast::Node *node, map<ChiType *, ChiType *> *base_subs = nullptr);
     void ensure_enum_subtype_final_type(ChiType *generic, ChiType *subtype);
     ChiEnumVariant *find_expected_enum_variant(const string &name, ChiType *expected_type);
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);

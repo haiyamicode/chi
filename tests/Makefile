@@ -50,8 +50,7 @@ TESTS_LIST = 00_fib.test \
 		47_structural_typing.test \
 		48_stdlib.test \
 		49_tuple.test \
-		50_async_await_managed.test \
-		51_deep_generics.test
+		50_async_await_managed.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests

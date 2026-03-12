@@ -130,6 +130,24 @@ enum IntExpr {
     Add(int, int)
 }
 
+enum MethodResult<T, E> {
+    Ok(T),
+    Err(E);
+
+    struct {
+        func value() ?T {
+            var result: ?T = null;
+            switch this {
+                Ok(value) => {
+                    result = value;
+                },
+                else => {}
+            }
+            return result;
+        }
+    }
+}
+
 func make_empty_container<T>(label: string) Container<T> {
     return Container<T>.Empty{:label};
 }
@@ -191,6 +209,15 @@ func id_wrapbox<T>(value: TupleResult<T, string>) TupleResult<T, string> {
 
 func test_tuple_enum() {
     println("=== Test: Tuple enum ===");
+
+    var method_ok = MethodResult<int, string>.Ok{42};
+    printf("method_ok.has_value={}\n", method_ok.value() != null);
+    printf("method_ok.value={}\n", method_ok.value()!);
+    printf("method_ok.discriminator={}\n", method_ok.discriminator());
+
+    var method_err = MethodResult<int, string>.Err{"oops"};
+    printf("method_err.has_value={}\n", method_err.value() != null);
+    printf("method_err.discriminator={}\n", method_err.discriminator());
 
     var ok = TupleResult<int, string>.Ok{42};
     var ok2 = id_wrapbox<int>(ok);

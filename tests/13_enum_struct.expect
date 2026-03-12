@@ -23,6 +23,11 @@ made2 single
 d.value=hello
 d.get_label()=str
 === Test: Tuple enum ===
+method_ok.has_value=true
+method_ok.value=42
+method_ok.discriminator=16
+method_err.has_value=false
+method_err.discriminator=17
 ok.0=42
 ok2 ok
 ok3 ok
