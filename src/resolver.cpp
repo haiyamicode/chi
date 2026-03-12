@@ -1394,6 +1394,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto var_scope = type_hint ? scope.set_value_type(type_hint) : scope;
             var_scope = var_scope.set_move_outlet(node);
             auto expr_type = resolve(data.expr, var_scope);
+            if (!expr_type) {
+                return var_type;
+            }
             // Escape analysis: track borrow sources for borrowing types
             if (scope.parent_fn_node && !scope.is_unsafe_block && expr_type &&
                 is_borrowing_type(expr_type)) {
@@ -4117,9 +4120,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto value_type = resolve(data.value, scope);
                 check_assignment(data.value, value_type, get_system_types()->int_);
                 auto value = resolve_constant_value(data.value);
-                assert(value);
-                data.resolved_value = get<int64_t>(*value);
-                scope.next_enum_value = data.resolved_value + 1;
+                if (value.has_value() && holds_alternative<const_int_t>(*value)) {
+                    data.resolved_value = get<const_int_t>(*value);
+                    scope.next_enum_value = data.resolved_value + 1;
+                } else {
+                    data.resolved_value = scope.next_enum_value++;
+                }
             } else {
                 data.resolved_value = scope.next_enum_value++;
             }
