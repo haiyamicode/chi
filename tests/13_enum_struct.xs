@@ -200,21 +200,18 @@ func test_tuple_enum() {
     var add = IntExpr.Add{10, 20};
 
     printf("ok.0={}\n", ok.0);
-    var ok2_desc = switch ok2 {
-        TupleResult<int, string>.Ok => "ok2 ok",
-        TupleResult<int, string>.Err => "ok2 err"
-    };
-    println(ok2_desc);
-    var ok3_desc = switch ok3 {
-        TupleResult<int, string>.Ok => "ok3 ok",
-        TupleResult<int, string>.Err => "ok3 err"
-    };
-    println(ok3_desc);
-    var typed_ok_desc = switch typed_ok {
-        TupleResult<int, string>.Ok => "typed ok",
-        TupleResult<int, string>.Err => "typed err"
-    };
-    println(typed_ok_desc);
+    println(switch ok2 {
+        Ok => "ok2 ok",
+        Err => "ok2 err"
+    });
+    println(switch ok3 {
+        Ok => "ok3 ok",
+        Err => "ok3 err"
+    });
+    println(switch typed_ok {
+        Ok => "typed ok",
+        Err => "typed err"
+    });
     printf("err.0={}\n", err.0);
     printf("add.0={}\n", add.0);
     printf("add.1={}\n", add.1);

@@ -216,6 +216,13 @@ void Resolver::resolve(ast::Package *package) {
 }
 
 void Resolver::resolve(ast::Module *module) {
+    if (!module || module->resolved || module->resolving) {
+        return;
+    }
+
+    auto *prev_module = m_module;
+    module->resolving = true;
+
     ResolveScope scope;
     m_module = module;
     auto module_scope = scope.set_module(module);
@@ -235,6 +242,10 @@ void Resolver::resolve(ast::Module *module) {
     if (getenv("DUMP_GENERICS")) {
         m_ctx->generics.dump(this);
     }
+
+    module->resolved = true;
+    module->resolving = false;
+    m_module = prev_module;
 }
 
 bool Resolver::can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit) {
@@ -836,7 +847,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto &proto_data = data.fn_proto->data.fn_proto;
             for (auto param : proto_data.params) {
                 if (should_destroy(param) && !param->escape.is_capture()) {
-                    data.body->data.block.cleanup_vars.add(param);
+                    add_cleanup_var(&data.body->data.block, param);
                     data.has_cleanup = true;
                 }
             }
@@ -3642,7 +3653,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto &proto_data = fn_member->data.fn_def.fn_proto->data.fn_proto;
                     for (auto param : proto_data.params) {
                         if (should_destroy(param) && !param->escape.is_capture()) {
-                            body->data.block.cleanup_vars.add(param);
+                            add_cleanup_var(&body->data.block, param);
                             fn_member->data.fn_def.has_cleanup = true;
                         }
                     }
@@ -4547,8 +4558,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->allocator->get_or_create_package(path_info->package_id_path);
                 auto src = io::Buffer::from_file(path);
                 module = m_ctx->allocator->process_source(target_package, &src, path);
-                Resolver resolver(m_ctx);
-                resolver.resolve(module);
                 comp_ctx->source_modules[abs_path] = module;
             }
         }
@@ -4726,7 +4735,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto *fn_def = &scope.parent_fn_node->data.fn_def;
             auto pre_branch = fn_def->flow.fork();
 
-            ChiType *ret_type = scope.value_type;
+            ChiType *ret_type = (scope.value_type && scope.value_type->kind != TypeKind::Any)
+                                     ? scope.value_type
+                                     : nullptr;
             array<ast::FlowState> case_flows;
             bool all_terminate = true;
             bool has_else = false;
@@ -4830,7 +4841,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto *fn_def = &scope.parent_fn_node->data.fn_def;
         auto pre_branch = fn_def->flow.fork();
 
-        ChiType *ret_type = scope.value_type;
+        ChiType *ret_type = (scope.value_type && scope.value_type->kind != TypeKind::Any)
+                                 ? scope.value_type
+                                 : nullptr;
         array<ast::FlowState> case_flows;
         bool all_terminate = true;
         bool has_else = false;
@@ -6727,6 +6740,18 @@ bool Resolver::is_struct_access_mutable(ChiType *type, ResolveScope *scope) {
         return ChiTypeStruct::is_mutable_pointer(sty);
     }
     return true;
+}
+
+void Resolver::add_cleanup_var(ast::Block *block, ast::Node *var) {
+    if (!block || !var) {
+        return;
+    }
+    for (auto existing : block->cleanup_vars) {
+        if (existing == var) {
+            return;
+        }
+    }
+    block->cleanup_vars.add(var);
 }
 
 ChiType *Resolver::get_enum_type(ChiType *type) {

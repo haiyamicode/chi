@@ -67,6 +67,8 @@ struct Module {
     array<Token *> tokens = {};
     array<Comment> comments = {};
     bool broken = false;
+    bool resolving = false;
+    bool resolved = false;
 
     Module() = default;
     Module(const Module &) = delete;
