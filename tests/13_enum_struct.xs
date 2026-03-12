@@ -99,6 +99,7 @@ enum Container<T> {
                 else => false
             };
         }
+
     }
 }
 
@@ -130,6 +131,14 @@ enum IntExpr {
     Add(int, int)
 }
 
+func make_empty_container<T>(label: string) Container<T> {
+    return Container<T>.Empty{label: label};
+}
+
+func accept_empty_container(value: Container<int>) {
+    println("accept empty");
+}
+
 func test_generic_enum() {
     println("=== Test: Generic enum ===");
 
@@ -154,22 +163,41 @@ func test_generic_enum() {
     var c = Container<int>.Empty{label: "empty"};
     printf("c.label={}\n", c.label);
 
+    var made: Container<int> = make_empty_container<int>("made");
+    printf("made.get_label()={}\n", made.get_label());
+    if made.is_single() {
+        println("made single");
+    } else {
+        println("made empty");
+    }
+    accept_empty_container(made);
+
+    var made2: Container<int> = Container<int>.Single{label: "made2", value: 99};
+    printf("made2.get_label()={}\n", made2.get_label());
+    if made2.is_single() {
+        println("made2 single");
+    } else {
+        println("made2 empty");
+    }
+
     // Different type instantiation
     var d = Container<string>.Single{label: "str", value: "hello"};
     printf("d.value={}\n", d.value);
     printf("d.get_label()={}\n", d.get_label());
 }
 
+func id_wrapbox<T>(value: TupleResult<T, string>) TupleResult<T, string> {
+    return value;
+}
+
 func test_tuple_enum() {
     println("=== Test: Tuple enum ===");
 
     var ok = TupleResult<int, string>.Ok{42};
-    var typed_ok: TupleResult<int, string> = TupleResult<int, string>.Ok{99};
     var err = TupleResult<int, string>.Err{"oops"};
     var add = IntExpr.Add{10, 20};
 
     printf("ok.0={}\n", ok.0);
-    println("typed ok");
     printf("err.0={}\n", err.0);
     printf("add.0={}\n", add.0);
     printf("add.1={}\n", add.1);

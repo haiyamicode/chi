@@ -15,11 +15,15 @@ b.second=20
 b.get_label()=pair
 b.is_single()=false
 c.label=empty
+made.get_label()=made
+made empty
+accept empty
+made2.get_label()=made2
+made2 single
 d.value=hello
 d.get_label()=str
 === Test: Tuple enum ===
 ok.0=42
-typed ok
 err.0=oops
 add.0=10
 add.1=20

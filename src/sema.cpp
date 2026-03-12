@@ -15,8 +15,17 @@ using namespace cx;
 bool ChiTypeFn::should_use_sret() { return !return_type->is_primitive_abi_type() && !is_extern; }
 
 ChiTypeEnum *ChiTypeEnumValue::parent_enum() {
-    assert(enum_type->kind == TypeKind::Enum);
-    return &enum_type->data.enum_;
+    auto type = enum_type;
+    if (type && type->kind == TypeKind::Subtype) {
+        auto &subtype = type->data.subtype;
+        if (subtype.final_type && subtype.final_type->kind == TypeKind::Enum) {
+            type = subtype.final_type;
+        } else if (subtype.generic && subtype.generic->kind == TypeKind::Enum) {
+            type = subtype.generic;
+        }
+    }
+    assert(type && type->kind == TypeKind::Enum);
+    return &type->data.enum_;
 }
 
 ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &name, ast::Node *node,

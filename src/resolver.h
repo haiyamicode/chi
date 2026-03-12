@@ -369,6 +369,8 @@ class Resolver {
                          ChiType *container = nullptr, bool is_extern = false,
                          TypeList *type_params = nullptr);
 
+    bool fn_type_has_placeholder(ChiType *fn_type);
+
     ChiType *get_lambda_for_fn(ChiType *fn);
     bool finalize_lambda_type_recursive(ChiType *type);
     void finalize_placeholder_lambda_params(ChiType *fn_type);
@@ -468,6 +470,10 @@ class Resolver {
 
     ChiType *get_enum_type(ChiType *type);
     ChiType *get_enum_root(ChiType *type);
+    ChiType *resolve_enum_value_parent_type(ChiType *enum_type);
+    void update_enum_value_member(ChiType *enum_value_type, ChiEnumVariant *member);
+    bool is_enum_value_placeholder(ChiType *enum_type);
+    void ensure_enum_subtype_final_type(ChiType *generic, ChiType *subtype);
     ChiEnumVariant *find_expected_enum_variant(const string &name, ChiType *expected_type);
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
     array<ChiStructMember *> get_enum_payload_fields(ChiType *type);

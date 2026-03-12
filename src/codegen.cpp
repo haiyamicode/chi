@@ -74,26 +74,6 @@ void CodegenContext::init_llvm() {
 
 Compiler::Compiler(CodegenContext *ctx) : m_ctx(ctx) {}
 
-// Check if a type contains placeholder descendants in its params
-// (is_placeholder may be false even when params contain placeholders)
-static bool has_placeholder_descendants(ChiType *type) {
-    switch (type->kind) {
-    case TypeKind::Fn:
-        for (auto p : type->data.fn.params) {
-            if (p->is_placeholder || p->kind == TypeKind::Infer)
-                return true;
-        }
-        if (type->data.fn.return_type && (type->data.fn.return_type->is_placeholder ||
-                                          type->data.fn.return_type->kind == TypeKind::Infer))
-            return true;
-        return false;
-    case TypeKind::FnLambda:
-        return has_placeholder_descendants(type->data.fn_lambda.fn);
-    default:
-        return false;
-    }
-}
-
 ChiType *Compiler::eval_type(ChiType *type) {
     // Handle Infer types - extract the inferred concrete type
     if (type->kind == TypeKind::Infer && type->data.infer.inferred_type) {
@@ -101,7 +81,7 @@ ChiType *Compiler::eval_type(ChiType *type) {
     }
 
     // Use TypeEnv from GenericResolver (set by compile_fn_proto)
-    if (m_fn && m_fn->type_env && (type->is_placeholder || has_placeholder_descendants(type))) {
+    if (m_fn && m_fn->type_env && type->is_placeholder) {
         type = get_resolver()->type_placeholders_sub_map(type, m_fn->type_env);
     }
 
@@ -112,6 +92,12 @@ ChiType *Compiler::eval_type(ChiType *type) {
 
     // Resolve special type kinds
     if (type->kind == TypeKind::Subtype) {
+        if (!type->data.subtype.final_type && !type->is_placeholder) {
+            auto resolved = get_resolver()->resolve_subtype(type);
+            if (resolved && resolved != type) {
+                return resolved;
+            }
+        }
         assert(type->data.subtype.final_type && "eval_type encountered unresolved subtype");
         return type->data.subtype.final_type;
     }
