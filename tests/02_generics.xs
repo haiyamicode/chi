@@ -150,7 +150,7 @@ struct SelfExpanding<T> {
     value: ?T = null;
 
     func wrap() SelfExpanding<Container<T>> {
-        return SelfExpanding<Container<T>>{};
+        return {};
     }
 }
 
@@ -162,7 +162,7 @@ struct MyBox<T> {
     value: ?T = null;
 
     func wrap() MyBox<W<T>> {
-        return MyBox<W<T>>{};
+        return {};
     }
 }
 
@@ -205,7 +205,7 @@ func main() {
     printf("struct_free_str: {}\n", gcs.call_free_fn());
 
     // Self-expanding generic: shallow use should compile and run
-    var se = SelfExpanding<int>{ value: 10 };
+    var se = SelfExpanding<int>{value: 10};
     printf("se.value={}\n", se.value!);
     var se2 = se.wrap();
     printf("se_wrapped\n");
@@ -230,3 +230,4 @@ func main() {
     var w17 = w16.wrap();
     printf("depth_wrap_ok\n");
 }
+

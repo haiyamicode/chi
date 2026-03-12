@@ -7,15 +7,11 @@ struct DeepWrap<T> {
     value: Pair<T>;
 
     static func make(v: T) DeepWrap<T> {
-        return DeepWrap<T>{
-            value: Pair<T>{ a: v },
-        };
+        return {value: Pair<T>{a: v}};
     }
 
     func wrap() DeepWrap<Pair<T>> {
-        return DeepWrap<Pair<T>>{
-            value: Pair<Pair<T>>{},
-        };
+        return {value: Pair<Pair<T>>{}};
     }
 }
 
@@ -38,3 +34,4 @@ func main() {
     var d10_copy = d10;
     printf("d10_copy.a_is_null={}\n", d10_copy.value.a == null);
 }
+
