@@ -2296,7 +2296,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 data.resolved_decl = member->node;
                 data.field->node = member->node;
-                return member->resolved_type;
+                auto result_type = member->resolved_type;
+                if (result_type->has_unresolved_subtype()) {
+                    result_type = member->node ? resolve_live_decl_type(member->node, node)
+                                               : resolve_concrete_subtypes(result_type, node);
+                    member->resolved_type = result_type;
+                }
+                return result_type;
             }
             case TypeKind::Struct: {
                 auto member = underlying_type->data.struct_.find_static_member(field_name);
@@ -2322,6 +2328,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         promoted->data.fn.type_params.add(tp);
                     }
                     result_type = promoted;
+                }
+
+                if (result_type->has_unresolved_subtype()) {
+                    result_type = member->node ? resolve_live_decl_type(member->node, node)
+                                               : resolve_concrete_subtypes(result_type, node);
+                    member->resolved_type = result_type;
                 }
 
                 return result_type;
@@ -2438,6 +2450,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto expr_struct = resolve_struct_type(stype);
         if (expr_struct->is_generic()) {
             data.should_resolve_variant = true;
+        }
+
+        if (member->resolved_type->has_unresolved_subtype()) {
+            auto result_type = member->node ? resolve_live_decl_type(member->node, node)
+                                            : resolve_concrete_subtypes(member->resolved_type, node);
+            member->resolved_type = result_type;
         }
 
         // For Array types, ensure we use the substituted member type
@@ -6155,6 +6173,59 @@ ChiType *Resolver::type_placeholders_sub_map(ChiType *type, map<ChiType *, ChiTy
     return recursive_type_replace(type, nullptr, handle_placeholder, make_recursive_call);
 }
 
+ChiType *Resolver::resolve_concrete_subtypes(ChiType *type, ast::Node *origin) {
+    if (!type || !type->has_unresolved_subtype()) {
+        return type;
+    }
+
+    auto handle_placeholder = [](ChiType *type, ChiTypeSubtype *) -> ChiType * {
+        return type;
+    };
+
+    auto make_recursive_call = [this, origin](ChiType *type, ChiTypeSubtype *) -> ChiType * {
+        return resolve_concrete_subtypes(type, origin);
+    };
+
+    auto resolved = recursive_type_replace(type, nullptr, handle_placeholder, make_recursive_call);
+    if (resolved->kind == TypeKind::Subtype && !resolved->is_placeholder &&
+        !resolved->data.subtype.final_type) {
+        return resolve_subtype(resolved, origin);
+    }
+
+    return resolved;
+}
+
+ChiType *Resolver::resolve_live_decl_type(ast::Node *decl, ast::Node *origin) {
+    if (!decl || !decl->resolved_type || decl->resolved_type->is_placeholder ||
+        !decl->resolved_type->has_unresolved_subtype()) {
+        return decl ? decl->resolved_type : nullptr;
+    }
+
+    auto resolved = resolve_concrete_subtypes(decl->resolved_type, origin);
+    decl->resolved_type = resolved;
+
+    ast::Node *proto = nullptr;
+    if (decl->type == NodeType::FnDef) {
+        proto = decl->data.fn_def.fn_proto;
+    } else if (decl->type == NodeType::GeneratedFn) {
+        proto = decl->data.generated_fn.fn_proto;
+    }
+
+    if (proto) {
+        proto->resolved_type = resolved;
+        if (resolved->kind == TypeKind::Fn) {
+            auto &params = resolved->data.fn.params;
+            auto &proto_params = proto->data.fn_proto.params;
+            size_t count = params.len < proto_params.len ? params.len : proto_params.len;
+            for (size_t i = 0; i < count; i++) {
+                proto_params[i]->resolved_type = params[i];
+            }
+        }
+    }
+
+    return resolved;
+}
+
 ChiType *Resolver::wrap_placeholders_with_infer(ChiType *type) {
     map<ChiType *, ChiType *> infer_map;
     return wrap_placeholders_with_infer(type, infer_map);
@@ -6612,6 +6683,24 @@ bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
 
 ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,
                                    NodeList *args, ast::Node *fn_decl) {
+    bool fn_has_unresolved_subtype =
+        fn->return_type && fn->return_type->has_unresolved_subtype();
+    if (!fn_has_unresolved_subtype) {
+        for (auto param_type : fn->params) {
+            if (param_type && param_type->has_unresolved_subtype()) {
+                fn_has_unresolved_subtype = true;
+                break;
+            }
+        }
+    }
+
+    if (fn_decl && fn_has_unresolved_subtype) {
+        auto live_fn_type = resolve_live_decl_type(fn_decl, node);
+        if (live_fn_type && live_fn_type->kind == TypeKind::Fn) {
+            fn = &live_fn_type->data.fn;
+        }
+    }
+
     auto n_args = args->len;
     auto n_params = fn->params.len;
 
@@ -6832,19 +6921,26 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                     if (member) {
                         dot.resolved_decl = member->node;
                         dot.field->node = member->node;
-                        auto &spec_fn = member->resolved_type->data.fn;
+                        auto spec_fn_type = resolve_live_decl_type(member->node, node);
+                        if (!spec_fn_type) {
+                            spec_fn_type = member->resolved_type;
+                        }
+                        member->resolved_type = spec_fn_type;
+                        auto &spec_fn = spec_fn_type->data.fn;
 
                         if (used_infer_wrapping) {
                             for (size_t i = 0; i < n_args; i++) {
                                 auto arg = args->at(i);
                                 auto concrete_param = spec_fn.get_param_at(i);
                                 auto arg_type = node_get_type(arg);
-                                auto concrete_arg_type = type_placeholders_sub_map(arg_type, &type_substitutions);
+                                auto concrete_arg_type =
+                                    type_placeholders_sub_map(arg_type, &type_substitutions);
                                 arg->resolved_type = concrete_arg_type;
                                 if (concrete_param) {
                                     check_assignment(arg, concrete_arg_type, concrete_param);
                                 }
-                                track_move_sink(scope.parent_fn_node, arg, concrete_arg_type, node, concrete_param);
+                                track_move_sink(scope.parent_fn_node, arg, concrete_arg_type,
+                                                node, concrete_param);
                                 ensure_temp_owner(arg, concrete_arg_type, scope);
                             }
                             return spec_fn.return_type;
@@ -6865,7 +6961,11 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         auto fn_variant = get_fn_variant(original_fn_type, &type_args, fn_decl_node);
         node->data.fn_call_expr.generated_fn = fn_variant;
 
-        auto &spec_fn = fn_variant->resolved_type->data.fn;
+        auto spec_fn_type = resolve_live_decl_type(fn_variant, node);
+        if (!spec_fn_type) {
+            spec_fn_type = fn_variant->resolved_type;
+        }
+        auto &spec_fn = spec_fn_type->data.fn;
 
         if (used_infer_wrapping) {
             for (size_t i = 0; i < n_args; i++) {
@@ -8048,11 +8148,6 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
         bool is_method_sig = m_resolving_subtype &&
                              m_resolving_subtype->data.subtype.generic == generic &&
                              sub->subtype_depth() > m_resolving_subtype->subtype_depth();
-        if (is_method_sig) {
-            fmt::print(stderr, "DEFER: {} (depth {}) while resolving {} (depth {})\n",
-                       sub->global_id, sub->subtype_depth(),
-                       m_resolving_subtype->global_id, m_resolving_subtype->subtype_depth());
-        }
         map<ChiType *, ChiType *> subs;
         for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
             // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in

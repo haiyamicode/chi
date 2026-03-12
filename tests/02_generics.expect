@@ -16,3 +16,4 @@ struct_chain: 200
 struct_free_str: method
 se.value=10
 se_wrapped
+depth_wrap_ok

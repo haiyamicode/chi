@@ -422,6 +422,8 @@ class Resolver {
     ChiType *type_placeholders_sub_map(ChiType *type, map<ChiType *, ChiType *> *subs);
     ChiType *wrap_placeholders_with_infer(ChiType *type);
     ChiType *wrap_placeholders_with_infer(ChiType *type, map<ChiType *, ChiType *> &infer_map);
+    ChiType *resolve_concrete_subtypes(ChiType *type, ast::Node *origin = nullptr);
+    ChiType *resolve_live_decl_type(ast::Node *decl, ast::Node *origin = nullptr);
 
     void type_placeholders_sub_each_selective(TypeList *list, ChiTypeSubtype *subs,
                                               TypeList *output, ast::Node *source_filter);

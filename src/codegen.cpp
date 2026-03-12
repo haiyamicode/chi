@@ -112,10 +112,7 @@ ChiType *Compiler::eval_type(ChiType *type) {
 
     // Resolve special type kinds
     if (type->kind == TypeKind::Subtype) {
-        if (!type->data.subtype.final_type) {
-            // Unresolved subtype — deferred from method signature substitution
-            return get_system_types()->uint8;
-        }
+        assert(type->data.subtype.final_type && "eval_type encountered unresolved subtype");
         return type->data.subtype.final_type;
     }
     if (type->kind == TypeKind::This && m_fn) {
@@ -351,6 +348,9 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             }
 
             auto fn_type = get_chitype(fn_node);
+            if (fn_type->has_unresolved_subtype()) {
+                continue;
+            }
 
             // For generic methods, compile their specialized versions instead
             if (fn_type->is_placeholder) {
