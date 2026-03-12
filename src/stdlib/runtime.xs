@@ -1110,12 +1110,14 @@ export struct Promise<T = Unit> {
 
     mut func settle<U>(callback: func <'static>(value: Result<T, Shared<Error>>) U) Promise<U> {
         var result = Promise<U>{};
-        this.on_resolve(func [result, callback] (value: T) {
-            result.resolve(callback(Result<T, Shared<Error>>{ value: move value }));
-        });
+        this.on_resolve(
+            func [result, callback] (value: T) {
+                result.resolve(callback(Result<T, Shared<Error>>{value: move value}));
+            }
+        );
         this.on_reject(
             func [result, callback] (err: Shared<Error>) {
-                result.resolve(callback(Result<T, Shared<Error>>{ error: move err }));
+                result.resolve(callback(Result<T, Shared<Error>>{error: move err}));
             }
         );
         return result;

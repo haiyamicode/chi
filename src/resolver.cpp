@@ -9287,24 +9287,29 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
                 continue;
             visited[node] = true;
 
-            bool satisfied = satisfies_lifetime_constraint(required, terminal, node);
-            if (verbose) {
-                fmt::print("[lifetime]   leaf {} -> {}\n", node_label(node),
-                           satisfied ? "OK" : "VIOLATION");
-            }
+            auto *next = flow.ref_edges.get(node);
+            bool is_leaf = !next || next->len == 0;
 
-            if (!satisfied) {
-                if (is_safe) {
-                    array<Note> notes;
-                    notes.add({"referenced here", terminal->token->pos});
-                    error_with_notes(node, std::move(notes), "'{}' does not live long enough",
-                                     node->name);
-                } else {
-                    node->escape.escaped = true;
+            if (is_leaf) {
+                bool satisfied = satisfies_lifetime_constraint(required, terminal, node);
+                if (verbose) {
+                    fmt::print("[lifetime]   leaf {} -> {}\n", node_label(node),
+                               satisfied ? "OK" : "VIOLATION");
+                }
+
+                if (!satisfied) {
+                    if (is_safe) {
+                        array<Note> notes;
+                        notes.add({"referenced here", terminal->token->pos});
+                        error_with_notes(node, std::move(notes),
+                                         "'{}' does not live long enough", node->name);
+                    } else {
+                        node->escape.escaped = true;
+                    }
                 }
             }
 
-            if (auto *next = flow.ref_edges.get(node)) {
+            if (next) {
                 for (size_t i = 0; i < next->len; i++)
                     stack.add(next->items[i]);
             }

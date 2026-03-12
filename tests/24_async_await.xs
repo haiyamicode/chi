@@ -405,15 +405,19 @@ func test_reject_chain() {
 func test_settle() {
     println("=== settle ===");
 
-    settle_resolves_after_delay().settle(func (result) {
-        printf("settle ok value: {}\n", result.value!);
-        printf("settle ok error null: {}\n", result.error == null);
-    });
+    settle_resolves_after_delay().settle(
+        func (result) {
+            printf("settle ok value: {}\n", result.value!);
+            printf("settle ok error null: {}\n", result.error == null);
+        }
+    );
 
-    settle_outer_throws().settle(func (result) {
-        printf("settle err value null: {}\n", result.value == null);
-        printf("settle err message: {}\n", result.error!.message());
-    });
+    settle_outer_throws().settle(
+        func (result) {
+            printf("settle err value null: {}\n", result.value == null);
+            printf("settle err message: {}\n", result.error!.message());
+        }
+    );
 }
 
 func test_reject_after_resolve() {

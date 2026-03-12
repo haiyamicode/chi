@@ -12,3 +12,4 @@ func main() {
     println(*x);
     println(q.y);
 }
+

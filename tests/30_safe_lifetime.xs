@@ -362,6 +362,27 @@ func test_method_ref_return() {
     printf("method ref = {}\n", *r);
 }
 
+struct PointRef {
+    x: int;
+}
+
+func alias_point_field(p: &PointRef) &int {
+    var r = &p.x;
+    return r;
+}
+
+func alias_destructured_field(p: &PointRef) &int {
+    var {&x} = *p;
+    return x;
+}
+
+func test_ref_alias_return() {
+    printf("=== ref alias return ===\n");
+    var p = PointRef{x: 77};
+    printf("field alias = {}\n", *alias_point_field(&p));
+    printf("destructure alias = {}\n", *alias_destructured_field(&p));
+}
+
 // --- Block-based destruction ---
 
 // Borrow scoped in block, delete after block is safe
@@ -688,6 +709,7 @@ func main() {
     test_cross_fn_ref();
     test_bigger_ref();
     test_method_ref_return();
+    test_ref_alias_return();
     test_block_scoped_borrow();
     test_block_destruction_order();
     var ret = test_early_return_cleanup();

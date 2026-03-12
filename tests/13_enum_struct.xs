@@ -190,6 +190,7 @@ func test_tuple_enum() {
     };
     printf("sum={}\n", sum);
 }
+
 func test_enum_string_copy() {
     println("=== Test: Enum string copy ===");
     var s = TaggedValue.Named{id: 1, label: stringf("name_{}", 42)};
@@ -300,8 +301,14 @@ func test_switch_nested_destructure() {
         ret: "txt"
     };
     var desc = switch fn {
-        FnDef{name, params: [first, ...rest], ret} =>
-            stringf("{}:{}:{}:{}:{}", name, ret, first, rest[0], rest[1]),
+        FnDef{name, params: [first, ...rest], ret} => stringf(
+            "{}:{}:{}:{}:{}",
+            name,
+            ret,
+            first,
+            rest[0],
+            rest[1]
+        ),
         else => "empty"
     };
     println(desc);
