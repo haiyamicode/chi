@@ -158,6 +158,7 @@ names[0]=hello names[1]=world
 
 -- Ref destructure: struct --
 x=10 y=20
+x=77 y=88
 
 -- Ref destructure: mixed --
 rx=30 cy=40
@@ -168,6 +169,7 @@ a=100 b=200 c=300
 -- Mut ref destructure: struct --
 rx=1 ry=2
 rx=99 ry=88
+p.x=99 p.y=88
 
 -- Mut ref destructure: array --
 a=1 b=2

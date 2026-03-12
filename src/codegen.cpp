@@ -4570,8 +4570,11 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 }
 
 void Compiler::compile_destructure(Function *fn, ast::DestructureDecl &data,
-                                  llvm::Value *source_ptr, ChiType *source_type) {
+                                  llvm::Value *source_ptr, ChiType *source_type,
+                                  llvm::Value *borrow_source_ptr) {
     auto &builder = *m_ctx->llvm_builder.get();
+    if (!borrow_source_ptr)
+        borrow_source_ptr = source_ptr;
     if (data.is_tuple) {
         auto tuple_ptr = source_ptr;
         auto tuple_type = source_type;
@@ -4591,17 +4594,19 @@ void Compiler::compile_destructure(Function *fn, ast::DestructureDecl &data,
             if (result) {
                 builder.CreateStore(result, tuple_ptr);
             }
+            borrow_source_ptr = tuple_ptr;
         }
-        compile_tuple_destructure(fn, data, tuple_ptr, tuple_type);
+        compile_tuple_destructure(fn, data, tuple_ptr, tuple_type, borrow_source_ptr);
     } else if (data.is_array) {
-        compile_array_destructure(fn, data, source_ptr, source_type);
+        compile_array_destructure(fn, data, source_ptr, source_type, borrow_source_ptr);
     } else {
-        compile_destructure_fields(fn, data.fields, source_ptr, source_type);
+        compile_destructure_fields(fn, data.fields, source_ptr, source_type, borrow_source_ptr);
     }
 }
 
 void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fields,
-                                          llvm::Value *source_ptr, ChiType *source_type) {
+                                          llvm::Value *source_ptr, ChiType *source_type,
+                                          llvm::Value *borrow_source_ptr) {
     auto &builder = *m_ctx->llvm_builder;
     auto struct_type_l = compile_type(source_type);
     size_t var_idx = 0;
@@ -4610,10 +4615,13 @@ void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fiel
         auto &field_data = field_node->data.destructure_field;
         auto member = field_data.resolved_field;
         auto field_ptr = compile_dot_access(fn, source_ptr, source_type, member);
+        auto borrow_field_ptr = borrow_source_ptr
+                                    ? compile_dot_access(fn, borrow_source_ptr, source_type, member)
+                                    : field_ptr;
 
         if (field_data.nested) {
             compile_destructure(fn, field_data.nested->data.destructure_decl, field_ptr,
-                               member->resolved_type);
+                               member->resolved_type, borrow_field_ptr);
         } else {
             // Allocate binding variable
             auto &gen_vars = field_node->parent->data.destructure_decl.generated_vars;
@@ -4625,7 +4633,7 @@ void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fiel
             if (field_data.sigil == ast::SigilKind::Reference ||
                 field_data.sigil == ast::SigilKind::MutRef) {
                 // Reference binding: store field address directly
-                builder.CreateStore(field_ptr, var_ptr);
+                builder.CreateStore(borrow_field_ptr, var_ptr);
             } else {
                 // Copy binding: load field value and copy
                 auto var_type = get_chitype(var_node);
@@ -4638,8 +4646,11 @@ void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fiel
 }
 
 void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &data,
-                                         llvm::Value *source_ptr, ChiType *source_type) {
+                                         llvm::Value *source_ptr, ChiType *source_type,
+                                         llvm::Value *borrow_source_ptr) {
     auto &builder = *m_ctx->llvm_builder;
+    if (!borrow_source_ptr)
+        borrow_source_ptr = source_ptr;
 
     // Same pattern as IndexExpr codegen (Struct case, lines 3835-3843)
     auto method = data.resolved_index_method;
@@ -4692,10 +4703,11 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
 
         auto index_val = llvm::ConstantInt::get(index_type_l, i);
         auto elem_ptr = builder.CreateCall(index_fn->llvm_fn, {source_ptr, index_val});
+        auto borrow_elem_ptr = builder.CreateCall(index_fn->llvm_fn, {borrow_source_ptr, index_val});
 
         if (field_data.sigil == ast::SigilKind::Reference ||
             field_data.sigil == ast::SigilKind::MutRef) {
-            builder.CreateStore(elem_ptr, var_ptr);
+            builder.CreateStore(borrow_elem_ptr, var_ptr);
         } else {
             auto elem_value = builder.CreateLoad(elem_type_l, elem_ptr);
             compile_store_or_copy(fn, elem_value, var_ptr, elem_type, field_node);
@@ -4704,8 +4716,11 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
 }
 
 void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &data,
-                                         llvm::Value *source_ptr, ChiType *source_type) {
+                                         llvm::Value *source_ptr, ChiType *source_type,
+                                         llvm::Value *borrow_source_ptr) {
     auto &builder = *m_ctx->llvm_builder;
+    if (!borrow_source_ptr)
+        borrow_source_ptr = source_ptr;
     auto source_type_l = compile_type(source_type);
     TypeList tuple_like_elems;
     array<ChiStructMember *> tuple_like_fields;
@@ -4758,15 +4773,20 @@ void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &dat
             auto elem_type = elems[i];
             auto elem_type_l = compile_type(elem_type);
             llvm::Value *elem_ptr;
+            llvm::Value *borrow_elem_ptr;
             if (tuple_like_struct) {
                 elem_ptr = compile_dot_access(fn, source_ptr, source_type, tuple_like_fields[i]);
+                borrow_elem_ptr = compile_dot_access(fn, borrow_source_ptr, source_type,
+                                                     tuple_like_fields[i]);
             } else {
                 elem_ptr = builder.CreateStructGEP(source_type_l, source_ptr, (unsigned)i);
+                borrow_elem_ptr =
+                    builder.CreateStructGEP(source_type_l, borrow_source_ptr, (unsigned)i);
             }
 
             if (field_data.sigil == ast::SigilKind::Reference ||
                 field_data.sigil == ast::SigilKind::MutRef) {
-                builder.CreateStore(elem_ptr, var_ptr);
+                builder.CreateStore(borrow_elem_ptr, var_ptr);
             } else {
                 auto elem_value = builder.CreateLoad(elem_type_l, elem_ptr);
                 compile_store_or_copy(fn, elem_value, var_ptr, elem_type, field_node);
@@ -6183,13 +6203,24 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto source_type = get_chitype(data.expr);
         auto temp_ptr = compile_alloc(fn, data.temp_var);
         add_var(data.temp_var, temp_ptr);
-        auto rhs_value = compile_assignment_to_type(fn, data.expr, source_type);
-        if (rhs_value) {
-            compile_store_or_copy(fn, rhs_value, temp_ptr, source_type, data.expr);
+        llvm::Value *borrow_source_ptr = nullptr;
+        if (get_resolver()->find_root_decl(data.expr)) {
+            auto source_ref = compile_expr_ref(fn, data.expr);
+            if (source_ref.address) {
+                borrow_source_ptr = source_ref.address;
+                compile_copy_with_ref(fn, source_ref, temp_ptr, source_type, data.expr);
+            }
+        }
+        if (!borrow_source_ptr) {
+            auto rhs_value = compile_assignment_to_type(fn, data.expr, source_type);
+            if (rhs_value) {
+                compile_store_or_copy(fn, rhs_value, temp_ptr, source_type, data.expr);
+            }
+            borrow_source_ptr = temp_ptr;
         }
 
         // Extract elements
-        compile_destructure(fn, data, temp_ptr, source_type);
+        compile_destructure(fn, data, temp_ptr, source_type, borrow_source_ptr);
         break;
     }
     case ast::NodeType::VarDecl: {

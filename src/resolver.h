@@ -391,19 +391,23 @@ class Resolver {
     ast::Node *create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt,
                                    ResolveScope &scope, ChiType *narrowed_type = nullptr);
 
-    void resolve_destructure(ast::Node *pattern, ChiType *source_type, ResolveScope &scope);
+    void resolve_destructure(ast::Node *pattern, ChiType *source_type, ResolveScope &scope,
+                             ast::Node *borrow_source = nullptr);
 
     void resolve_destructure_fields(ast::Node *parent, array<ast::Node *> &fields,
                                     ChiType *source_type, ResolveScope &scope,
-                                    array<ast::Node *> &generated_vars);
+                                    array<ast::Node *> &generated_vars,
+                                    ast::Node *borrow_source = nullptr);
 
     void resolve_array_destructure(ast::Node *parent, array<ast::Node *> &fields,
                                    ChiType *source_type, ResolveScope &scope,
-                                   array<ast::Node *> &generated_vars);
+                                   array<ast::Node *> &generated_vars,
+                                   ast::Node *borrow_source = nullptr);
 
     void resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &fields,
                                    ChiType *source_type, ResolveScope &scope,
-                                   array<ast::Node *> &generated_vars);
+                                   array<ast::Node *> &generated_vars,
+                                   ast::Node *borrow_source = nullptr);
 
     bool always_terminates(ast::Node *node);
 

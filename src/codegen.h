@@ -394,16 +394,19 @@ class Compiler {
                                ast::Node *expr = nullptr, bool destruct_old = false);
 
     void compile_destructure(Function *fn, ast::DestructureDecl &data, llvm::Value *source_ptr,
-                             ChiType *source_type);
+                             ChiType *source_type, llvm::Value *borrow_source_ptr = nullptr);
 
     void compile_destructure_fields(Function *fn, array<ast::Node *> &fields,
-                                    llvm::Value *source_ptr, ChiType *source_type);
+                                    llvm::Value *source_ptr, ChiType *source_type,
+                                    llvm::Value *borrow_source_ptr = nullptr);
 
     void compile_array_destructure(Function *fn, ast::DestructureDecl &data,
-                                   llvm::Value *source_ptr, ChiType *source_type);
+                                   llvm::Value *source_ptr, ChiType *source_type,
+                                   llvm::Value *borrow_source_ptr = nullptr);
 
     void compile_tuple_destructure(Function *fn, ast::DestructureDecl &data,
-                                   llvm::Value *source_ptr, ChiType *source_type);
+                                   llvm::Value *source_ptr, ChiType *source_type,
+                                   llvm::Value *borrow_source_ptr = nullptr);
 
     llvm::Value *compile_optional_branch(
         Function *fn, ast::Node *opt_expr, llvm::Type *result_type_l, const char *label,

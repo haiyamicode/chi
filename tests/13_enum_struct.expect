@@ -73,7 +73,7 @@ err oops
 === Test: Switch by-ref destructure ===
 before
 bool
-int
+bool
 === Test: Switch nested destructure ===
 join:txt:lhs:rhs:tail
 === Test: Enum base struct lifecycle ===

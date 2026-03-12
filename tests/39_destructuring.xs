@@ -347,6 +347,9 @@ func test_ref_struct() {
     var p = Point{x: 10, y: 20};
     var {&x, &y} = p;
     printf("x={} y={}\n", *x, *y);
+    p.x = 77;
+    p.y = 88;
+    printf("x={} y={}\n", *x, *y);
 }
 
 func test_ref_mixed() {
@@ -368,6 +371,7 @@ func test_mut_ref_struct() {
     *rx = 99;
     *ry = 88;
     printf("rx={} ry={}\n", *rx, *ry);
+    printf("p.x={} p.y={}\n", p.x, p.y);
 }
 
 func test_mut_ref_array() {

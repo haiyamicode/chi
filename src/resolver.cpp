@@ -1346,10 +1346,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (scope.parent_fn_node) {
             temp_var->decl_order = scope.parent_fn_def()->next_decl_order++;
+            if (!scope.is_unsafe_block && expr_type && is_borrowing_type(expr_type)) {
+                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, data.expr, temp_var);
+            }
         }
 
+        auto *borrow_source = find_root_decl(data.expr) ? data.expr : temp_var;
+
         // Resolve each field pattern
-        resolve_destructure(node, expr_type, scope);
+        resolve_destructure(node, expr_type, scope, borrow_source);
 
         // Add temp to cleanup if needed
         if (scope.parent_fn_node && scope.block && should_destroy(temp_var, expr_type) &&
@@ -7294,20 +7299,24 @@ static string build_narrowing_path(ast::Node *expr) {
 }
 
 void Resolver::resolve_destructure(ast::Node *pattern, ChiType *source_type,
-                                   ResolveScope &scope) {
+                                   ResolveScope &scope, ast::Node *borrow_source) {
     auto &data = pattern->data.destructure_decl;
     if (data.is_tuple) {
-        resolve_tuple_destructure(pattern, data.fields, source_type, scope, data.generated_vars);
+        resolve_tuple_destructure(pattern, data.fields, source_type, scope,
+                                  data.generated_vars, borrow_source);
     } else if (data.is_array) {
-        resolve_array_destructure(pattern, data.fields, source_type, scope, data.generated_vars);
+        resolve_array_destructure(pattern, data.fields, source_type, scope,
+                                  data.generated_vars, borrow_source);
     } else {
-        resolve_destructure_fields(pattern, data.fields, source_type, scope, data.generated_vars);
+        resolve_destructure_fields(pattern, data.fields, source_type, scope,
+                                   data.generated_vars, borrow_source);
     }
 }
 
 void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> &fields,
                                           ChiType *source_type, ResolveScope &scope,
-                                          array<ast::Node *> &generated_vars) {
+                                          array<ast::Node *> &generated_vars,
+                                          ast::Node *borrow_source) {
     auto struct_type = resolve_struct_type(source_type);
     if (!struct_type) {
         error(parent, "cannot destructure non-struct type '{}'", format_type_display(source_type));
@@ -7327,7 +7336,7 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
         field_data.resolved_field = member;
 
         if (field_data.nested) {
-            resolve_destructure(field_data.nested, member->resolved_type, scope);
+            resolve_destructure(field_data.nested, member->resolved_type, scope, borrow_source);
         } else {
             // Create a VarDecl for this binding
             auto binding_name = string(field_data.binding_name->str);
@@ -7353,6 +7362,13 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
                 scope.block->scope->put(binding_name, var);
             }
 
+            if (scope.parent_fn_node && !scope.is_unsafe_block && var->resolved_type &&
+                is_borrowing_type(var->resolved_type)) {
+                auto *source = borrow_source ? borrow_source : parent->data.destructure_decl.temp_var;
+                bool is_ref = var->resolved_type->is_reference();
+                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, source, var, is_ref);
+            }
+
             if (scope.parent_fn_node && scope.block && should_destroy(var, field_type) &&
                 !var->escape.is_capture()) {
                 scope.block->cleanup_vars.add(var);
@@ -7366,7 +7382,8 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
 
 void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &fields,
                                          ChiType *source_type, ResolveScope &scope,
-                                         array<ast::Node *> &generated_vars) {
+                                         array<ast::Node *> &generated_vars,
+                                         ast::Node *borrow_source) {
     // Same as IndexExpr resolver: get the internal struct, look up index_mut
     auto struct_type = resolve_struct_type(source_type);
     if (!struct_type) {
@@ -7436,6 +7453,13 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
             scope.block->scope->put(binding_name, var);
         }
 
+        if (scope.parent_fn_node && !scope.is_unsafe_block && var->resolved_type &&
+            is_borrowing_type(var->resolved_type)) {
+            auto *source = borrow_source ? borrow_source : parent->data.destructure_decl.temp_var;
+            bool is_ref = var->resolved_type->is_reference();
+            add_borrow_source_edges(scope.parent_fn_node->data.fn_def, source, var, is_ref);
+        }
+
         if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
             !var->escape.is_capture()) {
             scope.block->cleanup_vars.add(var);
@@ -7448,7 +7472,8 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
 
 void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &fields,
                                          ChiType *source_type, ResolveScope &scope,
-                                         array<ast::Node *> &generated_vars) {
+                                         array<ast::Node *> &generated_vars,
+                                         ast::Node *borrow_source) {
     array<ChiStructMember *> tuple_like_fields;
     TypeList tuple_like_elems;
 
@@ -7478,6 +7503,7 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
             return;
         }
         if (!tuple_like_struct) {
+            borrow_source = parent->data.destructure_decl.temp_var;
             // Get the return type of as_tuple() — should be a Tuple
             auto method_type = as_tuple_member->resolved_type;
             if (!method_type || method_type->kind != TypeKind::Fn ||
@@ -7555,6 +7581,13 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
 
         if (scope.block && scope.block->scope) {
             scope.block->scope->put(binding_name, var);
+        }
+
+        if (scope.parent_fn_node && !scope.is_unsafe_block && var->resolved_type &&
+            is_borrowing_type(var->resolved_type)) {
+            auto *source = borrow_source ? borrow_source : parent->data.destructure_decl.temp_var;
+            bool is_ref = var->resolved_type->is_reference();
+            add_borrow_source_edges(scope.parent_fn_node->data.fn_def, source, var, is_ref);
         }
 
         if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
