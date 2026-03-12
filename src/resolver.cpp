@@ -559,6 +559,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
             return enum_type && enum_type->data.enum_.is_plain;
         }
         return false;
+    case TypeKind::Subtype:
+        return from_type->kind == TypeKind::EnumValue && get_enum_root(from_type) == get_enum_root(to_type);
     case TypeKind::Infer: {
         auto &infer_data = to_type->data.infer;
         if (infer_data.inferred_type) {
@@ -6691,43 +6693,60 @@ bool Resolver::is_struct_access_mutable(ChiType *type, ResolveScope *scope) {
     return true;
 }
 
-ChiEnumVariant *Resolver::find_expected_enum_variant(const string &name, ChiType *expected_type) {
-    if (!expected_type) {
+ChiType *Resolver::get_enum_type(ChiType *type) {
+    if (!type) {
         return nullptr;
     }
-    auto type = expected_type->eval();
-    switch (type->kind) {
+
+    auto current = type->eval();
+    switch (current->kind) {
     case TypeKind::TypeSymbol:
-        return find_expected_enum_variant(name, type->data.type_symbol.underlying_type);
+        return get_enum_type(current->data.type_symbol.underlying_type);
     case TypeKind::This:
-        return find_expected_enum_variant(name, type->eval());
+        return get_enum_type(current->eval());
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::MoveRef:
     case TypeKind::Optional:
-        return find_expected_enum_variant(name, type->get_elem());
+        return get_enum_type(current->get_elem());
     case TypeKind::Enum:
-        return type->data.enum_.find_member(name);
+        return current;
     case TypeKind::EnumValue:
-        return type->data.enum_value.parent_enum()->find_member(name);
+        return current->data.enum_value.enum_type;
     case TypeKind::Subtype: {
-        auto &subtype = type->data.subtype;
+        auto &subtype = current->data.subtype;
         if (subtype.final_type) {
-            return find_expected_enum_variant(name, subtype.final_type);
+            return get_enum_type(subtype.final_type);
         }
-        auto resolved = resolve_subtype(type);
-        if (resolved && resolved != type) {
-            return find_expected_enum_variant(name, resolved);
+        auto resolved = resolve_subtype(current);
+        if (resolved && resolved != current) {
+            return get_enum_type(resolved);
         }
         if (subtype.generic && subtype.generic->kind == TypeKind::Enum) {
-            return subtype.generic->data.enum_.find_member(name);
+            return subtype.generic;
         }
         return nullptr;
     }
     default:
         return nullptr;
     }
+}
+
+ChiType *Resolver::get_enum_root(ChiType *type) {
+    auto enum_type = get_enum_type(type);
+    if (!enum_type || enum_type->kind != TypeKind::Enum) {
+        return nullptr;
+    }
+    return enum_type->data.enum_.resolved_generic ? enum_type->data.enum_.resolved_generic : enum_type;
+}
+
+ChiEnumVariant *Resolver::find_expected_enum_variant(const string &name, ChiType *expected_type) {
+    auto enum_type = get_enum_type(expected_type);
+    if (!enum_type || enum_type->kind != TypeKind::Enum) {
+        return nullptr;
+    }
+    return enum_type->data.enum_.find_member(name);
 }
 
 ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string &field_name) {

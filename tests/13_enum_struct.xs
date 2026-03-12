@@ -164,10 +164,12 @@ func test_tuple_enum() {
     println("=== Test: Tuple enum ===");
 
     var ok = TupleResult<int, string>.Ok{42};
+    var typed_ok: TupleResult<int, string> = TupleResult<int, string>.Ok{99};
     var err = TupleResult<int, string>.Err{"oops"};
     var add = IntExpr.Add{10, 20};
 
     printf("ok.0={}\n", ok.0);
+    println("typed ok");
     printf("err.0={}\n", err.0);
     printf("add.0={}\n", add.0);
     printf("add.1={}\n", add.1);

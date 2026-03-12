@@ -466,6 +466,8 @@ class Resolver {
 
     bool compare_impl_type(ChiType *base, ChiType *impl);
 
+    ChiType *get_enum_type(ChiType *type);
+    ChiType *get_enum_root(ChiType *type);
     ChiEnumVariant *find_expected_enum_variant(const string &name, ChiType *expected_type);
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
     array<ChiStructMember *> get_enum_payload_fields(ChiType *type);
