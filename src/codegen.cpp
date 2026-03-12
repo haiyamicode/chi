@@ -3966,14 +3966,18 @@ llvm::Value *Compiler::compile_comparator(Function *fn, ast::Node *expr, ChiType
     if (!type) {
         type = get_chitype(expr);
     }
-    switch (type->kind) {
-    case TypeKind::EnumValue: {
+
+    auto enum_type = get_resolver()->get_enum_type(type);
+    if (enum_type && enum_type->kind == TypeKind::Enum) {
         auto ref = compile_expr_ref(fn, expr);
         auto address = ref.address ? ref.address : ref.value;
-        auto gep = builder.CreateStructGEP(compile_type(type), address, 0);
-        return builder.CreateLoad(llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx), gep,
+        auto value_type = enum_type->data.enum_.base_value_type;
+        auto gep = builder.CreateStructGEP(compile_type(value_type), address, 0);
+        return builder.CreateLoad(compile_type(enum_type->data.enum_.discriminator), gep,
                                   "_load_enum_value");
     }
+
+    switch (type->kind) {
     case TypeKind::Reference:
     case TypeKind::MutRef:
     case TypeKind::MoveRef:

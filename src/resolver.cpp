@@ -4867,8 +4867,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
                 // Enum variant narrowing: single-clause case matching a specific variant
                 if (scase->data.case_expr.clauses.len == 1) {
-                    auto underlying = expr_type->eval();
-                    if (underlying && underlying->kind == TypeKind::EnumValue) {
+                    auto switch_enum = get_enum_type(expr_type);
+                    if (switch_enum && switch_enum->kind == TypeKind::Enum) {
                         auto clause = scase->data.case_expr.clauses[0];
                         auto clause_type = node_get_type(clause);
                         if (clause_type && clause_type->kind == TypeKind::EnumValue &&
@@ -4936,10 +4936,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Determine exhaustiveness
         bool exhaustive = has_else;
         if (!exhaustive) {
-            auto underlying = expr_type->eval();
-            if (underlying && underlying->kind == TypeKind::EnumValue) {
-                auto enum_ = underlying->data.enum_value.parent_enum();
-                if (enum_ && covered_count >= enum_->variants.len) {
+            auto enum_type = get_enum_type(expr_type);
+            if (enum_type && enum_type->kind == TypeKind::Enum) {
+                auto enum_ = &enum_type->data.enum_;
+                if (covered_count >= enum_->variants.len) {
                     exhaustive = true;
                 }
             }
@@ -5006,11 +5006,17 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
     if (!type) {
         return nullptr;
     }
+
+    if (auto enum_type = get_enum_type(type)) {
+        auto base_value_type = enum_type->data.enum_.base_value_type;
+        if (base_value_type && base_value_type->kind == TypeKind::EnumValue) {
+            return base_value_type->data.enum_value.discriminator_type;
+        }
+    }
+
     switch (type->kind) {
     case TypeKind::This:
         return resolve_comparator(type->eval(), scope);
-    case TypeKind::EnumValue:
-        return type->data.enum_value.discriminator_type;
     case TypeKind::Reference:
     case TypeKind::Pointer:
     case TypeKind::MutRef:

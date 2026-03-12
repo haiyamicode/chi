@@ -194,14 +194,31 @@ func test_tuple_enum() {
     println("=== Test: Tuple enum ===");
 
     var ok = TupleResult<int, string>.Ok{42};
+    var ok2 = id_wrapbox<int>(ok);
+    var ok3: TupleResult<int, string> = id_wrapbox<int>(ok2);
+    var typed_ok: TupleResult<int, string> = TupleResult<int, string>.Ok{99};
     var err = TupleResult<int, string>.Err{"oops"};
     var add = IntExpr.Add{10, 20};
 
     printf("ok.0={}\n", ok.0);
+    var ok2_desc = switch ok2 {
+        TupleResult<int, string>.Ok => "ok2 ok",
+        TupleResult<int, string>.Err => "ok2 err"
+    };
+    println(ok2_desc);
+    var ok3_desc = switch ok3 {
+        TupleResult<int, string>.Ok => "ok3 ok",
+        TupleResult<int, string>.Err => "ok3 err"
+    };
+    println(ok3_desc);
+    var typed_ok_desc = switch typed_ok {
+        TupleResult<int, string>.Ok => "typed ok",
+        TupleResult<int, string>.Err => "typed err"
+    };
+    println(typed_ok_desc);
     printf("err.0={}\n", err.0);
     printf("add.0={}\n", add.0);
     printf("add.1={}\n", add.1);
-
     var ok_desc = switch ok {
         TupleResult<int, string>.Ok => stringf("ok {}", ok.0),
         TupleResult<int, string>.Err => stringf("err {}", ok.0)
@@ -289,6 +306,8 @@ func test_switch_destructure() {
 
     var ok = TupleResult<int, string>.Ok{42};
     var err = TupleResult<int, string>.Err{"oops"};
+    var add = IntExpr.Add{10, 20};
+
     var ok_desc = switch ok {
         Ok(value) => stringf("ok {}", value),
         Err(message) => stringf("err {}", message)

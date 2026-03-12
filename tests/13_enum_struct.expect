@@ -24,6 +24,9 @@ d.value=hello
 d.get_label()=str
 === Test: Tuple enum ===
 ok.0=42
+ok2 ok
+ok3 ok
+typed ok
 err.0=oops
 add.0=10
 add.1=20
