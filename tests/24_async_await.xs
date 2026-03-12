@@ -402,6 +402,20 @@ func test_reject_chain() {
     printf("p2 rejected: {}\n", p2.is_rejected());
 }
 
+func test_settle() {
+    println("=== settle ===");
+
+    settle_resolves_after_delay().settle(func (result) {
+        printf("settle ok value: {}\n", result.value!);
+        printf("settle ok error null: {}\n", result.error == null);
+    });
+
+    settle_outer_throws().settle(func (result) {
+        printf("settle err value null: {}\n", result.value == null);
+        printf("settle err message: {}\n", result.error!.message());
+    });
+}
+
 func test_reject_after_resolve() {
     println("=== reject after resolve ===");
     var p = Promise<int>{};
@@ -455,6 +469,24 @@ async func async_resolves_after_delay() Promise<int> {
     var before = 42;
     var y = await time.sleep(150);
     return before;
+}
+
+// resolve after delay for settle()
+async func settle_resolves_after_delay() Promise<int> {
+    var y = await time.sleep(125);
+    return 55;
+}
+
+// nested throw after delay for settle()
+async func settle_inner_throws() Promise<int> {
+    var y = await time.sleep(175);
+    throw new TestError{code: 66};
+    return 0;
+}
+
+async func settle_outer_throws() Promise<int> {
+    var x = await settle_inner_throws();
+    return x + 1;
 }
 
 func test_async_throw_immediate() {
@@ -637,6 +669,7 @@ func main() {
     // Reject
     test_reject();
     test_reject_chain();
+    test_settle();
     test_reject_after_resolve();
     test_resolve_after_reject();
 

@@ -61,6 +61,7 @@ is_rejected: true
 === reject chain ===
 p rejected: true
 p2 rejected: true
+=== settle ===
 === reject after resolve ===
 is_resolved: true
 is_rejected: false
@@ -98,6 +99,10 @@ sleep resolved
 captured: 42
 delayed caught: error 20
 called caught: error 42
+settle ok value: 55
+settle ok error null: true
 resolved: 42
+settle err value null: true
+settle err message: error 66
 nested delayed caught: error 88
 3level caught: error 33
