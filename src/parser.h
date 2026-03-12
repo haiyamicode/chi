@@ -161,10 +161,18 @@ class Parser {
 
     Node *parse_var_decl(bool as_field, DeclSpec *decl_spec = nullptr);
 
+    bool starts_destructure_pattern();
     Node *parse_destructure_pattern(VarKind kind);
+    Node *parse_sequence_destructure_pattern(VarKind kind, TokenType start, TokenType end,
+                                             bool is_array);
+    Node *parse_any_destructure_pattern(VarKind kind);
+    Node *parse_any_destructure_decl(VarKind kind);
     Node *parse_destructure_decl(VarKind kind);
+    Node *parse_array_destructure_pattern(VarKind kind);
     Node *parse_array_destructure_decl(VarKind kind);
+    Node *parse_tuple_destructure_pattern(VarKind kind);
     Node *parse_tuple_destructure_decl(VarKind kind);
+    bool looks_like_case_pattern_clause();
 
     Node *parse_fn_proto(Token *iden, Node *fn_node);
 

@@ -16,7 +16,7 @@ enum Node (type: uint64) {
 
         func is_callable() bool {
             return switch this {
-                Node.FnDef => true,
+                FnDef => true,
                 else => false
             };
         }
@@ -27,14 +27,14 @@ enum Node (type: uint64) {
 
         func get_ret_or_default() string {
             return switch this {
-                Node.FnDef => this.ret,
+                FnDef => this.ret,
                 else => "none"
             };
         }
 
         func describe() string {
             return switch this {
-                Node.VarDecl, Node.FnDef => this.name,
+                VarDecl, FnDef => this.name,
                 else => "unknown"
             };
         }
@@ -120,6 +120,16 @@ enum Tagged<T> (tag: uint64) {
     }
 }
 
+enum TupleResult<T, E> {
+    Ok(T),
+    Err(E)
+}
+
+enum IntExpr {
+    Value(int),
+    Add(int, int)
+}
+
 func test_generic_enum() {
     println("=== Test: Generic enum ===");
 
@@ -150,6 +160,36 @@ func test_generic_enum() {
     printf("d.get_label()={}\n", d.get_label());
 }
 
+func test_tuple_enum() {
+    println("=== Test: Tuple enum ===");
+
+    var ok = TupleResult<int, string>.Ok{42};
+    var err = TupleResult<int, string>.Err{"oops"};
+    var add = IntExpr.Add{10, 20};
+
+    printf("ok.0={}\n", ok.0);
+    printf("err.0={}\n", err.0);
+    printf("add.0={}\n", add.0);
+    printf("add.1={}\n", add.1);
+
+    var ok_desc = switch ok {
+        TupleResult<int, string>.Ok => stringf("ok {}", ok.0),
+        TupleResult<int, string>.Err => stringf("err {}", ok.0)
+    };
+    println(ok_desc);
+
+    var err_desc = switch err {
+        TupleResult<int, string>.Ok => stringf("ok {}", err.0),
+        TupleResult<int, string>.Err => stringf("err {}", err.0)
+    };
+    println(err_desc);
+
+    var sum = switch add {
+        IntExpr.Value => add.0,
+        IntExpr.Add => add.0 + add.1
+    };
+    printf("sum={}\n", sum);
+}
 func test_enum_string_copy() {
     println("=== Test: Enum string copy ===");
     var s = TaggedValue.Named{id: 1, label: stringf("name_{}", 42)};
@@ -195,6 +235,78 @@ func test_enum_string_reassign() {
     println("--- scope exit ---");
 }
 
+func test_switch_destructure() {
+    println("=== Test: Switch destructure ===");
+
+    var fn = Node.FnDef{
+        name: "add",
+        params: {},
+        ret: "int"
+    };
+    var fn_desc = switch fn {
+        FnDef{name, ret} => stringf("{}:{}", name, ret),
+        VarDecl{name} => stringf("{}:var", name)
+    };
+    println(fn_desc);
+
+    var vd = Node.VarDecl{name: "x"};
+    var vd_desc = switch vd {
+        FnDef{name, ret} => stringf("{}:{}", name, ret),
+        VarDecl{name} => stringf("{}:var", name)
+    };
+    println(vd_desc);
+
+    var ok = TupleResult<int, string>.Ok{42};
+    var err = TupleResult<int, string>.Err{"oops"};
+    var ok_desc = switch ok {
+        Ok(value) => stringf("ok {}", value),
+        Err(message) => stringf("err {}", message)
+    };
+    println(ok_desc);
+
+    var err_desc = switch err {
+        Ok(value) => stringf("ok {}", value),
+        Err(message) => stringf("err {}", message)
+    };
+    println(err_desc);
+}
+
+func test_switch_by_ref_destructure() {
+    println("=== Test: Switch by-ref destructure ===");
+
+    var fn = Node.FnDef{
+        name: "before",
+        params: ["x"],
+        ret: "int"
+    };
+    var changed = switch fn {
+        FnDef{&name, &mut ret} => {
+            println(*name);
+            *ret = "bool";
+            *ret
+        },
+        else => "none"
+    };
+    println(changed);
+    println(fn.ret);
+}
+
+func test_switch_nested_destructure() {
+    println("=== Test: Switch nested destructure ===");
+
+    var fn = Node.FnDef{
+        name: "join",
+        params: ["lhs", "rhs", "tail"],
+        ret: "txt"
+    };
+    var desc = switch fn {
+        FnDef{name, params: [first, ...rest], ret} =>
+            stringf("{}:{}:{}:{}:{}", name, ret, first, rest[0], rest[1]),
+        else => "empty"
+    };
+    println(desc);
+}
+
 func test_switch_narrowing() {
     println("=== Test: Switch narrowing ===");
 
@@ -212,6 +324,26 @@ func test_switch_narrowing() {
     // Multi-clause case should not narrow (returns base field only)
     println(fn.describe());
     println(vd.describe());
+}
+
+func test_bare_variant_shorthand() {
+    println("=== Test: Bare variant shorthand ===");
+
+    var node: Node = FnDef{
+        name: "outside",
+        params: {},
+        ret: "bool"
+    };
+    println(node.get_ret_or_default());
+
+    node = VarDecl{name: "x"};
+    println(node.get_ret_or_default());
+
+    var kind = switch node {
+        VarDecl => "var",
+        FnDef => "fn"
+    };
+    println(kind);
 }
 
 func test_node_copy() {
@@ -387,13 +519,18 @@ func main() {
     printf("is_callable: {}\n", node.is_callable());
     printf("type_name: {}\n", node.type_name());
     test_generic_enum();
+    test_tuple_enum();
     test_enum_string_copy();
     test_enum_traced_copy();
     test_enum_traced_reassign();
     test_enum_trivial_copy();
     test_enum_string_reassign();
+    test_bare_variant_shorthand();
     test_node_copy();
     test_switch_narrowing();
+    test_switch_destructure();
+    test_switch_by_ref_destructure();
+    test_switch_nested_destructure();
     test_enum_base_struct_lifecycle();
     test_enum_display_override();
     test_switch_statement();

@@ -509,12 +509,9 @@ Node *Parser::parse_identifier() {
     auto token = expect_identifier();
     auto decl = m_ctx->resolver->find_symbol(token->str);
     auto node = create_identifier_node(token, decl);
-    if (!decl && token->type != TokenType::KW_THIS_TYPE && !m_ctx->format_mode) {
-        if (node->name == "char") {
-            error(token, errors::CHAR_USE_BYTE);
-        } else {
-            error(token, errors::UNDECLARED, node->name);
-        }
+    if (!decl && token->type != TokenType::KW_THIS_TYPE && !m_ctx->format_mode &&
+        node->name == "char") {
+        error(token, errors::CHAR_USE_BYTE);
     }
     if (token->type == TokenType::KW_THIS) {
         node->data.identifier.kind = IdentifierKind::This;
@@ -901,16 +898,8 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
         }
     }
 
-    if (!as_field && next_is(TokenType::LBRACE)) {
-        return parse_destructure_decl(var_kind);
-    }
-
-    if (!as_field && next_is(TokenType::LBRACK)) {
-        return parse_array_destructure_decl(var_kind);
-    }
-
-    if (!as_field && next_is(TokenType::LPAREN)) {
-        return parse_tuple_destructure_decl(var_kind);
+    if (!as_field && starts_destructure_pattern()) {
+        return parse_any_destructure_decl(var_kind);
     }
 
     bool is_embed = false;
@@ -972,6 +961,11 @@ Node *Parser::parse_var_decl(bool as_field, DeclSpec *decl_spec) {
     return node;
 }
 
+bool Parser::starts_destructure_pattern() {
+    return next_is(TokenType::LBRACE) || next_is(TokenType::LBRACK) ||
+           next_is(TokenType::LPAREN);
+}
+
 Node *Parser::parse_destructure_pattern(VarKind kind) {
     auto lbrace = expect(TokenType::LBRACE);
     auto node = create_node(NodeType::DestructureDecl, lbrace);
@@ -1004,12 +998,10 @@ Node *Parser::parse_destructure_pattern(VarKind kind) {
 
         if (next_is(TokenType::COLON)) {
             consume(); // consume ':'
-            if (next_is(TokenType::LBRACE)) {
-                // Nested destructuring: field: {subfield1, subfield2}
-                field_node->data.destructure_field.nested = parse_destructure_pattern(kind);
+            if (starts_destructure_pattern()) {
+                field_node->data.destructure_field.nested = parse_any_destructure_pattern(kind);
                 field_node->data.destructure_field.binding_name = nullptr;
             } else {
-                // Renaming: field: binding
                 auto binding_token = expect(TokenType::IDEN);
                 field_node->data.destructure_field.binding_name = binding_token;
             }
@@ -1042,76 +1034,17 @@ static void register_destructure_bindings(Parser *parser, ast::Node *pattern) {
     }
 }
 
-Node *Parser::parse_destructure_decl(VarKind kind) {
-    auto node = parse_destructure_pattern(kind);
-    node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
-    expect(TokenType::ASS); // = is required
-    node->data.destructure_decl.expr = parse_child_expr_construct(false, node);
-    expect(TokenType::SEMICOLON);
-
-    // Register bindings in parser scope so subsequent identifiers resolve
-    register_destructure_bindings(this, node);
-    return node;
-}
-
-Node *Parser::parse_array_destructure_decl(VarKind kind) {
-    auto lbrack = expect(TokenType::LBRACK);
-    auto node = create_node(NodeType::DestructureDecl, lbrack);
+Node *Parser::parse_sequence_destructure_pattern(VarKind kind, TokenType start,
+                                              TokenType end, bool is_array) {
+    auto token = expect(start);
+    auto node = create_node(NodeType::DestructureDecl, token);
     node->data.destructure_decl.kind = kind;
-    node->data.destructure_decl.is_array = true;
+    node->data.destructure_decl.is_array = is_array;
+    node->data.destructure_decl.is_tuple = !is_array;
 
     for (;;) {
-        auto token = get();
-        if (token->type == TokenType::RBRACK || token->type == TokenType::END)
-            break;
-
-        auto sigil = SigilKind::None;
-        if (next_is(TokenType::AND)) {
-            consume();
-            if (next_is(TokenType::KW_MUT)) {
-                consume();
-                sigil = SigilKind::MutRef;
-            } else {
-                sigil = SigilKind::Reference;
-            }
-        }
-
-        auto binding_token = expect(TokenType::IDEN);
-        if (binding_token->type != TokenType::IDEN)
-            break;
-
-        auto field_node = create_node(NodeType::DestructureField, binding_token);
-        field_node->data.destructure_field.field_name = binding_token;
-        field_node->data.destructure_field.binding_name = binding_token;
-        field_node->data.destructure_field.sigil = sigil;
-
-        node->data.destructure_decl.fields.add(field_node);
-        field_node->parent = node;
-
-        if (!at_comma(TokenType::RBRACK))
-            break;
-        consume();
-    }
-    expect(TokenType::RBRACK);
-
-    node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
-    expect(TokenType::ASS);
-    node->data.destructure_decl.expr = parse_child_expr_construct(false, node);
-    expect(TokenType::SEMICOLON);
-
-    register_destructure_bindings(this, node);
-    return node;
-}
-
-Node *Parser::parse_tuple_destructure_decl(VarKind kind) {
-    auto lparen = expect(TokenType::LPAREN);
-    auto node = create_node(NodeType::DestructureDecl, lparen);
-    node->data.destructure_decl.kind = kind;
-    node->data.destructure_decl.is_tuple = true;
-
-    for (;;) {
-        auto token = get();
-        if (token->type == TokenType::RPAREN || token->type == TokenType::END)
+        token = get();
+        if (token->type == end || token->type == TokenType::END)
             break;
 
         bool is_rest = false;
@@ -1145,13 +1078,28 @@ Node *Parser::parse_tuple_destructure_decl(VarKind kind) {
         field_node->parent = node;
 
         if (is_rest)
-            break; // rest must be last
-        if (!at_comma(TokenType::RPAREN))
+            break;
+        if (!at_comma(end))
             break;
         consume();
     }
-    expect(TokenType::RPAREN);
+    expect(end);
+    return node;
+}
 
+Node *Parser::parse_any_destructure_pattern(VarKind kind) {
+    if (next_is(TokenType::LBRACE))
+        return parse_destructure_pattern(kind);
+    if (next_is(TokenType::LBRACK))
+        return parse_array_destructure_pattern(kind);
+    if (next_is(TokenType::LPAREN))
+        return parse_tuple_destructure_pattern(kind);
+    error(get(), "expected destructure pattern");
+    return create_error_node();
+}
+
+Node *Parser::parse_any_destructure_decl(VarKind kind) {
+    auto node = parse_any_destructure_pattern(kind);
     node->parent_fn = get_scope()->find_parent(NodeType::FnDef);
     expect(TokenType::ASS);
     node->data.destructure_decl.expr = parse_child_expr_construct(false, node);
@@ -1159,6 +1107,26 @@ Node *Parser::parse_tuple_destructure_decl(VarKind kind) {
 
     register_destructure_bindings(this, node);
     return node;
+}
+
+Node *Parser::parse_destructure_decl(VarKind kind) { return parse_any_destructure_decl(kind); }
+
+Node *Parser::parse_array_destructure_pattern(VarKind kind) {
+    return parse_sequence_destructure_pattern(kind, TokenType::LBRACK, TokenType::RBRACK,
+                                              true);
+}
+
+Node *Parser::parse_array_destructure_decl(VarKind kind) {
+    return parse_any_destructure_decl(kind);
+}
+
+Node *Parser::parse_tuple_destructure_pattern(VarKind kind) {
+    return parse_sequence_destructure_pattern(kind, TokenType::LPAREN, TokenType::RPAREN,
+                                              false);
+}
+
+Node *Parser::parse_tuple_destructure_decl(VarKind kind) {
+    return parse_any_destructure_decl(kind);
 }
 
 Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
@@ -3135,9 +3103,45 @@ Node *Parser::parse_enum_member(Node *parent) {
     auto node = create_node(NodeType::EnumVariant, iden);
     node->data.enum_variant.name = iden;
     node->data.enum_variant.parent = parent;
-    if (next_is(TokenType::LBRACE)) {
+    if (next_is(TokenType::LPAREN)) {
         consume();
         auto struct_node = create_node(NodeType::StructDecl, iden);
+        struct_node->data.struct_decl.kind = ContainerKind::Struct;
+        struct_node->parent = node;
+        node->data.enum_variant.struct_body = struct_node;
+        node->data.enum_variant.is_tuple_form = true;
+        long field_index = 0;
+        while (get()->type != TokenType::RPAREN) {
+            if (get()->type == TokenType::END) {
+                error(get(), errors::UNEXPECTED_EOF);
+                break;
+            }
+            auto field_type = parse_type_expr(true);
+            node->data.enum_variant.tuple_types.add(field_type);
+
+            auto field = create_node(NodeType::VarDecl, field_type->token ? field_type->token : iden);
+            field->parent = struct_node;
+            field->name = std::to_string(field_index);
+            field->data.var_decl.identifier = field->token;
+            field->data.var_decl.type = field_type;
+            field->data.var_decl.is_field = true;
+            struct_node->data.struct_decl.members.add(field);
+            field_index++;
+
+            if (next_is(TokenType::COMMA)) {
+                consume();
+            } else if (!next_is(TokenType::RPAREN)) {
+                auto token = get();
+                error(token, "expected ',' after tuple enum member type, got '{}'",
+                      token->to_string());
+                consume();
+            }
+        }
+        expect(TokenType::RPAREN);
+    } else if (next_is(TokenType::LBRACE)) {
+        consume();
+        auto struct_node = create_node(NodeType::StructDecl, iden);
+        struct_node->parent = node;
         node->data.enum_variant.struct_body = struct_node;
         while (get()->type != TokenType::RBRACE) {
             if (get()->type == TokenType::END) {
@@ -3540,6 +3544,49 @@ Node *Parser::parse_export_decl() {
     return node;
 }
 
+bool Parser::looks_like_case_pattern_clause() {
+    int offset = 0;
+    auto token = lookahead(offset);
+    if (!token || token->type != TokenType::IDEN) {
+        return false;
+    }
+
+    for (;;) {
+        token = lookahead(offset);
+        if (!token || token->type != TokenType::IDEN) {
+            return false;
+        }
+        offset++;
+
+        if (lookahead(offset)->type == TokenType::LT) {
+            int depth = 0;
+            do {
+                token = lookahead(offset);
+                if (!token || token->type == TokenType::END) {
+                    return false;
+                }
+                if (token->type == TokenType::LT) {
+                    depth++;
+                } else if (token->type == TokenType::GT) {
+                    depth--;
+                }
+                offset++;
+            } while (depth > 0);
+        }
+
+        token = lookahead(offset);
+        if (!token) {
+            return false;
+        }
+        if (token->type == TokenType::DOT) {
+            offset++;
+            continue;
+        }
+        return token->type == TokenType::LPAREN || token->type == TokenType::LBRACE ||
+               token->type == TokenType::LBRACK;
+    }
+}
+
 Node *Parser::parse_switch_expr() {
     auto kw = expect(TokenType::KW_SWITCH);
     auto node = create_node(NodeType::SwitchExpr, kw);
@@ -3584,18 +3631,29 @@ Node *Parser::parse_switch_expr() {
 }
 
 Node *Parser::parse_case_expr(bool is_type_switch) {
-    Token *token = nullptr;
     Node *node = nullptr;
     if (next_is(TokenType::KW_ELSE)) {
         auto token = read();
         node = create_node(NodeType::CaseExpr, token);
         node->data.case_expr.is_else = true;
-
     } else {
-        auto expr = is_type_switch ? parse_type_expr(true) : parse_expr();
+        Node *expr = nullptr;
+        Node *pattern = nullptr;
+        if (!is_type_switch && looks_like_case_pattern_clause()) {
+            expr = parse_type_expr(true);
+            if (starts_destructure_pattern()) {
+                pattern = parse_any_destructure_pattern(VarKind::Mutable);
+            }
+        } else {
+            expr = is_type_switch ? parse_type_expr(true) : parse_expr();
+        }
+
         node = create_node(NodeType::CaseExpr, expr->token);
         node->data.case_expr.clauses = {expr};
-        if (next_is(TokenType::COMMA)) {
+        node->data.case_expr.destructure_pattern = pattern;
+        if (pattern && next_is(TokenType::COMMA)) {
+            error(get(), "switch destructure patterns cannot be combined with multiple clauses");
+        } else if (next_is(TokenType::COMMA)) {
             consume();
             while (!next_is(TokenType::ARROW) && !next_is(TokenType::END)) {
                 auto expr = is_type_switch ? parse_type_expr(true) : parse_expr();
@@ -3609,6 +3667,14 @@ Node *Parser::parse_case_expr(bool is_type_switch) {
     }
 
     auto arrow = expect(TokenType::ARROW);
-    node->data.case_expr.body = parse_block(nullptr, arrow);
+    Scope *case_scope = nullptr;
+    if (node->data.case_expr.destructure_pattern) {
+        case_scope = m_ctx->resolver->push_scope(node);
+        register_destructure_bindings(this, node->data.case_expr.destructure_pattern);
+    }
+    node->data.case_expr.body = parse_block(case_scope, arrow);
+    if (case_scope) {
+        m_ctx->resolver->pop_scope();
+    }
     return node;
 }

@@ -391,6 +391,8 @@ class Resolver {
     ast::Node *create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt,
                                    ResolveScope &scope, ChiType *narrowed_type = nullptr);
 
+    void resolve_destructure(ast::Node *pattern, ChiType *source_type, ResolveScope &scope);
+
     void resolve_destructure_fields(ast::Node *parent, array<ast::Node *> &fields,
                                     ChiType *source_type, ResolveScope &scope,
                                     array<ast::Node *> &generated_vars);
@@ -460,7 +462,9 @@ class Resolver {
 
     bool compare_impl_type(ChiType *base, ChiType *impl);
 
+    ChiEnumVariant *find_expected_enum_variant(const string &name, ChiType *expected_type);
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
+    array<ChiStructMember *> get_enum_payload_fields(ChiType *type);
     ChiStructMember *get_struct_member_access(ast::Node *node, ChiType *struct_type,
                                               const string &field_name, bool is_internal,
                                               bool is_write, ResolveScope *scope = nullptr,

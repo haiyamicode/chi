@@ -359,7 +359,7 @@ struct DestructureField {
     Node *nested = nullptr;        // for nested: points to DestructureDecl
     ChiStructMember *resolved_field = nullptr;
     SigilKind sigil = SigilKind::None; // &field or &mut field
-    bool is_rest = false;              // ...rest — collects remaining elements into a tuple
+    bool is_rest = false;              // ...rest — collects remaining elements
 };
 
 struct DestructureDecl {
@@ -371,6 +371,7 @@ struct DestructureDecl {
     bool is_array = false;                            // array destructuring: var [a, b] = arr
     bool is_tuple = false;                            // tuple destructuring: var (a, b) = tup
     ChiStructMember *resolved_index_method = nullptr; // index_mut for array destructure
+    ChiStructMember *resolved_slice_method = nullptr; // slice for array rest destructure
     ChiStructMember *resolved_as_tuple = nullptr;     // as_tuple for AsTuple destructure
     ChiType *as_tuple_result_type = nullptr;           // Tuple type returned by as_tuple
 };
@@ -480,6 +481,7 @@ struct SwitchExpr {
 
 struct CaseExpr {
     array<Node *> clauses = {};
+    Node *destructure_pattern = nullptr;
     Node *body = nullptr;
     bool is_else = false;
 };
@@ -499,6 +501,8 @@ struct EnumVariant {
     Node *value = nullptr;
     int64_t resolved_value = -1;
     Node *struct_body = nullptr;
+    array<Node *> tuple_types = {};
+    bool is_tuple_form = false;
     ChiType *resolved_type = nullptr;
     ChiEnumVariant *resolved_enum_variant = nullptr;
     ResolveStatus resolve_status = ResolveStatus::None;

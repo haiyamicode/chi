@@ -4410,6 +4410,16 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         builder.CreateMemSet(dest, zero, full_size, {});
         builder.CreateMemCpy(dest, {}, enum_var, {}, copy_size);
 
+        auto payload_fields = get_resolver()->get_enum_payload_fields(type);
+        for (uint32_t i = 0; i < expr->data.construct_expr.items.len && i < payload_fields.len; i++) {
+            auto field = payload_fields[i];
+            auto gep = compile_dot_access(fn, dest, type, field);
+            auto value = compile_assignment_to_type(fn, expr->data.construct_expr.items[i],
+                                                    field->resolved_type);
+            builder.CreateStore(value, gep);
+            emit_dbg_location(expr);
+        }
+
         for (auto field_init : expr->data.construct_expr.field_inits) {
             auto &data = field_init->data.field_init_expr;
             auto gep = compile_dot_access(fn, dest, type, data.resolved_field);
@@ -4559,6 +4569,37 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
     }
 }
 
+void Compiler::compile_destructure(Function *fn, ast::DestructureDecl &data,
+                                  llvm::Value *source_ptr, ChiType *source_type) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    if (data.is_tuple) {
+        auto tuple_ptr = source_ptr;
+        auto tuple_type = source_type;
+        if (data.resolved_as_tuple) {
+            tuple_type = data.as_tuple_result_type;
+            auto method = data.resolved_as_tuple;
+            auto variant_type_id = resolve_variant_type_id(fn, source_type);
+            auto method_node = get_variant_member_node(method, variant_type_id);
+            auto as_tuple_fn = get_fn(method_node);
+            auto fn_type = method->resolved_type;
+            auto tuple_type_l = compile_type(tuple_type);
+            tuple_ptr = builder.CreateAlloca(tuple_type_l, nullptr, "as_tuple");
+            auto sret_type = fn_type->data.fn.should_use_sret() ? tuple_type_l : nullptr;
+            std::vector<llvm::Value *> args = {source_ptr};
+            auto result =
+                create_fn_call_invoke(as_tuple_fn->llvm_fn, args, sret_type, nullptr, tuple_ptr);
+            if (result) {
+                builder.CreateStore(result, tuple_ptr);
+            }
+        }
+        compile_tuple_destructure(fn, data, tuple_ptr, tuple_type);
+    } else if (data.is_array) {
+        compile_array_destructure(fn, data, source_ptr, source_type);
+    } else {
+        compile_destructure_fields(fn, data.fields, source_ptr, source_type);
+    }
+}
+
 void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fields,
                                           llvm::Value *source_ptr, ChiType *source_type) {
     auto &builder = *m_ctx->llvm_builder;
@@ -4568,12 +4609,11 @@ void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fiel
     for (auto field_node : fields) {
         auto &field_data = field_node->data.destructure_field;
         auto member = field_data.resolved_field;
-        auto field_ptr = builder.CreateStructGEP(struct_type_l, source_ptr, member->field_index);
+        auto field_ptr = compile_dot_access(fn, source_ptr, source_type, member);
 
         if (field_data.nested) {
-            // Nested destructuring: recurse
-            auto &nested = field_data.nested->data.destructure_decl;
-            compile_destructure_fields(fn, nested.fields, field_ptr, member->resolved_type);
+            compile_destructure(fn, field_data.nested->data.destructure_decl, field_ptr,
+                               member->resolved_type);
         } else {
             // Allocate binding variable
             auto &gen_vars = field_node->parent->data.destructure_decl.generated_vars;
@@ -4607,6 +4647,15 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
     auto method_node = get_variant_member_node(method, variant_type_id);
     auto index_fn = get_fn(method_node);
 
+    Function *slice_fn = nullptr;
+    ChiStructMember *slice_method = data.resolved_slice_method;
+    ChiType *slice_fn_type = nullptr;
+    if (slice_method) {
+        auto slice_method_node = get_variant_member_node(slice_method, variant_type_id);
+        slice_fn = get_fn(slice_method_node);
+        slice_fn_type = slice_method->resolved_type;
+    }
+
     // Index parameter type (first param of index_mut)
     auto index_type = method->resolved_type->data.fn.get_param_at(0);
     auto index_type_l = compile_type(index_type);
@@ -4618,12 +4667,6 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
     for (size_t i = 0; i < data.fields.len; i++) {
         auto field_node = data.fields[i];
 
-        // Create index constant
-        auto index_val = llvm::ConstantInt::get(index_type_l, i);
-
-        // Call index_mut(source_ptr, i) → returns pointer to element
-        auto elem_ptr = builder.CreateCall(index_fn->llvm_fn, {source_ptr, index_val});
-
         // Allocate binding variable
         assert(i < data.generated_vars.len);
         auto var_node = data.generated_vars[i];
@@ -4631,12 +4674,29 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
         add_var(var_node, var_ptr);
 
         auto &field_data = field_node->data.destructure_field;
+        if (field_data.is_rest) {
+            assert(slice_fn && slice_fn_type);
+            auto opt_param_type = slice_fn_type->data.fn.params[1];
+            auto opt_type_l = compile_type(opt_param_type);
+            auto start_val = llvm::ConstantInt::get(index_type_l, i);
+            auto start_opt = compile_conversion(fn, start_val, index_type, opt_param_type);
+            auto end_opt = llvm::ConstantAggregateZero::get(opt_type_l);
+            auto var_type = get_chitype(var_node);
+            auto var_type_l = compile_type(var_type);
+            std::vector<llvm::Value *> args = {source_ptr, start_opt, end_opt};
+            auto sret_type =
+                slice_fn_type->data.fn.should_use_sret() ? var_type_l : nullptr;
+            create_fn_call_invoke(slice_fn->llvm_fn, args, sret_type, nullptr, var_ptr);
+            continue;
+        }
+
+        auto index_val = llvm::ConstantInt::get(index_type_l, i);
+        auto elem_ptr = builder.CreateCall(index_fn->llvm_fn, {source_ptr, index_val});
+
         if (field_data.sigil == ast::SigilKind::Reference ||
             field_data.sigil == ast::SigilKind::MutRef) {
-            // Reference binding: store element address directly
             builder.CreateStore(elem_ptr, var_ptr);
         } else {
-            // Copy binding: load element value and copy
             auto elem_value = builder.CreateLoad(elem_type_l, elem_ptr);
             compile_store_or_copy(fn, elem_value, var_ptr, elem_type, field_node);
         }
@@ -4646,8 +4706,26 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
 void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &data,
                                          llvm::Value *source_ptr, ChiType *source_type) {
     auto &builder = *m_ctx->llvm_builder;
-    auto tuple_type_l = compile_type(source_type);
-    auto &elems = source_type->data.tuple.elements;
+    auto source_type_l = compile_type(source_type);
+    TypeList tuple_like_elems;
+    array<ChiStructMember *> tuple_like_fields;
+    bool tuple_like_struct = false;
+    if (source_type->kind != TypeKind::Tuple) {
+        auto stype = get_resolver()->resolve_struct_type(source_type);
+        if (stype) {
+            for (int i = 0;; i++) {
+                auto field = stype->find_member(std::to_string(i));
+                if (!field || !field->is_field()) {
+                    tuple_like_struct = i > 0;
+                    break;
+                }
+                tuple_like_fields.add(field);
+                tuple_like_elems.add(field->resolved_type);
+            }
+        }
+    }
+    TypeList &elems = source_type->kind == TypeKind::Tuple ? source_type->data.tuple.elements
+                                                           : tuple_like_elems;
 
     for (size_t i = 0; i < data.fields.len; i++) {
         auto field_node = data.fields[i];
@@ -4659,14 +4737,19 @@ void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &dat
         add_var(var_node, var_ptr);
 
         if (field_data.is_rest) {
-            // Build a sub-tuple from remaining elements
             auto rest_type = get_chitype(var_node);
             auto rest_type_l = compile_type(rest_type);
             int rest_count = elems.len - (int)i;
             for (int j = 0; j < rest_count; j++) {
-                auto src_ptr = builder.CreateStructGEP(tuple_type_l, source_ptr, (unsigned)(i + j));
-                auto dst_ptr = builder.CreateStructGEP(rest_type_l, var_ptr, (unsigned)j);
+                llvm::Value *src_ptr;
                 auto elem_type = elems[i + j];
+                if (tuple_like_struct) {
+                    src_ptr = compile_dot_access(fn, source_ptr, source_type,
+                                                 tuple_like_fields[i + j]);
+                } else {
+                    src_ptr = builder.CreateStructGEP(source_type_l, source_ptr, (unsigned)(i + j));
+                }
+                auto dst_ptr = builder.CreateStructGEP(rest_type_l, var_ptr, (unsigned)j);
                 auto elem_type_l = compile_type(elem_type);
                 auto val = builder.CreateLoad(elem_type_l, src_ptr);
                 builder.CreateStore(val, dst_ptr);
@@ -4674,7 +4757,12 @@ void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &dat
         } else {
             auto elem_type = elems[i];
             auto elem_type_l = compile_type(elem_type);
-            auto elem_ptr = builder.CreateStructGEP(tuple_type_l, source_ptr, (unsigned)i);
+            llvm::Value *elem_ptr;
+            if (tuple_like_struct) {
+                elem_ptr = compile_dot_access(fn, source_ptr, source_type, tuple_like_fields[i]);
+            } else {
+                elem_ptr = builder.CreateStructGEP(source_type_l, source_ptr, (unsigned)i);
+            }
 
             if (field_data.sigil == ast::SigilKind::Reference ||
                 field_data.sigil == ast::SigilKind::MutRef) {
@@ -6101,32 +6189,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         }
 
         // Extract elements
-        if (data.is_tuple) {
-            auto tuple_ptr = temp_ptr;
-            auto tuple_type = source_type;
-            if (data.resolved_as_tuple) {
-                // Call as_tuple() on the source value to get a tuple
-                tuple_type = data.as_tuple_result_type;
-                auto method = data.resolved_as_tuple;
-                auto variant_type_id = resolve_variant_type_id(fn, source_type);
-                auto method_node = get_variant_member_node(method, variant_type_id);
-                auto as_tuple_fn = get_fn(method_node);
-                auto fn_type = method->resolved_type;
-                auto tuple_type_l = compile_type(tuple_type);
-                tuple_ptr = builder.CreateAlloca(tuple_type_l, nullptr, "as_tuple");
-                auto sret_type = fn_type->data.fn.should_use_sret() ? tuple_type_l : nullptr;
-                std::vector<llvm::Value *> args = {temp_ptr};
-                auto result = create_fn_call_invoke(as_tuple_fn->llvm_fn, args, sret_type, nullptr, tuple_ptr);
-                if (result) {
-                    builder.CreateStore(result, tuple_ptr);
-                }
-            }
-            compile_tuple_destructure(fn, data, tuple_ptr, tuple_type);
-        } else if (data.is_array) {
-            compile_array_destructure(fn, data, temp_ptr, source_type);
-        } else {
-            compile_destructure_fields(fn, data.fields, temp_ptr, source_type);
-        }
+        compile_destructure(fn, data, temp_ptr, source_type);
         break;
     }
     case ast::NodeType::VarDecl: {

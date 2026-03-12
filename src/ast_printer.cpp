@@ -918,13 +918,22 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::EnumVariant: {
         auto &data = node->data.enum_variant;
         emit("{}", node->name);
+        if (data.is_tuple_form) {
+            emit("(");
+            for (int i = 0; i < data.tuple_types.len; i++) {
+                print_node(data.tuple_types[i]);
+                if (i < data.tuple_types.len - 1) {
+                    emit(", ");
+                }
+            }
+            emit(")");
+        } else if (data.struct_body) {
+            emit(" ");
+            print_struct_members(data.struct_body->data.struct_decl);
+        }
         if (data.value) {
             emit(" = ");
             print_node(data.value);
-        }
-        if (data.struct_body) {
-            emit(" ");
-            print_struct_members(data.struct_body->data.struct_decl);
         }
         break;
     }
@@ -1230,6 +1239,9 @@ void AstPrinter::print_node(Node *node) {
             for (int i = 0; i < data.clauses.len; i++) {
                 auto clause = data.clauses.at(i);
                 print_node(clause);
+                if (i == 0 && data.destructure_pattern) {
+                    print_destructure_pattern(data.destructure_pattern);
+                }
                 if (i < data.clauses.len - 1) {
                     emit(", ");
                 }
@@ -1346,7 +1358,9 @@ void AstPrinter::print_destructure_pattern(Node *node) {
             if (i > 0)
                 emit(", ");
             auto &field_data = data.fields[i]->data.destructure_field;
-            if (field_data.sigil == SigilKind::MutRef)
+            if (field_data.is_rest)
+                emit("...");
+            else if (field_data.sigil == SigilKind::MutRef)
                 emit("&mut ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");

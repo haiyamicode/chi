@@ -1078,6 +1078,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::Identifier: {
         auto &data = node->data.identifier;
+        ChiType *type_override = nullptr;
         if (data.kind == ast::IdentifierKind::This) {
             // Check for narrowed 'this' (e.g., enum variant narrowing in switch)
             if (scope.block && scope.block->scope) {
@@ -1157,7 +1158,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
         if (!data.decl) {
-            return create_type(TypeKind::Unknown);
+            if (data.kind == ast::IdentifierKind::Value) {
+                auto variant = find_expected_enum_variant(node->name, scope.value_type);
+                if (variant) {
+                    data.decl = variant->node;
+                    type_override = variant->resolved_type;
+                }
+            }
+            if (!data.decl) {
+                error(node, errors::UNDECLARED, node->name);
+                return create_type(TypeKind::Unknown);
+            }
         }
         if (data.kind == ast::IdentifierKind::Value && scope.block) {
             auto replacement = scope.block->scope->find_one(data.decl->name);
@@ -1166,7 +1177,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.decl = replacement;
             }
         }
-        auto type = resolve(data.decl, scope);
+        auto type = type_override ? type_override : resolve(data.decl, scope);
         if (auto decl_fn = data.decl->parent_fn) {
             if (decl_fn != scope.parent_fn_node) {
                 data.decl->escape.escaped = true;
@@ -1338,13 +1349,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         // Resolve each field pattern
-        if (data.is_tuple) {
-            resolve_tuple_destructure(node, data.fields, expr_type, scope, data.generated_vars);
-        } else if (data.is_array) {
-            resolve_array_destructure(node, data.fields, expr_type, scope, data.generated_vars);
-        } else {
-            resolve_destructure_fields(node, data.fields, expr_type, scope, data.generated_vars);
-        }
+        resolve_destructure(node, expr_type, scope);
 
         // Add temp to cleanup if needed
         if (scope.parent_fn_node && scope.block && should_destroy(temp_var, expr_type) &&
@@ -2725,7 +2730,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
         } else {
-            if (result_type->kind == TypeKind::Optional) {
+            auto payload_fields = get_enum_payload_fields(value_type);
+            if (payload_fields.len > 0 && data.items.len > 0) {
+                if (data.items.len != payload_fields.len) {
+                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, payload_fields.len,
+                          data.items.len);
+                    return nullptr;
+                }
+                for (uint32_t i = 0; i < data.items.len; i++) {
+                    auto item = data.items[i];
+                    auto field = payload_fields[i];
+                    auto item_scope = scope.set_value_type(field->resolved_type);
+                    auto item_type = resolve(item, item_scope, flags);
+                    check_assignment(item, item_type, field->resolved_type);
+                }
+            } else if (result_type->kind == TypeKind::Optional) {
                 if (data.items.len != 1) {
                     error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 1, data.items.len);
                     return nullptr;
@@ -4698,7 +4717,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
                 if (!scase->data.case_expr.is_else) {
                     for (auto clause : scase->data.case_expr.clauses) {
-                        auto clause_type = resolve(clause, scope);
+                        auto clause_scope = scope.set_value_type(expr_type);
+                    auto clause_type = resolve(clause, clause_scope);
                         // Unwrap TypeSymbol from type expression resolution
                         if (clause_type && clause_type->kind == TypeKind::TypeSymbol)
                             clause_type = clause_type->data.type_symbol.underlying_type;
@@ -4803,7 +4823,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Resolve clauses BEFORE body so we can inject narrowed vars
             if (!scase->data.case_expr.is_else) {
                 for (auto clause : scase->data.case_expr.clauses) {
-                    auto clause_type = resolve(clause, scope);
+                    auto clause_scope = scope.set_value_type(expr_type);
+                    auto clause_type = resolve(clause, clause_scope);
                     resolve_constant_value(clause);
                     auto clause_comparator = resolve_comparator(clause_type, scope);
 
@@ -4834,9 +4855,38 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                 auto &block_data = scase->data.case_expr.body->data.block;
                                 block_data.implicit_vars.add(var);
                                 block_data.scope->put(var->name, var);
+
+                                auto pattern = scase->data.case_expr.destructure_pattern;
+                                if (pattern) {
+                                    auto ident = create_node(NodeType::Identifier);
+                                    ident->token = switch_expr->token;
+                                    ident->module = switch_expr->module;
+                                    ident->name = var->name;
+                                    ident->data.identifier.decl = var;
+                                    ident->data.identifier.kind = ast::IdentifierKind::Value;
+
+                                    pattern->parent_fn = scope.parent_fn_node;
+                                    pattern->data.destructure_decl.expr = ident;
+
+                                    auto body_scope = scope.set_block(&block_data);
+                                    resolve(pattern, body_scope);
+                                    block_data.implicit_vars.add(pattern);
+                                }
+                            } else if (scase->data.case_expr.destructure_pattern) {
+                                error(scase->data.case_expr.destructure_pattern,
+                                      "switch destructuring requires an identifier or field access");
                             }
+                        } else if (scase->data.case_expr.destructure_pattern) {
+                            error(scase->data.case_expr.destructure_pattern,
+                                  "switch destructuring requires an enum variant clause");
                         }
+                    } else if (scase->data.case_expr.destructure_pattern) {
+                        error(scase->data.case_expr.destructure_pattern,
+                              "switch destructuring requires an enum switch expression");
                     }
+                } else if (scase->data.case_expr.destructure_pattern) {
+                    error(scase->data.case_expr.destructure_pattern,
+                          "switch destructuring requires exactly one clause");
                 }
             }
 
@@ -6630,6 +6680,45 @@ bool Resolver::is_struct_access_mutable(ChiType *type, ResolveScope *scope) {
     return true;
 }
 
+ChiEnumVariant *Resolver::find_expected_enum_variant(const string &name, ChiType *expected_type) {
+    if (!expected_type) {
+        return nullptr;
+    }
+    auto type = expected_type->eval();
+    switch (type->kind) {
+    case TypeKind::TypeSymbol:
+        return find_expected_enum_variant(name, type->data.type_symbol.underlying_type);
+    case TypeKind::This:
+        return find_expected_enum_variant(name, type->eval());
+    case TypeKind::Pointer:
+    case TypeKind::Reference:
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef:
+    case TypeKind::Optional:
+        return find_expected_enum_variant(name, type->get_elem());
+    case TypeKind::Enum:
+        return type->data.enum_.find_member(name);
+    case TypeKind::EnumValue:
+        return type->data.enum_value.parent_enum()->find_member(name);
+    case TypeKind::Subtype: {
+        auto &subtype = type->data.subtype;
+        if (subtype.final_type) {
+            return find_expected_enum_variant(name, subtype.final_type);
+        }
+        auto resolved = resolve_subtype(type);
+        if (resolved && resolved != type) {
+            return find_expected_enum_variant(name, resolved);
+        }
+        if (subtype.generic && subtype.generic->kind == TypeKind::Enum) {
+            return subtype.generic->data.enum_.find_member(name);
+        }
+        return nullptr;
+    }
+    default:
+        return nullptr;
+    }
+}
+
 ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string &field_name) {
     if (!struct_type) {
         return nullptr;
@@ -6639,6 +6728,24 @@ ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string 
         return nullptr;
     }
     return sty->find_member(field_name);
+}
+
+array<ChiStructMember *> Resolver::get_enum_payload_fields(ChiType *type) {
+    array<ChiStructMember *> fields;
+    if (!type || type->kind != TypeKind::EnumValue) {
+        return fields;
+    }
+    auto variant_struct = type->data.enum_value.variant_struct;
+    if (!variant_struct) {
+        return fields;
+    }
+    for (auto field : variant_struct->data.struct_.fields) {
+        auto promoted = get_struct_member(type, field->get_name());
+        if (promoted) {
+            fields.add(promoted);
+        }
+    }
+    return fields;
 }
 
 ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *struct_type,
@@ -7186,6 +7293,18 @@ static string build_narrowing_path(ast::Node *expr) {
     return "";
 }
 
+void Resolver::resolve_destructure(ast::Node *pattern, ChiType *source_type,
+                                   ResolveScope &scope) {
+    auto &data = pattern->data.destructure_decl;
+    if (data.is_tuple) {
+        resolve_tuple_destructure(pattern, data.fields, source_type, scope, data.generated_vars);
+    } else if (data.is_array) {
+        resolve_array_destructure(pattern, data.fields, source_type, scope, data.generated_vars);
+    } else {
+        resolve_destructure_fields(pattern, data.fields, source_type, scope, data.generated_vars);
+    }
+}
+
 void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> &fields,
                                           ChiType *source_type, ResolveScope &scope,
                                           array<ast::Node *> &generated_vars) {
@@ -7208,10 +7327,7 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
         field_data.resolved_field = member;
 
         if (field_data.nested) {
-            // Nested destructuring: recurse
-            auto &nested = field_data.nested->data.destructure_decl;
-            resolve_destructure_fields(field_data.nested, nested.fields, member->resolved_type,
-                                       scope, nested.generated_vars);
+            resolve_destructure(field_data.nested, member->resolved_type, scope);
         } else {
             // Create a VarDecl for this binding
             auto binding_name = string(field_data.binding_name->str);
@@ -7271,6 +7387,23 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
     auto method = *method_p;
     parent->data.destructure_decl.resolved_index_method = method;
 
+    bool has_rest = false;
+    for (auto field_node : fields) {
+        if (field_node->data.destructure_field.is_rest) {
+            has_rest = true;
+            break;
+        }
+    }
+    if (has_rest) {
+        auto slice_method_p = struct_type->member_table.get("slice");
+        if (!slice_method_p) {
+            error(parent, "cannot use rest array destructure on type '{}'",
+                  format_type_display(source_type));
+            return;
+        }
+        parent->data.destructure_decl.resolved_slice_method = *slice_method_p;
+    }
+
     // Element type from index_mut return type (returns &T)
     auto elem_type = method->resolved_type->data.fn.return_type->get_elem();
     auto kind = parent->data.destructure_decl.kind;
@@ -7282,7 +7415,9 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
         auto var = get_dummy_var(binding_name);
         var->module = parent->module;
         var->parent_fn = scope.parent_fn_node;
-        auto var_type = field_data.sigil == ast::SigilKind::MutRef
+        auto var_type = field_data.is_rest
+                            ? get_array_type(elem_type)
+                        : field_data.sigil == ast::SigilKind::MutRef
                             ? get_pointer_type(elem_type, TypeKind::MutRef)
                         : field_data.sigil == ast::SigilKind::Reference
                             ? get_pointer_type(elem_type, TypeKind::Reference)
@@ -7314,32 +7449,50 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
 void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &fields,
                                          ChiType *source_type, ResolveScope &scope,
                                          array<ast::Node *> &generated_vars) {
-    // If source is not a Tuple, check for AsTuple intrinsic
+    array<ChiStructMember *> tuple_like_fields;
+    TypeList tuple_like_elems;
+
+    // If source is not a Tuple, check for a tuple-like struct first, then AsTuple intrinsic
     if (source_type->kind != TypeKind::Tuple) {
         auto stype = resolve_struct_type(source_type);
+        bool tuple_like_struct = false;
         ChiStructMember *as_tuple_member = nullptr;
         if (stype) {
-            auto member_p = stype->member_intrinsics.get(IntrinsicSymbol::AsTuple);
-            if (member_p) as_tuple_member = *member_p;
+            for (int i = 0;; i++) {
+                auto field = stype->find_member(std::to_string(i));
+                if (!field || !field->is_field()) {
+                    tuple_like_struct = i > 0;
+                    break;
+                }
+                tuple_like_fields.add(field);
+                tuple_like_elems.add(field->resolved_type);
+            }
+            if (!tuple_like_struct) {
+                auto member_p = stype->member_intrinsics.get(IntrinsicSymbol::AsTuple);
+                if (member_p) as_tuple_member = *member_p;
+            }
         }
-        if (!as_tuple_member) {
+        if (!tuple_like_struct && !as_tuple_member) {
             error(parent, "cannot tuple-destructure non-tuple type '{}'",
                   format_type_display(source_type));
             return;
         }
-        // Get the return type of as_tuple() — should be a Tuple
-        auto method_type = as_tuple_member->resolved_type;
-        if (!method_type || method_type->kind != TypeKind::Fn ||
-            method_type->data.fn.return_type->kind != TypeKind::Tuple) {
-            error(parent, "as_tuple() must return a Tuple type");
-            return;
+        if (!tuple_like_struct) {
+            // Get the return type of as_tuple() — should be a Tuple
+            auto method_type = as_tuple_member->resolved_type;
+            if (!method_type || method_type->kind != TypeKind::Fn ||
+                method_type->data.fn.return_type->kind != TypeKind::Tuple) {
+                error(parent, "as_tuple() must return a Tuple type");
+                return;
+            }
+            source_type = method_type->data.fn.return_type;
+            parent->data.destructure_decl.resolved_as_tuple = as_tuple_member;
+            parent->data.destructure_decl.as_tuple_result_type = source_type;
         }
-        source_type = method_type->data.fn.return_type;
-        parent->data.destructure_decl.resolved_as_tuple = as_tuple_member;
-        parent->data.destructure_decl.as_tuple_result_type = source_type;
     }
 
-    auto &elems = source_type->data.tuple.elements;
+    TypeList &elems = source_type->kind == TypeKind::Tuple ? source_type->data.tuple.elements
+                                                           : tuple_like_elems;
 
     // Check if there's a rest pattern
     bool has_rest = false;

@@ -393,6 +393,9 @@ class Compiler {
     void compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *dest, ChiType *type,
                                ast::Node *expr = nullptr, bool destruct_old = false);
 
+    void compile_destructure(Function *fn, ast::DestructureDecl &data, llvm::Value *source_ptr,
+                             ChiType *source_type);
+
     void compile_destructure_fields(Function *fn, array<ast::Node *> &fields,
                                     llvm::Value *source_ptr, ChiType *source_type);
 

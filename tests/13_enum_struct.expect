@@ -17,6 +17,14 @@ b.is_single()=false
 c.label=empty
 d.value=hello
 d.get_label()=str
+=== Test: Tuple enum ===
+ok.0=42
+err.0=oops
+add.0=10
+add.1=20
+ok 42
+err oops
+sum=30
 === Test: Enum string copy ===
 s.label=name_42
 t.label=name_42
@@ -44,6 +52,10 @@ a.id=5, b.id=5
 a.label=name_55
 a.label=name_77
 --- scope exit ---
+=== Test: Bare variant shorthand ===
+bool
+none
+var
 === Test: Node copy ===
 copy.ret=int
 copy.name=f
@@ -53,6 +65,17 @@ int
 none
 add
 x
+=== Test: Switch destructure ===
+add:int
+x:var
+ok 42
+err oops
+=== Test: Switch by-ref destructure ===
+before
+bool
+int
+=== Test: Switch nested destructure ===
+join:txt:lhs:rhs:tail
 === Test: Enum base struct lifecycle ===
 -- create --
 Traced(1) created
