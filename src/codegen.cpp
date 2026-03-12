@@ -3836,7 +3836,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             } else {
                 // else-if chain: compile recursively as expression
                 if (var) {
-                    auto else_val = compile_expr(fn, data.else_node);
+                    auto else_val = compile_assignment_to_type(fn, data.else_node, ret_type);
                     if (else_val)
                         builder.CreateStore(else_val, var);
                     builder.CreateBr(end_b);
@@ -3912,7 +3912,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 builder.CreateCondBr(cmp, case_label, next_label);
 
                 fn->use_label(case_label);
-                compile_block(fn, scase, scase->data.case_expr.body, done_label, var);
+                compile_block(fn, expr, scase->data.case_expr.body, done_label, var);
 
                 fn->use_label(next_label);
             }
@@ -3921,7 +3921,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             builder.CreateBr(else_label);
             fn->use_label(else_label);
             if (else_case) {
-                compile_block(fn, else_case, else_case->data.case_expr.body, done_label, var);
+                compile_block(fn, expr, else_case->data.case_expr.body, done_label, var);
             } else {
                 builder.CreateBr(done_label);
             }
@@ -3962,7 +3962,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             fn->use_label(case_labels[i]);
             auto scase = data.cases[i];
             if (scase->data.case_expr.is_else) has_else = true;
-            compile_block(fn, scase, scase->data.case_expr.body, done_label, var);
+            compile_block(fn, expr, scase->data.case_expr.body, done_label, var);
         }
 
         // No else: default label needs a terminator
@@ -8222,7 +8222,11 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
         compile_stmt(fn, stmt);
     }
     if (data.return_expr) {
-        result = compile_expr(fn, data.return_expr);
+        if (var && parent) {
+            result = compile_assignment_to_type(fn, data.return_expr, get_chitype(parent));
+        } else {
+            result = compile_expr(fn, data.return_expr);
+        }
     }
 
     // Destroy block-local vars (only if block didn't already branch away via return/break

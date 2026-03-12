@@ -136,14 +136,10 @@ enum MethodResult<T, E> {
 
     struct {
         func value() ?T {
-            var result: ?T = null;
-            switch this {
-                Ok(value) => {
-                    result = value;
-                },
-                else => {}
-            }
-            return result;
+            return switch this {
+                Ok(value) => value,
+                else => null
+            };
         }
     }
 }
