@@ -5819,33 +5819,23 @@ bool Resolver::type_needs_destruction(ChiType *type) {
         if (final_type) {
             return type_needs_destruction(final_type);
         }
-        // If final_type is not resolved yet, check the generic's destructor
         auto generic = type->data.subtype.generic;
         if (generic && generic->kind == TypeKind::Struct) {
             return get_struct_member(generic, "delete") != nullptr;
         }
+        if (generic && generic->kind == TypeKind::Enum) {
+            return enum_needs_destruction(&generic->data.enum_);
+        }
         return false;
+    }
+
+    if (type->kind == TypeKind::Enum) {
+        return enum_needs_destruction(&type->data.enum_);
     }
 
     // EnumValue: check if base struct or any variant has destructible fields
     if (type->kind == TypeKind::EnumValue) {
-        auto enum_ = type->data.enum_value.parent_enum();
-        auto bvs = enum_->base_value_type->data.enum_value.resolved_struct;
-        if (bvs) {
-            for (auto field : bvs->data.struct_.fields) {
-                if (type_needs_destruction(field->resolved_type))
-                    return true;
-            }
-        }
-        for (auto variant : enum_->variants) {
-            if (auto vs = variant->resolved_type->data.enum_value.variant_struct) {
-                for (auto field : vs->data.struct_.fields) {
-                    if (type_needs_destruction(field->resolved_type))
-                        return true;
-                }
-            }
-        }
-        return false;
+        return enum_needs_destruction(type->data.enum_value.parent_enum());
     }
 
     // Only structs can have destructors or fields needing destruction
@@ -6871,6 +6861,36 @@ void Resolver::update_enum_value_member(ChiType *enum_value_type, ChiEnumVariant
     if (auto concrete_member = enum_type->data.enum_.find_member(member->name)) {
         enum_value_type->data.enum_value.member = concrete_member;
     }
+}
+
+bool Resolver::enum_needs_destruction(ChiTypeEnum *enum_type) {
+    if (!enum_type) {
+        return false;
+    }
+
+    auto base_value_type = enum_type->base_value_type;
+    auto base_struct = base_value_type ? base_value_type->data.enum_value.resolved_struct : nullptr;
+    if (base_struct) {
+        for (auto field : base_struct->data.struct_.fields) {
+            if (type_needs_destruction(field->resolved_type)) {
+                return true;
+            }
+        }
+    }
+
+    for (auto variant : enum_type->variants) {
+        auto variant_struct = variant->resolved_type->data.enum_value.variant_struct;
+        if (!variant_struct) {
+            continue;
+        }
+        for (auto field : variant_struct->data.struct_.fields) {
+            if (type_needs_destruction(field->resolved_type)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 bool Resolver::is_enum_value_placeholder(ChiType *enum_type) {

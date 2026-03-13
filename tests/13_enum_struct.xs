@@ -61,6 +61,7 @@ struct Traced {
     }
 }
 
+
 enum TaggedValue (type: int) {
     Empty,
     Named {
@@ -142,6 +143,12 @@ enum MethodResult<T, E> {
             };
         }
     }
+}
+
+
+enum TracedResult<T, E> {
+    Ok(T),
+    Err(E)
 }
 
 func make_empty_container<T>(label: string) Container<T> {
@@ -519,6 +526,30 @@ func test_enum_base_struct_lifecycle() {
     println("-- scope exit --");
 }
 
+
+
+func make_traced_result() TracedResult<int, Traced> {
+    return TracedResult<int, Traced>.Err{Traced{11}};
+}
+
+func test_generic_enum_lifecycle() {
+    println("=== Test: Generic enum lifecycle ===");
+
+    var err = make_traced_result();
+    println("-- err copy --");
+    var forwarded: TracedResult<int, Traced> = err;
+    println("-- err overwrite copy --");
+    forwarded = TracedResult<int, Traced>.Ok{123};
+
+    var ok = TracedResult<Traced, int>.Ok{Traced{22}};
+    println("-- ok copy --");
+    var ok_forwarded: TracedResult<Traced, int> = ok;
+    println("-- ok overwrite copy --");
+    ok_forwarded = TracedResult<Traced, int>.Err{7};
+
+    println("-- scope exit --");
+}
+
 func test_enum_display_override() {
     println("=== Test: Enum Display override ===");
 
@@ -607,6 +638,7 @@ func main() {
     test_switch_by_ref_destructure();
     test_switch_nested_destructure();
     test_enum_base_struct_lifecycle();
+    test_generic_enum_lifecycle();
     test_enum_display_override();
     test_switch_statement();
 }

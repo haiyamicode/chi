@@ -111,6 +111,20 @@ Traced(3) destroyed
 Traced(3) destroyed
 Traced(1) destroyed
 Traced(2) destroyed
+=== Test: Generic enum lifecycle ===
+Traced(11) created
+-- err copy --
+Traced(11) copied
+-- err overwrite copy --
+Traced(11) destroyed
+Traced(22) created
+-- ok copy --
+Traced(22) copied
+-- ok overwrite copy --
+Traced(22) destroyed
+-- scope exit --
+Traced(22) destroyed
+Traced(11) destroyed
 === Test: Enum Display override ===
 printf red: red
 printf green: green

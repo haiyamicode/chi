@@ -4045,9 +4045,18 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         return src.value;
     };
 
+    auto resolved_type = type;
+    while (resolved_type && resolved_type->kind == TypeKind::Subtype) {
+        auto final_type = resolved_type->data.subtype.final_type;
+        if (!final_type) {
+            break;
+        }
+        resolved_type = final_type;
+    }
+
     // Optional: copy has_value flag + deep-copy inner value
-    if (type->kind == TypeKind::Optional) {
-        auto elem_type = type->get_elem();
+    if (resolved_type && resolved_type->kind == TypeKind::Optional) {
+        auto elem_type = resolved_type->get_elem();
         if (elem_type && get_resolver()->type_needs_destruction(elem_type)) {
             if (destruct_old) {
                 compile_destruction_for_type(fn, dest, type);
@@ -4082,8 +4091,12 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         // For Optional with trivially-copyable inner type, fall through to default
     }
 
-    // EnumValue: delegate to generated copier (switch on discriminator, deep-copy variant fields)
-    if (type->kind == TypeKind::EnumValue) {
+    // Enum-backed values: delegate to generated copier (switch on discriminator, deep-copy variant fields)
+    auto enum_copy_type = resolved_type;
+    if (enum_copy_type && enum_copy_type->kind == TypeKind::Enum) {
+        enum_copy_type = enum_copy_type->data.enum_.base_value_type;
+    }
+    if (enum_copy_type && enum_copy_type->kind == TypeKind::EnumValue) {
         auto copier = generate_copier_enum(type);
         if (copier) {
             if (destruct_old) {
@@ -4424,10 +4437,13 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         auto payload_fields = get_resolver()->get_enum_payload_fields(type);
         for (uint32_t i = 0; i < expr->data.construct_expr.items.len && i < payload_fields.len; i++) {
             auto field = payload_fields[i];
+            auto item = expr->data.construct_expr.items[i];
             auto gep = compile_dot_access(fn, dest, type, field);
-            auto value = compile_assignment_to_type(fn, expr->data.construct_expr.items[i],
-                                                    field->resolved_type);
-            builder.CreateStore(value, gep);
+            if (item->type == ast::NodeType::ConstructExpr) {
+                compile_construction(fn, gep, field->resolved_type, item);
+            } else {
+                compile_assignment_to_ptr(fn, item, gep, field->resolved_type);
+            }
             emit_dbg_location(expr);
         }
 
@@ -4435,9 +4451,11 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto &data = field_init->data.field_init_expr;
             auto gep = compile_dot_access(fn, dest, type, data.resolved_field);
             data.compiled_field_address = gep;
-            auto value =
-                compile_assignment_to_type(fn, data.value, data.resolved_field->resolved_type);
-            builder.CreateStore(value, gep);
+            if (data.value->type == ast::NodeType::ConstructExpr) {
+                compile_construction(fn, gep, data.resolved_field->resolved_type, data.value);
+            } else {
+                compile_assignment_to_ptr(fn, data.value, gep, data.resolved_field->resolved_type);
+            }
             emit_dbg_location(expr);
         }
         break;
@@ -7006,9 +7024,9 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
-    // Handle optionals, structs, and enum values via generated __delete
+    // Handle optionals, structs, enums, and enum values via generated __delete
     if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct &&
-        type->kind != TypeKind::EnumValue) {
+        type->kind != TypeKind::Enum && type->kind != TypeKind::EnumValue) {
         return;
     }
 
@@ -7241,7 +7259,10 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         return generate_destructor_optional(type, resolved_type);
     }
 
-    // Handle EnumValue types — switch on discriminator to destroy variant fields
+    // Handle enum value layouts — switch on discriminator to destroy variant fields
+    if (resolved_type->kind == TypeKind::Enum) {
+        resolved_type = resolved_type->data.enum_.base_value_type;
+    }
     if (resolved_type->kind == TypeKind::EnumValue) {
         return generate_destructor_enum(type, resolved_type);
     }
@@ -7783,7 +7804,15 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
             break;
     }
 
-    if (!resolved_type || resolved_type->kind != TypeKind::EnumValue) {
+    if (!resolved_type) {
+        return nullptr;
+    }
+
+    if (resolved_type->kind == TypeKind::Enum) {
+        resolved_type = resolved_type->data.enum_.base_value_type;
+    }
+
+    if (resolved_type->kind != TypeKind::EnumValue) {
         return nullptr;
     }
 
