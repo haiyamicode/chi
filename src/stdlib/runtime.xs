@@ -459,11 +459,14 @@ export struct Array<T> {
         func display() string {
             var buf = Buffer{};
             buf.write_string("[");
-            for item, i in this {
+            var i: uint32 = 0;
+            while i < this.length {
                 if i > 0 {
                     buf.write_string(", ");
                 }
-                buf.write_string(stringf("{}", item));
+                var item_str = stringf("{}", &this.data[i]);
+                buf.write_string(move item_str);
+                i += 1;
             }
             buf.write_string("]");
             return buf.to_string();
@@ -883,11 +886,14 @@ struct __CxSpan<T> {
         func display() string {
             var buf = Buffer{};
             buf.write_string("[");
-            for item, i in this {
+            var i: uint32 = 0;
+            while i < this.length {
                 if i > 0 {
                     buf.write_string(", ");
                 }
-                buf.write_string(stringf("{}", item));
+                var item_str = stringf("{}", &this.data[i]);
+                buf.write_string(move item_str);
+                i += 1;
             }
             buf.write_string("]");
             return buf.to_string();
@@ -943,7 +949,7 @@ export struct Buffer {
 
     static func from_string(str: string) Buffer {
         var buf = Buffer{};
-        buf.write_string(str);
+        buf.write_string(move str);
         return buf;
     }
 
@@ -1102,11 +1108,11 @@ export struct Promise<T = Unit> {
         var result = Promise<U>{};
         this.on_resolve(
             func [result, callback] (value: T) {
-                result.resolve(callback(value));
+                result.resolve(callback(move value));
             }
         );
         this.on_reject(func [result] (err: Shared<Error>) {
-            result.reject_shared(err);
+            result.reject_shared(move err);
         });
         return result;
     }
@@ -1114,11 +1120,11 @@ export struct Promise<T = Unit> {
     mut func catch(callback: func <'static>(err: Shared<Error>) T) Promise<T> {
         var result = Promise<T>{};
         this.on_resolve(func [result] (value: T) {
-            result.resolve(value);
+            result.resolve(move value);
         });
         this.on_reject(
             func [result, callback] (err: Shared<Error>) {
-                result.resolve(callback(err));
+                result.resolve(callback(move err));
             }
         );
         return result;
