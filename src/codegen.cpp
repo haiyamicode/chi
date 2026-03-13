@@ -1638,7 +1638,8 @@ void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> 
     switch (node->type) {
     case ast::NodeType::Identifier: {
         auto decl = node->data.identifier.decl;
-        if (decl && decl->type == ast::NodeType::VarDecl) {
+        if (decl && (decl->type == ast::NodeType::VarDecl ||
+                     decl->type == ast::NodeType::ParamDecl)) {
             vars.insert(decl);
         }
         break;
@@ -1655,7 +1656,7 @@ void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> 
     }
 }
 
-std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
+std::vector<AsyncSegment> Compiler::collect_async_segments(Function *fn, ast::Node *body) {
     std::vector<AsyncSegment> segments;
     AsyncSegment current;
 
@@ -1700,6 +1701,13 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
     // Note: vars defined in await_stmt for segment i are passed via value parameter,
     // not captured by segment i
     std::set<ast::Node *> defined_vars;
+    auto *parent_fn = fn ? fn->node : nullptr;
+    if (parent_fn && parent_fn->type == ast::NodeType::FnDef &&
+        parent_fn->data.fn_def.fn_proto) {
+        for (auto param : parent_fn->data.fn_def.fn_proto->data.fn_proto.params) {
+            defined_vars.insert(param);
+        }
+    }
     for (size_t i = 0; i < segments.size(); i++) {
         // Collect vars defined in this segment's statements
         for (auto stmt : segments[i].stmts) {
@@ -1711,6 +1719,12 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
         // For subsequent segments, find which vars they use
         for (size_t j = i + 1; j < segments.size(); j++) {
             std::set<ast::Node *> used_vars;
+            // Continuation j first recompiles the previous segment's await_stmt
+            // with the awaited value substituted in place. Any vars referenced
+            // there must still be available after the suspension.
+            if (segments[j - 1].await_stmt) {
+                collect_vars_used_in_node(segments[j - 1].await_stmt, used_vars);
+            }
             for (auto stmt : segments[j].stmts) {
                 collect_vars_used_in_node(stmt, used_vars);
             }
@@ -1826,6 +1840,8 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
 
     // Extract captured variables and add to var table
     map<ast::Node *, llvm::Value *> local_vars;
+    map<ast::Node *, llvm::Value *> shadowed_vars;
+    std::set<ast::Node *> had_shadowed_binding;
     for (size_t i = 0; i < captured_vars_ordered.size(); i++) {
         auto var = captured_vars_ordered[i];
         auto var_type = get_chitype(var);
@@ -1837,6 +1853,10 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
         auto captured_value = builder.CreateLoad(var_type_l, captured_value_ptr);
         builder.CreateStore(captured_value, local_alloc);
 
+        if (m_ctx->var_table.has_key(var)) {
+            shadowed_vars[var] = get_var(var);
+            had_shadowed_binding.insert(var);
+        }
         local_vars[var] = local_alloc;
         add_var(var, local_alloc);
     }
@@ -1944,7 +1964,11 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
 
     // Clean up temporary vars from var_table
     for (auto &kv : local_vars.data) {
-        m_ctx->var_table.unset(kv.first);
+        if (had_shadowed_binding.count(kv.first)) {
+            m_ctx->var_table[kv.first] = shadowed_vars[kv.first];
+        } else {
+            m_ctx->var_table.unset(kv.first);
+        }
     }
 
     llvm::verifyFunction(*llvm_fn);
@@ -2248,6 +2272,19 @@ void Compiler::compile_async_fn_body(Function *fn) {
     auto fn_def = fn->get_def();
     auto body = fn_def->body;
 
+    for (const auto &param_info : fn->parameter_info) {
+        if (param_info.kind != ParameterKind::Regular)
+            continue;
+        auto param = fn_def->fn_proto->data.fn_proto.params[param_info.user_param_index];
+        if (m_ctx->var_table.has_key(param))
+            continue;
+        auto llvm_param = fn->llvm_fn->getArg(param_info.llvm_index);
+        auto param_type = param_info.type;
+        auto var = fn->entry_alloca(compile_type(param_type), param->name);
+        builder.CreateStore(llvm_param, var);
+        add_var(param, var);
+    }
+
     // Get return type (Promise<T>)
     auto return_type = fn->fn_type->data.fn.return_type;
     assert(get_resolver()->is_promise_type(return_type));
@@ -2260,7 +2297,7 @@ void Compiler::compile_async_fn_body(Function *fn) {
     ctx.parent_fn = fn;
     ctx.promise_type = return_type;
     ctx.promise_struct_type = promise_struct_type_l;
-    ctx.segments = collect_async_segments(body);
+    ctx.segments = collect_async_segments(fn, body);
 
     // Check if there are any awaits - if the first segment has no await_expr, there are no awaits
     if (ctx.segments.empty() || !ctx.segments[0].await_expr) {

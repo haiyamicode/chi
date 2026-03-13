@@ -52,6 +52,7 @@ value: 'hello world!'
 value: 198
 === Double chain ===
 value: 12
+=== Branchy returns ===
 === Bare await ===
 === Bare then logic ===
 === Multiple bare ===
@@ -92,8 +93,12 @@ All tests passed!
 bare ok
 x = 15
 after first
+tt=1006
+tf=116
 x still = 15
 after second
+ft=36
+ff=46
 after third
 timeout fired
 sleep resolved

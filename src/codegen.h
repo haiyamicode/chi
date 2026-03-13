@@ -515,7 +515,7 @@ class Compiler {
     ast::Node *get_variant_member_node(ChiStructMember *member, std::optional<TypeId> variant_type_id);
 
     // Async/await codegen
-    std::vector<AsyncSegment> collect_async_segments(ast::Node *body);
+    std::vector<AsyncSegment> collect_async_segments(Function *fn, ast::Node *body);
     void collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars);
     std::pair<llvm::StructType *, std::vector<ast::Node *>> get_continuation_capture_info(
         AsyncContext &ctx, int segment_index);

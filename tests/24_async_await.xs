@@ -130,6 +130,11 @@ async func greet(name: string) Promise<string> {
     return "hello " + name;
 }
 
+async func delayed_number(value: int) Promise<int> {
+    await time.sleep(1);
+    return value;
+}
+
 // --- Async no await ---
 
 async func simple_async(x: int) Promise<int> {
@@ -337,6 +342,46 @@ async func do_double_chain() Promise<int> {
 func test_double_chain() {
     println("=== Double chain ===");
     printf("value: {}\n", do_double_chain().value()!);
+}
+
+// --- Await: nested if/return control flow ---
+
+async func do_branchy_returns(flag1: bool, flag2: bool, base: int) Promise<int> {
+    var a = await delayed_number(1);
+    var seed = base + a;
+
+    if flag1 {
+        if flag2 {
+            return seed + 1000;
+        }
+
+        var b = await delayed_number(10);
+        return seed + b + 100;
+    }
+
+    var c = await delayed_number(20);
+    if flag2 {
+        return seed + c + 10;
+    }
+
+    return seed + c + 20;
+}
+
+func test_branchy_returns() {
+    println("=== Branchy returns ===");
+
+    do_branchy_returns(true, true, 5).then(func (value: int) {
+        printf("tt={}\n", value);
+    });
+    do_branchy_returns(true, false, 5).then(func (value: int) {
+        printf("tf={}\n", value);
+    });
+    do_branchy_returns(false, true, 5).then(func (value: int) {
+        printf("ft={}\n", value);
+    });
+    do_branchy_returns(false, false, 5).then(func (value: int) {
+        printf("ff={}\n", value);
+    });
 }
 
 // --- Await: bare then logic ---
@@ -832,6 +877,7 @@ func main() {
     test_string_concat();
     test_await_last();
     test_double_chain();
+    test_branchy_returns();
 
     // Await patterns (async-resolved via event loop)
     test_bare_await();
