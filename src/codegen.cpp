@@ -1631,127 +1631,6 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
 // Async/Await Codegen
 // ============================================================================
 
-// Helper to check if an expression contains an await
-static bool contains_await(ast::Node *node) {
-    if (!node)
-        return false;
-    if (node->type == ast::NodeType::AwaitExpr)
-        return true;
-
-    switch (node->type) {
-    case ast::NodeType::TryExpr:
-        return contains_await(node->data.try_expr.expr);
-    case ast::NodeType::DestructureDecl:
-        return contains_await(node->data.destructure_decl.expr);
-    case ast::NodeType::VarDecl: {
-        auto &data = node->data.var_decl;
-        return contains_await(data.expr);
-    }
-    case ast::NodeType::ReturnStmt:
-        return contains_await(node->data.return_stmt.expr);
-    case ast::NodeType::ThrowStmt:
-        return contains_await(node->data.throw_stmt.expr);
-    case ast::NodeType::BinOpExpr:
-        return contains_await(node->data.bin_op_expr.op1) ||
-               contains_await(node->data.bin_op_expr.op2);
-    case ast::NodeType::FnCallExpr:
-        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
-            if (contains_await(node->data.fn_call_expr.args[i]))
-                return true;
-        }
-        return contains_await(node->data.fn_call_expr.fn_ref_expr);
-    case ast::NodeType::UnaryOpExpr:
-        return contains_await(node->data.unary_op_expr.op1);
-    default:
-        return false;
-    }
-}
-
-// Find the await expression within a node
-static ast::Node *find_await_expr(ast::Node *node) {
-    if (!node)
-        return nullptr;
-    if (node->type == ast::NodeType::AwaitExpr)
-        return node;
-
-    switch (node->type) {
-    case ast::NodeType::TryExpr:
-        return find_await_expr(node->data.try_expr.expr);
-    case ast::NodeType::DestructureDecl:
-        return find_await_expr(node->data.destructure_decl.expr);
-    case ast::NodeType::VarDecl:
-        return find_await_expr(node->data.var_decl.expr);
-    case ast::NodeType::ReturnStmt:
-        return find_await_expr(node->data.return_stmt.expr);
-    case ast::NodeType::ThrowStmt:
-        return find_await_expr(node->data.throw_stmt.expr);
-    case ast::NodeType::BinOpExpr: {
-        auto lhs = find_await_expr(node->data.bin_op_expr.op1);
-        return lhs ? lhs : find_await_expr(node->data.bin_op_expr.op2);
-    }
-    case ast::NodeType::FnCallExpr:
-        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
-            auto arg = find_await_expr(node->data.fn_call_expr.args[i]);
-            if (arg)
-                return arg;
-        }
-        return find_await_expr(node->data.fn_call_expr.fn_ref_expr);
-    case ast::NodeType::UnaryOpExpr:
-        return find_await_expr(node->data.unary_op_expr.op1);
-    default:
-        return nullptr;
-    }
-}
-
-struct AwaitSite {
-    ast::Node *await_expr = nullptr;
-    ast::Node *resume_expr = nullptr;
-};
-
-static AwaitSite find_await_site(ast::Node *node) {
-    if (!node) {
-        return {};
-    }
-    if (node->type == ast::NodeType::AwaitExpr) {
-        return {node, node};
-    }
-
-    switch (node->type) {
-    case ast::NodeType::TryExpr: {
-        auto site = find_await_site(node->data.try_expr.expr);
-        if (site.await_expr && node->data.try_expr.expr == site.await_expr &&
-            site.resume_expr == site.await_expr) {
-            site.resume_expr = node;
-        }
-        return site;
-    }
-    case ast::NodeType::DestructureDecl:
-        return find_await_site(node->data.destructure_decl.expr);
-    case ast::NodeType::VarDecl:
-        return find_await_site(node->data.var_decl.expr);
-    case ast::NodeType::ReturnStmt:
-        return find_await_site(node->data.return_stmt.expr);
-    case ast::NodeType::ThrowStmt:
-        return find_await_site(node->data.throw_stmt.expr);
-    case ast::NodeType::BinOpExpr: {
-        auto lhs = find_await_site(node->data.bin_op_expr.op1);
-        return lhs.await_expr ? lhs : find_await_site(node->data.bin_op_expr.op2);
-    }
-    case ast::NodeType::FnCallExpr:
-        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
-            auto arg = find_await_site(node->data.fn_call_expr.args[i]);
-            if (arg.await_expr) {
-                return arg;
-            }
-        }
-        return find_await_site(node->data.fn_call_expr.fn_ref_expr);
-    case ast::NodeType::UnaryOpExpr:
-        return find_await_site(node->data.unary_op_expr.op1);
-    default:
-        return {};
-    }
-}
-
 void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars) {
     if (!node)
         return;
@@ -1764,46 +1643,14 @@ void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> 
         }
         break;
     }
-    case ast::NodeType::TryExpr:
-        collect_vars_used_in_node(node->data.try_expr.expr, vars);
-        if (node->data.try_expr.catch_block) {
-            collect_vars_used_in_node(node->data.try_expr.catch_block, vars);
-        }
-        break;
-    case ast::NodeType::DestructureDecl:
-        collect_vars_used_in_node(node->data.destructure_decl.expr, vars);
-        break;
-    case ast::NodeType::VarDecl:
-        collect_vars_used_in_node(node->data.var_decl.expr, vars);
-        break;
-    case ast::NodeType::ReturnStmt:
-        collect_vars_used_in_node(node->data.return_stmt.expr, vars);
-        break;
-    case ast::NodeType::ThrowStmt:
-        collect_vars_used_in_node(node->data.throw_stmt.expr, vars);
-        break;
-    case ast::NodeType::BinOpExpr:
-        collect_vars_used_in_node(node->data.bin_op_expr.op1, vars);
-        collect_vars_used_in_node(node->data.bin_op_expr.op2, vars);
-        break;
-    case ast::NodeType::FnCallExpr:
-        collect_vars_used_in_node(node->data.fn_call_expr.fn_ref_expr, vars);
-        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
-            collect_vars_used_in_node(node->data.fn_call_expr.args[i], vars);
-        }
-        break;
     case ast::NodeType::AwaitExpr:
         collect_vars_used_in_node(node->data.await_expr.expr, vars);
         break;
-    case ast::NodeType::Block:
-        for (int i = 0; i < node->data.block.statements.len; i++) {
-            collect_vars_used_in_node(node->data.block.statements[i], vars);
-        }
-        break;
-    case ast::NodeType::UnaryOpExpr:
-        collect_vars_used_in_node(node->data.unary_op_expr.op1, vars);
-        break;
     default:
+        cx::visit_async_children(node, true, [&](ast::Node *child) {
+            collect_vars_used_in_node(child, vars);
+            return false;
+        });
         break;
     }
 }
@@ -1815,10 +1662,11 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
     auto &stmts = body->data.block.statements;
     for (int i = 0; i < stmts.len; i++) {
         auto stmt = stmts[i];
-        if (contains_await(stmt)) {
+        if (get_resolver()->contains_await(stmt)) {
             // This statement has an await - it ends the current segment
-            auto site = find_await_site(stmt);
-            current.await_expr = site.await_expr ? site.await_expr : find_await_expr(stmt);
+            auto site = get_resolver()->find_await_site(stmt);
+            current.await_expr =
+                site.await_expr ? site.await_expr : get_resolver()->find_await_expr(stmt);
             current.await_resume_expr =
                 site.resume_expr ? site.resume_expr : current.await_expr;
             if (current.await_resume_expr &&
@@ -3539,13 +3387,13 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.try_expr;
         auto &builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+        auto try_expr_type = get_chitype(data.expr);
 
-        if (m_async_await_value && data.expr && data.expr->type == ast::NodeType::AwaitExpr) {
-            if (!data.catch_block && !data.catch_expr) {
-                return m_async_await_value;
-            }
+        if (m_async_await_value && get_resolver()->contains_await(data.expr)) {
+            auto site = get_resolver()->find_await_site(data.expr);
+            assert(site.await_expr && "async try must contain a resumed await site");
 
-            auto awaited_type = get_chitype(data.expr);
+            auto awaited_type = get_chitype(site.await_expr);
             auto shared_error_type =
                 get_resolver()->get_shared_type(get_resolver()->get_context()->rt_error_type);
             auto settled_type = get_resolver()->get_result_type(awaited_type, shared_error_type);
@@ -3589,6 +3437,41 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                                  llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
                                  result_size.getFixedValue(), llvm::MaybeAlign());
 
+            ChiType *result_enum = nullptr;
+            if (!data.catch_block) {
+                result_enum = result_type;
+                if (result_enum->kind == TypeKind::Subtype) {
+                    result_enum = get_resolver()->resolve_subtype(result_enum, expr);
+                }
+                if (result_enum && result_enum->kind == TypeKind::EnumValue) {
+                    result_enum = result_enum->data.enum_value.enum_type;
+                }
+            }
+            auto init_result_variant = [&](const string &variant_name, auto store_payload) {
+                assert(result_enum && result_enum->kind == TypeKind::Enum);
+                auto variant_member = result_enum->data.enum_.find_member(variant_name);
+                assert(variant_member);
+                auto variant_type = variant_member->resolved_type;
+                assert(variant_type && variant_type->kind == TypeKind::EnumValue);
+
+                auto enum_variant_p = m_ctx->enum_variant_table.get(variant_member);
+                assert(enum_variant_p);
+                auto enum_var = *enum_variant_p;
+                auto copy_size = llvm_type_size(((llvm::GlobalVariable *)enum_var)->getValueType());
+                auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0);
+
+                builder.CreateMemSet(result_var, zero, llvm_type_size(result_type_l).getFixedValue(),
+                                     llvm::MaybeAlign());
+                builder.CreateMemCpy(result_var, {}, enum_var, {}, copy_size);
+
+                auto payload_fields = get_resolver()->get_enum_payload_fields(variant_type);
+                if (payload_fields.len > 0) {
+                    auto payload_ptr =
+                        compile_dot_access(fn, result_var, variant_type, payload_fields[0]);
+                    store_payload(payload_fields[0]->resolved_type, payload_ptr);
+                }
+            };
+
             auto reject_async_error = [&]() {
                 emit_async_promise_reject_shared(fn, shared_error_value);
                 compile_destruction_for_type(fn, settled_var, settled_type);
@@ -3614,8 +3497,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
 
             if (!data.catch_block) {
-                auto settled_value = builder.CreateLoad(settled_type_l, settled_var);
-                compile_store_or_copy(fn, settled_value, result_var, result_type, data.expr);
+                init_result_variant("Err", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
+                    compile_store_or_copy(fn, shared_error_value, payload_ptr, payload_type, expr);
+                });
                 compile_destruction_for_type(fn, settled_var, settled_type);
                 builder.CreateBr(continue_b);
             } else {
@@ -3672,18 +3556,28 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
 
             fn->use_label(ok_b);
+            auto ok_variant_type = ok_member->resolved_type;
+            auto ok_fields = get_resolver()->get_enum_payload_fields(ok_variant_type);
+            llvm::Value *payload_value = nullptr;
+            if (ok_fields.len > 0) {
+                auto payload_ptr = compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
+                payload_value =
+                    builder.CreateLoad(compile_type(ok_fields[0]->resolved_type), payload_ptr);
+            }
+            auto prev_async_await_value = m_async_await_value;
+            m_async_await_value = payload_value;
+            auto ok_value = compile_expr(fn, data.expr);
+            m_async_await_value = prev_async_await_value;
+
             if (!data.catch_block) {
-                auto settled_value = builder.CreateLoad(settled_type_l, settled_var);
-                compile_store_or_copy(fn, settled_value, result_var, result_type, data.expr);
+                init_result_variant("Ok", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
+                    if (ok_value) {
+                        compile_store_or_copy(fn, ok_value, payload_ptr, payload_type, data.expr);
+                    }
+                });
             } else {
-                auto ok_variant_type = ok_member->resolved_type;
-                auto ok_fields = get_resolver()->get_enum_payload_fields(ok_variant_type);
-                if (ok_fields.len > 0) {
-                    auto payload_ptr =
-                        compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
-                    auto payload_value = builder.CreateLoad(compile_type(ok_fields[0]->resolved_type),
-                                                            payload_ptr);
-                    compile_store_or_copy(fn, payload_value, result_var, result_type, data.expr);
+                if (ok_value) {
+                    compile_store_or_copy(fn, ok_value, result_var, result_type, data.expr);
                 }
             }
             compile_destruction_for_type(fn, settled_var, settled_type);

@@ -8,9 +8,19 @@ extern "C" {
     unsafe func __move(dest: *void, src: *void, size: uint32);
 }
 
+
+
+
+
+
+
+
 export extern "C" {
     func memcmp(s1: *void, s2: *void, n: uint32) int;
 }
+
+
+
 
 export unsafe func malloc(size: uint32) *void {
     return cx_malloc(size, null);

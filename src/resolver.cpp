@@ -1953,7 +1953,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::TryExpr: {
         auto &data = node->data.try_expr;
         auto expr_type = resolve(data.expr, scope);
-        bool is_try_await = data.expr && data.expr->type == NodeType::AwaitExpr;
+        bool is_try_await = contains_await(data.expr);
+        auto try_value_type = expr_type;
         auto resolve_catch_type = [&]() -> ChiType * {
             if (!data.catch_expr) {
                 return nullptr;
@@ -2013,15 +2014,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 // Catch may fall through: merge with pre-catch (no-error path)
                 fn_def->flow.merge(pre_catch);
             }
-
-            return expr_type;
+            return try_value_type;
         }
 
         if (is_try_await) {
             if (data.catch_expr) {
                 resolve_catch_type();
             }
-            return get_result_type(expr_type, get_shared_type(m_ctx->rt_error_type));
+            return get_result_type(try_value_type, get_shared_type(m_ctx->rt_error_type));
         }
 
         if (data.catch_expr) {
@@ -2029,7 +2029,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             resolve_catch_type();
         }
         // try f() → Result<T, Shared<Error>>
-        return get_result_type(expr_type, get_shared_type(m_ctx->rt_error_type));
+        return get_result_type(try_value_type, get_shared_type(m_ctx->rt_error_type));
     }
     case NodeType::AwaitExpr: {
         auto &data = node->data.await_expr;
@@ -7723,19 +7723,32 @@ ChiType *Resolver::get_shared_type(ChiType *value) {
     return type;
 }
 
+ChiTypeSubtype *Resolver::get_promise_subtype(ChiType *type) {
+    if (!m_ctx->rt_promise_type || !type) {
+        return nullptr;
+    }
+    if (type->kind == TypeKind::Subtype && type->data.subtype.generic == m_ctx->rt_promise_type) {
+        return &type->data.subtype;
+    }
+    if (type->kind == TypeKind::Struct) {
+        if (auto entry = m_ctx->generics.struct_envs.get(type->global_id)) {
+            if (entry->generic_type == m_ctx->rt_promise_type && entry->subtype &&
+                entry->subtype->kind == TypeKind::Subtype) {
+                return &entry->subtype->data.subtype;
+            }
+        }
+    }
+    return nullptr;
+}
+
 bool Resolver::is_promise_type(ChiType *type) {
-    if (!m_ctx->rt_promise_type) {
-        return false;
-    }
-    if (type->kind == TypeKind::Subtype) {
-        return type->data.subtype.generic == m_ctx->rt_promise_type;
-    }
-    return false;
+    return get_promise_subtype(type) != nullptr;
 }
 
 ChiType *Resolver::get_promise_value_type(ChiType *type) {
-    assert(is_promise_type(type));
-    return type->data.subtype.args[0];
+    auto subtype = get_promise_subtype(type);
+    assert(subtype);
+    return subtype->args[0];
 }
 
 ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
@@ -8449,6 +8462,59 @@ bool Resolver::is_result_type(ChiType *type) {
         return type->data.subtype.generic == m_ctx->rt_result_type;
     }
     return false;
+}
+
+bool Resolver::contains_await(ast::Node *node) {
+    if (!node) {
+        return false;
+    }
+    if (node->type == NodeType::AwaitExpr) {
+        return true;
+    }
+    return visit_async_children(node, false, [&](ast::Node *child) {
+        return contains_await(child);
+    });
+}
+
+ast::Node *Resolver::find_await_expr(ast::Node *node) {
+    if (!node) {
+        return nullptr;
+    }
+    if (node->type == NodeType::AwaitExpr) {
+        return node;
+    }
+
+    ast::Node *found = nullptr;
+    visit_async_children(node, false, [&](ast::Node *child) {
+        found = find_await_expr(child);
+        return found != nullptr;
+    });
+    return found;
+}
+
+AwaitSite Resolver::find_await_site(ast::Node *node) {
+    if (!node) {
+        return {};
+    }
+    if (node->type == NodeType::AwaitExpr) {
+        return {node, node};
+    }
+
+    if (node->type == NodeType::TryExpr) {
+        auto site = find_await_site(node->data.try_expr.expr);
+        if (site.await_expr && site.resume_expr &&
+            site.resume_expr->type != NodeType::TryExpr) {
+            site.resume_expr = node;
+        }
+        return site;
+    }
+
+    AwaitSite site = {};
+    visit_async_children(node, false, [&](ast::Node *child) {
+        site = find_await_site(child);
+        return site.await_expr != nullptr;
+    });
+    return site;
 }
 
 ChiType *Resolver::create_int_type(int bit_count, bool is_unsigned) {

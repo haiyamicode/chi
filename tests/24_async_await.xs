@@ -515,6 +515,10 @@ async func settle_other_throws() Promise<int> {
     return 0;
 }
 
+func add_one_sync(x: int) int {
+    return x + 1;
+}
+
 async func try_await_result_ok() Promise<Result<int, Shared<Error>>> {
     return try await settle_resolves_after_delay();
 }
@@ -556,6 +560,21 @@ async func try_await_typed_catch_err() Promise<int> {
 async func try_await_typed_catch_mismatch() Promise<int> {
     var value = try await settle_other_throws() catch TestError as err {
         return -999;
+    };
+    return value;
+}
+
+async func try_await_nested_result_ok() Promise<Result<int, Shared<Error>>> {
+    return try add_one_sync(await settle_resolves_after_delay());
+}
+
+async func try_await_nested_result_err() Promise<Result<int, Shared<Error>>> {
+    return try add_one_sync(await settle_outer_throws());
+}
+
+async func try_await_nested_catch_err() Promise<int> {
+    var value = try add_one_sync(await settle_outer_throws()) catch {
+        return -27;
     };
     return value;
 }
@@ -618,6 +637,28 @@ func test_try_await() {
             return -1;
         }
     );
+
+    try_await_nested_result_ok().then(
+        func (result) Unit {
+            printf("try await nested ok: {}\n", result.value()!);
+            return {};
+        }
+    );
+
+    try_await_nested_result_err().then(
+        func (result) Unit {
+            printf("try await nested err: {}\n", result.error()!.message());
+            return {};
+        }
+    );
+
+    try_await_nested_catch_err().then(
+        func (value: int) Unit {
+            printf("try await nested catch err: {}\n", value);
+            return {};
+        }
+    );
+
 }
 
 func test_async_throw_immediate() {
@@ -823,4 +864,3 @@ func main() {
 
     println("All tests passed!");
 }
-

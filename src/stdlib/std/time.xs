@@ -6,6 +6,11 @@ extern "C" {
     unsafe func cx_timeout(delay: uint64, callback: *void);
 }
 
+
+
+
+
+
 export func now() uint64 {
     return __cx_time_now();
 }

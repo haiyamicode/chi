@@ -104,11 +104,14 @@ settle ok value: 55
 settle ok error null: true
 try await ok: 55
 try await catch ok: 57
+try await nested ok: 56
 resolved: 42
 settle err value null: true
 settle err message: error 66
 try await err: error 66
 try await catch err: -7
+try await nested err: error 66
+try await nested catch err: -27
 try await typed err: error 67
 try await typed catch saw: error 67
 try await typed catch err: -17

@@ -8,6 +8,13 @@ extern "C" {
     unsafe func __cx_strlen(s: *byte) uint32;
 }
 
+
+
+
+
+
+
+
 export func env(key: string) ?string {
     var cs = key.to_cstring();
     unsafe {

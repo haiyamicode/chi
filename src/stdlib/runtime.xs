@@ -45,6 +45,49 @@ extern "C" {
     unsafe func cx_capture_get_data(capture_ptr: *void) *void;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 struct __CxEnumBase<T> {
     private __value: T = undefined;
 
@@ -1385,3 +1428,4 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 }
+

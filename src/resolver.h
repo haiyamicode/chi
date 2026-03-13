@@ -190,6 +190,108 @@ struct ResolveScope {
 
 enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0, IS_FN_LAMBDA = 1 << 1 };
 
+struct AwaitSite {
+    ast::Node *await_expr = nullptr;
+    ast::Node *resume_expr = nullptr;
+};
+
+template <typename F>
+static bool visit_async_children(ast::Node *node, bool include_try_catch, F &&visit) {
+    if (!node) {
+        return false;
+    }
+
+    auto visit_one = [&](ast::Node *child) -> bool {
+        return child && visit(child);
+    };
+    auto visit_many = [&](auto &nodes) -> bool {
+        for (auto child : nodes) {
+            if (visit_one(child)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    switch (node->type) {
+    case ast::NodeType::TryExpr:
+        if (visit_one(node->data.try_expr.expr)) {
+            return true;
+        }
+        return include_try_catch && visit_one(node->data.try_expr.catch_block);
+    case ast::NodeType::DestructureDecl:
+        return visit_one(node->data.destructure_decl.expr);
+    case ast::NodeType::VarDecl:
+        return visit_one(node->data.var_decl.expr);
+    case ast::NodeType::ReturnStmt:
+        return visit_one(node->data.return_stmt.expr);
+    case ast::NodeType::ThrowStmt:
+        return visit_one(node->data.throw_stmt.expr);
+    case ast::NodeType::BinOpExpr:
+        return visit_one(node->data.bin_op_expr.op1) || visit_one(node->data.bin_op_expr.op2);
+    case ast::NodeType::FnCallExpr:
+        if (visit_one(node->data.fn_call_expr.fn_ref_expr)) {
+            return true;
+        }
+        return visit_many(node->data.fn_call_expr.args);
+    case ast::NodeType::UnaryOpExpr:
+        return visit_one(node->data.unary_op_expr.op1);
+    case ast::NodeType::Block:
+        if (visit_many(node->data.block.statements)) {
+            return true;
+        }
+        return visit_one(node->data.block.return_expr);
+    case ast::NodeType::IfExpr:
+        return visit_one(node->data.if_expr.condition) ||
+               visit_one(node->data.if_expr.then_block) ||
+               visit_one(node->data.if_expr.else_node);
+    case ast::NodeType::SwitchExpr:
+        return visit_one(node->data.switch_expr.expr) || visit_many(node->data.switch_expr.cases);
+    case ast::NodeType::CaseExpr:
+        return visit_many(node->data.case_expr.clauses) ||
+               visit_one(node->data.case_expr.destructure_pattern) ||
+               visit_one(node->data.case_expr.body);
+    case ast::NodeType::ConstructExpr:
+        if (visit_one(node->data.construct_expr.type) ||
+            visit_many(node->data.construct_expr.items) ||
+            visit_many(node->data.construct_expr.field_inits)) {
+            return true;
+        }
+        return visit_one(node->data.construct_expr.spread_expr);
+    case ast::NodeType::FieldInitExpr:
+        return visit_one(node->data.field_init_expr.value);
+    case ast::NodeType::TupleExpr:
+        return visit_many(node->data.tuple_expr.items);
+    case ast::NodeType::DotExpr:
+        return visit_one(node->data.dot_expr.expr);
+    case ast::NodeType::IndexExpr:
+        return visit_one(node->data.index_expr.expr) ||
+               visit_one(node->data.index_expr.subscript);
+    case ast::NodeType::SliceExpr:
+        return visit_one(node->data.slice_expr.expr) || visit_one(node->data.slice_expr.start) ||
+               visit_one(node->data.slice_expr.end);
+    case ast::NodeType::RangeExpr:
+        return visit_one(node->data.range_expr.start) || visit_one(node->data.range_expr.end);
+    case ast::NodeType::CastExpr:
+        return visit_one(node->data.cast_expr.expr);
+    case ast::NodeType::PrefixExpr:
+        return visit_one(node->data.prefix_expr.expr);
+    case ast::NodeType::PackExpansion:
+    case ast::NodeType::ParenExpr:
+        return visit_one(node->data.child_expr);
+    case ast::NodeType::ForStmt:
+        return visit_one(node->data.for_stmt.init) || visit_one(node->data.for_stmt.condition) ||
+               visit_one(node->data.for_stmt.post) || visit_one(node->data.for_stmt.bind) ||
+               visit_one(node->data.for_stmt.index_bind) ||
+               visit_one(node->data.for_stmt.expr) || visit_one(node->data.for_stmt.body);
+    case ast::NodeType::WhileStmt:
+        return visit_one(node->data.while_stmt.condition) ||
+               visit_one(node->data.while_stmt.body);
+    default:
+        return false;
+    }
+}
+
 class Resolver {
     ResolveContext *m_ctx = nullptr;
     ast::Module *m_module = nullptr;
@@ -364,8 +466,8 @@ class Resolver {
     ChiType *get_promise_type(ChiType *value);
     ChiType *get_shared_type(ChiType *value);
 
+    ChiTypeSubtype *get_promise_subtype(ChiType *type);
     bool is_promise_type(ChiType *type);
-
     ChiType *get_promise_value_type(ChiType *type);
 
     ChiType *get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
@@ -380,6 +482,9 @@ class Resolver {
 
     ChiType *get_result_type(ChiType *value, ChiType *err);
     bool is_result_type(ChiType *type);
+    bool contains_await(ast::Node *node);
+    ast::Node *find_await_expr(ast::Node *node);
+    AwaitSite find_await_site(ast::Node *node);
 
     ChiType *get_wrapped_type(ChiType *elem, TypeKind kind);
 

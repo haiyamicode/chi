@@ -8,6 +8,12 @@ extern "C" {
     func snprintf(buf: *byte, size: uint64, fmt: *byte, ...) int32;
 }
 
+
+
+
+
+
+
 func test_sqrt() {
     println("testing C sqrt:");
     let result = sqrt(16.0);
