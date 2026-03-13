@@ -190,14 +190,14 @@ func test_no_throw() {
 func test_result_mode() {
     println("=== result mode ===");
 
-    // try f() → Result<int, &Error> — success case
+    // try f() → Result<int, Shared<Error>> — success case
     var result = try succeed();
     switch result {
         Ok(value) => printf("value = {}\n", value),
         Err => println("unexpected error")
     }
 
-    // try f() → Result<(), &Error> — error case (void fn → Result<(), &Error>)
+    // try f() → Result<(), Shared<Error>> — error case (void fn → Result<(), Shared<Error>>)
     var result2 = try fail_with("oops");
     switch result2 {
         Err(err) => printf("got error: {}\n", err.message()),
@@ -205,7 +205,7 @@ func test_result_mode() {
     }
 }
 
-// --- Typed catch without block → Result<T, &MyError> ---
+// --- Typed catch without block → Result<T, Shared<Error>> with type filtering ---
 
 func test_typed_result() {
     println("=== typed result ===");
@@ -313,3 +313,4 @@ func main() {
     // Return from catch exits the function
     printf("early return = {}\n", test_catch_return());
 }
+

@@ -116,11 +116,13 @@ struct ResolveContext {
     uint32_t lang_flags = 0;
     map<string, ChiType *> composite_types = {};
     map<ChiType *, ChiType *> promise_of = {};
+    map<ChiType *, ChiType *> shared_of = {};
     map<string, ChiType *> tuple_types = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
     ChiType *rt_array_type = nullptr;
     ChiType *rt_span_type = nullptr;
     ChiType *rt_promise_type = nullptr;
+    ChiType *rt_shared_type = nullptr;
     ChiType *rt_result_type = nullptr;
     ChiType *rt_lambda_type = nullptr;
     ChiType *rt_string_type = nullptr;
@@ -360,6 +362,7 @@ class Resolver {
     ChiType *get_fixed_array_type(ChiType *elem, uint32_t size);
 
     ChiType *get_promise_type(ChiType *value);
+    ChiType *get_shared_type(ChiType *value);
 
     bool is_promise_type(ChiType *type);
 

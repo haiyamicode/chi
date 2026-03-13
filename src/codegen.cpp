@@ -1078,22 +1078,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
     // clean up & return (block-local vars are destroyed at block exit or inline at return sites)
     fn->use_label(return_b);
-    // Destroy any caught error objects still owned (from diverging catch blocks)
-    for (auto &owner : fn->error_owner_vars) {
-        auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
-        auto is_nonnull =
-            builder.CreateICmpNE(owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
-        auto do_free_b = fn->new_label("_err_cleanup");
-        auto skip_free_b = fn->new_label("_err_cleanup_done");
-        builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
-        fn->use_label(do_free_b);
-        if (owner.concrete_type) {
-            compile_destruction_for_type(fn, owned_ptr, owner.concrete_type);
-        }
-        builder.CreateCall(get_system_fn("cx_free")->llvm_fn, {owned_ptr});
-        builder.CreateBr(skip_free_b);
-        fn->use_label(skip_free_b);
-    }
+    emit_cleanup_owners(fn);
     for (auto ptr : fn->vararg_pointers) {
         emit_dbg_location(fn->node);
         builder.CreateCall(get_system_fn("cx_array_delete")->llvm_fn, {ptr});
@@ -1136,21 +1121,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
                 auto &body_block = fn->get_def()->body->data.block;
                 compile_block_cleanup(fn, &body_block, nullptr, body_block.exit_flow);
             }
-            for (auto &owner : fn->error_owner_vars) {
-                auto owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
-                auto is_nonnull = builder.CreateICmpNE(
-                    owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
-                auto do_free_b = fn->new_label("_err_cleanup");
-                auto skip_free_b = fn->new_label("_err_cleanup_done");
-                builder.CreateCondBr(is_nonnull, do_free_b, skip_free_b);
-                fn->use_label(do_free_b);
-                if (owner.concrete_type) {
-                    compile_destruction_for_type(fn, owned_ptr, owner.concrete_type);
-                }
-                builder.CreateCall(get_system_fn("cx_free")->llvm_fn, {owned_ptr});
-                builder.CreateBr(skip_free_b);
-                fn->use_label(skip_free_b);
-            }
+            emit_cleanup_owners(fn);
             fn->insn_noop();
             builder.CreateResume(landing);
         }
@@ -1668,6 +1639,8 @@ static bool contains_await(ast::Node *node) {
         return true;
 
     switch (node->type) {
+    case ast::NodeType::TryExpr:
+        return contains_await(node->data.try_expr.expr);
     case ast::NodeType::DestructureDecl:
         return contains_await(node->data.destructure_decl.expr);
     case ast::NodeType::VarDecl: {
@@ -1702,6 +1675,8 @@ static ast::Node *find_await_expr(ast::Node *node) {
         return node;
 
     switch (node->type) {
+    case ast::NodeType::TryExpr:
+        return find_await_expr(node->data.try_expr.expr);
     case ast::NodeType::DestructureDecl:
         return find_await_expr(node->data.destructure_decl.expr);
     case ast::NodeType::VarDecl:
@@ -1728,6 +1703,55 @@ static ast::Node *find_await_expr(ast::Node *node) {
     }
 }
 
+struct AwaitSite {
+    ast::Node *await_expr = nullptr;
+    ast::Node *resume_expr = nullptr;
+};
+
+static AwaitSite find_await_site(ast::Node *node) {
+    if (!node) {
+        return {};
+    }
+    if (node->type == ast::NodeType::AwaitExpr) {
+        return {node, node};
+    }
+
+    switch (node->type) {
+    case ast::NodeType::TryExpr: {
+        auto site = find_await_site(node->data.try_expr.expr);
+        if (site.await_expr && node->data.try_expr.expr == site.await_expr &&
+            site.resume_expr == site.await_expr) {
+            site.resume_expr = node;
+        }
+        return site;
+    }
+    case ast::NodeType::DestructureDecl:
+        return find_await_site(node->data.destructure_decl.expr);
+    case ast::NodeType::VarDecl:
+        return find_await_site(node->data.var_decl.expr);
+    case ast::NodeType::ReturnStmt:
+        return find_await_site(node->data.return_stmt.expr);
+    case ast::NodeType::ThrowStmt:
+        return find_await_site(node->data.throw_stmt.expr);
+    case ast::NodeType::BinOpExpr: {
+        auto lhs = find_await_site(node->data.bin_op_expr.op1);
+        return lhs.await_expr ? lhs : find_await_site(node->data.bin_op_expr.op2);
+    }
+    case ast::NodeType::FnCallExpr:
+        for (int i = 0; i < node->data.fn_call_expr.args.len; i++) {
+            auto arg = find_await_site(node->data.fn_call_expr.args[i]);
+            if (arg.await_expr) {
+                return arg;
+            }
+        }
+        return find_await_site(node->data.fn_call_expr.fn_ref_expr);
+    case ast::NodeType::UnaryOpExpr:
+        return find_await_site(node->data.unary_op_expr.op1);
+    default:
+        return {};
+    }
+}
+
 void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars) {
     if (!node)
         return;
@@ -1740,6 +1764,12 @@ void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> 
         }
         break;
     }
+    case ast::NodeType::TryExpr:
+        collect_vars_used_in_node(node->data.try_expr.expr, vars);
+        if (node->data.try_expr.catch_block) {
+            collect_vars_used_in_node(node->data.try_expr.catch_block, vars);
+        }
+        break;
     case ast::NodeType::DestructureDecl:
         collect_vars_used_in_node(node->data.destructure_decl.expr, vars);
         break;
@@ -1787,8 +1817,18 @@ std::vector<AsyncSegment> Compiler::collect_async_segments(ast::Node *body) {
         auto stmt = stmts[i];
         if (contains_await(stmt)) {
             // This statement has an await - it ends the current segment
-            current.await_expr = find_await_expr(stmt);
-            current.await_value_type = get_chitype(current.await_expr);
+            auto site = find_await_site(stmt);
+            current.await_expr = site.await_expr ? site.await_expr : find_await_expr(stmt);
+            current.await_resume_expr =
+                site.resume_expr ? site.resume_expr : current.await_expr;
+            if (current.await_resume_expr &&
+                current.await_resume_expr->type == ast::NodeType::TryExpr) {
+                current.await_value_type = get_resolver()->get_result_type(
+                    get_chitype(current.await_expr),
+                    get_resolver()->get_shared_type(get_resolver()->get_context()->rt_error_type));
+            } else {
+                current.await_value_type = get_chitype(current.await_resume_expr);
+            }
 
             // Store the statement containing the await — it will be compiled
             // in the next continuation with AwaitExpr resolving to value_arg.
@@ -2065,16 +2105,29 @@ void Compiler::generate_async_continuation_body(AsyncContext &ctx, int segment_i
 llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,
                                                  map<ast::Node *, llvm::Value *> &local_vars,
                                                  llvm::Value *result_promise_ptr) {
-    auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
 
     // Get capture struct type and ordered list of captured variables
     auto [capture_struct_type, captured_vars_ordered] =
         get_continuation_capture_info(ctx, segment_index);
     auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
+    auto cont_fn_llvm = ctx.continuations[segment_index - 1];
+    return build_result_capture_lambda(fn, ctx, cont_fn_llvm, capture_struct_type,
+                                       (uint32_t)capture_size, result_promise_ptr,
+                                       captured_vars_ordered, &local_vars);
+}
+
+llvm::Value *Compiler::build_result_capture_lambda(Function *fn, AsyncContext &ctx,
+                                                   llvm::Function *target_fn,
+                                                   llvm::StructType *capture_struct_type,
+                                                   uint32_t capture_size,
+                                                   llvm::Value *result_promise_ptr,
+                                                   const std::vector<ast::Node *> &captured_vars_ordered,
+                                                   map<ast::Node *, llvm::Value *> *local_vars) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
 
-    // Generate destructor for capture struct (called by cx_capture_release when refcount hits 0)
     llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(ptr_type);
     bool needs_destruction = get_resolver()->type_needs_destruction(ctx.promise_type);
     if (!needs_destruction) {
@@ -2093,50 +2146,34 @@ llvm::Value *Compiler::build_continuation_lambda(Function *fn, AsyncContext &ctx
         }
     }
 
-    // Allocate capture via CxCapture (refcounted, type-erased)
-    auto null_ti =
-        llvm::ConstantPointerNull::get(ptr_type); // no Chi type for ad-hoc capture struct
+    auto null_ti = llvm::ConstantPointerNull::get(ptr_type);
     auto [capture_ptr, captures_payload_ptr] =
-        compile_cxcapture_create((uint32_t)capture_size, null_ti, dtor_ptr);
+        compile_cxcapture_create(capture_size, null_ti, dtor_ptr);
     auto captures_ptr =
         builder.CreateBitCast(captures_payload_ptr, capture_struct_type->getPointerTo());
 
-    // Zero-init the payload before populating (needed for compile_copy on Promise,
-    // since copy may release the old value which would be garbage otherwise)
     builder.CreateMemSet(captures_payload_ptr,
                          llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
                          capture_size, {});
 
-    // Store result promise VALUE (not pointer) - copy it so it survives after stack frame is gone
     auto result_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, 0);
     auto result_promise_val = builder.CreateLoad(ctx.promise_struct_type, result_promise_ptr);
+    emit_dbg_location(fn->node);
     compile_copy(fn, result_promise_val, result_gep, ctx.promise_type);
 
-    // Store captured variables
     for (size_t i = 0; i < captured_vars_ordered.size(); i++) {
         auto var = captured_vars_ordered[i];
         auto var_type = get_chitype(var);
-        auto var_type_l = compile_type(var_type);
-
-        llvm::Value *var_ptr;
-        if (local_vars.has_key(var)) {
-            var_ptr = local_vars[var];
-        } else {
-            var_ptr = get_var(var);
-        }
-        auto var_value = builder.CreateLoad(var_type_l, var_ptr);
-
+        auto var_ptr = local_vars && local_vars->has_key(var) ? (*local_vars)[var] : get_var(var);
+        auto var_value = builder.CreateLoad(compile_type(var_type), var_ptr);
         auto var_gep = builder.CreateStructGEP(capture_struct_type, captures_ptr, i + 1);
         builder.CreateStore(var_value, var_gep);
     }
 
-    // Build __CxLambda struct
     emit_dbg_location(fn->node);
-    auto cont_fn_llvm = ctx.continuations[segment_index - 1];
     auto [lambda_alloca, lambda_struct_type_l] =
-        compile_cxlambda_init(fn, cont_fn_llvm, (uint32_t)capture_size);
+        compile_cxlambda_init(fn, target_fn, capture_size);
     compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
-
     return builder.CreateLoad(lambda_struct_type_l, lambda_alloca);
 }
 
@@ -2150,7 +2187,7 @@ llvm::Value *Compiler::build_rejection_forwarder_lambda(Function *fn, AsyncConte
     // Capture struct: just { Promise<T> result_promise }
     std::vector<llvm::Type *> capture_types = {ctx.promise_struct_type};
     auto capture_struct_type = llvm::StructType::get(llvm_ctx, capture_types);
-    auto capture_size = llvm_module.getDataLayout().getTypeAllocSize(capture_struct_type);
+    auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
 
     // Find reject_shared method on Promise<T>
     auto promise_struct = get_resolver()->resolve_struct_type(ctx.promise_type);
@@ -2194,38 +2231,93 @@ llvm::Value *Compiler::build_rejection_forwarder_lambda(Function *fn, AsyncConte
     // Restore builder to caller's position
     builder.SetInsertPoint(saved_insert);
 
-    // Build capture and lambda (same pattern as build_continuation_lambda)
-    auto null_ti = llvm::ConstantPointerNull::get(ptr_type);
+    return build_result_capture_lambda(fn, ctx, fwd_llvm_fn, capture_struct_type,
+                                       (uint32_t)capture_size, result_promise_ptr, {}, nullptr);
+}
 
-    // Generate destructor for capture struct (contains Promise which needs destruction)
-    llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(ptr_type);
-    if (get_resolver()->type_needs_destruction(ctx.promise_type)) {
-        auto dtor = generate_destructor_continuation(capture_struct_type, ctx.promise_type, {});
-        if (dtor) {
-            dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, ptr_type);
-        }
+llvm::Value *Compiler::build_try_await_forwarder_lambda(Function *fn, AsyncContext &ctx,
+                                                        int segment_index,
+                                                        map<ast::Node *, llvm::Value *> &local_vars,
+                                                        llvm::Value *result_promise_ptr,
+                                                        bool is_error) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &llvm_module = *m_ctx->llvm_module;
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+
+    auto [capture_struct_type, captured_vars_ordered] =
+        get_continuation_capture_info(ctx, segment_index);
+    auto capture_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(capture_struct_type);
+
+    auto &prev_segment = ctx.segments[segment_index - 1];
+    auto settled_type = eval_type(prev_segment.await_value_type);
+    auto settled_type_l = compile_type(settled_type);
+    auto enum_type = get_resolver()->get_enum_type(settled_type);
+    if (!enum_type || enum_type->kind != TypeKind::Enum) {
+        panic("invalid try-await settled type: {}", get_resolver()->format_type_display(settled_type));
     }
 
-    auto [capture_ptr, captures_payload_ptr] =
-        compile_cxcapture_create((uint32_t)capture_size, null_ti, dtor_ptr);
-    auto typed_captures_ptr =
-        builder.CreateBitCast(captures_payload_ptr, capture_struct_type->getPointerTo());
+    ChiType *arg_type = nullptr;
+    if (is_error) {
+        arg_type = get_resolver()->get_shared_type(get_resolver()->get_context()->rt_error_type);
+    } else {
+        arg_type = get_chitype(prev_segment.await_expr);
+    }
+    auto arg_type_l = compile_type(arg_type);
 
-    // Zero-init then copy result promise
-    builder.CreateMemSet(captures_payload_ptr,
-                         llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
-                         capture_size, {});
-    auto result_gep = builder.CreateStructGEP(capture_struct_type, typed_captures_ptr, 0);
-    auto result_promise_val = builder.CreateLoad(ctx.promise_struct_type, result_promise_ptr);
-    compile_copy(fn, result_promise_val, result_gep, ctx.promise_type);
+    auto void_type = llvm::Type::getVoidTy(llvm_ctx);
+    auto fwd_fn_type = llvm::FunctionType::get(void_type, {ptr_type, arg_type_l}, false);
+    auto fwd_fn_name = fmt::format("{}__try_await_{}_fwd_{}", fn->qualified_name,
+                                   is_error ? "err" : "ok", segment_index);
+    auto fwd_llvm_fn =
+        llvm::Function::Create(fwd_fn_type, llvm::Function::PrivateLinkage, fwd_fn_name, llvm_module);
+    auto fwd_fn = new Function(m_ctx, fwd_llvm_fn, fn->node);
+    fwd_fn->qualified_name = fwd_fn_name;
 
-    // Build __CxLambda struct
+    auto saved_insert = builder.GetInsertBlock();
+    auto entry_b = fwd_fn->new_label("_entry");
+    fwd_fn->use_label(entry_b);
     emit_dbg_location(fn->node);
-    auto [lambda_alloca, lambda_struct_type_l] =
-        compile_cxlambda_init(fn, fwd_llvm_fn, (uint32_t)capture_size);
-    compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
 
-    return builder.CreateLoad(lambda_struct_type_l, lambda_alloca);
+    auto data_arg = fwd_llvm_fn->getArg(0);
+    auto value_arg = fwd_llvm_fn->getArg(1);
+    auto captures_ptr = builder.CreateBitCast(data_arg, capture_struct_type->getPointerTo());
+
+    auto settled_var = fwd_fn->entry_alloca(settled_type_l, "settled");
+    builder.CreateMemSet(settled_var,
+                         llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0),
+                         m_ctx->llvm_module->getDataLayout().getTypeAllocSize(settled_type_l), {});
+
+    auto variant_name = is_error ? "Err" : "Ok";
+    auto variant_member = enum_type->data.enum_.find_member(variant_name);
+    assert(variant_member);
+    auto variant_type = variant_member->resolved_type;
+    assert(variant_type && variant_type->kind == TypeKind::EnumValue);
+
+    auto enum_variant_p = m_ctx->enum_variant_table.get(variant_member);
+    assert(enum_variant_p);
+    auto enum_var = *enum_variant_p;
+    auto copy_size = llvm_type_size(((llvm::GlobalVariable *)enum_var)->getValueType());
+    builder.CreateMemCpy(settled_var, {}, enum_var, {}, copy_size);
+
+    auto payload_fields = get_resolver()->get_enum_payload_fields(variant_type);
+    if (payload_fields.len > 0) {
+        auto payload_ptr = compile_dot_access(fwd_fn, settled_var, variant_type, payload_fields[0]);
+        emit_dbg_location(fn->node);
+        compile_copy(fwd_fn, value_arg, payload_ptr, payload_fields[0]->resolved_type);
+    }
+
+    builder.CreateCall(ctx.continuations[segment_index - 1], {data_arg, builder.CreateLoad(settled_type_l, settled_var)});
+    if (get_resolver()->type_needs_destruction(settled_type)) {
+        compile_destruction_for_type(fwd_fn, settled_var, settled_type);
+    }
+    builder.CreateRetVoid();
+
+    llvm::verifyFunction(*fwd_llvm_fn);
+    builder.SetInsertPoint(saved_insert);
+    return build_result_capture_lambda(fn, ctx, fwd_llvm_fn, capture_struct_type,
+                                       (uint32_t)capture_size, result_promise_ptr,
+                                       captured_vars_ordered, &local_vars);
 }
 
 void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
@@ -2258,17 +2350,38 @@ void Compiler::emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *aw
     auto lambda =
         build_continuation_lambda(fn, ctx, next_segment_index, local_vars, result_promise_ptr);
 
-    // Call Promise.on_resolve(callback) to register the continuation
-    // Use variant lookup to get the specialized Promise<T>.on_resolve() method
-    auto then_member = promise_struct_type->find_member("on_resolve");
-    assert(then_member && "Promise.on_resolve() method not found");
     std::optional<TypeId> variant_type_id = std::nullopt;
     if (promise_type->kind == TypeKind::Subtype && !promise_type->is_placeholder) {
         variant_type_id = promise_type->id;
     }
+    auto &prev_segment = ctx.segments[next_segment_index - 1];
+    emit_dbg_location(await_expr);
+    if (prev_segment.await_resume_expr &&
+        prev_segment.await_resume_expr->type == ast::NodeType::TryExpr) {
+        auto then_member = promise_struct_type->find_member("on_resolve");
+        assert(then_member && "Promise.on_resolve() method not found");
+        auto then_method_node = get_variant_member_node(then_member, variant_type_id);
+        auto then_method = get_fn(then_method_node);
+        auto ok_lambda = build_try_await_forwarder_lambda(fn, ctx, next_segment_index, local_vars,
+                                                          result_promise_ptr, false);
+        builder.CreateCall(then_method->llvm_fn, {awaited_promise_ptr, ok_lambda});
+
+        auto on_reject_member = promise_struct_type->find_member("on_reject");
+        assert(on_reject_member && "Promise.on_reject() method not found");
+        auto on_reject_node = get_variant_member_node(on_reject_member, variant_type_id);
+        auto on_reject_method = get_fn(on_reject_node);
+        auto err_lambda = build_try_await_forwarder_lambda(fn, ctx, next_segment_index, local_vars,
+                                                           result_promise_ptr, true);
+        builder.CreateCall(on_reject_method->llvm_fn, {awaited_promise_ptr, err_lambda});
+        return;
+    }
+
+    // Call Promise.on_resolve(callback) to register the continuation
+    // Use variant lookup to get the specialized Promise<T>.on_resolve() method
+    auto then_member = promise_struct_type->find_member("on_resolve");
+    assert(then_member && "Promise.on_resolve() method not found");
     auto then_method_node = get_variant_member_node(then_member, variant_type_id);
     auto then_method = get_fn(then_method_node);
-    emit_dbg_location(await_expr);
     builder.CreateCall(then_method->llvm_fn, {awaited_promise_ptr, lambda});
 
     // Also register on_reject to propagate rejection to the result promise
@@ -2456,6 +2569,109 @@ void Compiler::emit_async_promise_reject(Function *fn, llvm::Value *data_ptr,
     auto reject_method_node = get_variant_member_node(reject_member, variant_type_id);
     auto reject_method = get_fn(reject_method_node);
     builder.CreateCall(reject_method->llvm_fn, {fn->async_reject_promise_ptr, fat_ptr});
+}
+
+void Compiler::emit_async_promise_reject_shared(Function *fn, llvm::Value *shared_error) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    auto promise_struct = get_resolver()->resolve_struct_type(fn->async_promise_type);
+    std::optional<TypeId> variant_type_id = std::nullopt;
+    if (fn->async_promise_type->kind == TypeKind::Subtype &&
+        !fn->async_promise_type->is_placeholder) {
+        variant_type_id = fn->async_promise_type->id;
+    }
+    auto reject_member = promise_struct->find_member("reject_shared");
+    assert(reject_member && "Promise.reject_shared() method not found");
+    auto reject_method_node = get_variant_member_node(reject_member, variant_type_id);
+    auto reject_method = get_fn(reject_method_node);
+    builder.CreateCall(reject_method->llvm_fn, {fn->async_reject_promise_ptr, shared_error});
+}
+
+llvm::Value *Compiler::compile_shared_new(Function *fn, ChiType *shared_type,
+                                          llvm::Value *owned_value) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto shared_type_l = compile_type(shared_type);
+    auto shared_var = fn->entry_alloca(shared_type_l, "_shared_new");
+    auto size = llvm_type_size(shared_type_l);
+    builder.CreateMemSet(shared_var,
+                         llvm::ConstantInt::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                         size.getFixedValue(), llvm::MaybeAlign());
+
+    auto shared_struct = get_resolver()->resolve_struct_type(shared_type);
+    assert(shared_struct);
+    auto variant_type_id = resolve_variant_type_id(fn, shared_type);
+    auto new_member = shared_struct->find_member("new");
+    assert(new_member && "Shared.new() method not found");
+    auto new_node = get_variant_member_node(new_member, variant_type_id);
+    auto new_fn = get_fn(new_node);
+    builder.CreateCall(new_fn->llvm_fn, {shared_var, owned_value});
+    return builder.CreateLoad(shared_type_l, shared_var, "_shared_value");
+}
+
+llvm::Value *Compiler::compile_shared_as_ref(Function *fn, llvm::Value *shared_ptr,
+                                             ChiType *shared_type) {
+    auto shared_struct = get_resolver()->resolve_struct_type(shared_type);
+    assert(shared_struct);
+    auto as_ref_member = shared_struct->find_member("as_ref");
+    assert(as_ref_member && "Shared.as_ref() method not found");
+    auto variant_type_id = resolve_variant_type_id(fn, shared_type);
+    auto as_ref_node = get_variant_member_node(as_ref_member, variant_type_id);
+    auto as_ref_fn = get_fn(as_ref_node);
+    return m_ctx->llvm_builder->CreateCall(as_ref_fn->llvm_fn, {shared_ptr});
+}
+
+llvm::Value *Compiler::extract_interface_data_ptr(llvm::Value *fat_ptr) {
+    return m_ctx->llvm_builder->CreateExtractValue(fat_ptr, {0}, "iface_data_ptr");
+}
+
+llvm::Value *Compiler::compile_interface_type_match(Function *fn, llvm::Value *fat_ptr,
+                                                    ChiType *iface_type,
+                                                    ChiType *concrete_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto ptr_type = get_llvm_ptr_type();
+    auto vtable_ptr = builder.CreateExtractValue(fat_ptr, {1}, "iface_vtable_ptr");
+    auto runtime_ti = builder.CreateLoad(ptr_type, vtable_ptr, "runtime_ti");
+
+    auto impl = concrete_type->data.struct_.interface_table[iface_type];
+    assert(impl);
+    auto vtable_global = m_ctx->impl_table[impl];
+    assert(vtable_global);
+    auto case_ti = builder.CreateLoad(ptr_type, vtable_global, "case_ti");
+    return builder.CreateICmpEQ(runtime_ti, case_ti, "type_matches");
+}
+
+void Compiler::emit_cleanup_owners(Function *fn) {
+    auto &builder = *m_ctx->llvm_builder;
+    for (auto &owner : fn->cleanup_owner_vars) {
+        llvm::Value *should_cleanup = nullptr;
+        llvm::Value *owned_ptr = nullptr;
+        if (owner.active_var) {
+            should_cleanup =
+                builder.CreateLoad(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), owner.active_var);
+        } else {
+            assert(owner.free_heap);
+            owned_ptr = builder.CreateLoad(builder.getPtrTy(), owner.ptr_var);
+            should_cleanup = builder.CreateICmpNE(
+                owned_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()));
+        }
+
+        auto do_cleanup_b = fn->new_label("_owner_cleanup");
+        auto skip_cleanup_b = fn->new_label("_owner_cleanup_done");
+        builder.CreateCondBr(should_cleanup, do_cleanup_b, skip_cleanup_b);
+
+        fn->use_label(do_cleanup_b);
+        if (owner.free_heap) {
+            if (owner.concrete_type) {
+                compile_destruction_for_type(fn, owned_ptr, owner.concrete_type);
+            }
+            builder.CreateCall(get_system_fn("cx_free")->llvm_fn, {owned_ptr});
+        } else if (owner.concrete_type) {
+            compile_destruction_for_type(fn, owner.ptr_var, owner.concrete_type);
+        }
+        builder.CreateBr(skip_cleanup_b);
+
+        fn->use_label(skip_cleanup_b);
+    }
 }
 
 llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
@@ -3324,6 +3540,159 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
 
+        if (m_async_await_value && data.expr && data.expr->type == ast::NodeType::AwaitExpr) {
+            if (!data.catch_block && !data.catch_expr) {
+                return m_async_await_value;
+            }
+
+            auto awaited_type = get_chitype(data.expr);
+            auto shared_error_type =
+                get_resolver()->get_shared_type(get_resolver()->get_context()->rt_error_type);
+            auto settled_type = get_resolver()->get_result_type(awaited_type, shared_error_type);
+            auto settled_enum = get_resolver()->resolve_subtype(settled_type, expr);
+            assert(settled_enum && settled_enum->kind == TypeKind::Enum);
+
+            auto settled_type_l = compile_type(settled_type);
+            auto settled_var = fn->entry_alloca(settled_type_l, "try_await_settled");
+            builder.CreateStore(m_async_await_value, settled_var);
+
+            auto err_member = settled_enum->data.enum_.find_member("Err");
+            auto ok_member = settled_enum->data.enum_.find_member("Ok");
+            assert(err_member && ok_member);
+
+            auto err_variant_type = err_member->resolved_type;
+            auto err_fields = get_resolver()->get_enum_payload_fields(err_variant_type);
+            assert(err_fields.len > 0);
+            auto shared_error_ptr =
+                compile_dot_access(fn, settled_var, err_variant_type, err_fields[0]);
+            auto shared_error_value =
+                builder.CreateLoad(compile_type(err_fields[0]->resolved_type), shared_error_ptr);
+
+            auto err_value = llvm::ConstantInt::get(
+                (llvm::IntegerType *)compile_type(settled_enum->data.enum_.discriminator),
+                err_member->node->data.enum_variant.resolved_value);
+            auto disc_ptr = builder.CreateStructGEP(compile_type(settled_enum->data.enum_.base_value_type),
+                                                    settled_var, 0);
+            auto disc = builder.CreateLoad(compile_type(settled_enum->data.enum_.discriminator),
+                                           disc_ptr, "try_await_disc");
+
+            auto is_err = builder.CreateICmpEQ(disc, err_value, "try_await_is_err");
+            auto err_b = fn->new_label("_try_await_err");
+            auto ok_b = fn->new_label("_try_await_ok");
+            auto continue_b = fn->new_label("_try_await_continue");
+
+            auto result_type = get_chitype(expr);
+            auto result_type_l = compile_type(result_type);
+            auto result_var = fn->entry_alloca(result_type_l, "try_await_result");
+            auto result_size = llvm_type_size(result_type_l);
+            builder.CreateMemSet(result_var,
+                                 llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
+                                 result_size.getFixedValue(), llvm::MaybeAlign());
+
+            auto reject_async_error = [&]() {
+                emit_async_promise_reject_shared(fn, shared_error_value);
+                compile_destruction_for_type(fn, settled_var, settled_type);
+                builder.CreateRetVoid();
+            };
+
+            builder.CreateCondBr(is_err, err_b, ok_b);
+
+            fn->use_label(err_b);
+            if (data.catch_expr) {
+                auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
+                auto error_iface = compile_shared_as_ref(fn, shared_error_ptr, shared_error_type);
+                auto type_matches = compile_interface_type_match(
+                    fn, error_iface, get_resolver()->get_context()->rt_error_type, catch_type);
+                auto match_b = fn->new_label("_try_await_type_match");
+                auto nomatch_b = fn->new_label("_try_await_type_nomatch");
+                builder.CreateCondBr(type_matches, match_b, nomatch_b);
+
+                fn->use_label(nomatch_b);
+                reject_async_error();
+
+                fn->use_label(match_b);
+            }
+
+            if (!data.catch_block) {
+                auto settled_value = builder.CreateLoad(settled_type_l, settled_var);
+                compile_store_or_copy(fn, settled_value, result_var, result_type, data.expr);
+                compile_destruction_for_type(fn, settled_var, settled_type);
+                builder.CreateBr(continue_b);
+            } else {
+                llvm::Value *shared_owner_var = nullptr;
+                llvm::Value *shared_owner_active = nullptr;
+                if (data.catch_err_var) {
+                    auto shared_type_l = compile_type(shared_error_type);
+                    shared_owner_var = fn->entry_alloca(shared_type_l, "try_await_err_owner");
+                    auto shared_size = llvm_type_size(shared_type_l);
+                    builder.CreateMemSet(
+                        shared_owner_var,
+                        llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
+                        shared_size.getFixedValue(), llvm::MaybeAlign());
+                    compile_copy(fn, shared_error_value, shared_owner_var, shared_error_type, expr);
+                    shared_owner_active =
+                        fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), "try_await_err_owner.active");
+                    builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), shared_owner_active);
+                    fn->cleanup_owner_vars.push_back(
+                        {shared_owner_var, shared_error_type, shared_owner_active, false});
+                }
+
+                compile_destruction_for_type(fn, settled_var, settled_type);
+
+                if (data.catch_err_var) {
+                    auto err_var = compile_alloc(fn, data.catch_err_var);
+                    add_var(data.catch_err_var, err_var);
+                    auto owner_iface = compile_shared_as_ref(fn, shared_owner_var, shared_error_type);
+                    auto concrete_data_ptr = extract_interface_data_ptr(owner_iface);
+                    builder.CreateStore(concrete_data_ptr, err_var);
+                    data.catch_block->data.block.implicit_vars.len = 0;
+                }
+
+                auto catch_cleanup_b = fn->new_label("_try_await_catch_cleanup");
+                compile_block(fn, expr, data.catch_block, catch_cleanup_b, result_var);
+
+                fn->use_label(catch_cleanup_b);
+                if (shared_owner_var) {
+                    auto cleanup_b = fn->new_label("_try_await_owner_cleanup");
+                    auto cleanup_done_b = fn->new_label("_try_await_owner_cleanup_done");
+                    auto owner_active =
+                        builder.CreateLoad(llvm::Type::getInt1Ty(llvm_ctx), shared_owner_active);
+                    builder.CreateCondBr(owner_active, cleanup_b, cleanup_done_b);
+
+                    fn->use_label(cleanup_b);
+                    compile_destruction_for_type(fn, shared_owner_var, shared_error_type);
+                    builder.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_owner_active);
+                    builder.CreateBr(cleanup_done_b);
+
+                    fn->use_label(cleanup_done_b);
+                }
+                if (!fn->get_scope()->branched && !builder.GetInsertBlock()->getTerminator()) {
+                    builder.CreateBr(continue_b);
+                }
+            }
+
+            fn->use_label(ok_b);
+            if (!data.catch_block) {
+                auto settled_value = builder.CreateLoad(settled_type_l, settled_var);
+                compile_store_or_copy(fn, settled_value, result_var, result_type, data.expr);
+            } else {
+                auto ok_variant_type = ok_member->resolved_type;
+                auto ok_fields = get_resolver()->get_enum_payload_fields(ok_variant_type);
+                if (ok_fields.len > 0) {
+                    auto payload_ptr =
+                        compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
+                    auto payload_value = builder.CreateLoad(compile_type(ok_fields[0]->resolved_type),
+                                                            payload_ptr);
+                    compile_store_or_copy(fn, payload_value, result_var, result_type, data.expr);
+                }
+            }
+            compile_destruction_for_type(fn, settled_var, settled_type);
+            builder.CreateBr(continue_b);
+
+            fn->use_label(continue_b);
+            return builder.CreateLoad(result_type_l, result_var, "try_await_result");
+        }
+
         auto result_type = get_chitype(expr);
         bool is_void = result_type->kind == TypeKind::Void;
         llvm::Type *result_type_l = nullptr;
@@ -3414,6 +3783,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         auto error_data = builder.CreateCall(get_error_data_fn->llvm_fn, {}, "error_data");
         auto error_vtable = builder.CreateCall(get_error_vtable_fn->llvm_fn, {}, "error_vtable");
+        auto make_shared_error_value = [&]() {
+            auto rt_error = get_resolver()->get_context()->rt_error_type;
+            auto move_ref_error = get_resolver()->get_pointer_type(rt_error, TypeKind::MoveRef);
+            auto fat_iface_type_l = compile_type(move_ref_error);
+            llvm::Value *fat_ptr = llvm::UndefValue::get(fat_iface_type_l);
+            fat_ptr = builder.CreateInsertValue(fat_ptr, error_data, {0});
+            fat_ptr = builder.CreateInsertValue(fat_ptr, error_vtable, {1});
+            auto shared_error_type = get_resolver()->get_shared_type(rt_error);
+            return compile_shared_new(fn, shared_error_type, fat_ptr);
+        };
 
         if (data.catch_block) {
             // === CATCH BLOCK MODE: try f() catch (...) { block } → yields T ===
@@ -3504,9 +3883,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             // Register error_data_var for function-level cleanup (diverge path)
             // This handles cases where the catch block returns/breaks
-            fn->error_owner_vars.push_back({error_data_var, catch_type});
+            fn->cleanup_owner_vars.push_back({error_data_var, catch_type, nullptr, true});
         } else {
-            // === RESULT MODE: try f() → Result<T, E> ===
+            // === RESULT MODE: try f() → Result<T, Shared<Error>> ===
 
             if (data.catch_expr) {
                 auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
@@ -3525,19 +3904,17 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 fn->use_label(nomatch_b);
                 builder.CreateResume(landing);
 
-                // Type matches: populate Result.Err(&ConcreteError)
+                // Type matches: populate Result.Err(Shared<Error>)
                 fn->use_label(match_b);
                 init_result_variant("Err", [&](ChiType *, llvm::Value *payload_ptr) {
-                    builder.CreateStore(error_data, payload_ptr);
+                    auto shared_error = make_shared_error_value();
+                    builder.CreateStore(shared_error, payload_ptr);
                 });
             } else {
-                // Catch-all: populate Result.Err(Error interface)
-                init_result_variant("Err", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
-                    auto iface_type_l = compile_type(payload_type);
-                    auto data_p = builder.CreateStructGEP(iface_type_l, payload_ptr, 0);
-                    builder.CreateStore(error_data, data_p);
-                    auto vtable_p = builder.CreateStructGEP(iface_type_l, payload_ptr, 1);
-                    builder.CreateStore(error_vtable, vtable_p);
+                // Catch-all: populate Result.Err(Shared<Error>)
+                init_result_variant("Err", [&](ChiType *, llvm::Value *payload_ptr) {
+                    auto shared_error = make_shared_error_value();
+                    builder.CreateStore(shared_error, payload_ptr);
                 });
             }
             builder.CreateBr(continue_b);
@@ -3888,15 +4265,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         if (data.is_type_switch) {
             // Type switch: compare typeinfo pointers from fat pointer vtable
-            auto ptr_type = get_llvm_ptr_type();
-            auto iface_type_l = llvm::StructType::get(*m_ctx->llvm_ctx, {ptr_type, ptr_type});
-
             auto iref_ref = compile_expr_ref(fn, data.expr);
-            auto fp = builder.CreateLoad(iface_type_l, iref_ref.address, "fat_ptr");
-            auto vtable_ptr = builder.CreateExtractValue(fp, {1}, "vtable_ptr");
-
-            // Load runtime typeinfo from vtable[0]
-            auto runtime_ti = builder.CreateLoad(ptr_type, vtable_ptr, "runtime_ti");
+            auto fp = builder.CreateLoad(compile_type(get_chitype(data.expr)), iref_ref.address,
+                                         "fat_ptr");
 
             // Get the interface type from the switch expression
             auto expr_type = get_chitype(data.expr);
@@ -3921,11 +4292,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 auto clause_type = get_resolver()->node_get_type(clause);
                 auto clause_elem =
                     clause_type->is_pointer_like() ? clause_type->get_elem() : clause_type;
-                auto impl = clause_elem->data.struct_.interface_table[iface_elem];
-                auto vtable_global = m_ctx->impl_table[impl];
-                // vtable[0] is the typeinfo pointer
-                auto case_ti = builder.CreateLoad(ptr_type, vtable_global, "case_ti");
-                auto cmp = builder.CreateICmpEQ(runtime_ti, case_ti, "ti_cmp");
+                auto cmp = compile_interface_type_match(fn, fp, iface_elem, clause_elem);
                 builder.CreateCondBr(cmp, case_label, next_label);
 
                 fn->use_label(case_label);
@@ -6356,40 +6723,20 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         auto &data = stmt->data.return_stmt;
         auto &llvm_builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
-        assert(fn->return_label);
         auto scope = fn->get_scope();
 
         {
-            // Check if this is an async function returning T (wrapped to Promise<T>)
-            bool is_async = fn->node && fn->node->type == ast::NodeType::FnDef &&
-                            fn->node->data.fn_def.is_async();
-            auto return_type = fn->fn_type->data.fn.return_type;
+            bool continuation_async_return =
+                fn->async_reject_promise_ptr && !fn->return_label && fn->async_promise_type;
 
-            if (is_async && get_resolver()->is_promise_type(return_type)) {
-                // For async functions, wrap the return value in a resolved Promise
+            if (continuation_async_return) {
+                auto return_type = fn->async_promise_type;
                 auto promise_struct = get_resolver()->resolve_struct_type(return_type);
-                auto return_type_l = compile_type(return_type);
-
-                // Zero-initialize return_value before calling Promise.new()
-                auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(return_type_l);
-                llvm_builder.CreateMemSet(
-                    fn->return_value,
-                    llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0), size,
-                    {});
-
                 std::optional<TypeId> variant_type_id = std::nullopt;
                 if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
                     variant_type_id = return_type->id;
                 }
 
-                // Call Promise.new() to initialize promise at return_value
-                auto new_member = promise_struct->find_member("new");
-                assert(new_member && "Promise.new() method not found");
-                auto new_method_node = get_variant_member_node(new_member, variant_type_id);
-                auto new_method = get_fn(new_method_node);
-                llvm_builder.CreateCall(new_method->llvm_fn, {fn->return_value});
-
-                // Compile return value, or synthesize Unit{} for bare `return;`
                 auto inner_type = get_resolver()->get_promise_value_type(return_type);
                 llvm::Value *ret_value;
                 if (data.expr) {
@@ -6398,15 +6745,62 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
                 }
 
-                // Call Promise.resolve(value)
                 auto resolve_member = promise_struct->find_member("resolve");
                 assert(resolve_member && "Promise.resolve() method not found");
                 auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
                 auto resolve_method = get_fn(resolve_method_node);
-                llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
-            } else if (data.expr) {
-                auto ret_type = get_chitype(stmt);
-                compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
+                llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->async_reject_promise_ptr, ret_value});
+            } else {
+                assert(fn->return_label);
+
+                // Check if this is an async function returning T (wrapped to Promise<T>)
+                bool is_async = fn->node && fn->node->type == ast::NodeType::FnDef &&
+                                fn->node->data.fn_def.is_async();
+                auto return_type = fn->fn_type->data.fn.return_type;
+
+                if (is_async && get_resolver()->is_promise_type(return_type)) {
+                // For async functions, wrap the return value in a resolved Promise
+                    auto promise_struct = get_resolver()->resolve_struct_type(return_type);
+                    auto return_type_l = compile_type(return_type);
+
+                    // Zero-initialize return_value before calling Promise.new()
+                    auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(return_type_l);
+                    llvm_builder.CreateMemSet(
+                        fn->return_value,
+                        llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                        size, {});
+
+                    std::optional<TypeId> variant_type_id = std::nullopt;
+                    if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
+                        variant_type_id = return_type->id;
+                    }
+
+                    // Call Promise.new() to initialize promise at return_value
+                    auto new_member = promise_struct->find_member("new");
+                    assert(new_member && "Promise.new() method not found");
+                    auto new_method_node = get_variant_member_node(new_member, variant_type_id);
+                    auto new_method = get_fn(new_method_node);
+                    llvm_builder.CreateCall(new_method->llvm_fn, {fn->return_value});
+
+                    // Compile return value, or synthesize Unit{} for bare `return;`
+                    auto inner_type = get_resolver()->get_promise_value_type(return_type);
+                    llvm::Value *ret_value;
+                    if (data.expr) {
+                        ret_value = compile_assignment_to_type(fn, data.expr, inner_type);
+                    } else {
+                        ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
+                    }
+
+                    // Call Promise.resolve(value)
+                    auto resolve_member = promise_struct->find_member("resolve");
+                    assert(resolve_member && "Promise.resolve() method not found");
+                    auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
+                    auto resolve_method = get_fn(resolve_method_node);
+                    llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
+                } else if (data.expr) {
+                    auto ret_type = get_chitype(stmt);
+                    compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
+                }
             }
         }
         // If return expression was a moved local, skip its destruction
@@ -6420,7 +6814,11 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         for (int i = fn->active_blocks.size() - 1; i >= 0; i--) {
             compile_block_cleanup(fn, fn->active_blocks[i], move_returned_var, return_flow);
         }
-        llvm_builder.CreateBr(fn->return_label);
+        if (fn->return_label) {
+            llvm_builder.CreateBr(fn->return_label);
+        } else {
+            llvm_builder.CreateRetVoid();
+        }
         scope->branched = true;
         break;
     }
@@ -8326,21 +8724,21 @@ Function *Compiler::get_fn(ast::Node *node) {
         }
     }
 
-    // Placeholder GeneratedFn with type_env: the concrete variant exists on the
-    // original fn_def but wasn't compiled yet (created after codegen passed over
-    // the function's declaration). Compile its proto now; body goes to pending_fns.
-    if (!entry && m_fn && m_fn->type_env && node->type == ast::NodeType::GeneratedFn &&
-        node->data.generated_fn.fn_subtype->is_placeholder) {
-        auto &gfn = node->data.generated_fn;
-        array<ChiType *> concrete_args;
-        for (auto arg : gfn.fn_subtype->data.subtype.args)
-            concrete_args.add(eval_type(arg));
+    if (!entry && node->type == ast::NodeType::GeneratedFn) {
+        auto target = node;
+        if (m_fn && m_fn->type_env && node->data.generated_fn.fn_subtype->is_placeholder) {
+            auto &gfn = node->data.generated_fn;
+            array<ChiType *> concrete_args;
+            for (auto arg : gfn.fn_subtype->data.subtype.args) {
+                concrete_args.add(eval_type(arg));
+            }
+            target = get_resolver()->get_fn_variant(get_resolver()->node_get_type(gfn.original_fn),
+                                                    &concrete_args, gfn.original_fn);
+        }
 
-        auto variant = get_resolver()->get_fn_variant(
-            get_resolver()->node_get_type(gfn.original_fn), &concrete_args, gfn.original_fn);
-        auto fn = compile_fn_proto(gfn.original_fn->data.fn_def.fn_proto, variant, "");
+        auto fn = compile_fn_proto(target->data.generated_fn.fn_proto, target, "");
         m_ctx->pending_fns.add(fn);
-        entry = m_ctx->function_table.get(get_resolver()->resolve_global_id(variant));
+        entry = m_ctx->function_table.get(get_resolver()->resolve_global_id(target));
     }
 
     // Fallback for inherited default interface methods: try struct-qualified key

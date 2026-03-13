@@ -73,8 +73,14 @@ func main() {
     var result = try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError;
     switch result {
         Err(err) => {
-            printf("kind: {}\n", err.kind);
-            printf("op: {}\n", err.op);
+            var e = err.as_ref();
+            switch e.(type) {
+                &fs.FsError => {
+                    printf("kind: {}\n", e.kind);
+                    printf("op: {}\n", e.op);
+                },
+                else => {}
+            }
         },
         else => {}
     }

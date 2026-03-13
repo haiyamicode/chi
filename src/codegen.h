@@ -87,12 +87,14 @@ struct Function {
     std::vector<ParameterInfo> parameter_info;
     llvm::Value *bind_ptr = nullptr;
 
-    // Error ownership for catch blocks (cleaned up at function return for diverge paths)
-    struct ErrorOwner {
-        llvm::Value *ptr_var;    // alloca holding error data pointer (null if already freed)
-        ChiType *concrete_type;  // concrete error type for destruction (null for catch-all)
+    // Deferred cleanup owners (used for catch paths that can diverge before explicit cleanup).
+    struct CleanupOwner {
+        llvm::Value *ptr_var;      // heap ptr slot or direct address of the owned value
+        ChiType *concrete_type;    // type to destroy
+        llvm::Value *active_var;   // optional i1* flag for stack-owned values
+        bool free_heap = false;    // true when ptr_var stores heap memory to cx_free
     };
-    std::vector<ErrorOwner> error_owner_vars;
+    std::vector<CleanupOwner> cleanup_owner_vars;
 
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
@@ -215,7 +217,8 @@ struct AsyncSegment {
     std::vector<ast::Node *> stmts;      // statements in this segment
     ast::Node *await_expr = nullptr;     // the await that ends this segment (null for final)
     ast::Node *await_stmt = nullptr;     // the statement containing the await (any kind)
-    ChiType *await_value_type = nullptr; // type of the awaited value
+    ast::Node *await_resume_expr = nullptr; // expression resumed by the callback (AwaitExpr/TryExpr)
+    ChiType *await_value_type = nullptr;    // type received by the continuation callback
     std::set<ast::Node *> vars_to_capture; // variables needed in later segments
 };
 
@@ -521,6 +524,16 @@ class Compiler {
     llvm::Value *build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,
                                            map<ast::Node *, llvm::Value *> &local_vars,
                                            llvm::Value *result_promise_ptr);
+    llvm::Value *build_result_capture_lambda(Function *fn, AsyncContext &ctx,
+                                             llvm::Function *target_fn,
+                                             llvm::StructType *capture_struct_type,
+                                             uint32_t capture_size,
+                                             llvm::Value *result_promise_ptr,
+                                             const std::vector<ast::Node *> &captured_vars_ordered,
+                                             map<ast::Node *, llvm::Value *> *local_vars);
+    llvm::Value *build_try_await_forwarder_lambda(Function *fn, AsyncContext &ctx, int segment_index,
+                                                  map<ast::Node *, llvm::Value *> &local_vars,
+                                                  llvm::Value *result_promise_ptr, bool is_error);
     llvm::Value *build_rejection_forwarder_lambda(Function *fn, AsyncContext &ctx,
                                                   llvm::Value *result_promise_ptr);
     void emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
@@ -529,6 +542,13 @@ class Compiler {
     void compile_async_fn_body(Function *fn);
     void emit_async_reject_landing_pad(Function *fn, llvm::Value *landing);
     void emit_async_promise_reject(Function *fn, llvm::Value *data_ptr, llvm::Value *vtable_ptr);
+    void emit_async_promise_reject_shared(Function *fn, llvm::Value *shared_error);
+    llvm::Value *compile_shared_new(Function *fn, ChiType *shared_type, llvm::Value *owned_value);
+    llvm::Value *compile_shared_as_ref(Function *fn, llvm::Value *shared_ptr, ChiType *shared_type);
+    llvm::Value *compile_interface_type_match(Function *fn, llvm::Value *fat_ptr, ChiType *iface_type,
+                                              ChiType *concrete_type);
+    llvm::Value *extract_interface_data_ptr(llvm::Value *fat_ptr);
+    void emit_cleanup_owners(Function *fn);
     llvm::Value *compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
                                              llvm::Value *dest = nullptr);
 

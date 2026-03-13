@@ -383,6 +383,16 @@ struct TestError {
     }
 }
 
+struct OtherTestError {
+    code: int = 0;
+
+    impl Error {
+        func message() string {
+            return stringf("other {}", this.code);
+        }
+    }
+}
+
 func test_reject() {
     println("=== reject ===");
     var p = Promise<int>{};
@@ -493,13 +503,130 @@ async func settle_outer_throws() Promise<int> {
     return x + 1;
 }
 
+async func settle_typed_throws() Promise<int> {
+    var y = await time.sleep(185);
+    throw new TestError{code: 67};
+    return 0;
+}
+
+async func settle_other_throws() Promise<int> {
+    var y = await time.sleep(195);
+    throw new OtherTestError{code: 77};
+    return 0;
+}
+
+async func try_await_result_ok() Promise<Result<int, Shared<Error>>> {
+    return try await settle_resolves_after_delay();
+}
+
+async func try_await_result_err() Promise<Result<int, Shared<Error>>> {
+    return try await settle_outer_throws();
+}
+
+async func try_await_catch_ok() Promise<int> {
+    var value = try await settle_resolves_after_delay() catch {
+        return -1;
+    };
+    return value + 2;
+}
+
+async func try_await_catch_err() Promise<int> {
+    var value = try await settle_outer_throws() catch {
+        return -7;
+    };
+    return value;
+}
+
+async func try_await_typed_result_err() Promise<Result<int, Shared<Error>>> {
+    return try await settle_typed_throws() catch TestError;
+}
+
+async func try_await_typed_result_mismatch() Promise<Result<int, Shared<Error>>> {
+    return try await settle_other_throws() catch TestError;
+}
+
+async func try_await_typed_catch_err() Promise<int> {
+    var value = try await settle_typed_throws() catch TestError as err {
+        printf("try await typed catch saw: {}\n", err.message());
+        return -17;
+    };
+    return value;
+}
+
+async func try_await_typed_catch_mismatch() Promise<int> {
+    var value = try await settle_other_throws() catch TestError as err {
+        return -999;
+    };
+    return value;
+}
+
+func test_try_await() {
+    println("=== try await ===");
+
+    try_await_result_ok().then(
+        func (result) Unit {
+            printf("try await ok: {}\n", result.value()!);
+            return {};
+        }
+    );
+
+    try_await_result_err().then(
+        func (result) Unit {
+            printf("try await err: {}\n", result.error()!.message());
+            return {};
+        }
+    );
+
+    try_await_catch_ok().then(
+        func (value: int) Unit {
+            printf("try await catch ok: {}\n", value);
+            return {};
+        }
+    );
+
+    try_await_catch_err().then(
+        func (value: int) Unit {
+            printf("try await catch err: {}\n", value);
+            return {};
+        }
+    );
+
+    try_await_typed_result_err().then(
+        func (result) Unit {
+            printf("try await typed err: {}\n", result.error()!.message());
+            return {};
+        }
+    );
+
+    try_await_typed_result_mismatch().catch(
+        func (err: Shared<Error>) Result<int, Shared<Error>> {
+            printf("try await typed mismatch: {}\n", err.message());
+            return Result<int, Shared<Error>>.Ok{-1};
+        }
+    );
+
+    try_await_typed_catch_err().then(
+        func (value: int) Unit {
+            printf("try await typed catch err: {}\n", value);
+            return {};
+        }
+    );
+
+    try_await_typed_catch_mismatch().catch(
+        func (err: Shared<Error>) int {
+            printf("try await typed catch mismatch: {}\n", err.message());
+            return -1;
+        }
+    );
+}
+
 func test_async_throw_immediate() {
     println("=== async throw immediate ===");
     var p = async_throw_immediate();
     printf("rejected: {}\n", p.is_rejected());
     p.catch(
         func (err: Shared<Error>) int {
-            printf("caught: {}\n", err.as_ref().message());
+            printf("caught: {}\n", err.message());
             return -1;
         }
     );
@@ -511,7 +638,7 @@ func test_async_throw_after_delay() {
     printf("immediate rejected: {}\n", p.is_rejected());
     p.catch(
         func (err: Shared<Error>) int {
-            printf("delayed caught: {}\n", err.as_ref().message());
+            printf("delayed caught: {}\n", err.message());
             return -1;
         }
     );
@@ -522,7 +649,7 @@ func test_async_called_throws() {
     var p = async_called_throws_after_delay();
     p.catch(
         func (err: Shared<Error>) int {
-            printf("called caught: {}\n", err.as_ref().message());
+            printf("called caught: {}\n", err.message());
             return -1;
         }
     );
@@ -581,7 +708,7 @@ func test_nested_rejection_immediate() {
     printf("rejected: {}\n", p.is_rejected());
     p.catch(
         func (err: Shared<Error>) int {
-            printf("nested caught: {}\n", err.as_ref().message());
+            printf("nested caught: {}\n", err.message());
             return -1;
         }
     );
@@ -592,7 +719,7 @@ func test_nested_rejection_delayed() {
     var p = nested_outer_delayed();
     p.catch(
         func (err: Shared<Error>) int {
-            printf("nested delayed caught: {}\n", err.as_ref().message());
+            printf("nested delayed caught: {}\n", err.message());
             return -1;
         }
     );
@@ -603,7 +730,7 @@ func test_nested_rejection_3level() {
     var p = nested_3level_top();
     p.catch(
         func (err: Shared<Error>) int {
-            printf("3level caught: {}\n", err.as_ref().message());
+            printf("3level caught: {}\n", err.message());
             return -1;
         }
     );
@@ -674,6 +801,7 @@ func main() {
     test_reject();
     test_reject_chain();
     test_settle();
+    test_try_await();
     test_reject_after_resolve();
     test_resolve_after_reject();
 
@@ -695,3 +823,4 @@ func main() {
 
     println("All tests passed!");
 }
+

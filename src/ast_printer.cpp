@@ -38,6 +38,21 @@ void cx::print_ast(Node *root) {
 
 void AstPrinter::print_ast() { print_node(m_root); }
 
+static bool decl_emits_trailing_newline(Node *node) {
+    if (!node)
+        return false;
+    switch (node->type) {
+    case NodeType::FnDef:
+        return node->data.fn_def.body != nullptr;
+    case NodeType::StructDecl:
+    case NodeType::ImplementBlock:
+    case NodeType::EnumDecl:
+        return true;
+    default:
+        return false;
+    }
+}
+
 string AstPrinter::format_to_string() {
     fmt::memory_buffer buf;
     m_buffer = &buf;
@@ -58,15 +73,37 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::Root: {
         Node *prev_decl = nullptr;
         for (auto decl : m_root->data.root.top_level_decls) {
-            // FnDef/StructDecl emit their own trailing \n in print_node,
-            // so the loop's \n already creates a blank line.
-            // VarDecl/ImportDecl/ExportDecl don't, so preserve source
-            // blank lines after them.
-            if (prev_decl &&
-                (prev_decl->type == NodeType::VarDecl || prev_decl->type == NodeType::ImportDecl ||
-                 prev_decl->type == NodeType::ExportDecl) &&
-                has_blank_line_between(prev_decl, decl)) {
-                emit("\n");
+            if (prev_decl) {
+                long prev_end = -1;
+                if (prev_decl->end_token)
+                    prev_end = prev_decl->end_token->pos.line;
+                else if (prev_decl->token)
+                    prev_end = prev_decl->token->pos.line;
+                else if (prev_decl->start_token)
+                    prev_end = prev_decl->start_token->pos.line;
+
+                long next_start = -1;
+                if (m_comments && m_comment_idx < m_comments->len) {
+                    auto &comment = m_comments->at(m_comment_idx);
+                    auto *ft = first_token(decl);
+                    long node_line = ft ? ft->pos.line : -1;
+                    if (node_line >= 0 && comment.pos.line < node_line) {
+                        next_start = comment.pos.line;
+                    }
+                }
+                if (next_start < 0) {
+                    auto *ft = first_token(decl);
+                    if (ft)
+                        next_start = ft->pos.line;
+                }
+
+                if (prev_end >= 0 && next_start >= 0) {
+                    auto source_blank_lines = std::max<long>(0, next_start - prev_end - 1);
+                    auto printer_blank_lines = decl_emits_trailing_newline(prev_decl) ? 1L : 0L;
+                    for (long i = printer_blank_lines; i < source_blank_lines; i++) {
+                        emit("\n");
+                    }
+                }
             }
             auto *ft = first_token(decl);
             if (ft)

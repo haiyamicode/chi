@@ -62,6 +62,7 @@ is_rejected: true
 p rejected: true
 p2 rejected: true
 === settle ===
+=== try await ===
 === reject after resolve ===
 is_resolved: true
 is_rejected: false
@@ -101,8 +102,17 @@ delayed caught: error 20
 called caught: error 42
 settle ok value: 55
 settle ok error null: true
+try await ok: 55
+try await catch ok: 57
 resolved: 42
 settle err value null: true
 settle err message: error 66
+try await err: error 66
+try await catch err: -7
+try await typed err: error 67
+try await typed catch saw: error 67
+try await typed catch err: -17
+try await typed mismatch: other 77
+try await typed catch mismatch: other 77
 nested delayed caught: error 88
 3level caught: error 33

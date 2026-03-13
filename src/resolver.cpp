@@ -1953,7 +1953,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::TryExpr: {
         auto &data = node->data.try_expr;
         auto expr_type = resolve(data.expr, scope);
-        if (data.expr->type != NodeType::FnCallExpr) {
+        bool is_try_await = data.expr && data.expr->type == NodeType::AwaitExpr;
+        auto resolve_catch_type = [&]() -> ChiType * {
+            if (!data.catch_expr) {
+                return nullptr;
+            }
+            auto catch_type = to_value_type(resolve(data.catch_expr, scope));
+            if (catch_type && catch_type->kind == TypeKind::Struct) {
+                auto rt_error = m_ctx->rt_error_type;
+                if (rt_error && !catch_type->data.struct_.interface_table.get(rt_error)) {
+                    error(data.catch_expr, errors::CATCH_NOT_ERROR,
+                          format_type_display(catch_type));
+                }
+                return catch_type;
+            }
+            error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type_display(catch_type));
+            return nullptr;
+        };
+        if (!is_try_await && data.expr->type != NodeType::FnCallExpr) {
             error(data.expr, errors::TRY_NOT_CALL);
         }
         scope.parent_fn_def()->has_try = true;
@@ -1962,19 +1979,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Catch block mode: try f() catch (...) { block } → yields T
             ChiType *err_var_type = nullptr;
             if (data.catch_expr) {
-                auto catch_type = to_value_type(resolve(data.catch_expr, scope));
-                if (catch_type && catch_type->kind == TypeKind::Struct) {
-                    auto rt_error = m_ctx->rt_error_type;
-                    if (rt_error && !catch_type->data.struct_.interface_table.get(rt_error)) {
-                        error(data.catch_expr, errors::CATCH_NOT_ERROR,
-                              format_type_display(catch_type));
-                    }
+                auto catch_type = resolve_catch_type();
+                if (catch_type) {
                     err_var_type = get_pointer_type(catch_type, TypeKind::Reference);
-                } else {
-                    error(data.catch_expr, errors::CATCH_NOT_ERROR,
-                          format_type_display(catch_type));
                 }
-            } else {
+            } else if (!is_try_await) {
                 // catch-all: error binding is &Error (interface reference)
                 err_var_type = get_pointer_type(m_ctx->rt_error_type, TypeKind::Reference);
             }
@@ -2008,23 +2017,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return expr_type;
         }
 
-        if (data.catch_expr) {
-            // No block, Result mode: try f() catch FileError → Result<T, &FileError>
-            auto catch_type = to_value_type(resolve(data.catch_expr, scope));
-            if (catch_type && catch_type->kind == TypeKind::Struct) {
-                auto rt_error = m_ctx->rt_error_type;
-                if (rt_error && !catch_type->data.struct_.interface_table.get(rt_error)) {
-                    error(data.catch_expr, errors::CATCH_NOT_ERROR,
-                          format_type_display(catch_type));
-                }
-                auto ref_type = get_pointer_type(catch_type, TypeKind::Reference);
-                return get_result_type(expr_type, ref_type);
+        if (is_try_await) {
+            if (data.catch_expr) {
+                resolve_catch_type();
             }
-            error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type_display(catch_type));
+            return get_result_type(expr_type, get_shared_type(m_ctx->rt_error_type));
         }
-        // try f() → Result<T, &Error>
-        return get_result_type(expr_type,
-                               get_pointer_type(m_ctx->rt_error_type, TypeKind::Reference));
+
+        if (data.catch_expr) {
+            // No block, typed Result mode is a type filter over owned Shared<Error>.
+            resolve_catch_type();
+        }
+        // try f() → Result<T, Shared<Error>>
+        return get_result_type(expr_type, get_shared_type(m_ctx->rt_error_type));
     }
     case NodeType::AwaitExpr: {
         auto &data = node->data.await_expr;
@@ -3479,6 +3484,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
                 if (node->name == "Array") {
                     m_ctx->rt_array_type = struct_type;
+                } else if (node->name == "Shared") {
+                    m_ctx->rt_shared_type = struct_type;
                 } else if (node->name == "Promise") {
                     m_ctx->rt_promise_type = struct_type;
                 } else if (node->name == "Result") {
@@ -7697,6 +7704,22 @@ ChiType *Resolver::get_promise_type(ChiType *value) {
     args.add(value);
     auto type = get_subtype(promise, &args);
     m_ctx->promise_of[value] = type;
+    return type;
+}
+
+ChiType *Resolver::get_shared_type(ChiType *value) {
+    auto found = m_ctx->shared_of.get(value);
+    if (found) {
+        return *found;
+    }
+
+    auto shared = m_ctx->rt_shared_type;
+    assert(shared && "Shared struct not found in runtime");
+
+    TypeList args;
+    args.add(value);
+    auto type = get_subtype(shared, &args);
+    m_ctx->shared_of[value] = type;
     return type;
 }
 
