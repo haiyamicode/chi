@@ -71,11 +71,13 @@ func main() {
 
     println("=== error: result mode ===");
     var result = try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError;
-    if result.error {
-        printf("kind: {}\n", result.error.kind);
-        printf("op: {}\n", result.error.op);
+    switch result {
+        Err(err) => {
+            printf("kind: {}\n", err.kind);
+            printf("op: {}\n", err.op);
+        },
+        else => {}
     }
 
     println("done");
 }
-

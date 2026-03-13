@@ -192,18 +192,16 @@ func test_result_mode() {
 
     // try f() → Result<int, &Error> — success case
     var result = try succeed();
-    if result.error {
-        println("unexpected error");
-    } else {
-        printf("value = {}\n", result.value);
+    switch result {
+        Ok(value) => printf("value = {}\n", value),
+        Err => println("unexpected error")
     }
 
     // try f() → Result<(), &Error> — error case (void fn → Result<(), &Error>)
     var result2 = try fail_with("oops");
-    if result2.error {
-        printf("got error: {}\n", result2.error.message());
-    } else {
-        println("should not reach");
+    switch result2 {
+        Err(err) => printf("got error: {}\n", err.message()),
+        Ok => println("should not reach")
     }
 }
 
@@ -214,18 +212,16 @@ func test_typed_result() {
 
     // Error case
     var result = try fail_with("typed result") catch MyError;
-    if result.error {
-        printf("caught: {}\n", result.error.message());
-    } else {
-        println("should not reach");
+    switch result {
+        Err(err) => printf("caught: {}\n", err.message()),
+        Ok => println("should not reach")
     }
 
     // Success case
     var result2 = try succeed() catch MyError;
-    if result2.error {
-        println("should not reach");
-    } else {
-        printf("value = {}\n", result2.value);
+    switch result2 {
+        Ok(value) => printf("value = {}\n", value),
+        Err => println("should not reach")
     }
 }
 
@@ -301,18 +297,19 @@ func main() {
 
     // Re-throw propagates out — catch it here
     var rethrow_result = try test_rethrow() catch OtherError;
-    if rethrow_result.error {
-        printf("re-caught: {}\n", rethrow_result.error.message());
+    switch rethrow_result {
+        Err(err) => printf("re-caught: {}\n", err.message()),
+        Ok => {}
     }
 
     // Branching catch: fallback vs re-throw
     printf("branch fallback = {}\n", branching_catch(false));
     var branch_result = try branching_catch(true) catch OtherError;
-    if branch_result.error {
-        printf("branch rethrow: {}\n", branch_result.error.message());
+    switch branch_result {
+        Err(err) => printf("branch rethrow: {}\n", err.message()),
+        Ok => {}
     }
 
     // Return from catch exits the function
     printf("early return = {}\n", test_catch_return());
 }
-

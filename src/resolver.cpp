@@ -99,7 +99,7 @@ void Resolver::context_init_primitives() {
     system_types.array = create_type(TypeKind::Array);
     system_types.span = create_type(TypeKind::Span);
     system_types.optional = create_type(TypeKind::Optional);
-    // Result and Promise are now defined as Chi-native structs in runtime.xs
+    // Result and Promise are now defined as Chi-native types in runtime.xs
     // system_types.promise = create_type(TypeKind::Promise);
     system_types.undefined = create_type(TypeKind::Undefined);
     system_types.zeroinit = create_type(TypeKind::ZeroInit);
@@ -144,7 +144,7 @@ void Resolver::context_init_primitives() {
     add_primitive("Unit", system_types.unit);
     add_primitive("Tuple", system_types.tuple);
 
-    // Result and Promise are discovered from runtime.xs struct declarations
+    // Result and Promise are discovered from runtime.xs declarations
 
     // intrinsic symbols
     m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
@@ -3276,6 +3276,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto base_struct_type = resolve(data.base_struct, scope);
                 auto base_struct = eval_struct_type(base_struct_type);
                 enum_type->data.enum_.base_struct = base_struct;
+            }
+            if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
+                if (node->name == "Result") {
+                    m_ctx->rt_result_type = enum_type;
+                }
             }
             return type_sym;
         }
@@ -8394,9 +8399,9 @@ ChiType *Resolver::get_result_type(ChiType *value, ChiType *err) {
         value = m_ctx->rt_unit_type;
     }
 
-    // Use the Chi-native Result<T, E> struct from runtime.xs
+    // Use the Chi-native Result<T, E> type from runtime.xs
     auto result = m_ctx->rt_result_type;
-    assert(result && "Result struct not found in runtime");
+    assert(result && "Result type not found in runtime");
 
     TypeList args;
     args.add(value);

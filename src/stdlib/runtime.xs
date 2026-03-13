@@ -995,9 +995,25 @@ export interface Error {
     func message() string;
 }
 
-export struct Result<T, E> {
-    error: ?E = null;
-    value: ?T = null;
+export enum Result<T, E> {
+    Ok(T),
+    Err(E);
+
+    struct {
+        func value() ?T {
+            return switch this {
+                Ok(value) => value,
+                else => null
+            };
+        }
+
+        func error() ?E {
+            return switch this {
+                Err(error) => error,
+                else => null
+            };
+        }
+    }
 }
 
 // Promise for async operations
@@ -1112,12 +1128,12 @@ export struct Promise<T = Unit> {
         var result = Promise<U>{};
         this.on_resolve(
             func [result, callback] (value: T) {
-                result.resolve(callback(Result<T, Shared<Error>>{value: move value}));
+                result.resolve(callback(Result<T, Shared<Error>>.Ok{move value}));
             }
         );
         this.on_reject(
             func [result, callback] (err: Shared<Error>) {
-                result.resolve(callback(Result<T, Shared<Error>>{error: move err}));
+                result.resolve(callback(Result<T, Shared<Error>>.Err{move err}));
             }
         );
         return result;
@@ -1363,4 +1379,3 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 }
-

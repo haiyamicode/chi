@@ -407,15 +407,15 @@ func test_settle() {
 
     settle_resolves_after_delay().settle(
         func (result) {
-            printf("settle ok value: {}\n", result.value!);
-            printf("settle ok error null: {}\n", result.error == null);
+            printf("settle ok value: {}\n", result.value()!);
+            printf("settle ok error null: {}\n", result.error() == null);
         }
     );
 
     settle_outer_throws().settle(
         func (result) {
-            printf("settle err value null: {}\n", result.value == null);
-            printf("settle err message: {}\n", result.error!.message());
+            printf("settle err value null: {}\n", result.value() == null);
+            printf("settle err message: {}\n", result.error()!.message());
         }
     );
 }
@@ -695,4 +695,3 @@ func main() {
 
     println("All tests passed!");
 }
-

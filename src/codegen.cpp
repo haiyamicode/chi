@@ -3340,6 +3340,41 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                                  size.getFixedValue(), llvm::MaybeAlign());
         }
 
+        ChiType *result_enum = nullptr;
+        if (!is_void && !data.catch_block) {
+            result_enum = result_type;
+            if (result_enum->kind == TypeKind::Subtype) {
+                result_enum = get_resolver()->resolve_subtype(result_enum, expr);
+            }
+        }
+        if (result_enum && result_enum->kind == TypeKind::EnumValue) {
+            result_enum = result_enum->data.enum_value.enum_type;
+        }
+        auto init_result_variant = [&](const string &variant_name, auto store_payload) {
+            assert(result_enum && result_enum->kind == TypeKind::Enum);
+            auto variant_member = result_enum->data.enum_.find_member(variant_name);
+            assert(variant_member);
+            auto variant_type = variant_member->resolved_type;
+            assert(variant_type && variant_type->kind == TypeKind::EnumValue);
+
+            auto enum_variant_p = m_ctx->enum_variant_table.get(variant_member);
+            assert(enum_variant_p);
+            auto enum_var = *enum_variant_p;
+            auto copy_size = llvm_type_size(((llvm::GlobalVariable *)enum_var)->getValueType());
+            auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(llvm_ctx), 0);
+
+            builder.CreateMemSet(result_var, zero, llvm_type_size(result_type_l).getFixedValue(),
+                                 llvm::MaybeAlign());
+            builder.CreateMemCpy(result_var, {}, enum_var, {}, copy_size);
+
+            auto payload_fields = get_resolver()->get_enum_payload_fields(variant_type);
+            if (payload_fields.len > 0) {
+                auto payload_ptr =
+                    compile_dot_access(fn, result_var, variant_type, payload_fields[0]);
+                store_payload(payload_fields[0]->resolved_type, payload_ptr);
+            }
+        };
+
         auto continue_b = fn->new_label("_try_continue");
         auto normal_b = fn->new_label("_try_normal");
         auto landing_b = fn->new_label("_try_landing");
@@ -3473,12 +3508,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         } else {
             // === RESULT MODE: try f() → Result<T, E> ===
 
-            // Result is now a runtime struct: { ?E error, ?T value }
-            // Get the resolved struct type for field access
-            auto result_struct = get_resolver()->resolve_struct_type(result_type);
-            auto err_field_type = result_struct->fields[0]->resolved_type; // ?E
-            auto err_field_type_l = compile_type(err_field_type);
-
             if (data.catch_expr) {
                 auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
                 auto caught_type_id =
@@ -3496,26 +3525,20 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 fn->use_label(nomatch_b);
                 builder.CreateResume(landing);
 
-                // Type matches: populate result.error with &ConcreteError
+                // Type matches: populate Result.Err(&ConcreteError)
                 fn->use_label(match_b);
-                auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
-                auto has_err_p = builder.CreateStructGEP(err_field_type_l, err_p, 0);
-                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
-                                    has_err_p);
-                auto err_value_p = builder.CreateStructGEP(err_field_type_l, err_p, 1);
-                builder.CreateStore(error_data, err_value_p);
+                init_result_variant("Err", [&](ChiType *, llvm::Value *payload_ptr) {
+                    builder.CreateStore(error_data, payload_ptr);
+                });
             } else {
-                // Catch-all: populate result.error with Error interface
-                auto err_p = builder.CreateStructGEP(result_type_l, result_var, 0);
-                auto has_err_p = builder.CreateStructGEP(err_field_type_l, err_p, 0);
-                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
-                                    has_err_p);
-                auto err_value_p = builder.CreateStructGEP(err_field_type_l, err_p, 1);
-                auto iface_type_l = compile_type(err_field_type->get_elem());
-                auto data_p = builder.CreateStructGEP(iface_type_l, err_value_p, 0);
-                builder.CreateStore(error_data, data_p);
-                auto vtable_p = builder.CreateStructGEP(iface_type_l, err_value_p, 1);
-                builder.CreateStore(error_vtable, vtable_p);
+                // Catch-all: populate Result.Err(Error interface)
+                init_result_variant("Err", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
+                    auto iface_type_l = compile_type(payload_type);
+                    auto data_p = builder.CreateStructGEP(iface_type_l, payload_ptr, 0);
+                    builder.CreateStore(error_data, data_p);
+                    auto vtable_p = builder.CreateStructGEP(iface_type_l, payload_ptr, 1);
+                    builder.CreateStore(error_vtable, vtable_p);
+                });
             }
             builder.CreateBr(continue_b);
         }
@@ -3533,21 +3556,15 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 }
             }
         } else {
-            // Result mode: store value into Result.value field (?T at index 1)
-            auto result_struct = get_resolver()->resolve_struct_type(result_type);
-            auto val_field_type = result_struct->fields[1]->resolved_type; // ?T
-            auto val_field_type_l = compile_type(val_field_type);
-            auto val_p = builder.CreateStructGEP(result_type_l, result_var, 1);
-            auto has_val_p = builder.CreateStructGEP(val_field_type_l, val_p, 0);
-            builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(llvm_ctx), 1),
-                                has_val_p);
-            auto val_value_p = builder.CreateStructGEP(val_field_type_l, val_p, 1);
-            if (invoke.sret) {
-                auto sret_loaded = builder.CreateLoad(invoke.sret_type, invoke.sret);
-                builder.CreateStore(sret_loaded, val_value_p);
-            } else if (value && !value->getType()->isVoidTy()) {
-                builder.CreateStore(value, val_value_p);
-            }
+            // Result mode: populate Result.Ok(T)
+            init_result_variant("Ok", [&](ChiType *, llvm::Value *payload_ptr) {
+                if (invoke.sret) {
+                    auto sret_loaded = builder.CreateLoad(invoke.sret_type, invoke.sret);
+                    builder.CreateStore(sret_loaded, payload_ptr);
+                } else if (value && !value->getType()->isVoidTy()) {
+                    builder.CreateStore(value, payload_ptr);
+                }
+            });
         }
         builder.CreateBr(continue_b);
 
