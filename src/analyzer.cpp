@@ -10,6 +10,19 @@
 
 using namespace cx;
 
+static ast::Node *resolve_scanned_decl(ast::Node *decl, cx::Scope *scope) {
+    if (!decl || !scope || decl->type != ast::NodeType::VarDecl || decl->resolved_type) {
+        return decl;
+    }
+
+    auto replacement = scope->find_one(decl->name);
+    if (!replacement || replacement == decl || !replacement->resolved_type) {
+        return decl;
+    }
+
+    return replacement;
+}
+
 Analyzer::Analyzer() { m_ctx.flags = FLAG_SAVE_TOKENS; }
 
 ast::Module *Analyzer::process_source(ast::Package *package, io::Buffer *src,
@@ -189,6 +202,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
                 } else {
                     result.decl = token_node;
                 }
+                result.decl = resolve_scanned_decl(result.decl, result.scope);
             }
 
             // Check if token is a field name in a construct expression
@@ -224,6 +238,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
                     result.decl = decl;
                 }
             }
+            result.decl = resolve_scanned_decl(result.decl, result.scope);
         }
     }
 

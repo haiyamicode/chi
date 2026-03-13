@@ -7788,6 +7788,15 @@ void Resolver::resolve_destructure(ast::Node *pattern, ChiType *source_type,
     }
 }
 
+static void attach_destructure_binding(ast::Node *field_node, ast::Node *var) {
+    auto binding_name = field_node->data.destructure_field.binding_name;
+    if (!binding_name || !var) {
+        return;
+    }
+    var->token = binding_name;
+    binding_name->node = var;
+}
+
 void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> &fields,
                                           ChiType *source_type, ResolveScope &scope,
                                           array<ast::Node *> &generated_vars,
@@ -7826,8 +7835,8 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
                                      : field_type;
             var->data.var_decl.kind = kind;
             var->data.var_decl.initialized_at = parent;
-            var->token = field_data.binding_name;
             var->name = binding_name;
+            attach_destructure_binding(field_node, var);
 
             if (scope.parent_fn_node) {
                 var->decl_order = scope.parent_fn_def()->next_decl_order++;
@@ -7917,8 +7926,8 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
         var->resolved_type = var_type;
         var->data.var_decl.kind = kind;
         var->data.var_decl.initialized_at = parent;
-        var->token = field_data.binding_name;
         var->name = binding_name;
+        attach_destructure_binding(field_node, var);
 
         if (scope.parent_fn_node) {
             var->decl_order = scope.parent_fn_def()->next_decl_order++;
@@ -8047,8 +8056,8 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
         var->resolved_type = var_type;
         var->data.var_decl.kind = kind;
         var->data.var_decl.initialized_at = parent;
-        var->token = field_data.binding_name;
         var->name = binding_name;
+        attach_destructure_binding(field_node, var);
 
         if (scope.parent_fn_node) {
             var->decl_order = scope.parent_fn_def()->next_decl_order++;
