@@ -447,6 +447,117 @@ func test_else_if_await_returns() {
     run_else_if_await_returns_cases();
 }
 
+// --- Await: while loop control flow ---
+
+async func do_while_plain(limit: int) Promise<int> {
+    var i = 0;
+    var sum = 0;
+
+    while i < limit {
+        sum = sum + await delayed_number(1);
+        i = i + 1;
+    }
+
+    return sum;
+}
+
+async func do_while_awaited_cond(limit: int) Promise<int> {
+    var i = 0;
+    var sum = 0;
+
+    while await delayed_flag(i < limit, 228) {
+        sum = sum + await delayed_number(1);
+        i = i + 1;
+    }
+
+    return sum;
+}
+
+async func do_while_await_return(limit: int) Promise<int> {
+    var i = 0;
+    var sum = 0;
+
+    while await delayed_flag(i < limit, 229) {
+        sum = sum + await delayed_number(1);
+        if await delayed_flag(i == 1, 230) {
+            return sum + 100;
+        }
+        i = i + 1;
+    }
+
+    return sum;
+}
+
+async func do_while_try_await(limit: int) Promise<int> {
+    var i = 0;
+    var sum = 0;
+
+    while await delayed_flag(i < limit, 231) {
+        sum = sum + try await settle_resolves_after_delay() catch {
+            return -1000;
+        };
+        i = i + 1;
+    }
+
+    return sum;
+}
+
+async func run_while_await_cases() Promise {
+    printf("while plain={}\n", await do_while_plain(3));
+    printf("while awaited={}\n", await do_while_awaited_cond(3));
+    printf("while return={}\n", await do_while_await_return(3));
+    printf("while try={}\n", await do_while_try_await(2));
+}
+
+func test_while_await() {
+    println("=== While await ===");
+    run_while_await_cases();
+}
+
+// --- Await: while break / continue ---
+
+async func do_while_break(limit: int) Promise<int> {
+    var i = 0;
+    var sum = 0;
+
+    while await delayed_flag(i < limit, 232) {
+        sum = sum + await delayed_number(1);
+        if await delayed_flag(i == 1, 233) {
+            break;
+        }
+        i = i + 1;
+    }
+
+    return sum + i;
+}
+
+async func do_while_continue(limit: int) Promise<int> {
+    var i = 0;
+    var sum = 0;
+
+    while await delayed_flag(i < limit, 234) {
+        i = i + 1;
+        if await delayed_flag(i == 2, 235) {
+            continue;
+        }
+        sum = sum + await delayed_number(i);
+    }
+
+    return sum;
+}
+
+func test_while_loop_control() {
+    println("=== While loop control ===");
+
+    do_while_break(5).then(func (value: int) {
+        printf("while break={}\n", value);
+    });
+
+    do_while_continue(4).then(func (value: int) {
+        printf("while continue={}\n", value);
+    });
+}
+
 // --- Await: bare then logic ---
 
 async func do_bare_then_logic() Promise {
@@ -1108,6 +1219,8 @@ func main() {
     test_branchy_returns();
     test_condition_await_returns();
     test_else_if_await_returns();
+    test_while_await();
+    test_while_loop_control();
 
     // Await patterns (async-resolved via event loop)
     test_bare_await();

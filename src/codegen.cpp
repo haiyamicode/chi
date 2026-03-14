@@ -2072,6 +2072,33 @@ void Compiler::sync_async_frame_var(Function *fn, AsyncStateMachine &machine, as
     local_vars[var] = frame_ptr;
 }
 
+std::vector<AsyncLoopResumeContext> Compiler::snapshot_async_loop_stack(Function *fn) {
+    std::vector<AsyncLoopResumeContext> out;
+    for (auto &loop : fn->loop_labels) {
+        if (loop.async_continue_state_id < 0 && !loop.async_break_block) {
+            continue;
+        }
+        AsyncLoopResumeContext ctx = {};
+        ctx.active_blocks_depth = loop.active_blocks_depth;
+        ctx.continue_state_id = loop.async_continue_state_id;
+        ctx.break_block = loop.async_break_block;
+        ctx.break_stmt_index = loop.async_break_stmt_index;
+        out.push_back(ctx);
+    }
+    return out;
+}
+
+void Compiler::restore_async_loop_stack(Function *fn,
+                                        const std::vector<AsyncLoopResumeContext> &loop_stack) {
+    for (auto &ctx : loop_stack) {
+        auto loop = fn->push_loop();
+        loop->active_blocks_depth = ctx.active_blocks_depth;
+        loop->async_continue_state_id = ctx.continue_state_id;
+        loop->async_break_block = ctx.break_block;
+        loop->async_break_stmt_index = ctx.break_stmt_index;
+    }
+}
+
 std::set<ast::Node *> Compiler::get_async_resolved_awaits(const AsyncResumePoint *resume_point,
                                                           ast::Node *resume_stmt) {
     std::set<ast::Node *> resolved;
@@ -2088,13 +2115,23 @@ AsyncResumePoint Compiler::build_async_resume_point(ast::Node *block, int stmt_i
                                                     ast::Node *resume_stmt,
                                                     const AsyncResumePoint *resume_point,
                                                     ast::Node *await_expr,
-                                                    ChiType *value_type) {
+                                                    ChiType *value_type,
+                                                    ast::Node *continue_block,
+                                                    int continue_stmt_index,
+                                                    int continue_state_id) {
     AsyncResumePoint next = {};
     next.block = block;
     next.stmt_index = stmt_index;
     next.resume_stmt = resume_stmt;
     if (resume_point) {
         next.resolved_awaits = resume_point->resolved_awaits;
+        next.continue_block = resume_point->continue_block;
+        next.continue_stmt_index = resume_point->continue_stmt_index;
+        next.continue_state_id = resume_point->continue_state_id;
+    } else {
+        next.continue_block = continue_block;
+        next.continue_stmt_index = continue_stmt_index;
+        next.continue_state_id = continue_state_id;
     }
     next.resolved_awaits.push_back({await_expr, value_type});
     return next;
@@ -2110,6 +2147,36 @@ void Compiler::emit_async_function_return(Function *fn, AsyncStateMachine &machi
     } else {
         builder.CreateRetVoid();
     }
+}
+
+void Compiler::emit_async_state_transition(Function *fn, AsyncStateMachine &machine, int state_id) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto state_ptr = get_async_frame_state_ptr(fn, machine);
+    builder.CreateStore(builder.getInt32(state_id), state_ptr);
+    auto frame_data_ptr =
+        builder.CreateBitCast(machine.frame_ptr, llvm::PointerType::get(*m_ctx->llvm_ctx, 0));
+    emit_dbg_location(fn->node);
+    builder.CreateCall(machine.dispatcher_fn, {frame_data_ptr});
+    builder.CreateRetVoid();
+}
+
+int Compiler::get_async_loop_head_state(Function *fn, AsyncStateMachine &machine,
+                                        ast::Node *while_stmt, ast::Node *parent_block,
+                                        int stmt_index) {
+    auto existing = machine.loop_head_state_ids.find(while_stmt);
+    if (existing != machine.loop_head_state_ids.end()) {
+        return existing->second;
+    }
+
+    auto state_id = machine.next_state_id++;
+    machine.loop_head_state_ids[while_stmt] = state_id;
+
+    AsyncResumePoint head = {};
+    head.block = parent_block;
+    head.stmt_index = stmt_index;
+    head.resume_stmt = nullptr;
+    register_async_resume_state(fn, machine, head, state_id);
+    return state_id;
 }
 
 void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int state_id,
@@ -2198,6 +2265,8 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
     state_fn->async_reject_promise_ptr = result_promise_ptr;
     state_fn->async_promise_type = machine.promise_type;
 
+    restore_async_loop_stack(state_fn, resume_point.loop_stack);
+
     map<ast::Node *, llvm::Value *> resumed_locals;
     map<ast::Node *, llvm::Value *> shadowed_vars;
     std::set<ast::Node *> had_shadowed_binding;
@@ -2219,10 +2288,21 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
     }
 
     compile_async_block_recursive(state_fn, machine, resume_point.block, resume_point.stmt_index,
-                                  resumed_locals, result_promise_ptr, &resume_point);
+                                  resumed_locals, result_promise_ptr, &resume_point,
+                                  resume_point.continue_block, resume_point.continue_stmt_index,
+                                  resume_point.continue_state_id);
 
     if (!builder.GetInsertBlock()->getTerminator()) {
-        builder.CreateRetVoid();
+        if (resume_point.continue_state_id >= 0) {
+            emit_async_state_transition(state_fn, machine, resume_point.continue_state_id);
+        } else if (resume_point.continue_block) {
+            compile_async_block_recursive(state_fn, machine, resume_point.continue_block,
+                                          resume_point.continue_stmt_index, resumed_locals,
+                                          result_promise_ptr, nullptr, nullptr, -1, -1);
+        }
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            builder.CreateRetVoid();
+        }
     }
 
     if (state_fn->cleanup_landing_label) {
@@ -2242,6 +2322,9 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
             m_ctx->var_table.unset(kv.first);
         }
     }
+    for (size_t i = 0; i < resume_point.loop_stack.size(); i++) {
+        state_fn->pop_loop();
+    }
 
     llvm::verifyFunction(*worker_llvm_fn);
     machine.frame_ptr = previous_frame_ptr;
@@ -2254,7 +2337,8 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
                                           int next_stmt_index,
                                           map<ast::Node *, llvm::Value *> &local_vars,
                                           llvm::Value *result_promise_ptr,
-                                          const AsyncResumePoint *resume_point) {
+                                          const AsyncResumePoint *resume_point,
+                                          int continue_state_id) {
     auto &builder = *m_ctx->llvm_builder;
     auto &data = if_stmt->data.if_expr;
 
@@ -2266,7 +2350,9 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
         auto settled_type =
             get_async_resume_value_type(if_stmt, promise_expr, promise_site.resume_expr);
         auto next = build_async_resume_point(parent_block, next_stmt_index - 1, if_stmt,
-                                             resume_point, promise_expr, settled_type);
+                                             resume_point, promise_expr, settled_type,
+                                             nullptr, -1, continue_state_id);
+        next.loop_stack = snapshot_async_loop_stack(fn);
         auto state_id = register_async_resume_state(fn, machine, next);
         emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
         return;
@@ -2281,10 +2367,10 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
     fn->use_label(then_b);
     auto then_locals = local_vars;
     compile_async_block_recursive(fn, machine, data.then_block, 0, then_locals, result_promise_ptr,
-                                  nullptr);
+                                  nullptr, parent_block, next_stmt_index, continue_state_id);
     if (!builder.GetInsertBlock()->getTerminator()) {
         compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, then_locals,
-                                      result_promise_ptr, nullptr);
+                                      result_promise_ptr, nullptr, nullptr, -1, continue_state_id);
         if (!builder.GetInsertBlock()->getTerminator()) {
             builder.CreateBr(done_b);
         }
@@ -2294,20 +2380,91 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
     auto else_locals = local_vars;
     if (data.else_node && data.else_node->type == ast::NodeType::Block) {
         compile_async_block_recursive(fn, machine, data.else_node, 0, else_locals,
-                                      result_promise_ptr, nullptr);
+                                      result_promise_ptr, nullptr, parent_block,
+                                      next_stmt_index, continue_state_id);
         if (!builder.GetInsertBlock()->getTerminator()) {
             compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, else_locals,
-                                          result_promise_ptr, nullptr);
+                                          result_promise_ptr, nullptr, nullptr, -1, continue_state_id);
             if (!builder.GetInsertBlock()->getTerminator()) {
                 builder.CreateBr(done_b);
             }
         }
     } else if (data.else_node && data.else_node->type == ast::NodeType::IfExpr) {
         compile_async_if_recursive(fn, machine, data.else_node, parent_block, next_stmt_index,
-                                   else_locals, result_promise_ptr, nullptr);
+                                   else_locals, result_promise_ptr, nullptr, continue_state_id);
     } else if (!data.else_node) {
         compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, else_locals,
-                                      result_promise_ptr, nullptr);
+                                      result_promise_ptr, nullptr, nullptr, -1, continue_state_id);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            builder.CreateBr(done_b);
+        }
+    }
+
+    fn->use_label(done_b);
+}
+
+void Compiler::compile_async_while_recursive(Function *fn, AsyncStateMachine &machine,
+                                             ast::Node *while_stmt, ast::Node *parent_block,
+                                             int stmt_index, int next_stmt_index,
+                                             map<ast::Node *, llvm::Value *> &local_vars,
+                                             llvm::Value *result_promise_ptr,
+                                             const AsyncResumePoint *resume_point) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &data = while_stmt->data.while_stmt;
+
+    if (!get_resolver()->contains_await(while_stmt)) {
+        compile_stmt(fn, while_stmt);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                          result_promise_ptr, nullptr, nullptr, -1, -1);
+        }
+        return;
+    }
+
+    auto loop_head_state_id = get_async_loop_head_state(fn, machine, while_stmt, parent_block,
+                                                        stmt_index);
+    auto resolved = get_async_resolved_awaits(resume_point, while_stmt);
+    if (data.condition && contains_unresolved_await(data.condition, resolved)) {
+        auto site = find_unresolved_await_site(data.condition, resolved);
+        auto promise_expr = site.await_expr;
+        auto settled_type =
+            get_async_resume_value_type(while_stmt, promise_expr, site.resume_expr);
+        auto next = build_async_resume_point(parent_block, stmt_index, while_stmt, resume_point,
+                                             promise_expr, settled_type, nullptr, -1, -1);
+        next.loop_stack = snapshot_async_loop_stack(fn);
+        auto state_id = register_async_resume_state(fn, machine, next);
+        emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
+        return;
+    }
+
+    auto cond = data.condition ? compile_assignment_to_type(fn, data.condition, get_system_types()->bool_)
+                               : builder.getTrue();
+    auto body_b = fn->new_label("_async_while_body");
+    auto end_b = fn->new_label("_async_while_end");
+    auto done_b = fn->new_label("_async_while_done");
+    builder.CreateCondBr(cond, body_b, end_b);
+
+    fn->use_label(body_b);
+    auto body_locals = local_vars;
+    const AsyncResumePoint *body_resume =
+        (resume_point && resume_point->block == data.body) ? resume_point : nullptr;
+    auto loop = fn->push_loop();
+    loop->async_continue_state_id = loop_head_state_id;
+    loop->async_break_block = parent_block;
+    loop->async_break_stmt_index = next_stmt_index;
+    compile_async_block_recursive(fn, machine, data.body,
+                                  body_resume ? body_resume->stmt_index : 0, body_locals,
+                                  result_promise_ptr, body_resume, nullptr, -1,
+                                  loop_head_state_id);
+    fn->pop_loop();
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        emit_async_state_transition(fn, machine, loop_head_state_id);
+    }
+
+    fn->use_label(end_b);
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                      result_promise_ptr, nullptr, nullptr, -1, -1);
         if (!builder.GetInsertBlock()->getTerminator()) {
             builder.CreateBr(done_b);
         }
@@ -2320,7 +2477,10 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
                                              ast::Node *block, int stmt_index,
                                              map<ast::Node *, llvm::Value *> &local_vars,
                                              llvm::Value *result_promise_ptr,
-                                             const AsyncResumePoint *resume_point) {
+                                             const AsyncResumePoint *resume_point,
+                                             ast::Node *continue_block,
+                                             int continue_stmt_index,
+                                             int continue_state_id) {
     auto &builder = *m_ctx->llvm_builder;
     auto &data = block->data.block;
 
@@ -2350,7 +2510,33 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
 
         if (stmt->type == ast::NodeType::IfExpr) {
             compile_async_if_recursive(fn, machine, stmt, block, i + 1, local_vars,
-                                       result_promise_ptr, current_resume);
+                                       result_promise_ptr, current_resume, continue_state_id);
+            fn->active_blocks.pop_back();
+            fn->pop_scope();
+            return;
+        }
+        if (stmt->type == ast::NodeType::WhileStmt) {
+            compile_async_while_recursive(fn, machine, stmt, block, i, i + 1, local_vars,
+                                          result_promise_ptr, current_resume);
+            fn->active_blocks.pop_back();
+            fn->pop_scope();
+            return;
+        }
+        if (stmt->type == ast::NodeType::BranchStmt) {
+            auto token = stmt->token;
+            auto loop = fn->get_loop();
+            auto &break_flow = fn->active_blocks.back()->exit_flow;
+            for (int j = fn->active_blocks.size() - 1; j >= (int)loop->active_blocks_depth; j--) {
+                compile_block_cleanup(fn, fn->active_blocks[j], nullptr, break_flow);
+            }
+            if (token->type == TokenType::KW_BREAK) {
+                compile_async_block_recursive(fn, machine, loop->async_break_block,
+                                              loop->async_break_stmt_index, local_vars,
+                                              result_promise_ptr, nullptr, nullptr, -1, -1);
+            }
+            if (token->type == TokenType::KW_CONTINUE) {
+                emit_async_state_transition(fn, machine, loop->async_continue_state_id);
+            }
             fn->active_blocks.pop_back();
             fn->pop_scope();
             return;
@@ -2361,7 +2547,9 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
             auto promise_expr = site.await_expr;
             auto settled_type = get_async_resume_value_type(stmt, promise_expr, site.resume_expr);
             auto next = build_async_resume_point(block, i, stmt, current_resume, promise_expr,
-                                                 settled_type);
+                                                 settled_type, continue_block,
+                                                 continue_stmt_index, continue_state_id);
+            next.loop_stack = snapshot_async_loop_stack(fn);
             auto state_id = register_async_resume_state(fn, machine, next);
             emit_async_suspend(fn, machine, state_id, promise_expr, settled_type,
                                result_promise_ptr);

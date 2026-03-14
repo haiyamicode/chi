@@ -33,6 +33,16 @@ struct LoopLabels {
     label_t *end = nullptr;
     label_t *continue_target = nullptr;  // where continue jumps (post-increment for for/range loops)
     size_t active_blocks_depth = 0;  // active_blocks.size() when loop was entered
+    int async_continue_state_id = -1;
+    ast::Node *async_break_block = nullptr;
+    int async_break_stmt_index = -1;
+};
+
+struct AsyncLoopResumeContext {
+    size_t active_blocks_depth = 0;
+    int continue_state_id = -1;
+    ast::Node *break_block = nullptr;
+    int break_stmt_index = -1;
 };
 
 enum class ParameterKind {
@@ -222,6 +232,10 @@ struct AsyncResumePoint {
     ast::Node *block = nullptr;
     int stmt_index = 0;
     ast::Node *resume_stmt = nullptr;
+    ast::Node *continue_block = nullptr;
+    int continue_stmt_index = -1;
+    int continue_state_id = -1;
+    std::vector<AsyncLoopResumeContext> loop_stack = {};
     std::vector<AsyncResumeBinding> resolved_awaits = {};
 };
 
@@ -249,6 +263,7 @@ struct AsyncStateMachine {
     std::vector<AsyncResumeState> states = {};
     std::map<ast::Node *, int> frame_var_index = {};
     std::map<ast::Node *, int> frame_await_index = {};
+    std::map<ast::Node *, int> loop_head_state_ids = {};
 };
 
 struct CodegenContext {
@@ -559,29 +574,48 @@ class Compiler {
     llvm::Value *build_async_rejection_forwarder_lambda(Function *fn, AsyncStateMachine &machine);
     void sync_async_frame_var(Function *fn, AsyncStateMachine &machine, ast::Node *var,
                               map<ast::Node *, llvm::Value *> &local_vars);
+    std::vector<AsyncLoopResumeContext> snapshot_async_loop_stack(Function *fn);
+    void restore_async_loop_stack(Function *fn,
+                                  const std::vector<AsyncLoopResumeContext> &loop_stack);
     std::set<ast::Node *> get_async_resolved_awaits(const AsyncResumePoint *resume_point,
                                                     ast::Node *resume_stmt);
     AsyncResumePoint build_async_resume_point(ast::Node *block, int stmt_index,
                                               ast::Node *resume_stmt,
                                               const AsyncResumePoint *resume_point,
-                                              ast::Node *await_expr, ChiType *value_type);
+                                              ast::Node *await_expr, ChiType *value_type,
+                                              ast::Node *continue_block = nullptr,
+                                              int continue_stmt_index = -1,
+                                              int continue_state_id = -1);
     void emit_async_suspend(Function *fn, AsyncStateMachine &machine, int state_id,
                             ast::Node *await_expr, ChiType *settled_type,
                             llvm::Value *result_promise_ptr);
     void emit_async_function_return(Function *fn, AsyncStateMachine &machine,
                                     llvm::Value *result_promise_ptr);
+    void emit_async_state_transition(Function *fn, AsyncStateMachine &machine, int state_id);
+    int get_async_loop_head_state(Function *fn, AsyncStateMachine &machine, ast::Node *while_stmt,
+                                  ast::Node *parent_block, int stmt_index);
     int register_async_resume_state(Function *fn, AsyncStateMachine &machine,
                                     const AsyncResumePoint &resume_point,
                                     int forced_state_id = -1);
     void compile_async_block_recursive(Function *fn, AsyncStateMachine &machine, ast::Node *block,
                                        int stmt_index, map<ast::Node *, llvm::Value *> &local_vars,
                                        llvm::Value *result_promise_ptr,
-                                        const AsyncResumePoint *resume_point = nullptr);
+                                       const AsyncResumePoint *resume_point = nullptr,
+                                       ast::Node *continue_block = nullptr,
+                                       int continue_stmt_index = -1,
+                                       int continue_state_id = -1);
     void compile_async_if_recursive(Function *fn, AsyncStateMachine &machine, ast::Node *if_stmt,
                                     ast::Node *parent_block, int next_stmt_index,
                                     map<ast::Node *, llvm::Value *> &local_vars,
                                     llvm::Value *result_promise_ptr,
-                                    const AsyncResumePoint *resume_point = nullptr);
+                                    const AsyncResumePoint *resume_point = nullptr,
+                                    int continue_state_id = -1);
+    void compile_async_while_recursive(Function *fn, AsyncStateMachine &machine,
+                                       ast::Node *while_stmt, ast::Node *parent_block,
+                                       int stmt_index, int next_stmt_index,
+                                       map<ast::Node *, llvm::Value *> &local_vars,
+                                       llvm::Value *result_promise_ptr,
+                                       const AsyncResumePoint *resume_point = nullptr);
     void compile_async_fn_body(Function *fn);
     void emit_async_reject_landing_pad(Function *fn, llvm::Value *landing);
     void emit_async_promise_reject(Function *fn, llvm::Value *data_ptr, llvm::Value *vtable_ptr);
