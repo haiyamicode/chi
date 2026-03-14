@@ -558,6 +558,190 @@ func test_while_loop_control() {
     });
 }
 
+// --- Await: for loop control flow ---
+
+struct AsyncIterNode<T: ops.Construct> {
+    value: T = T{};
+    next: ?*AsyncIterNode<T> = null;
+}
+
+struct AsyncLinkedListIterator<T: ops.Construct> {
+    current: ?*AsyncIterNode<T> = null;
+
+    impl ops.MutIterator<T> {
+        mut func next() ?(&mut T) {
+            if !this.current {
+                return null;
+            }
+            var ptr = this.current;
+            this.current = ptr.next;
+            unsafe {
+                return &mut ptr.value;
+            }
+        }
+    }
+}
+
+struct AsyncLinkedList<T: ops.Construct> {
+    head: ?*AsyncIterNode<T> = null;
+
+    impl ops.MutIterable<T> {
+        func to_iter_mut() AsyncLinkedListIterator<T> {
+            return {current: this.head};
+        }
+    }
+}
+
+async func do_for_plain(limit: int) Promise<int> {
+    var sum = 0;
+
+    for i in 0..limit {
+        sum = sum + await delayed_number(i + 1);
+    }
+
+    return sum;
+}
+
+async func do_for_control(limit: int) Promise<int> {
+    var sum = 0;
+
+    for i in 0..limit {
+        if await delayed_flag(i == 2, 236) {
+            continue;
+        }
+        sum = sum + await double_it(i + 1);
+        if await delayed_flag(i == 3, 237) {
+            break;
+        }
+    }
+
+    return sum;
+}
+
+async func do_for_try_await(limit: int) Promise<int> {
+    var sum = 0;
+
+    for i in 0..limit {
+        sum = sum + try await settle_resolves_after_delay() catch {
+            return -1000;
+        };
+        if await delayed_flag(i == 1, 238) {
+            break;
+        }
+    }
+
+    return sum;
+}
+
+async func run_for_await_cases() Promise {
+    printf("for plain={}\n", await do_for_plain(4));
+    printf("for control={}\n", await do_for_control(6));
+    printf("for try={}\n", await do_for_try_await(4));
+}
+
+func test_for_await() {
+    println("=== For await ===");
+    run_for_await_cases();
+}
+
+async func do_iter_for_plain(list: AsyncLinkedList<int>) Promise<int> {
+    var sum = 0;
+
+    for item in list {
+        sum = sum + await delayed_number(*item * 10);
+    }
+
+    return sum;
+}
+
+async func do_iter_for_mutate_first(list: AsyncLinkedList<int>) Promise<int> {
+    for item in list {
+        var inc = await delayed_number(10);
+        *item = *item + inc;
+        return *item;
+    }
+
+    return -1;
+}
+
+async func do_iter_for_control(list: AsyncLinkedList<int>) Promise<int> {
+    var sum = 0;
+
+    for item in list {
+        if await delayed_flag(*item == 2, 239) {
+            continue;
+        }
+        sum = sum + await double_it(*item);
+        if await delayed_flag(*item == 3, 240) {
+            break;
+        }
+    }
+
+    return sum;
+}
+
+async func do_iter_for_indexed(list: AsyncLinkedList<int>) Promise<int> {
+    var sum = 0;
+
+    for item, i in list {
+        sum = sum + await delayed_number(*item + i);
+    }
+
+    return sum;
+}
+
+async func do_iter_for_try(list: AsyncLinkedList<int>) Promise<int> {
+    var sum = 0;
+
+    for item in list {
+        if await delayed_flag(*item == 2, 241) {
+            sum = sum + try await settle_outer_throws() catch {
+                500
+            };
+        }
+        sum = sum + try await delayed_number(*item * 10) catch {
+            return -1000;
+        };
+        if await delayed_flag(*item == 3, 242) {
+            break;
+        }
+    }
+
+    return sum;
+}
+
+async func run_iter_for_await_cases() Promise {
+    var m2 = new AsyncIterNode<int>{value: 2};
+    var m1 = new AsyncIterNode<int>{value: 1, next: m2};
+    var mutate_list = AsyncLinkedList<int>{head: m1};
+
+    var n4 = new AsyncIterNode<int>{value: 4};
+    var n3 = new AsyncIterNode<int>{value: 3, next: n4};
+    var n2 = new AsyncIterNode<int>{value: 2, next: n3};
+    var n1 = new AsyncIterNode<int>{value: 1, next: n2};
+    var list = AsyncLinkedList<int>{head: n1};
+
+    printf("iter mutate={}\n", await do_iter_for_mutate_first(mutate_list));
+    printf("iter plain={}\n", await do_iter_for_plain(list));
+    printf("iter control={}\n", await do_iter_for_control(list));
+    printf("iter indexed={}\n", await do_iter_for_indexed(list));
+    printf("iter try={}\n", await do_iter_for_try(list));
+
+    unsafe {
+        delete m1;
+        delete m2;
+        delete n1;
+        delete n2;
+        delete n3;
+        delete n4;
+    }
+}
+
+func test_iter_for_await() {
+    println("=== Iterator for await ===");
+    run_iter_for_await_cases();
+}
+
 // --- Await: bare then logic ---
 
 async func do_bare_then_logic() Promise {
@@ -736,6 +920,143 @@ async func settle_other_throws() Promise<int> {
 
 func add_one_sync(x: int) int {
     return x + 1;
+}
+
+// --- Await: switch control flow ---
+
+async func switch_expr_await(tag: int, flip: bool) Promise<int> {
+    return switch await double_it(tag) {
+        2 => if await double_it(if flip { 50 } else { 49 }) == 100 { 100 } else { 101 },
+        4 => add_one_sync(await double_it(10)),
+        6 => try add_one_sync(await async_throw_immediate()) catch { -7 },
+        else => switch await double_it(if flip { 2 } else { 3 }) {
+            4 => 400,
+            else => 500,
+        },
+    };
+}
+
+async func switch_stmt_await(tag: int, flip: bool) Promise<int> {
+    switch await double_it(tag) {
+        2 => {
+            if await double_it(if flip { 1 } else { 0 }) == 2 {
+                return 10;
+            }
+            return 11;
+        },
+        4 => {
+            var x = await double_it(10);
+            return x + 2;
+        },
+        6 => {
+            return try add_one_sync(await async_throw_immediate()) catch { -30 };
+        },
+        else => {
+            if await double_it(if flip { 2 } else { 3 }) == 4 {
+                return 40;
+            }
+            return 50;
+        }
+    }
+}
+
+async func run_switch_await_cases() Promise {
+    printf("expr1t={}\n", await switch_expr_await(1, true));
+    printf("expr1f={}\n", await switch_expr_await(1, false));
+    printf("expr2={}\n", await switch_expr_await(2, false));
+    printf("expr3={}\n", await switch_expr_await(3, false));
+    printf("expr9t={}\n", await switch_expr_await(9, true));
+    printf("expr9f={}\n", await switch_expr_await(9, false));
+    printf("stmt1t={}\n", await switch_stmt_await(1, true));
+    printf("stmt1f={}\n", await switch_stmt_await(1, false));
+    printf("stmt2={}\n", await switch_stmt_await(2, false));
+    printf("stmt3={}\n", await switch_stmt_await(3, false));
+    printf("stmt9t={}\n", await switch_stmt_await(9, true));
+    printf("stmt9f={}\n", await switch_stmt_await(9, false));
+}
+
+func test_switch_await() {
+    println("=== Switch await ===");
+    run_switch_await_cases();
+}
+
+// --- Await: type switch control flow ---
+
+interface AsyncShape {}
+
+struct AsyncCircle {
+    radius: int = 0;
+    impl AsyncShape {}
+}
+
+struct AsyncRect {
+    w: int = 0;
+    h: int = 0;
+    impl AsyncShape {}
+}
+
+async func async_make_shape(flag: bool) Promise<&AsyncShape> {
+    if flag {
+        return new AsyncCircle{radius: 7};
+    }
+    return new AsyncRect{w: 3, h: 4};
+}
+
+async func type_switch_stmt_await(flag: bool) Promise<int> {
+    var s = await async_make_shape(flag);
+    switch s.(type) {
+        &AsyncCircle => {
+            return await double_it(s.radius + 1);
+        },
+        &AsyncRect => {
+            return await double_it(s.w + s.h + 2);
+        },
+        else => {
+            return 99;
+        }
+    }
+}
+
+async func type_switch_expr_await(flag: bool) Promise<int> {
+    var s = await async_make_shape(flag);
+    return switch s.(type) {
+        &AsyncCircle => await double_it(s.radius + 1),
+        &AsyncRect => await double_it(s.w + s.h + 2),
+        else => 88,
+    };
+}
+
+async func type_switch_try_await(flag: bool) Promise<int> {
+    var s = await async_make_shape(flag);
+    switch s.(type) {
+        &AsyncCircle => {
+            return s.radius + try await settle_resolves_after_delay() catch {
+                return -100;
+            };
+        },
+        &AsyncRect => {
+            return s.w + s.h + try await settle_outer_throws() catch {
+                return -200;
+            };
+        },
+        else => {
+            return 99;
+        }
+    }
+}
+
+async func run_type_switch_await_cases() Promise {
+    printf("type stmt circle={}\n", await type_switch_stmt_await(true));
+    printf("type stmt rect={}\n", await type_switch_stmt_await(false));
+    printf("type expr circle={}\n", await type_switch_expr_await(true));
+    printf("type expr rect={}\n", await type_switch_expr_await(false));
+    printf("type try circle={}\n", await type_switch_try_await(true));
+    printf("type try rect={}\n", await type_switch_try_await(false));
+}
+
+func test_type_switch_await() {
+    println("=== Type switch await ===");
+    run_type_switch_await_cases();
 }
 
 async func try_await_result_ok() Promise<Result<int, Shared<Error>>> {
@@ -1221,6 +1542,10 @@ func main() {
     test_else_if_await_returns();
     test_while_await();
     test_while_loop_control();
+    test_for_await();
+    test_iter_for_await();
+    test_switch_await();
+    test_type_switch_await();
 
     // Await patterns (async-resolved via event loop)
     test_bare_await();

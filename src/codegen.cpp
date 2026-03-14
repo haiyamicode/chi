@@ -1721,6 +1721,45 @@ void Compiler::collect_async_frame_nodes(ast::Node *node, std::vector<ast::Node 
             vars.push_back(node);
         }
     }
+    if (node->type == ast::NodeType::ForStmt &&
+        node->data.for_stmt.kind == ast::ForLoopKind::IntRange &&
+        node->data.for_stmt.expr &&
+        node->data.for_stmt.expr->type == ast::NodeType::RangeExpr) {
+        auto &for_data = node->data.for_stmt;
+        auto iter_node = node->data.for_stmt.bind ? node->data.for_stmt.bind : node;
+        if (!seen_vars.count(iter_node)) {
+            seen_vars.insert(iter_node);
+            vars.push_back(iter_node);
+        }
+        if (for_data.index_bind && !seen_vars.count(for_data.index_bind)) {
+            seen_vars.insert(for_data.index_bind);
+            vars.push_back(for_data.index_bind);
+        }
+        auto end_expr = node->data.for_stmt.expr->data.range_expr.end;
+        if (end_expr && !seen_vars.count(end_expr)) {
+            seen_vars.insert(end_expr);
+            vars.push_back(end_expr);
+        }
+    } else if (node->type == ast::NodeType::ForStmt) {
+        auto &for_data = node->data.for_stmt;
+        auto expr_type = for_data.expr ? get_chitype(for_data.expr) : nullptr;
+        auto fixed_array_loop = expr_type && ((expr_type->kind == TypeKind::FixedArray) ||
+                                              (expr_type->is_reference() &&
+                                               expr_type->get_elem()->kind == TypeKind::FixedArray));
+        if (for_data.bind && !seen_vars.count(for_data.bind)) {
+            seen_vars.insert(for_data.bind);
+            vars.push_back(for_data.bind);
+        }
+        if (for_data.index_bind && !seen_vars.count(for_data.index_bind)) {
+            seen_vars.insert(for_data.index_bind);
+            vars.push_back(for_data.index_bind);
+        }
+        if ((for_data.kind == ast::ForLoopKind::Range || for_data.kind == ast::ForLoopKind::Iter ||
+             fixed_array_loop) && !seen_vars.count(node)) {
+            seen_vars.insert(node);
+            vars.push_back(node);
+        }
+    }
     if (node->type == ast::NodeType::Block) {
         for (auto implicit : node->data.block.implicit_vars) {
             collect_async_frame_nodes(implicit, vars, awaits, seen_vars, seen_awaits);
@@ -1733,6 +1772,43 @@ void Compiler::collect_async_frame_nodes(ast::Node *node, std::vector<ast::Node 
         collect_async_frame_nodes(child, vars, awaits, seen_vars, seen_awaits);
         return false;
     });
+}
+
+ChiType *Compiler::get_async_frame_node_type(ast::Node *node) {
+    if (!node) {
+        return nullptr;
+    }
+    if (node->type != ast::NodeType::ForStmt) {
+        return get_chitype(node);
+    }
+
+    auto &data = node->data.for_stmt;
+    if (data.kind == ast::ForLoopKind::IntRange && data.expr &&
+        data.expr->type == ast::NodeType::RangeExpr) {
+        return data.bind ? get_chitype(data.bind) : get_chitype(data.expr->data.range_expr.start);
+    }
+
+    auto expr_type = data.expr ? get_chitype(data.expr) : nullptr;
+    auto fixed_array_loop = expr_type && ((expr_type->kind == TypeKind::FixedArray) ||
+                                          (expr_type->is_reference() &&
+                                           expr_type->get_elem()->kind == TypeKind::FixedArray));
+    if (fixed_array_loop) {
+        return get_system_types()->uint32;
+    }
+
+    if (data.kind == ast::ForLoopKind::Range && data.expr) {
+        auto sty = get_resolver()->resolve_struct_type(expr_type);
+        auto beginp = sty ? sty->member_table.get("begin") : nullptr;
+        return beginp ? (*beginp)->resolved_type->data.fn.return_type : nullptr;
+    }
+
+    if (data.kind == ast::ForLoopKind::Iter && data.expr) {
+        auto sty = get_resolver()->resolve_struct_type(expr_type);
+        auto iter_fn = sty ? sty->member_table.get("to_iter_mut") : nullptr;
+        return iter_fn ? (*iter_fn)->resolved_type->data.fn.return_type : nullptr;
+    }
+
+    return get_chitype(node);
 }
 
 llvm::Value *Compiler::get_async_frame_field_ptr(Function *fn, AsyncStateMachine &machine,
@@ -1777,7 +1853,7 @@ void Compiler::initialize_async_frame(Function *fn, AsyncStateMachine &machine, 
     frame_types.push_back(builder.getInt32Ty());
     for (auto var : machine.frame_vars) {
         machine.frame_var_index[var] = (int)frame_types.size();
-        frame_types.push_back(compile_type(get_chitype(var)));
+        frame_types.push_back(compile_type(get_async_frame_node_type(var)));
     }
     for (auto await_expr : machine.frame_awaits) {
         auto site = get_resolver()->find_await_site(body);
@@ -2065,11 +2141,28 @@ void Compiler::sync_async_frame_var(Function *fn, AsyncStateMachine &machine, as
     auto &builder = *m_ctx->llvm_builder;
     auto frame_ptr = get_async_frame_field_ptr(fn, machine, var);
     auto current_ptr = get_var(var);
-    auto var_type = get_chitype(var);
+    auto var_type = get_async_frame_node_type(var);
     auto current_value = builder.CreateLoad(compile_type(var_type), current_ptr);
     compile_store_or_copy(fn, current_value, frame_ptr, var_type, var);
     add_var(var, frame_ptr);
     local_vars[var] = frame_ptr;
+}
+
+void Compiler::flush_async_frame_vars(Function *fn, AsyncStateMachine &machine) {
+    auto &builder = *m_ctx->llvm_builder;
+    for (auto var : machine.frame_vars) {
+        if (!m_ctx->var_table.has_key(var)) {
+            continue;
+        }
+        auto current_ptr = get_var(var);
+        auto frame_ptr = get_async_frame_field_ptr(fn, machine, var);
+        if (current_ptr == frame_ptr) {
+            continue;
+        }
+        auto var_type = get_async_frame_node_type(var);
+        auto current_value = builder.CreateLoad(compile_type(var_type), current_ptr);
+        compile_store_or_copy(fn, current_value, frame_ptr, var_type, var);
+    }
 }
 
 std::vector<AsyncLoopResumeContext> Compiler::snapshot_async_loop_stack(Function *fn) {
@@ -2118,20 +2211,28 @@ AsyncResumePoint Compiler::build_async_resume_point(ast::Node *block, int stmt_i
                                                     ChiType *value_type,
                                                     ast::Node *continue_block,
                                                     int continue_stmt_index,
-                                                    int continue_state_id) {
+                                                    int continue_state_id,
+                                                    ast::Node *tail_return_expr_parent) {
     AsyncResumePoint next = {};
     next.block = block;
     next.stmt_index = stmt_index;
     next.resume_stmt = resume_stmt;
+    bool has_explicit_continue = continue_block || continue_stmt_index >= 0 ||
+                                 continue_state_id >= 0 || tail_return_expr_parent;
     if (resume_point) {
         next.resolved_awaits = resume_point->resolved_awaits;
-        next.continue_block = resume_point->continue_block;
-        next.continue_stmt_index = resume_point->continue_stmt_index;
-        next.continue_state_id = resume_point->continue_state_id;
-    } else {
+        if (!has_explicit_continue) {
+            next.continue_block = resume_point->continue_block;
+            next.continue_stmt_index = resume_point->continue_stmt_index;
+            next.continue_state_id = resume_point->continue_state_id;
+            next.tail_return_expr_parent = resume_point->tail_return_expr_parent;
+        }
+    }
+    if (has_explicit_continue || !resume_point) {
         next.continue_block = continue_block;
         next.continue_stmt_index = continue_stmt_index;
         next.continue_state_id = continue_state_id;
+        next.tail_return_expr_parent = tail_return_expr_parent;
     }
     next.resolved_awaits.push_back({await_expr, value_type});
     return next;
@@ -2147,6 +2248,20 @@ void Compiler::emit_async_function_return(Function *fn, AsyncStateMachine &machi
     } else {
         builder.CreateRetVoid();
     }
+}
+
+static ast::Node *get_async_switch_expr(ast::Node *stmt) {
+    if (!stmt) {
+        return nullptr;
+    }
+    if (stmt->type == ast::NodeType::SwitchExpr) {
+        return stmt;
+    }
+    if (stmt->type == ast::NodeType::ReturnStmt && stmt->data.return_stmt.expr &&
+        stmt->data.return_stmt.expr->type == ast::NodeType::SwitchExpr) {
+        return stmt->data.return_stmt.expr;
+    }
+    return nullptr;
 }
 
 void Compiler::emit_async_state_transition(Function *fn, AsyncStateMachine &machine, int state_id) {
@@ -2175,6 +2290,7 @@ int Compiler::get_async_loop_head_state(Function *fn, AsyncStateMachine &machine
     head.block = parent_block;
     head.stmt_index = stmt_index;
     head.resume_stmt = nullptr;
+    head.is_loop_head = true;
     register_async_resume_state(fn, machine, head, state_id);
     return state_id;
 }
@@ -2183,6 +2299,7 @@ void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int 
                                   ast::Node *await_expr, ChiType *settled_type,
                                   llvm::Value *result_promise_ptr) {
     auto &builder = *m_ctx->llvm_builder;
+    flush_async_frame_vars(fn, machine);
     auto promise_value = compile_expr(fn, await_expr->data.await_expr.expr);
     auto promise_type = get_chitype(await_expr->data.await_expr.expr);
     auto promise_type_l = compile_type(promise_type);
@@ -2290,7 +2407,8 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
     compile_async_block_recursive(state_fn, machine, resume_point.block, resume_point.stmt_index,
                                   resumed_locals, result_promise_ptr, &resume_point,
                                   resume_point.continue_block, resume_point.continue_stmt_index,
-                                  resume_point.continue_state_id);
+                                  resume_point.continue_state_id,
+                                  resume_point.tail_return_expr_parent);
 
     if (!builder.GetInsertBlock()->getTerminator()) {
         if (resume_point.continue_state_id >= 0) {
@@ -2324,6 +2442,89 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
     }
     for (size_t i = 0; i < resume_point.loop_stack.size(); i++) {
         state_fn->pop_loop();
+    }
+
+    llvm::verifyFunction(*worker_llvm_fn);
+    machine.frame_ptr = previous_frame_ptr;
+    builder.restoreIP(saved_ip);
+    return state_id;
+}
+
+int Compiler::register_async_custom_state(Function *fn, AsyncStateMachine &machine,
+                                          const string &name_suffix,
+                                          const std::function<void(Function *)> &emit_body,
+                                          int forced_state_id) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &llvm_module = *m_ctx->llvm_module;
+
+    int state_id = forced_state_id >= 0 ? forced_state_id : machine.next_state_id++;
+    if (forced_state_id >= 0 && machine.next_state_id <= forced_state_id) {
+        machine.next_state_id = forced_state_id + 1;
+    }
+
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+    auto worker_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto worker_name = fmt::format("{}__async_state_{}_{}", fn->qualified_name, state_id, name_suffix);
+    auto worker_llvm_fn = llvm::Function::Create(
+        worker_type, llvm::Function::PrivateLinkage, worker_name, llvm_module);
+    auto state_fn = new Function(m_ctx, worker_llvm_fn, fn->node);
+    state_fn->qualified_name = worker_name;
+
+    auto saved_ip = builder.saveIP();
+
+    auto dispatch_case_b =
+        llvm::BasicBlock::Create(llvm_ctx, fmt::format("_state_{}", state_id), machine.dispatcher_fn);
+    machine.dispatcher_switch->addCase(builder.getInt32(state_id), dispatch_case_b);
+    builder.SetInsertPoint(dispatch_case_b);
+    auto dispatch_data_arg = machine.dispatcher_fn->getArg(0);
+    builder.CreateCall(worker_llvm_fn, {dispatch_data_arg});
+    builder.CreateRetVoid();
+
+    auto entry_b = state_fn->new_label("_entry");
+    state_fn->use_label(entry_b);
+
+    auto data_arg = worker_llvm_fn->getArg(0);
+    auto previous_frame_ptr = machine.frame_ptr;
+    machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
+    auto result_promise_ptr =
+        builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
+    state_fn->async_reject_promise_ptr = result_promise_ptr;
+    state_fn->async_promise_type = machine.promise_type;
+
+    map<ast::Node *, llvm::Value *> shadowed_vars;
+    std::set<ast::Node *> had_shadowed_binding;
+    for (auto var : machine.frame_vars) {
+        if (m_ctx->var_table.has_key(var)) {
+            shadowed_vars[var] = get_var(var);
+            had_shadowed_binding.insert(var);
+        }
+        auto frame_ptr = get_async_frame_field_ptr(state_fn, machine, var);
+        add_var(var, frame_ptr);
+    }
+
+    emit_body(state_fn);
+
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        builder.CreateRetVoid();
+    }
+
+    if (state_fn->cleanup_landing_label) {
+        worker_llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+        state_fn->use_label(state_fn->cleanup_landing_label);
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+        landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
+        emit_async_reject_landing_pad(state_fn, landing);
+        builder.CreateRetVoid();
+    }
+
+    for (auto &kv : shadowed_vars.data) {
+        m_ctx->var_table[kv.first] = kv.second;
+    }
+    for (auto var : machine.frame_vars) {
+        if (!had_shadowed_binding.count(var)) {
+            m_ctx->var_table.unset(var);
+        }
     }
 
     llvm::verifyFunction(*worker_llvm_fn);
@@ -2366,6 +2567,7 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
 
     fn->use_label(then_b);
     auto then_locals = local_vars;
+    auto saved_then_var_table = m_ctx->var_table;
     compile_async_block_recursive(fn, machine, data.then_block, 0, then_locals, result_promise_ptr,
                                   nullptr, parent_block, next_stmt_index, continue_state_id);
     if (!builder.GetInsertBlock()->getTerminator()) {
@@ -2375,9 +2577,11 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
             builder.CreateBr(done_b);
         }
     }
+    m_ctx->var_table = saved_then_var_table;
 
     fn->use_label(else_b);
     auto else_locals = local_vars;
+    auto saved_else_var_table = m_ctx->var_table;
     if (data.else_node && data.else_node->type == ast::NodeType::Block) {
         compile_async_block_recursive(fn, machine, data.else_node, 0, else_locals,
                                       result_promise_ptr, nullptr, parent_block,
@@ -2399,6 +2603,7 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
             builder.CreateBr(done_b);
         }
     }
+    m_ctx->var_table = saved_else_var_table;
 
     fn->use_label(done_b);
 }
@@ -2473,6 +2678,432 @@ void Compiler::compile_async_while_recursive(Function *fn, AsyncStateMachine &ma
     fn->use_label(done_b);
 }
 
+void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &machine,
+                                           ast::Node *for_stmt, ast::Node *parent_block,
+                                           int stmt_index, int next_stmt_index,
+                                           map<ast::Node *, llvm::Value *> &local_vars,
+                                           llvm::Value *result_promise_ptr,
+                                           const AsyncResumePoint *resume_point) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &data = for_stmt->data.for_stmt;
+
+    if (!get_resolver()->contains_await(for_stmt)) {
+        compile_stmt(fn, for_stmt);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                          result_promise_ptr, nullptr, nullptr, -1, -1, nullptr);
+        }
+        return;
+    }
+
+    auto ensure_loop_var = [&](ast::Node *var) {
+        if (!var) {
+            return;
+        }
+        if (machine.frame_var_index.count(var)) {
+            auto frame_ptr = get_async_frame_field_ptr(fn, machine, var);
+            add_var(var, frame_ptr);
+            local_vars[var] = frame_ptr;
+            return;
+        }
+        if (!m_ctx->var_table.has_key(var)) {
+            if (var->type == ast::NodeType::BindIdentifier) {
+                auto storage =
+                    fn->entry_alloca(compile_type(get_async_frame_node_type(var)), "_for_bind_var");
+                add_var(var, storage);
+            } else {
+                compile_stmt(fn, var);
+            }
+        }
+        local_vars[var] = get_var(var);
+    };
+
+    ensure_loop_var(data.bind);
+    ensure_loop_var(data.index_bind);
+
+    bool is_int_range = data.kind == ast::ForLoopKind::IntRange && data.expr &&
+                        data.expr->type == ast::NodeType::RangeExpr;
+    auto expr_type = !is_int_range && data.expr ? get_chitype(data.expr) : nullptr;
+    auto fixed_array_loop = expr_type && ((expr_type->kind == TypeKind::FixedArray) ||
+                                          (expr_type->is_reference() &&
+                                           expr_type->get_elem()->kind == TypeKind::FixedArray));
+    bool is_index_range = fixed_array_loop || data.kind == ast::ForLoopKind::Range;
+    bool is_iter_loop = data.kind == ast::ForLoopKind::Iter;
+
+    if (!is_int_range && !is_index_range && !is_iter_loop) {
+        compile_stmt(fn, for_stmt);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                          result_promise_ptr, nullptr, nullptr, -1, -1, nullptr);
+        }
+        return;
+    }
+
+    auto iter_node = (is_int_range && data.bind) ? data.bind : for_stmt;
+    ast::Node *end_node = is_int_range ? data.expr->data.range_expr.end : nullptr;
+
+    bool loop_resume = resume_point && resume_point->is_loop_head &&
+                       resume_point->block == parent_block &&
+                       resume_point->stmt_index == stmt_index && !resume_point->resume_stmt;
+    if (!loop_resume) {
+        auto iter_ptr = get_async_frame_field_ptr(fn, machine, iter_node);
+        add_var(iter_node, iter_ptr);
+        local_vars[iter_node] = iter_ptr;
+
+        if (is_int_range) {
+            auto &range = data.expr->data.range_expr;
+            auto start_value =
+                compile_assignment_to_type(fn, range.start, get_async_frame_node_type(iter_node));
+            compile_store_or_copy(fn, start_value, get_var(iter_node),
+                                  get_async_frame_node_type(iter_node), range.start);
+
+            auto end_value = compile_assignment_to_type(fn, end_node, get_chitype(end_node));
+            auto end_ptr = get_async_frame_field_ptr(fn, machine, end_node);
+            compile_store_or_copy(fn, end_value, end_ptr, get_chitype(end_node), end_node);
+            add_var(end_node, end_ptr);
+            local_vars[end_node] = end_ptr;
+        } else if (fixed_array_loop) {
+            builder.CreateStore(llvm::ConstantInt::get(compile_type(get_async_frame_node_type(iter_node)), 0),
+                                iter_ptr);
+        } else if (data.kind == ast::ForLoopKind::Range) {
+            auto ptr = compile_dot_ptr(fn, data.expr);
+            auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+            auto begin = *sty->member_table.get("begin");
+            auto iter_begin =
+                builder.CreateCall(get_fn(begin->node)->llvm_fn, {ptr}, "_iter_begin");
+            compile_store_or_copy(fn, iter_begin, iter_ptr, get_async_frame_node_type(iter_node), data.expr);
+        } else if (data.kind == ast::ForLoopKind::Iter) {
+            auto container_ptr = compile_dot_ptr(fn, data.expr);
+            auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+            auto iter_fn = *sty->member_table.get("to_iter_mut");
+            auto iter_fn_type = iter_fn->resolved_type;
+            auto iter_ret_type = iter_fn_type->data.fn.return_type;
+            auto iter_llvm_fn = get_fn(iter_fn->node)->llvm_fn;
+            if (iter_fn_type->data.fn.should_use_sret()) {
+                builder.CreateCall(iter_llvm_fn, {iter_ptr, container_ptr});
+            } else {
+                auto iter_val = builder.CreateCall(iter_llvm_fn, {container_ptr}, "_iter_val");
+                compile_store_or_copy(fn, iter_val, iter_ptr, iter_ret_type, data.expr);
+            }
+            if (data.index_bind) {
+                builder.CreateStore(llvm::ConstantInt::get(
+                                        llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext()), 0),
+                                    get_var(data.index_bind));
+            }
+        }
+    } else {
+        add_var(iter_node, get_async_frame_field_ptr(fn, machine, iter_node));
+        local_vars[iter_node] = get_var(iter_node);
+        if (end_node) {
+            add_var(end_node, get_async_frame_field_ptr(fn, machine, end_node));
+            local_vars[end_node] = get_var(end_node);
+        }
+    }
+
+    auto loop_head_state_id = get_async_loop_head_state(fn, machine, for_stmt, parent_block, stmt_index);
+    auto post_state_id = register_async_custom_state(
+        fn, machine, "for_post",
+        [&](Function *state_fn) {
+            auto &post_builder = *m_ctx->llvm_builder;
+            auto iter_ptr = get_var(iter_node);
+            auto iter_type = get_async_frame_node_type(iter_node);
+            auto iter_type_l = compile_type(iter_type);
+            if (is_int_range || fixed_array_loop) {
+                auto cur = post_builder.CreateLoad(iter_type_l, iter_ptr);
+                auto next_value =
+                    post_builder.CreateAdd(cur, llvm::ConstantInt::get(iter_type_l, 1));
+                compile_store_or_copy(state_fn, next_value, iter_ptr, iter_type, iter_node);
+            } else if (data.kind == ast::ForLoopKind::Range) {
+                auto ptr = compile_dot_ptr(state_fn, data.expr);
+                auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+                auto next = *sty->member_table.get("next");
+                auto iter_value = post_builder.CreateLoad(iter_type_l, iter_ptr);
+                auto iter_next =
+                    post_builder.CreateCall(get_fn(next->node)->llvm_fn, {ptr, iter_value}, "_iter_next");
+                compile_store_or_copy(state_fn, iter_next, iter_ptr, iter_type, data.expr);
+            } else if (data.kind == ast::ForLoopKind::Iter && data.index_bind) {
+                auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
+                auto cur = post_builder.CreateLoad(idx_type, get_var(data.index_bind));
+                post_builder.CreateStore(post_builder.CreateAdd(cur, llvm::ConstantInt::get(idx_type, 1)),
+                                         get_var(data.index_bind));
+            }
+            emit_async_state_transition(state_fn, machine, loop_head_state_id);
+        });
+
+    auto resolved = get_async_resolved_awaits(resume_point, for_stmt);
+    auto iter_type = get_async_frame_node_type(iter_node);
+    auto iter_value = builder.CreateLoad(compile_type(iter_type), get_var(iter_node));
+    llvm::Value *cond = nullptr;
+    if (is_int_range) {
+        auto end_value = builder.CreateLoad(compile_type(get_chitype(end_node)), get_var(end_node));
+        cond = builder.CreateICmpSLT(iter_value, end_value);
+    } else if (fixed_array_loop) {
+        auto arr_type = expr_type->is_reference() ? expr_type->get_elem() : expr_type;
+        auto size_val = llvm::ConstantInt::get(iter_value->getType(), arr_type->data.fixed_array.size);
+        cond = builder.CreateICmpULT(iter_value, size_val);
+    } else if (data.kind == ast::ForLoopKind::Range) {
+        auto ptr = compile_dot_ptr(fn, data.expr);
+        auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+        auto end = *sty->member_table.get("end");
+        auto iter_end = builder.CreateCall(get_fn(end->node)->llvm_fn, {ptr}, "_iter_end");
+        cond = builder.CreateICmpSLT(iter_value, iter_end);
+    } else if (data.kind == ast::ForLoopKind::Iter) {
+        auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+        auto next_fn = *get_resolver()->resolve_struct_type(get_async_frame_node_type(iter_node))
+                            ->member_table.get("next");
+        auto next_fn_type = next_fn->resolved_type;
+        auto next_ret_type = next_fn_type->data.fn.return_type;
+        auto next_ret_type_l = compile_type(next_ret_type);
+        auto next_llvm_fn = get_fn(next_fn->node)->llvm_fn;
+        auto opt_alloca = fn->entry_alloca(next_ret_type_l, "_opt_alloca");
+        if (next_fn_type->data.fn.should_use_sret()) {
+            builder.CreateCall(next_llvm_fn, {opt_alloca, get_var(iter_node)});
+        } else {
+            auto opt_result = builder.CreateCall(next_llvm_fn, {get_var(iter_node)}, "_opt_result");
+            builder.CreateStore(opt_result, opt_alloca);
+        }
+        auto has_value_p = builder.CreateStructGEP(next_ret_type_l, opt_alloca, 0);
+        cond = builder.CreateLoad(llvm::Type::getInt1Ty(m_ctx->llvm_module->getContext()), has_value_p);
+        if (data.bind) {
+            auto value_p = builder.CreateStructGEP(next_ret_type_l, opt_alloca, 1);
+            auto value =
+                builder.CreateLoad(compile_type(data.bind->resolved_type), value_p, "_iter_item");
+            builder.CreateStore(value, get_var(data.bind));
+        }
+    }
+
+    auto body_b = fn->new_label("_async_for_body");
+    auto end_b = fn->new_label("_async_for_end");
+    auto done_b = fn->new_label("_async_for_done");
+    builder.CreateCondBr(cond, body_b, end_b);
+
+    fn->use_label(body_b);
+    auto body_locals = local_vars;
+    if (fixed_array_loop || data.kind == ast::ForLoopKind::Range) {
+        if (data.index_bind) {
+            auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
+            auto idx_val = iter_value->getType() == idx_type
+                               ? iter_value
+                               : builder.CreateIntCast(iter_value, idx_type, false);
+            builder.CreateStore(idx_val, get_var(data.index_bind));
+        }
+        if (data.bind) {
+            if (fixed_array_loop) {
+                auto arr_type = expr_type->is_reference() ? expr_type->get_elem() : expr_type;
+                auto arr_type_l = compile_type(arr_type);
+                auto elem_type = arr_type->data.fixed_array.elem;
+                auto elem_type_l = compile_type(elem_type);
+                auto arr_ref = compile_expr_ref(fn, data.expr);
+                auto arr_addr = expr_type->is_reference()
+                                    ? builder.CreateLoad(compile_type(expr_type), arr_ref.address, "_fa_deref")
+                                    : arr_ref.address;
+                auto zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext()), 0);
+                auto idx = builder.CreateLoad(iter_value->getType(), get_var(iter_node));
+                auto elem_ptr = builder.CreateGEP(arr_type_l, arr_addr, {zero, idx});
+                if (data.bind_sigil != ast::SigilKind::None) {
+                    builder.CreateStore(elem_ptr, get_var(data.bind));
+                } else {
+                    auto value = builder.CreateLoad(elem_type_l, elem_ptr, "_item_value");
+                    compile_store_or_copy(fn, value, get_var(data.bind), get_chitype(data.bind), data.bind);
+                }
+            } else {
+                auto ptr = compile_dot_ptr(fn, data.expr);
+                auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
+                auto index = *sty->member_table.get("index_mut");
+                auto item_ref =
+                    builder.CreateCall(get_fn(index->node)->llvm_fn, {ptr, iter_value}, "_iter_item");
+                if (data.bind_sigil != ast::SigilKind::None) {
+                    builder.CreateStore(item_ref, get_var(data.bind));
+                } else {
+                    auto value = builder.CreateLoad(compile_type(data.bind->resolved_type), item_ref,
+                                                    "_item_value");
+                    compile_store_or_copy(fn, value, get_var(data.bind),
+                                          get_chitype(data.bind), data.bind);
+                }
+            }
+        }
+    }
+    const AsyncResumePoint *body_resume =
+        (resume_point && resume_point->block == data.body) ? resume_point : nullptr;
+    auto loop = fn->push_loop();
+    loop->async_continue_state_id = post_state_id;
+    loop->async_break_block = parent_block;
+    loop->async_break_stmt_index = next_stmt_index;
+    compile_async_block_recursive(fn, machine, data.body,
+                                  body_resume ? body_resume->stmt_index : 0, body_locals,
+                                  result_promise_ptr, body_resume, nullptr, -1, post_state_id,
+                                  nullptr);
+    fn->pop_loop();
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        emit_async_state_transition(fn, machine, post_state_id);
+    }
+
+    fn->use_label(end_b);
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                      result_promise_ptr, nullptr, nullptr, -1, -1, nullptr);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            builder.CreateBr(done_b);
+        }
+    }
+
+    fn->use_label(done_b);
+}
+
+void Compiler::compile_async_switch_recursive(Function *fn, AsyncStateMachine &machine,
+                                              ast::Node *stmt, ast::Node *switch_expr,
+                                              ast::Node *parent_block, int stmt_index,
+                                              int next_stmt_index,
+                                              map<ast::Node *, llvm::Value *> &local_vars,
+                                              llvm::Value *result_promise_ptr,
+                                              const AsyncResumePoint *resume_point,
+                                              int continue_state_id) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &data = switch_expr->data.switch_expr;
+    auto resolved = get_async_resolved_awaits(resume_point, stmt);
+    auto tail_return = stmt->type == ast::NodeType::ReturnStmt &&
+                       stmt->data.return_stmt.expr == switch_expr;
+
+    if (data.expr && contains_unresolved_await(data.expr, resolved)) {
+        auto site = find_unresolved_await_site(data.expr, resolved);
+        auto promise_expr = site.await_expr;
+        auto settled_type =
+            get_async_resume_value_type(switch_expr, promise_expr, site.resume_expr);
+        auto next = build_async_resume_point(parent_block, stmt_index, stmt, resume_point,
+                                             promise_expr, settled_type, nullptr, -1,
+                                             continue_state_id,
+                                             tail_return ? switch_expr : nullptr);
+        next.loop_stack = snapshot_async_loop_stack(fn);
+        auto state_id = register_async_resume_state(fn, machine, next);
+        emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
+        return;
+    }
+
+    auto continue_case = [&](map<ast::Node *, llvm::Value *> &case_locals) {
+        if (tail_return) {
+            return;
+        }
+        compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, case_locals,
+                                      result_promise_ptr, nullptr, nullptr, -1,
+                                      continue_state_id, nullptr);
+    };
+
+    auto compile_case_body = [&](ast::Node *scase) {
+        auto case_locals = local_vars;
+        auto saved_var_table = m_ctx->var_table;
+        compile_async_block_recursive(fn, machine, scase->data.case_expr.body, 0, case_locals,
+                                      result_promise_ptr, nullptr,
+                                      tail_return ? nullptr : parent_block,
+                                      tail_return ? -1 : next_stmt_index,
+                                      tail_return ? -1 : continue_state_id,
+                                      tail_return ? switch_expr : nullptr);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            continue_case(case_locals);
+        }
+        m_ctx->var_table = saved_var_table;
+    };
+
+    if (data.is_type_switch) {
+        auto iref_ref = compile_expr_ref(fn, data.expr);
+        auto fp = builder.CreateLoad(compile_type(get_chitype(data.expr)), iref_ref.address,
+                                     "fat_ptr");
+        auto expr_type = get_chitype(data.expr);
+        auto iface_elem = expr_type->get_elem();
+        auto done_label = fn->new_label("_async_tswitch_done");
+        auto else_label = fn->new_label("_async_tswitch_else");
+        ast::Node *else_case = nullptr;
+
+        for (auto scase : data.cases) {
+            if (scase->data.case_expr.is_else) {
+                else_case = scase;
+                continue;
+            }
+
+            auto case_label = fn->new_label("_async_tswitch_case");
+            auto next_label = fn->new_label("_async_tswitch_next");
+            auto clause = scase->data.case_expr.clauses[0];
+            auto clause_type = get_resolver()->node_get_type(clause);
+            auto clause_elem =
+                clause_type->is_pointer_like() ? clause_type->get_elem() : clause_type;
+            auto cmp = compile_interface_type_match(fn, fp, iface_elem, clause_elem);
+            builder.CreateCondBr(cmp, case_label, next_label);
+
+            fn->use_label(case_label);
+            compile_case_body(scase);
+            if (!builder.GetInsertBlock()->getTerminator()) {
+                builder.CreateBr(done_label);
+            }
+
+            fn->use_label(next_label);
+        }
+
+        builder.CreateBr(else_label);
+        fn->use_label(else_label);
+        if (else_case) {
+            compile_case_body(else_case);
+        } else if (!tail_return) {
+            compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                          result_promise_ptr, nullptr, nullptr, -1,
+                                          continue_state_id, nullptr);
+        }
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            builder.CreateBr(done_label);
+        }
+
+        fn->use_label(done_label);
+        return;
+    }
+
+    auto expr_value = compile_comparator(fn, data.expr);
+    auto comparator_type = expr_value->getType();
+    auto default_label = fn->new_label("_async_switch_default");
+    auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.len);
+    auto done_label = fn->new_label("_async_switch_done");
+
+    array<label_t *> case_labels;
+    for (auto scase : data.cases) {
+        auto label = default_label;
+        if (!scase->data.case_expr.is_else) {
+            label = fn->new_label("_async_switch_case");
+        }
+        for (auto clause : scase->data.case_expr.clauses) {
+            auto clause_value = get_resolver()->resolve_constant_value(clause);
+            assert(clause_value);
+            auto cond_value = (llvm::ConstantInt *)compile_constant_value(
+                fn, *clause_value, get_chitype(clause), comparator_type);
+            switch_b->addCase(cond_value, label);
+        }
+        case_labels.add(label);
+    }
+
+    bool has_else = false;
+    for (int i = 0; i < data.cases.len; i++) {
+        fn->use_label(case_labels[i]);
+        auto scase = data.cases[i];
+        if (scase->data.case_expr.is_else) {
+            has_else = true;
+        }
+        compile_case_body(scase);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            builder.CreateBr(done_label);
+        }
+    }
+
+    if (!has_else) {
+        fn->use_label(default_label);
+        if (!tail_return) {
+            compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                          result_promise_ptr, nullptr, nullptr, -1,
+                                          continue_state_id, nullptr);
+        }
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            builder.CreateBr(done_label);
+        }
+    }
+
+    fn->use_label(done_label);
+}
+
 void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &machine,
                                              ast::Node *block, int stmt_index,
                                              map<ast::Node *, llvm::Value *> &local_vars,
@@ -2480,7 +3111,8 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
                                              const AsyncResumePoint *resume_point,
                                              ast::Node *continue_block,
                                              int continue_stmt_index,
-                                             int continue_state_id) {
+                                             int continue_state_id,
+                                             ast::Node *tail_return_expr_parent) {
     auto &builder = *m_ctx->llvm_builder;
     auto &data = block->data.block;
 
@@ -2515,9 +3147,24 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
             fn->pop_scope();
             return;
         }
+        if (auto switch_expr = get_async_switch_expr(stmt)) {
+            compile_async_switch_recursive(fn, machine, stmt, switch_expr, block, i, i + 1,
+                                           local_vars, result_promise_ptr, current_resume,
+                                           continue_state_id);
+            fn->active_blocks.pop_back();
+            fn->pop_scope();
+            return;
+        }
         if (stmt->type == ast::NodeType::WhileStmt) {
             compile_async_while_recursive(fn, machine, stmt, block, i, i + 1, local_vars,
                                           result_promise_ptr, current_resume);
+            fn->active_blocks.pop_back();
+            fn->pop_scope();
+            return;
+        }
+        if (stmt->type == ast::NodeType::ForStmt) {
+            compile_async_for_recursive(fn, machine, stmt, block, i, i + 1, local_vars,
+                                        result_promise_ptr, current_resume);
             fn->active_blocks.pop_back();
             fn->pop_scope();
             return;
@@ -2568,6 +3215,62 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
             fn->pop_scope();
             return;
         }
+    }
+
+    const AsyncResumePoint *return_resume = nullptr;
+    if (resume_point && resume_point->block == block &&
+        resume_point->stmt_index == data.statements.len) {
+        return_resume = resume_point;
+    }
+    auto return_resolved = get_async_resolved_awaits(return_resume, data.return_expr);
+    if (data.return_expr && contains_unresolved_await(data.return_expr, return_resolved)) {
+        auto site = find_unresolved_await_site(data.return_expr, return_resolved);
+        auto promise_expr = site.await_expr;
+        auto settled_type = get_async_resume_value_type(data.return_expr, promise_expr, site.resume_expr);
+        auto next = build_async_resume_point(block, data.statements.len, data.return_expr,
+                                             return_resume, promise_expr, settled_type,
+                                             continue_block, continue_stmt_index,
+                                             continue_state_id, tail_return_expr_parent);
+        next.loop_stack = snapshot_async_loop_stack(fn);
+        auto state_id = register_async_resume_state(fn, machine, next);
+        emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
+
+        fn->active_blocks.pop_back();
+        fn->pop_scope();
+        return;
+    }
+
+    if (data.return_expr && tail_return_expr_parent) {
+        auto &llvm_builder = *m_ctx->llvm_builder.get();
+        auto inner_type = get_chitype(tail_return_expr_parent);
+        auto ret_value = compile_assignment_to_type(fn, data.return_expr, inner_type);
+
+        auto promise_struct = get_resolver()->resolve_struct_type(machine.promise_type);
+        std::optional<TypeId> variant_type_id = std::nullopt;
+        if (machine.promise_type->kind == TypeKind::Subtype && !machine.promise_type->is_placeholder) {
+            variant_type_id = machine.promise_type->id;
+        }
+        auto resolve_member = promise_struct->find_member("resolve");
+        assert(resolve_member && "Promise.resolve() method not found");
+        auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
+        auto resolve_method = get_fn(resolve_method_node);
+        llvm_builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
+
+        ast::Node *move_returned_var = nullptr;
+        if (data.return_expr->escape.moved &&
+            data.return_expr->type == ast::NodeType::Identifier) {
+            move_returned_var = data.return_expr->data.identifier.decl;
+        }
+        compile_block_cleanup(fn, &data, move_returned_var, data.exit_flow);
+        fn->active_blocks.pop_back();
+        fn->pop_scope();
+
+        if (fn->return_label) {
+            emit_async_function_return(fn, machine, result_promise_ptr);
+        } else {
+            llvm_builder.CreateRetVoid();
+        }
+        return;
     }
 
     if (!scope->branched && !builder.GetInsertBlock()->getTerminator()) {
