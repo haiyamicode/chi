@@ -106,6 +106,7 @@ struct Function {
         bool free_heap = false;    // true when ptr_var stores heap memory to cx_free
     };
     std::vector<CleanupOwner> cleanup_owner_vars;
+    std::set<ast::Node *> async_frame_owned_vars;
 
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
@@ -225,7 +226,6 @@ struct InvokeInfo {
 
 struct AsyncResumeBinding {
     ast::Node *await_expr = nullptr;
-    ChiType *value_type = nullptr;
 };
 
 struct AsyncResumePoint {
@@ -247,6 +247,11 @@ struct AsyncResumeState {
     llvm::Function *worker_fn = nullptr;
 };
 
+struct AsyncLambdaValue {
+    llvm::Value *alloca = nullptr;
+    llvm::Value *value = nullptr;
+};
+
 struct AsyncStateMachine {
     Function *parent_fn = nullptr;
     llvm::Value *result_promise_ptr = nullptr;
@@ -264,7 +269,10 @@ struct AsyncStateMachine {
     std::vector<ast::Node *> frame_awaits = {};
     std::vector<AsyncResumeState> states = {};
     std::map<ast::Node *, int> frame_var_index = {};
+    std::map<ast::Node *, int> frame_var_alive_index = {};
     std::map<ast::Node *, int> frame_await_index = {};
+    std::map<ast::Node *, int> frame_await_alive_index = {};
+    std::map<ast::Node *, ChiType *> frame_await_types = {};
     std::map<ast::Node *, int> loop_head_state_ids = {};
 };
 
@@ -352,7 +360,7 @@ class Compiler {
     CodegenContext *m_ctx = nullptr;
     Function *m_fn = nullptr;
     ChiType *m_fn_eval_subtype = nullptr;
-    std::map<ast::Node *, llvm::Value *> m_async_await_values = {};
+    std::map<ast::Node *, RefValue> m_async_await_refs = {};
 
     llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
 
@@ -479,6 +487,7 @@ class Compiler {
 
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
     llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type);
+    llvm::Value *compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type);
     void compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                    ChiType *dest_type);
 
@@ -561,23 +570,34 @@ class Compiler {
                                    std::set<ast::Node *> &seen_awaits);
     ChiType *get_async_frame_node_type(ast::Node *node);
     void initialize_async_frame(Function *fn, AsyncStateMachine &machine, ast::Node *body);
+    bool async_frame_needs_destruction(AsyncStateMachine &machine);
+    Function *generate_async_frame_destructor(Function *fn, AsyncStateMachine &machine);
     void initialize_async_dispatcher(Function *fn, AsyncStateMachine &machine);
     llvm::Value *get_async_frame_field_ptr(Function *fn, AsyncStateMachine &machine, ast::Node *node);
+    llvm::Value *get_async_frame_var_alive_ptr(Function *fn, AsyncStateMachine &machine,
+                                               ast::Node *node);
     llvm::Value *get_async_frame_await_ptr(Function *fn, AsyncStateMachine &machine, ast::Node *await_expr);
+    llvm::Value *get_async_frame_await_alive_ptr(Function *fn, AsyncStateMachine &machine,
+                                                 ast::Node *await_expr);
     llvm::Value *get_async_frame_state_ptr(Function *fn, AsyncStateMachine &machine);
-    llvm::Value *build_async_frame_lambda(Function *fn, AsyncStateMachine &machine,
-                                          llvm::Function *target_fn);
-    llvm::Value *build_async_resume_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
-                                                     int state_id, ChiType *value_type,
-                                                     ast::Node *await_expr);
-    llvm::Value *build_async_try_await_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
-                                                        int state_id,
-                                                        ChiType *settled_type,
-                                                        ast::Node *await_expr, bool is_error);
-    llvm::Value *build_async_rejection_forwarder_lambda(Function *fn, AsyncStateMachine &machine);
+    AsyncLambdaValue build_async_frame_lambda(Function *fn, AsyncStateMachine &machine,
+                                              llvm::Function *target_fn);
+    AsyncLambdaValue build_async_resume_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
+                                                         int state_id, ChiType *value_type,
+                                                         ast::Node *await_expr);
+    AsyncLambdaValue build_async_try_await_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
+                                                            int state_id,
+                                                            ChiType *settled_type,
+                                                            ast::Node *await_expr, bool is_error);
+    AsyncLambdaValue build_async_rejection_forwarder_lambda(Function *fn, AsyncStateMachine &machine);
     void sync_async_frame_var(Function *fn, AsyncStateMachine &machine, ast::Node *var,
                               map<ast::Node *, llvm::Value *> &local_vars);
     void flush_async_frame_vars(Function *fn, AsyncStateMachine &machine);
+    void destroy_async_frame_slot_if_alive(Function *fn, llvm::Value *slot, llvm::Value *alive_ptr,
+                                           ChiType *type);
+    void write_async_frame_await_value(Function *fn, AsyncStateMachine &machine,
+                                       ast::Node *await_expr, RefValue value, ChiType *type,
+                                       ast::Node *expr);
     std::vector<AsyncLoopResumeContext> snapshot_async_loop_stack(Function *fn);
     void restore_async_loop_stack(Function *fn,
                                   const std::vector<AsyncLoopResumeContext> &loop_stack);
@@ -586,7 +606,7 @@ class Compiler {
     AsyncResumePoint build_async_resume_point(ast::Node *block, int stmt_index,
                                               ast::Node *resume_stmt,
                                               const AsyncResumePoint *resume_point,
-                                              ast::Node *await_expr, ChiType *value_type,
+                                              ast::Node *await_expr,
                                               ast::Node *continue_block = nullptr,
                                               int continue_stmt_index = -1,
                                               int continue_state_id = -1,

@@ -152,10 +152,25 @@ try await typed catch err: -17
 try await typed mismatch: other 77
 try await typed catch mismatch: other 77
 nested delayed caught: error 88
+TraceAsyncValue.copy(1)
+TraceAsyncValue.copy(1)
+TraceAsyncValue.delete(1)
+TraceAsyncValue.got(1)
+TraceAsyncValue.delete(1)
 elif tt=15
 3level caught: error 33
 type try rect=-200
 cond tt=1005
+trace caught: trace 30
+trace lifecycle=1
+TraceAsyncValue.copy(2)
+TraceAsyncValue.delete(1)
+TraceAsyncValue.copy(2)
+TraceAsyncValue.delete(2)
+TraceAsyncValue.got(2)
+trace loop=3
+TraceAsyncValue.delete(2)
+TraceAsyncValue.delete(2)
 try branch tt=1055
 try branch ft=-300
 try branch ff=-400

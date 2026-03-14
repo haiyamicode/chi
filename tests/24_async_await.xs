@@ -796,6 +796,57 @@ struct OtherTestError {
     }
 }
 
+struct TraceAsyncError {
+    code: int = 0;
+
+    mut func new(code: int = 0) {
+        this.code = code;
+        if code != 0 {
+            printf("TraceAsyncError.new({})\n", code);
+        }
+    }
+
+    mut func delete() {
+        if this.code != 0 {
+            printf("TraceAsyncError.delete({})\n", this.code);
+        }
+    }
+
+    impl ops.Copy {
+        mut func copy(source: &This) {
+            this.code = source.code;
+            if source.code != 0 {
+                printf("TraceAsyncError.copy({})\n", source.code);
+            }
+        }
+    }
+
+    impl Error {
+        func message() string {
+            return stringf("trace {}", this.code);
+        }
+    }
+}
+
+struct TraceAsyncValue {
+    value: int = 0;
+
+    mut func delete() {
+        if this.value != 0 {
+            printf("TraceAsyncValue.delete({})\n", this.value);
+        }
+    }
+
+    impl ops.Copy {
+        mut func copy(source: &This) {
+            this.value = source.value;
+            if source.value != 0 {
+                printf("TraceAsyncValue.copy({})\n", source.value);
+            }
+        }
+    }
+}
+
 func test_reject() {
     println("=== reject ===");
     var p = Promise<int>{};
@@ -916,6 +967,42 @@ async func settle_other_throws() Promise<int> {
     var y = await time.sleep(195);
     throw new OtherTestError{code: 77};
     return 0;
+}
+
+async func trace_async_throw_after_delay() Promise<int> {
+    var y = await time.sleep(205);
+    throw new TraceAsyncError{code: 30};
+    return 0;
+}
+
+async func trace_async_value_after_delay(value: int) Promise<TraceAsyncValue> {
+    var y = await time.sleep(215);
+    return TraceAsyncValue{value: value};
+}
+
+async func trace_async_lifecycle_probe() Promise<int> {
+    if await delayed_flag(false, 210) {
+        return 99;
+    }
+
+    var result = try await trace_async_throw_after_delay() catch TraceAsyncError as err {
+        printf("trace caught: {}\n", err.message());
+        return 1;
+    };
+
+    return result;
+}
+
+async func trace_async_value_loop() Promise<int> {
+    var sum = 0;
+    var i = 0;
+    while i < 2 {
+        var value = await trace_async_value_after_delay(i + 1);
+        printf("TraceAsyncValue.got({})\n", value.value);
+        sum = sum + value.value;
+        i = i + 1;
+    }
+    return sum;
 }
 
 func add_one_sync(x: int) int {
@@ -1363,6 +1450,20 @@ func test_try_await() {
     );
 
     run_try_await_pathological_cases();
+
+    trace_async_lifecycle_probe().then(
+        func (value: int) Unit {
+            printf("trace lifecycle={}\n", value);
+            return {};
+        }
+    );
+
+    trace_async_value_loop().then(
+        func (value: int) Unit {
+            printf("trace loop={}\n", value);
+            return {};
+        }
+    );
 
 }
 

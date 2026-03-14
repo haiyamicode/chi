@@ -219,15 +219,6 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    mut func from_ptr(ptr: *T) {
-        unsafe {
-            if this._ptr {
-                delete this._ptr;
-            }
-        }
-        this._ptr = ptr;
-    }
-
     mut func delete() {
         unsafe {
             if this._ptr {
@@ -1097,11 +1088,16 @@ export struct Promise<T = Unit> {
         this.data.value = move value;
         if this.data.callback {
             this.data.callback!(this.data.value!);
+            this.data.callback = null;
+        }
+        if this.data.err_callback {
+            this.data.err_callback = null;
         }
     }
 
     mut func reject(err: &move Error) {
-        this.reject_shared(Shared<Error>{move err});
+        var shared_err = Shared<Error>{move err};
+        this.reject_shared(move shared_err);
     }
 
     private mut func reject_shared(shared_err: Shared<Error>) {
@@ -1112,6 +1108,10 @@ export struct Promise<T = Unit> {
         this.data.error = {move shared_err};
         if this.data.err_callback {
             this.data.err_callback!(this.data.error!);
+            this.data.err_callback = null;
+        }
+        if this.data.callback {
+            this.data.callback = null;
         }
     }
 
@@ -1428,4 +1428,3 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 }
-

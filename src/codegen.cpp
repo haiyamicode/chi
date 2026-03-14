@@ -1253,6 +1253,30 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
     return arg_value;
 }
 
+llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto src_type = get_chitype(expr);
+
+    if (expr->escape.moved && param_type && !param_type->is_reference()) {
+        auto src_ref = compile_expr_ref(fn, expr);
+        if (src_ref.address) {
+            auto arg_value = src_ref.value;
+            if (!arg_value) {
+                arg_value = builder.CreateLoad(compile_type(src_type), src_ref.address);
+            }
+            emit_dbg_location(expr);
+            arg_value = compile_conversion(fn, arg_value, src_type, param_type);
+            if (src_type->kind != TypeKind::Undefined && src_type->kind != TypeKind::ZeroInit &&
+                get_resolver()->type_needs_destruction(src_type)) {
+                builder.CreateStore(llvm::Constant::getNullValue(compile_type(src_type)), src_ref.address);
+            }
+            return arg_value;
+        }
+    }
+
+    return compile_arg_for_call(fn, expr, param_type);
+}
+
 void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                          ChiType *dest_type) {
     auto src_type = get_chitype(expr);
@@ -1822,10 +1846,51 @@ llvm::Value *Compiler::get_async_frame_field_ptr(Function *fn, AsyncStateMachine
                                                 it->second);
 }
 
+llvm::Value *Compiler::get_async_frame_var_alive_ptr(Function *fn, AsyncStateMachine &machine,
+                                                     ast::Node *node) {
+    auto it = machine.frame_var_alive_index.find(node);
+    if (it == machine.frame_var_alive_index.end()) {
+        return nullptr;
+    }
+    return m_ctx->llvm_builder->CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
+                                                it->second);
+}
+
+static bool is_same_async_frame_field_ptr(llvm::Value *ptr, AsyncStateMachine &machine,
+                                          int field_index) {
+    if (!ptr) {
+        return false;
+    }
+    auto stripped = ptr->stripPointerCasts();
+    auto gep = llvm::dyn_cast<llvm::GEPOperator>(stripped);
+    if (!gep || gep->getPointerOperand() != machine.frame_ptr) {
+        return false;
+    }
+    if (gep->getNumIndices() != 2) {
+        return false;
+    }
+    auto idx_it = gep->idx_begin();
+    auto zero_index = llvm::dyn_cast<llvm::ConstantInt>(idx_it->get());
+    ++idx_it;
+    auto field = llvm::dyn_cast<llvm::ConstantInt>(idx_it->get());
+    return zero_index && zero_index->isZero() && field &&
+           field->getSExtValue() == field_index;
+}
+
 llvm::Value *Compiler::get_async_frame_await_ptr(Function *fn, AsyncStateMachine &machine,
                                                  ast::Node *await_expr) {
     auto it = machine.frame_await_index.find(await_expr);
     assert(it != machine.frame_await_index.end());
+    return m_ctx->llvm_builder->CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
+                                                it->second);
+}
+
+llvm::Value *Compiler::get_async_frame_await_alive_ptr(Function *fn, AsyncStateMachine &machine,
+                                                       ast::Node *await_expr) {
+    auto it = machine.frame_await_alive_index.find(await_expr);
+    if (it == machine.frame_await_alive_index.end()) {
+        return nullptr;
+    }
     return m_ctx->llvm_builder->CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
                                                 it->second);
 }
@@ -1854,18 +1919,31 @@ void Compiler::initialize_async_frame(Function *fn, AsyncStateMachine &machine, 
     for (auto var : machine.frame_vars) {
         machine.frame_var_index[var] = (int)frame_types.size();
         frame_types.push_back(compile_type(get_async_frame_node_type(var)));
+        if (get_resolver()->type_needs_destruction(get_async_frame_node_type(var))) {
+            machine.frame_var_alive_index[var] = (int)frame_types.size();
+            frame_types.push_back(builder.getInt1Ty());
+        }
     }
     for (auto await_expr : machine.frame_awaits) {
-        auto site = get_resolver()->find_await_site(body);
-        (void)site;
+        auto await_type = get_async_resume_value_type(body, await_expr);
+        machine.frame_await_types[await_expr] = await_type;
         machine.frame_await_index[await_expr] = (int)frame_types.size();
-        frame_types.push_back(compile_type(get_async_resume_value_type(body, await_expr)));
+        frame_types.push_back(compile_type(await_type));
+        if (get_resolver()->type_needs_destruction(await_type)) {
+            machine.frame_await_alive_index[await_expr] = (int)frame_types.size();
+            frame_types.push_back(builder.getInt1Ty());
+        }
     }
 
     machine.frame_struct_type = llvm::StructType::get(llvm_ctx, frame_types);
     auto frame_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(machine.frame_struct_type);
     auto null_ti = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
-    auto dtor_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
+    llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
+    if (async_frame_needs_destruction(machine)) {
+        if (auto dtor = generate_async_frame_destructor(fn, machine)) {
+            dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, builder.getInt8PtrTy());
+        }
+    }
     auto [capture_ptr, payload_ptr] = compile_cxcapture_create((uint32_t)frame_size, null_ti, dtor_ptr);
     machine.frame_capture_ptr = capture_ptr;
     machine.frame_ptr =
@@ -1896,8 +1974,117 @@ void Compiler::initialize_async_frame(Function *fn, AsyncStateMachine &machine, 
         auto llvm_param = fn->llvm_fn->getArg(param_info.llvm_index);
         auto field_ptr = get_async_frame_field_ptr(fn, machine, param);
         builder.CreateStore(llvm_param, field_ptr);
+        if (auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, param)) {
+            builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+        }
         add_var(param, field_ptr);
     }
+}
+
+bool Compiler::async_frame_needs_destruction(AsyncStateMachine &machine) {
+    if (get_resolver()->type_needs_destruction(machine.promise_type)) {
+        return true;
+    }
+    for (auto var : machine.frame_vars) {
+        if (get_resolver()->type_needs_destruction(get_async_frame_node_type(var))) {
+            return true;
+        }
+    }
+    for (auto await_expr : machine.frame_awaits) {
+        auto it = machine.frame_await_types.find(await_expr);
+        if (it != machine.frame_await_types.end() &&
+            get_resolver()->type_needs_destruction(it->second)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void Compiler::destroy_async_frame_slot_if_alive(Function *fn, llvm::Value *slot,
+                                                 llvm::Value *alive_ptr, ChiType *type) {
+    if (!alive_ptr) {
+        compile_destruction_for_type(fn, slot, type);
+        return;
+    }
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto alive = builder.CreateLoad(builder.getInt1Ty(), alive_ptr);
+    auto destroy_b = fn->new_label("async_slot_drop");
+    auto done_b = fn->new_label("async_slot_done");
+    builder.CreateCondBr(alive, destroy_b, done_b);
+    fn->use_label(destroy_b);
+    compile_destruction_for_type(fn, slot, type);
+    builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
+    builder.CreateBr(done_b);
+    fn->use_label(done_b);
+}
+
+Function *Compiler::generate_async_frame_destructor(Function *fn, AsyncStateMachine &machine) {
+    if (!async_frame_needs_destruction(machine)) {
+        return nullptr;
+    }
+
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &llvm_module = *m_ctx->llvm_module;
+
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+    auto fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto fn_name = fmt::format("{}__async_frame_dtor", fn->qualified_name);
+    auto dtor_llvm_fn =
+        llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fn_name, llvm_module);
+    auto dtor_fn = new Function(m_ctx, dtor_llvm_fn, fn->node);
+    dtor_fn->qualified_name = fn_name;
+
+    auto saved_ip = builder.saveIP();
+    auto entry_b = dtor_fn->new_label("_entry");
+    dtor_fn->use_label(entry_b);
+
+    auto data_arg = dtor_llvm_fn->getArg(0);
+    auto frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
+
+    for (int i = (int)machine.frame_awaits.size() - 1; i >= 0; i--) {
+        auto await_expr = machine.frame_awaits[i];
+        auto type_it = machine.frame_await_types.find(await_expr);
+        if (type_it == machine.frame_await_types.end() ||
+            !get_resolver()->type_needs_destruction(type_it->second)) {
+            continue;
+        }
+        auto slot = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr,
+                                            machine.frame_await_index[await_expr]);
+        llvm::Value *alive_ptr = nullptr;
+        auto alive_it = machine.frame_await_alive_index.find(await_expr);
+        if (alive_it != machine.frame_await_alive_index.end()) {
+            alive_ptr = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr, alive_it->second);
+        }
+        destroy_async_frame_slot_if_alive(dtor_fn, slot, alive_ptr, type_it->second);
+    }
+
+    for (int i = (int)machine.frame_vars.size() - 1; i >= 0; i--) {
+        auto var = machine.frame_vars[i];
+        auto var_type = get_async_frame_node_type(var);
+        if (!get_resolver()->type_needs_destruction(var_type)) {
+            continue;
+        }
+        auto slot = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr,
+                                            machine.frame_var_index[var]);
+        llvm::Value *alive_ptr = nullptr;
+        auto alive_it = machine.frame_var_alive_index.find(var);
+        if (alive_it != machine.frame_var_alive_index.end()) {
+            alive_ptr = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr, alive_it->second);
+        }
+        destroy_async_frame_slot_if_alive(dtor_fn, slot, alive_ptr, var_type);
+    }
+
+    if (get_resolver()->type_needs_destruction(machine.promise_type)) {
+        auto promise_ptr = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr, 0);
+        compile_destruction_for_type(dtor_fn, promise_ptr, machine.promise_type);
+    }
+
+    builder.CreateRetVoid();
+    llvm::verifyFunction(*dtor_llvm_fn);
+    builder.restoreIP(saved_ip);
+    return dtor_fn;
 }
 
 void Compiler::initialize_async_dispatcher(Function *fn, AsyncStateMachine &machine) {
@@ -1934,8 +2121,8 @@ llvm::Value *Compiler::get_async_frame_state_ptr(Function *fn, AsyncStateMachine
                                                 machine.frame_state_index);
 }
 
-llvm::Value *Compiler::build_async_frame_lambda(Function *fn, AsyncStateMachine &machine,
-                                                llvm::Function *target_fn) {
+AsyncLambdaValue Compiler::build_async_frame_lambda(Function *fn, AsyncStateMachine &machine,
+                                                    llvm::Function *target_fn) {
     auto &builder = *m_ctx->llvm_builder;
     auto capture_slot =
         builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 1);
@@ -1945,12 +2132,13 @@ llvm::Value *Compiler::build_async_frame_lambda(Function *fn, AsyncStateMachine 
     auto [lambda_alloca, lambda_struct_type_l] =
         compile_cxlambda_init(fn, target_fn, (uint32_t)frame_size);
     compile_cxlambda_set_captures(lambda_alloca, capture_ptr);
-    return builder.CreateLoad(lambda_struct_type_l, lambda_alloca);
+    return {lambda_alloca, builder.CreateLoad(lambda_struct_type_l, lambda_alloca)};
 }
 
-llvm::Value *Compiler::build_async_resume_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
-                                                           int state_id, ChiType *value_type,
-                                                           ast::Node *await_expr) {
+AsyncLambdaValue Compiler::build_async_resume_forwarder_lambda(Function *fn,
+                                                               AsyncStateMachine &machine,
+                                                               int state_id, ChiType *value_type,
+                                                               ast::Node *await_expr) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
     auto &llvm_module = *m_ctx->llvm_module;
@@ -1973,9 +2161,8 @@ llvm::Value *Compiler::build_async_resume_forwarder_lambda(Function *fn, AsyncSt
     auto value_arg = fwd_llvm_fn->getArg(1);
     auto previous_frame_ptr = machine.frame_ptr;
     machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
-
-    auto slot = get_async_frame_await_ptr(fwd_fn, machine, await_expr);
-    compile_store_or_copy(fwd_fn, value_arg, slot, value_type, await_expr);
+    write_async_frame_await_value(fwd_fn, machine, await_expr, RefValue::from_value(value_arg),
+                                  value_type, await_expr);
 
     auto state_ptr = get_async_frame_state_ptr(fwd_fn, machine);
     builder.CreateStore(llvm::ConstantInt::get(builder.getInt32Ty(), state_id), state_ptr);
@@ -1990,11 +2177,12 @@ llvm::Value *Compiler::build_async_resume_forwarder_lambda(Function *fn, AsyncSt
     return build_async_frame_lambda(fn, machine, fwd_llvm_fn);
 }
 
-llvm::Value *Compiler::build_async_try_await_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
-                                                              int state_id,
-                                                              ChiType *settled_type,
-                                                              ast::Node *await_expr,
-                                                              bool is_error) {
+AsyncLambdaValue Compiler::build_async_try_await_forwarder_lambda(Function *fn,
+                                                                  AsyncStateMachine &machine,
+                                                                  int state_id,
+                                                                  ChiType *settled_type,
+                                                                  ast::Node *await_expr,
+                                                                  bool is_error) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
     auto &llvm_module = *m_ctx->llvm_module;
@@ -2042,15 +2230,14 @@ llvm::Value *Compiler::build_async_try_await_forwarder_lambda(Function *fn, Asyn
     if (payload_fields.len > 0) {
         auto payload_ptr = compile_dot_access(fwd_fn, settled_var, variant_member->resolved_type,
                                               payload_fields[0]);
-        compile_store_or_copy(fwd_fn, value_arg, payload_ptr, payload_fields[0]->resolved_type,
-                              await_expr);
+        compile_copy_with_ref(fwd_fn, RefValue::from_value(value_arg), payload_ptr,
+                              payload_fields[0]->resolved_type, await_expr, true);
     }
 
     auto previous_frame_ptr = machine.frame_ptr;
     machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
-    auto slot = get_async_frame_await_ptr(fwd_fn, machine, await_expr);
-    auto settled_value = builder.CreateLoad(settled_type_l, settled_var);
-    compile_store_or_copy(fwd_fn, settled_value, slot, settled_type, await_expr);
+    write_async_frame_await_value(fwd_fn, machine, await_expr, RefValue::from_address(settled_var),
+                                  settled_type, await_expr);
     auto state_ptr = get_async_frame_state_ptr(fwd_fn, machine);
     builder.CreateStore(llvm::ConstantInt::get(builder.getInt32Ty(), state_id), state_ptr);
     emit_dbg_location(fn->node);
@@ -2088,8 +2275,8 @@ void Compiler::collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> 
     }
 }
 
-llvm::Value *Compiler::build_async_rejection_forwarder_lambda(Function *fn,
-                                                              AsyncStateMachine &machine) {
+AsyncLambdaValue Compiler::build_async_rejection_forwarder_lambda(Function *fn,
+                                                                  AsyncStateMachine &machine) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
     auto &llvm_module = *m_ctx->llvm_module;
@@ -2140,11 +2327,41 @@ void Compiler::sync_async_frame_var(Function *fn, AsyncStateMachine &machine, as
 
     auto &builder = *m_ctx->llvm_builder;
     auto frame_ptr = get_async_frame_field_ptr(fn, machine, var);
+    auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, var);
     auto current_ptr = get_var(var);
     auto var_type = get_async_frame_node_type(var);
-    auto current_value = builder.CreateLoad(compile_type(var_type), current_ptr);
-    compile_store_or_copy(fn, current_value, frame_ptr, var_type, var);
+    auto resolved_var_type = var_type;
+    while (resolved_var_type && resolved_var_type->kind == TypeKind::Subtype &&
+           resolved_var_type->data.subtype.final_type) {
+        resolved_var_type = resolved_var_type->data.subtype.final_type;
+    }
+    auto field_index = machine.frame_var_index[var];
+    if (!is_same_async_frame_field_ptr(current_ptr, machine, field_index)) {
+        if (get_resolver()->type_needs_destruction(var_type)) {
+            destroy_async_frame_slot_if_alive(fn, frame_ptr, alive_ptr, var_type);
+        }
+        auto current_value = builder.CreateLoad(compile_type(var_type), current_ptr);
+        compile_store_or_copy(fn, current_value, frame_ptr, var_type, var, false);
+        if (alive_ptr) {
+            builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+        }
+        if (get_resolver()->type_needs_destruction(var_type)) {
+            if (resolved_var_type && resolved_var_type->kind == TypeKind::MoveRef) {
+                builder.CreateStore(llvm::Constant::getNullValue(compile_type(var_type)),
+                                    current_ptr);
+            } else if (get_resolver()->is_non_copyable(var_type)) {
+                auto size = llvm_type_size(compile_type(var_type));
+                builder.CreateMemSet(
+                    current_ptr,
+                    llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                    size, {});
+            } else {
+                compile_destruction_for_type(fn, current_ptr, var_type);
+            }
+        }
+    }
     add_var(var, frame_ptr);
+    fn->async_frame_owned_vars.insert(var);
     local_vars[var] = frame_ptr;
 }
 
@@ -2156,12 +2373,54 @@ void Compiler::flush_async_frame_vars(Function *fn, AsyncStateMachine &machine) 
         }
         auto current_ptr = get_var(var);
         auto frame_ptr = get_async_frame_field_ptr(fn, machine, var);
-        if (current_ptr == frame_ptr) {
+        auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, var);
+        auto field_index = machine.frame_var_index[var];
+        if (is_same_async_frame_field_ptr(current_ptr, machine, field_index)) {
             continue;
         }
         auto var_type = get_async_frame_node_type(var);
+        auto resolved_var_type = var_type;
+        while (resolved_var_type && resolved_var_type->kind == TypeKind::Subtype &&
+               resolved_var_type->data.subtype.final_type) {
+            resolved_var_type = resolved_var_type->data.subtype.final_type;
+        }
+        if (get_resolver()->type_needs_destruction(var_type)) {
+            destroy_async_frame_slot_if_alive(fn, frame_ptr, alive_ptr, var_type);
+        }
         auto current_value = builder.CreateLoad(compile_type(var_type), current_ptr);
-        compile_store_or_copy(fn, current_value, frame_ptr, var_type, var);
+        compile_store_or_copy(fn, current_value, frame_ptr, var_type, var, false);
+        if (alive_ptr) {
+            builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+        }
+        if (get_resolver()->type_needs_destruction(var_type)) {
+            if (resolved_var_type && resolved_var_type->kind == TypeKind::MoveRef) {
+                builder.CreateStore(llvm::Constant::getNullValue(compile_type(var_type)),
+                                    current_ptr);
+            } else if (get_resolver()->is_non_copyable(var_type)) {
+                auto size = llvm_type_size(compile_type(var_type));
+                builder.CreateMemSet(
+                    current_ptr,
+                    llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                    size, {});
+            } else {
+                compile_destruction_for_type(fn, current_ptr, var_type);
+            }
+        }
+    }
+}
+
+void Compiler::write_async_frame_await_value(Function *fn, AsyncStateMachine &machine,
+                                             ast::Node *await_expr, RefValue value,
+                                             ChiType *type, ast::Node *expr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto slot = get_async_frame_await_ptr(fn, machine, await_expr);
+    auto alive_ptr = get_async_frame_await_alive_ptr(fn, machine, await_expr);
+    if (get_resolver()->type_needs_destruction(type)) {
+        destroy_async_frame_slot_if_alive(fn, slot, alive_ptr, type);
+    }
+    compile_copy_with_ref(fn, value, slot, type, expr, false);
+    if (alive_ptr) {
+        builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
     }
 }
 
@@ -2208,7 +2467,6 @@ AsyncResumePoint Compiler::build_async_resume_point(ast::Node *block, int stmt_i
                                                     ast::Node *resume_stmt,
                                                     const AsyncResumePoint *resume_point,
                                                     ast::Node *await_expr,
-                                                    ChiType *value_type,
                                                     ast::Node *continue_block,
                                                     int continue_stmt_index,
                                                     int continue_state_id,
@@ -2234,7 +2492,7 @@ AsyncResumePoint Compiler::build_async_resume_point(ast::Node *block, int stmt_i
         next.continue_state_id = continue_state_id;
         next.tail_return_expr_parent = tail_return_expr_parent;
     }
-    next.resolved_awaits.push_back({await_expr, value_type});
+    next.resolved_awaits.push_back({await_expr});
     return next;
 }
 
@@ -2242,8 +2500,8 @@ void Compiler::emit_async_function_return(Function *fn, AsyncStateMachine &machi
                                           llvm::Value *result_promise_ptr) {
     auto &builder = *m_ctx->llvm_builder;
     if (fn->return_label) {
-        auto result_promise = builder.CreateLoad(machine.promise_struct_type, result_promise_ptr);
-        compile_copy(fn, result_promise, fn->return_value, machine.promise_type, fn->node);
+        compile_copy_with_ref(fn, RefValue::from_address(result_promise_ptr), fn->return_value,
+                              machine.promise_type, fn->node);
         builder.CreateBr(fn->return_label);
     } else {
         builder.CreateRetVoid();
@@ -2300,7 +2558,8 @@ void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int 
                                   llvm::Value *result_promise_ptr) {
     auto &builder = *m_ctx->llvm_builder;
     flush_async_frame_vars(fn, machine);
-    auto promise_value = compile_expr(fn, await_expr->data.await_expr.expr);
+    auto promise_expr = await_expr->data.await_expr.expr;
+    auto promise_ref = compile_expr_ref(fn, promise_expr);
     auto promise_type = get_chitype(await_expr->data.await_expr.expr);
     auto promise_type_l = compile_type(promise_type);
     auto promise_ptr = fn->entry_alloca(promise_type_l, "awaited");
@@ -2309,7 +2568,14 @@ void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int 
         promise_ptr,
         llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
         size, {});
-    compile_copy(fn, promise_value, promise_ptr, promise_type, await_expr->data.await_expr.expr);
+    if (promise_ref.address) {
+        compile_copy_with_ref(fn, promise_ref, promise_ptr, promise_type, promise_expr);
+        if (promise_expr->type == ast::NodeType::FnCallExpr) {
+            compile_destruction_for_type(fn, promise_ref.address, promise_type);
+        }
+    } else {
+        compile_copy(fn, promise_ref.value, promise_ptr, promise_type, promise_expr);
+    }
 
     auto promise_struct = get_resolver()->resolve_struct_type(promise_type);
     std::optional<TypeId> variant_type_id = std::nullopt;
@@ -2326,15 +2592,17 @@ void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int 
             fn, machine, state_id, settled_type, await_expr, false);
         auto err_lambda = build_async_try_await_forwarder_lambda(
             fn, machine, state_id, settled_type, await_expr, true);
-        builder.CreateCall(then_method->llvm_fn, {promise_ptr, ok_lambda});
-        builder.CreateCall(on_reject_method->llvm_fn, {promise_ptr, err_lambda});
+        builder.CreateCall(then_method->llvm_fn, {promise_ptr, ok_lambda.value});
+        builder.CreateCall(on_reject_method->llvm_fn, {promise_ptr, err_lambda.value});
     } else {
         auto ok_lambda =
             build_async_resume_forwarder_lambda(fn, machine, state_id, settled_type, await_expr);
-        builder.CreateCall(then_method->llvm_fn, {promise_ptr, ok_lambda});
+        builder.CreateCall(then_method->llvm_fn, {promise_ptr, ok_lambda.value});
         auto reject_lambda = build_async_rejection_forwarder_lambda(fn, machine);
-        builder.CreateCall(on_reject_method->llvm_fn, {promise_ptr, reject_lambda});
+        builder.CreateCall(on_reject_method->llvm_fn, {promise_ptr, reject_lambda.value});
     }
+
+    compile_destruction_for_type(fn, promise_ptr, promise_type);
 
     emit_async_function_return(fn, machine, result_promise_ptr);
 }
@@ -2395,13 +2663,13 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
         auto frame_ptr = get_async_frame_field_ptr(state_fn, machine, var);
         resumed_locals[var] = frame_ptr;
         add_var(var, frame_ptr);
+        state_fn->async_frame_owned_vars.insert(var);
     }
 
-    auto previous_await_values = m_async_await_values;
+    auto previous_await_refs = m_async_await_refs;
     for (auto &binding : resume_point.resolved_awaits) {
         auto captured_value_ptr = get_async_frame_await_ptr(state_fn, machine, binding.await_expr);
-        auto captured_value = builder.CreateLoad(compile_type(binding.value_type), captured_value_ptr);
-        m_async_await_values[binding.await_expr] = captured_value;
+        m_async_await_refs[binding.await_expr] = RefValue::from_address(captured_value_ptr);
     }
 
     compile_async_block_recursive(state_fn, machine, resume_point.block, resume_point.stmt_index,
@@ -2432,7 +2700,7 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
         builder.CreateRetVoid();
     }
 
-    m_async_await_values = previous_await_values;
+    m_async_await_refs = previous_await_refs;
     for (auto &kv : resumed_locals.data) {
         if (had_shadowed_binding.count(kv.first)) {
             m_ctx->var_table[kv.first] = shadowed_vars[kv.first];
@@ -2551,8 +2819,7 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
         auto settled_type =
             get_async_resume_value_type(if_stmt, promise_expr, promise_site.resume_expr);
         auto next = build_async_resume_point(parent_block, next_stmt_index - 1, if_stmt,
-                                             resume_point, promise_expr, settled_type,
-                                             nullptr, -1, continue_state_id);
+                                             resume_point, promise_expr, nullptr, -1, continue_state_id);
         next.loop_stack = snapshot_async_loop_stack(fn);
         auto state_id = register_async_resume_state(fn, machine, next);
         emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
@@ -2635,7 +2902,7 @@ void Compiler::compile_async_while_recursive(Function *fn, AsyncStateMachine &ma
         auto settled_type =
             get_async_resume_value_type(while_stmt, promise_expr, site.resume_expr);
         auto next = build_async_resume_point(parent_block, stmt_index, while_stmt, resume_point,
-                                             promise_expr, settled_type, nullptr, -1, -1);
+                                             promise_expr, nullptr, -1, -1);
         next.loop_stack = snapshot_async_loop_stack(fn);
         auto state_id = register_async_resume_state(fn, machine, next);
         emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
@@ -2756,10 +3023,16 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
                 compile_assignment_to_type(fn, range.start, get_async_frame_node_type(iter_node));
             compile_store_or_copy(fn, start_value, get_var(iter_node),
                                   get_async_frame_node_type(iter_node), range.start);
+            if (auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, iter_node)) {
+                builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+            }
 
             auto end_value = compile_assignment_to_type(fn, end_node, get_chitype(end_node));
             auto end_ptr = get_async_frame_field_ptr(fn, machine, end_node);
             compile_store_or_copy(fn, end_value, end_ptr, get_chitype(end_node), end_node);
+            if (auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, end_node)) {
+                builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+            }
             add_var(end_node, end_ptr);
             local_vars[end_node] = end_ptr;
         } else if (fixed_array_loop) {
@@ -2772,6 +3045,9 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
             auto iter_begin =
                 builder.CreateCall(get_fn(begin->node)->llvm_fn, {ptr}, "_iter_begin");
             compile_store_or_copy(fn, iter_begin, iter_ptr, get_async_frame_node_type(iter_node), data.expr);
+            if (auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, iter_node)) {
+                builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+            }
         } else if (data.kind == ast::ForLoopKind::Iter) {
             auto container_ptr = compile_dot_ptr(fn, data.expr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
@@ -2784,6 +3060,9 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
             } else {
                 auto iter_val = builder.CreateCall(iter_llvm_fn, {container_ptr}, "_iter_val");
                 compile_store_or_copy(fn, iter_val, iter_ptr, iter_ret_type, data.expr);
+            }
+            if (auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, iter_node)) {
+                builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
             }
             if (data.index_bind) {
                 builder.CreateStore(llvm::ConstantInt::get(
@@ -2970,8 +3249,7 @@ void Compiler::compile_async_switch_recursive(Function *fn, AsyncStateMachine &m
         auto settled_type =
             get_async_resume_value_type(switch_expr, promise_expr, site.resume_expr);
         auto next = build_async_resume_point(parent_block, stmt_index, stmt, resume_point,
-                                             promise_expr, settled_type, nullptr, -1,
-                                             continue_state_id,
+                                             promise_expr, nullptr, -1, continue_state_id,
                                              tail_return ? switch_expr : nullptr);
         next.loop_stack = snapshot_async_loop_stack(fn);
         auto state_id = register_async_resume_state(fn, machine, next);
@@ -3138,6 +3416,15 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
             current_resume = resume_point;
             stmt = resume_point->resume_stmt ? resume_point->resume_stmt : stmt;
         }
+        if (!current_resume && resume_point) {
+            if (stmt->type == ast::NodeType::WhileStmt &&
+                resume_point->block == stmt->data.while_stmt.body) {
+                current_resume = resume_point;
+            } else if (stmt->type == ast::NodeType::ForStmt &&
+                       resume_point->block == stmt->data.for_stmt.body) {
+                current_resume = resume_point;
+            }
+        }
         auto resolved = get_async_resolved_awaits(current_resume, stmt);
 
         if (stmt->type == ast::NodeType::IfExpr) {
@@ -3194,7 +3481,7 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
             auto promise_expr = site.await_expr;
             auto settled_type = get_async_resume_value_type(stmt, promise_expr, site.resume_expr);
             auto next = build_async_resume_point(block, i, stmt, current_resume, promise_expr,
-                                                 settled_type, continue_block,
+                                                 continue_block,
                                                  continue_stmt_index, continue_state_id);
             next.loop_stack = snapshot_async_loop_stack(fn);
             auto state_id = register_async_resume_state(fn, machine, next);
@@ -3228,7 +3515,7 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
         auto promise_expr = site.await_expr;
         auto settled_type = get_async_resume_value_type(data.return_expr, promise_expr, site.resume_expr);
         auto next = build_async_resume_point(block, data.statements.len, data.return_expr,
-                                             return_resume, promise_expr, settled_type,
+                                             return_resume, promise_expr,
                                              continue_block, continue_stmt_index,
                                              continue_state_id, tail_return_expr_parent);
         next.loop_stack = snapshot_async_loop_stack(fn);
@@ -3243,7 +3530,7 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
     if (data.return_expr && tail_return_expr_parent) {
         auto &llvm_builder = *m_ctx->llvm_builder.get();
         auto inner_type = get_chitype(tail_return_expr_parent);
-        auto ret_value = compile_assignment_to_type(fn, data.return_expr, inner_type);
+        auto ret_value = compile_direct_call_arg(fn, data.return_expr, inner_type);
 
         auto promise_struct = get_resolver()->resolve_struct_type(machine.promise_type);
         std::optional<TypeId> variant_type_id = std::nullopt;
@@ -3323,8 +3610,8 @@ void Compiler::compile_async_fn_body(Function *fn) {
         builder.CreateCall(new_method->llvm_fn, {result_promise_ptr});
 
         // Store as return value so the function returns this promise
-        auto result_promise = builder.CreateLoad(promise_struct_type_l, result_promise_ptr);
-        compile_copy(fn, result_promise, fn->return_value, return_type, fn->node);
+        compile_copy_with_ref(fn, RefValue::from_address(result_promise_ptr), fn->return_value,
+                              return_type, fn->node);
 
         fn->async_reject_promise_ptr = result_promise_ptr;
         fn->async_promise_type = return_type;
@@ -3349,8 +3636,9 @@ void Compiler::compile_async_fn_body(Function *fn) {
     emit_dbg_location(fn->node);
     builder.CreateCall(machine.dispatcher_fn, {frame_data_ptr});
 
-    auto result_promise = builder.CreateLoad(promise_struct_type_l, machine.result_promise_ptr);
-    compile_copy(fn, result_promise, fn->return_value, return_type, fn->node);
+    compile_copy_with_ref(fn, RefValue::from_address(machine.result_promise_ptr), fn->return_value,
+                          return_type, fn->node);
+    builder.CreateCall(get_system_fn("cx_capture_release")->llvm_fn, {machine.frame_capture_ptr});
     builder.CreateBr(fn->return_label);
 }
 
@@ -4379,9 +4667,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto try_expr_type = get_chitype(data.expr);
 
         auto try_site = get_resolver()->find_await_site(data.expr);
-        auto try_it = try_site.await_expr ? m_async_await_values.find(try_site.await_expr)
-                                          : m_async_await_values.end();
-        if (try_it != m_async_await_values.end() && get_resolver()->contains_await(data.expr)) {
+        auto try_it = try_site.await_expr ? m_async_await_refs.find(try_site.await_expr)
+                                          : m_async_await_refs.end();
+        if (try_it != m_async_await_refs.end() && get_resolver()->contains_await(data.expr)) {
             auto site = try_site;
             assert(site.await_expr && "async try must contain a resumed await site");
 
@@ -4394,7 +4682,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             auto settled_type_l = compile_type(settled_type);
             auto settled_var = fn->entry_alloca(settled_type_l, "try_await_settled");
-            builder.CreateStore(try_it->second, settled_var);
+            compile_copy_with_ref(fn, try_it->second, settled_var, settled_type, site.await_expr, false);
 
             auto err_member = settled_enum->data.enum_.find_member("Err");
             auto ok_member = settled_enum->data.enum_.find_member("Ok");
@@ -4556,10 +4844,15 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 payload_value =
                     builder.CreateLoad(compile_type(ok_fields[0]->resolved_type), payload_ptr);
             }
-            auto prev_async_values = m_async_await_values;
-            m_async_await_values[site.await_expr] = payload_value;
+            auto prev_async_refs = m_async_await_refs;
+            if (ok_fields.len > 0) {
+                auto payload_ptr = compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
+                m_async_await_refs[site.await_expr] = RefValue::from_address(payload_ptr);
+            } else {
+                m_async_await_refs[site.await_expr] = RefValue{};
+            }
             auto ok_value = compile_expr(fn, data.expr);
-            m_async_await_values = prev_async_values;
+            m_async_await_refs = prev_async_refs;
 
             if (!data.catch_block) {
                 init_result_variant("Ok", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
@@ -4841,9 +5134,14 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     case ast::NodeType::AwaitExpr: {
         // In async continuation context, the resolved value is passed directly
         // via value_arg — return it without compiling the promise expression.
-        auto it = m_async_await_values.find(expr);
-        if (it != m_async_await_values.end()) {
-            return it->second;
+        auto it = m_async_await_refs.find(expr);
+        if (it != m_async_await_refs.end()) {
+            if (it->second.value) {
+                return it->second.value;
+            }
+            assert(it->second.address && "await ref must have value or address");
+            auto &builder = *m_ctx->llvm_builder.get();
+            return builder.CreateLoad(compile_type(get_chitype(expr)), it->second.address);
         }
 
         // Synchronous await fallback for already-resolved promises.
@@ -4989,9 +5287,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto expr_type = get_chitype(data.expr);
             if (expr_type->is_pointer_like()) {
                 // Pointer delete: destroy + free
-                auto ptr = compile_expr(fn, data.expr);
+                auto ref = compile_expr_ref(fn, data.expr);
+                auto &builder = *m_ctx->llvm_builder;
+                auto ptr = ref.address ? builder.CreateLoad(compile_type(expr_type), ref.address)
+                                       : compile_expr(fn, data.expr);
                 auto elem_type = expr_type->get_elem();
                 compile_heap_free(fn, ptr, elem_type);
+                if (ref.address) {
+                    builder.CreateStore(llvm::Constant::getNullValue(compile_type(expr_type)),
+                                        ref.address);
+                }
             } else {
                 // Value delete: destroy in-place, no free
                 auto ref = compile_expr_ref(fn, data.expr);
@@ -5293,6 +5598,21 @@ void Compiler::compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Val
     if (!value)
         return;
     if (expr->escape.moved) {
+        if (expr->type == ast::NodeType::AwaitExpr) {
+            auto it = m_async_await_refs.find(expr);
+            if (it != m_async_await_refs.end() && it->second.address) {
+                if (destruct_old)
+                    compile_destruction_for_type(fn, dest, type);
+                auto &builder = *m_ctx->llvm_builder;
+                auto moved_value = it->second.value;
+                if (!moved_value) {
+                    moved_value = builder.CreateLoad(compile_type(type), it->second.address);
+                }
+                builder.CreateStore(moved_value, dest);
+                builder.CreateStore(llvm::Constant::getNullValue(compile_type(type)), it->second.address);
+                return;
+            }
+        }
         // Moved temporary — destruct old if needed, then bitwise store
         if (destruct_old)
             compile_destruction_for_type(fn, dest, type);
@@ -6426,31 +6746,35 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         }
     }
     case ast::NodeType::FnCallExpr: {
-        auto &builder = *m_ctx->llvm_builder.get();
+        llvm::Value *dest = nullptr;
         if (expr->resolved_outlet) {
-            auto dest = get_var(expr->resolved_outlet);
-            compile_fn_call(fn, expr, nullptr, dest);
-            return RefValue::from_address(dest);
+            dest = get_var(expr->resolved_outlet);
+        } else {
+            dest = compile_alloc(fn, expr);
         }
-        auto ret = compile_fn_call(fn, expr);
-        auto var = compile_alloc(fn, expr);
-        builder.CreateStore(ret, var);
+        compile_fn_call(fn, expr, nullptr, dest);
         emit_dbg_location(expr);
-        return RefValue::from_address(var);
+        return RefValue::from_address(dest);
     }
     // Rvalue expressions - return value only (no meaningful address)
     case ast::NodeType::ParenExpr:
         return compile_expr_ref(fn, expr->data.child_expr);
     case ast::NodeType::IfExpr:
     case ast::NodeType::SwitchExpr:
+    case ast::NodeType::TryExpr:
     case ast::NodeType::BinOpExpr:
     case ast::NodeType::ConstructExpr:
     case ast::NodeType::LiteralExpr:
     case ast::NodeType::UnitExpr:
     case ast::NodeType::TupleExpr:
     case ast::NodeType::CastExpr:
-    case ast::NodeType::AwaitExpr:
+    case ast::NodeType::AwaitExpr: {
+        auto it = m_async_await_refs.find(expr);
+        if (it != m_async_await_refs.end()) {
+            return it->second;
+        }
         return RefValue::from_value(compile_expr(fn, expr));
+    }
     default:
         panic("compile_expr_ref not implemented: {}", PRINT_ENUM(expr->type));
     }
@@ -7627,7 +7951,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto inner_type = get_resolver()->get_promise_value_type(return_type);
                 llvm::Value *ret_value;
                 if (data.expr) {
-                    ret_value = compile_assignment_to_type(fn, data.expr, inner_type);
+                    ret_value = compile_direct_call_arg(fn, data.expr, inner_type);
                 } else {
                     ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
                 }
@@ -7673,7 +7997,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     auto inner_type = get_resolver()->get_promise_value_type(return_type);
                     llvm::Value *ret_value;
                     if (data.expr) {
-                        ret_value = compile_assignment_to_type(fn, data.expr, inner_type);
+                        ret_value = compile_direct_call_arg(fn, data.expr, inner_type);
                     } else {
                         ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
                     }
@@ -7704,6 +8028,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         if (fn->return_label) {
             llvm_builder.CreateBr(fn->return_label);
         } else {
+            emit_cleanup_owners(fn);
             llvm_builder.CreateRetVoid();
         }
         scope->branched = true;
@@ -7740,6 +8065,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 llvm_builder.CreateBr(fn->return_label);
             } else {
                 // Async continuation: just return void
+                emit_cleanup_owners(fn);
                 llvm_builder.CreateRetVoid();
             }
         } else {
@@ -8154,6 +8480,8 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
         auto var = block->cleanup_vars[i];
         if (var == skip_var)
             continue; // Move-returned: skip destruction
+        if (fn->async_frame_owned_vars.count(var))
+            continue; // async frame owns this value; frame destructor handles it
         // Skip variables not yet compiled (e.g. early return before var decl)
         if (!m_ctx->var_table.has_key(var))
             continue;
