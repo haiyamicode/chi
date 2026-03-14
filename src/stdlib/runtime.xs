@@ -1436,21 +1436,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
 
     impl ops.Index<K, V> {
         func index(key: K) &V {
-            if this.buckets == null {
-                panic("map: key not found");
-            }
-            var h = key.hash();
-            var idx = (h % (this.capacity as uint64)) as uint32;
-            unsafe {
-                var node = this.buckets[idx];
-                while node != null {
-                    if node.hash == h && node.key == key {
-                        return &node.value;
-                    }
-                    node = node.next;
-                }
-            }
-            panic("map: key not found");
+            return this.get(move key) ?? panic("map: key not found");
         }
     }
 
