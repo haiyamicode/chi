@@ -126,10 +126,26 @@ try await typed catch mismatch: other 77
 nested delayed caught: error 88
 3level caught: error 33
 cond tt=1005
-cond ft=35
-cond ff=45
-cond tf=115
 try branch tt=1055
 try branch ft=-300
 try branch ff=-400
 try branch tf=56
+cond tf=115
+path 1111=10060
+cond ft=35
+cond ff=45
+path 1110=1006
+path 1101=2072
+path 1100=2006
+path 1011=3035
+path 1010=3091
+path 1001=3038
+path 1000=3040
+path 0111=4061
+path 0110=4062
+path 0101=4007
+path 0100=4040
+path 0011=5072
+path 0010=93
+path 0001=5007
+path 0000=5042

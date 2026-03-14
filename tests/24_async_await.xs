@@ -392,6 +392,13 @@ async func do_condition_await_returns(flag1: bool, flag2: bool, base: int) Promi
     return a + c + 20;
 }
 
+async func run_condition_await_returns_cases() Promise {
+    printf("cond tt={}\n", await do_condition_await_returns(true, true, 5));
+    printf("cond tf={}\n", await do_condition_await_returns(true, false, 5));
+    printf("cond ft={}\n", await do_condition_await_returns(false, true, 5));
+    printf("cond ff={}\n", await do_condition_await_returns(false, false, 5));
+}
+
 func test_branchy_returns() {
     println("=== Branchy returns ===");
 
@@ -411,19 +418,7 @@ func test_branchy_returns() {
 
 func test_condition_await_returns() {
     println("=== Condition await returns ===");
-
-    do_condition_await_returns(true, true, 5).then(func (value: int) {
-        printf("cond tt={}\n", value);
-    });
-    do_condition_await_returns(true, false, 5).then(func (value: int) {
-        printf("cond tf={}\n", value);
-    });
-    do_condition_await_returns(false, true, 5).then(func (value: int) {
-        printf("cond ft={}\n", value);
-    });
-    do_condition_await_returns(false, false, 5).then(func (value: int) {
-        printf("cond ff={}\n", value);
-    });
+    run_condition_await_returns_cases();
 }
 
 // --- Await: bare then logic ---
@@ -692,6 +687,115 @@ async func try_await_branchy(flag1: bool, flag2: bool) Promise<int> {
     };
 }
 
+async func try_await_pathological(flag1: bool, flag2: bool, flag3: bool, flag4: bool,
+                                  base: int) Promise<int> {
+    var root = await delayed_number(base);
+
+    if await delayed_flag(flag1, 211) {
+        if await delayed_flag(flag2, 212) {
+            if await delayed_flag(flag3, 213) {
+                if await delayed_flag(flag4, 214) {
+                    var a = try await settle_resolves_after_delay() catch {
+                        return -1001;
+                    };
+                    return root + a + 10000;
+                }
+
+                return try add_one_sync(await settle_outer_throws()) catch {
+                    return root + 1001;
+                };
+            }
+
+            if await delayed_flag(flag4, 215) {
+                return try await settle_typed_throws() catch TestError as err {
+                    return root + err.code + 2000;
+                };
+            }
+
+            return try await settle_other_throws() catch {
+                return root + 2001;
+            };
+        }
+
+        if await delayed_flag(flag3, 216) {
+            var b = await delayed_number(30);
+            if await delayed_flag(flag4, 217) {
+                return root + b + 3000;
+            }
+
+            var c = try await settle_resolves_after_delay() catch {
+                return -3001;
+            };
+            return root + b + c + 3001;
+        }
+
+        if await delayed_flag(flag4, 225) {
+            return root + 3002 + await delayed_number(31);
+        }
+
+        return root + 3003 + await delayed_number(32);
+    }
+
+    if await delayed_flag(flag2, 218) {
+        if await delayed_flag(flag3, 219) {
+            var d = try add_one_sync(await settle_resolves_after_delay()) catch {
+                return -4001;
+            };
+            if await delayed_flag(flag4, 220) {
+                return root + d + 4000;
+            }
+            return root + d + 4001;
+        }
+
+        if await delayed_flag(flag4, 221) {
+            return try await settle_outer_throws() catch {
+                return root + 4002;
+            };
+        }
+
+        return root + await delayed_number(32) + 4003;
+    }
+
+    if await delayed_flag(flag3, 222) {
+        if await delayed_flag(flag4, 223) {
+            var e = try await settle_typed_throws() catch TestError as err {
+                return root + err.code + 5000;
+            };
+            return e;
+        }
+
+        return root + await delayed_number(33) +
+               try await settle_resolves_after_delay() catch {
+                   return -5001;
+               };
+    }
+
+    if await delayed_flag(flag4, 224) {
+        return root + 5002;
+    }
+
+    return root + await delayed_number(34) + 5003;
+}
+
+async func run_try_await_pathological_cases() Promise {
+    printf("path 1111={}\n", await try_await_pathological(true, true, true, true, 5));
+    printf("path 1110={}\n", await try_await_pathological(true, true, true, false, 5));
+    printf("path 1101={}\n", await try_await_pathological(true, true, false, true, 5));
+    printf("path 1100={}\n", await try_await_pathological(true, true, false, false, 5));
+    printf("path 1011={}\n", await try_await_pathological(true, false, true, true, 5));
+    printf("path 1010={}\n", await try_await_pathological(true, false, true, false, 5));
+    printf("path 1001={}\n", await try_await_pathological(true, false, false, true, 5));
+    printf("path 1000={}\n", await try_await_pathological(true, false, false, false, 5));
+    printf("path 0111={}\n", await try_await_pathological(false, true, true, true, 5));
+    printf("path 0110={}\n", await try_await_pathological(false, true, true, false, 5));
+    printf("path 0101={}\n", await try_await_pathological(false, true, false, true, 5));
+    printf("path 0100={}\n", await try_await_pathological(false, true, false, false, 5));
+    printf("path 0011={}\n", await try_await_pathological(false, false, true, true, 5));
+    printf("path 0010={}\n", await try_await_pathological(false, false, true, false, 5));
+    printf("path 0001={}\n", await try_await_pathological(false, false, false, true, 5));
+    printf("path 0000={}\n", await try_await_pathological(false, false, false, false, 5));
+}
+
 func test_try_await() {
     println("=== try await ===");
 
@@ -799,6 +903,8 @@ func test_try_await() {
             return {};
         }
     );
+
+    run_try_await_pathological_cases();
 
 }
 
