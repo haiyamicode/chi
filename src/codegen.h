@@ -488,6 +488,8 @@ class Compiler {
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
     llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type);
     llvm::Value *compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type);
+    void compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
+                                      ChiType *dest_type, bool destruct_old = false);
     void compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                    ChiType *dest_type);
 

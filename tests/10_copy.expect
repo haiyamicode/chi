@@ -20,28 +20,34 @@ t.id=2, b.id=2
 === Test 5: Optional copy (?T -> ?T) ===
 Traced(1) copied
 a.id=1, c.id=1
-=== Test 6: Optional reassign ===
+=== Test 6: Optional reassign from temp ===
+Traced(1) destroyed
 Traced(4) created
-Traced(1) destroyed
 a.id=4
-=== scope exit ===
-Traced(1) destroyed
-Traced(2) destroyed
-Traced(2) destroyed
+=== Test 7: Optional reassign from var ===
+Traced(5) created
 Traced(4) destroyed
-=== Test 7: Any box + destroy ===
+Traced(5) copied
+t2.id=5, a.id=5
+=== scope exit ===
+Traced(5) destroyed
+Traced(1) destroyed
+Traced(2) destroyed
+Traced(2) destroyed
+Traced(5) destroyed
+=== Test 8: Any box + destroy ===
 Traced(1) created
 Traced(1) copied
 --- scope exit ---
 Traced(1) destroyed
-=== Test 8: Any copy ===
+=== Test 9: Any copy ===
 Traced(1) created
 Traced(1) copied
 Traced(1) copied
 --- scope exit ---
 Traced(1) destroyed
 Traced(1) destroyed
-=== Test 9: Any reassign ===
+=== Test 10: Any reassign ===
 Traced(1) created
 Traced(1) copied
 Traced(2) created
@@ -49,15 +55,15 @@ Traced(2) copied
 Traced(1) destroyed
 --- scope exit ---
 Traced(2) destroyed
-=== Test 10: Any move T -> any ===
+=== Test 11: Any move T -> any ===
 Traced(3) created
 Traced(3) copied
 --- scope exit ---
 Traced(3) destroyed
-=== Test 11: Any with string ===
+=== Test 12: Any with string ===
 s=hello world
 --- scope exit ---
-=== Test 12: Any with int (trivial) ===
+=== Test 13: Any with int (trivial) ===
 --- scope exit ---
 deleting direct
 deleting local_b
