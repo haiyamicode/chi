@@ -11,12 +11,16 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <unistd.h>
 #include <sstream>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <uv.h>
+#if __has_include(<ptrauth.h>)
+#include <ptrauth.h>
+#endif
 
 #include "internals.h"
 #include "format.h"
@@ -38,6 +42,10 @@ using namespace cx;
 struct StackTrace {
     string message;
     char trace[8096];
+    string site_file;
+    uint32_t site_line = 0;
+    uint32_t site_col = 0;
+    bool has_site = false;
     // Typed error support (throw/catch)
     void *error_type_info = nullptr;  // TypeInfo* from Error interface
     void *error_data_ptr = nullptr;   // data_ptr from Error interface (heap-allocated struct)
@@ -472,6 +480,23 @@ void cx_panic(CxString *message) {
     throw (void *)NULL;
 }
 
+void cx_set_panic_location(CxString *file, uint32_t line, uint32_t col) {
+    if (!file || !file->data) {
+        return;
+    }
+    st.site_file = string(file->data, file->size);
+    st.site_line = line;
+    st.site_col = col;
+    st.has_site = true;
+}
+
+void cx_clear_panic_location() {
+    st.site_file.clear();
+    st.site_line = 0;
+    st.site_col = 0;
+    st.has_site = false;
+}
+
 void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_id) {
     st.error_type_info = type_info;
     st.error_data_ptr = data_ptr;
@@ -578,8 +603,220 @@ void cx_memset(void *dest, uint8_t value, uint32_t size) { memset(dest, value, s
 
 void signal_handler(int signal_num) {
     print("panic: {}\n", st.message);
+    if (st.has_site) {
+        print("at {}:{}:{}\n", st.site_file, st.site_line, st.site_col);
+    }
     print(st.trace);
     exit(1);
+}
+
+static void terminate_handler() {
+    auto current = std::current_exception();
+    if (current) {
+        try {
+            std::rethrow_exception(current);
+        } catch (void *ptr) {
+            if (ptr == nullptr && !st.message.empty()) {
+                print("panic: {}\n", st.message);
+                if (st.has_site) {
+                    print("at {}:{}:{}\n", st.site_file, st.site_line, st.site_col);
+                }
+                print(st.trace);
+                exit(1);
+            }
+        } catch (...) {
+        }
+    }
+    abort();
+}
+
+static void write_fault_message(const char *msg) {
+    if (!msg) return;
+    size_t len = 0;
+    while (msg[len] != '\0') {
+        len++;
+    }
+    while (len > 0) {
+        auto written = write(STDERR_FILENO, msg, len);
+        if (written <= 0) {
+            break;
+        }
+        msg += written;
+        len -= (size_t)written;
+    }
+}
+
+static void write_fault_hex(uintptr_t value) {
+    char buf[2 + sizeof(uintptr_t) * 2 + 1];
+    static const char *digits = "0123456789abcdef";
+    buf[0] = '0';
+    buf[1] = 'x';
+    for (size_t i = 0; i < sizeof(uintptr_t) * 2; i++) {
+        auto shift = (sizeof(uintptr_t) * 2 - 1 - i) * 4;
+        buf[2 + i] = digits[(value >> shift) & 0xF];
+    }
+    buf[2 + sizeof(uintptr_t) * 2] = '\0';
+    write_fault_message(buf);
+}
+
+static void write_fault_hex_compact(uintptr_t value) {
+    char buf[2 + sizeof(uintptr_t) * 2 + 1];
+    static const char *digits = "0123456789abcdef";
+    int pos = 0;
+    buf[pos++] = '0';
+    buf[pos++] = 'x';
+    bool started = false;
+    for (size_t i = 0; i < sizeof(uintptr_t) * 2; i++) {
+        auto shift = (sizeof(uintptr_t) * 2 - 1 - i) * 4;
+        auto digit = (unsigned)((value >> shift) & 0xF);
+        if (digit != 0 || started || i == sizeof(uintptr_t) * 2 - 1) {
+            buf[pos++] = digits[digit];
+            started = true;
+        }
+    }
+    buf[pos] = '\0';
+    write_fault_message(buf);
+}
+
+static void write_fault_uint(unsigned int value) {
+    char buf[16];
+    int i = 0;
+    if (value == 0) {
+        write_fault_message("0");
+        return;
+    }
+    while (value > 0 && i < (int)sizeof(buf)) {
+        buf[i++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+    while (i > 0) {
+        char ch = buf[--i];
+        auto written = write(STDERR_FILENO, &ch, 1);
+        if (written <= 0) {
+            break;
+        }
+    }
+}
+
+static uintptr_t normalize_fault_ip(uintptr_t ip) {
+#if __has_include(<ptrauth.h>)
+    ip = (uintptr_t)ptrauth_strip((void *)ip, ptrauth_key_return_address);
+#endif
+    return ip;
+}
+
+struct FaultBtContext {
+    uintptr_t ip;
+    bool printed;
+};
+
+static int fault_bt_callback(void *data, uintptr_t, const char *filename, int lineno,
+                             const char *function) {
+    auto ctx = (FaultBtContext *)data;
+    if (!filename && !function) {
+        return 0;
+    }
+
+    write_fault_message("  ");
+    if (filename) {
+        write_fault_message(filename);
+    } else {
+        write_fault_message("<unknown>");
+    }
+    if (lineno > 0) {
+        write_fault_message(":");
+        write_fault_uint((unsigned int)lineno);
+    }
+    if (function) {
+        write_fault_message(" in function ");
+        write_fault_message(function);
+    }
+    write_fault_message("\n");
+    ctx->printed = true;
+    return 0;
+}
+
+static void fault_bt_error_callback(void *, const char *, int) {}
+
+static bool write_fault_unwind_symbol(unw_cursor_t *cursor) {
+    char name[512];
+    unw_word_t offset = 0;
+    if (unw_get_proc_name(cursor, name, sizeof(name), &offset) < 0) {
+        return false;
+    }
+    write_fault_message("  ");
+    write_fault_message(name);
+    write_fault_message(" + ");
+    write_fault_hex_compact((uintptr_t)offset);
+    write_fault_message("\n");
+    return true;
+}
+
+static void write_fault_backtrace(void *ucontext) {
+    write_fault_message("backtrace:\n");
+
+    unw_cursor_t cursor;
+    int init_status = -1;
+#ifdef UNW_INIT_SIGNAL_FRAME
+    if (ucontext) {
+        init_status = unw_init_local2(&cursor, (unw_context_t *)ucontext, UNW_INIT_SIGNAL_FRAME);
+    }
+#endif
+    if (init_status < 0) {
+        unw_context_t context;
+        unw_getcontext(&context);
+        init_status = unw_init_local(&cursor, &context);
+    }
+    if (init_status < 0) {
+        write_fault_message("  <unavailable>\n");
+        return;
+    }
+
+    int printed_depth = 0;
+    for (int depth = 0; depth < 64; depth++) {
+        unw_word_t ip = 0;
+        if (unw_get_reg(&cursor, UNW_REG_IP, &ip) < 0) {
+            break;
+        }
+        auto normalized_ip = normalize_fault_ip((uintptr_t)ip);
+        FaultBtContext bt_ctx{normalized_ip, false};
+        if (depth >= 3) {
+            cx_backtrace_pcinfo(normalized_ip, fault_bt_callback, &bt_ctx);
+            if (!bt_ctx.printed) {
+                bt_ctx.printed = write_fault_unwind_symbol(&cursor);
+            }
+            if (!bt_ctx.printed) {
+                write_fault_message("  ");
+                write_fault_hex(normalized_ip);
+                write_fault_message("\n");
+            }
+            printed_depth++;
+        }
+        auto step = unw_step(&cursor);
+        if (step <= 0) {
+            break;
+        }
+    }
+    if (printed_depth == 0) {
+        write_fault_message("  <unavailable>\n");
+    }
+}
+
+static bool is_probable_null_fault(void *address) {
+    return (uintptr_t)address < 4096;
+}
+
+static void fault_signal_handler(int signal_num, siginfo_t *info, void *ucontext) {
+    (void)ucontext;
+    const char *message = "panic: segmentation fault\n";
+    if (info && is_probable_null_fault(info->si_addr)) {
+        message = "panic: null pointer dereference\n";
+    } else if (signal_num == SIGBUS) {
+        message = "panic: bus error\n";
+    }
+    write_fault_message(message);
+    write_fault_backtrace(ucontext);
+    _exit(1);
 }
 
 void cx_runtime_start(void *stack) {
@@ -593,6 +830,15 @@ void cx_runtime_start(void *stack) {
     }
     if (enable_trace) {
         signal(SIGABRT, signal_handler);
+        std::set_terminate(terminate_handler);
+
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_sigaction = fault_signal_handler;
+        sa.sa_flags = SA_SIGINFO;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGSEGV, &sa, nullptr);
+        sigaction(SIGBUS, &sa, nullptr);
     }
 }
 

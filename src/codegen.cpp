@@ -4364,14 +4364,13 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto has_value_p = builder.CreateStructGEP(opt_type_l, ref.address, 0);
                     auto has_value =
                         builder.CreateLoad(compile_type(get_system_types()->bool_), has_value_p);
-                    auto assert = get_system_fn("assert");
                     emit_dbg_location(expr);
                     auto msg = compile_string_literal("unwrapping null optional");
                     auto opt_msg =
                         compile_conversion(fn, msg, get_system_types()->string,
                                            get_resolver()->get_wrapped_type(
                                                get_system_types()->string, TypeKind::Optional));
-                    auto value = builder.CreateCall(assert->llvm_fn, {has_value, opt_msg});
+                    emit_runtime_assert(fn, has_value, opt_msg, expr);
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
@@ -6710,13 +6709,18 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             if (data.is_suffix) {
                 if (data.op1->resolved_type->kind == TypeKind::Optional) {
                     auto ref = compile_expr_ref(fn, data.op1);
-                    auto has_value_p = builder.CreateStructGEP(
-                        compile_type(data.op1->resolved_type), ref.address, 0);
-                    builder.CreateStore(
-                        llvm::ConstantInt::get(llvm::IntegerType::getInt1Ty(*m_ctx->llvm_ctx), 1),
-                        has_value_p);
-                    auto value_p = builder.CreateStructGEP(compile_type(data.op1->resolved_type),
-                                                           ref.address, 1);
+                    auto opt_type_l = compile_type(data.op1->resolved_type);
+                    auto has_value_p = builder.CreateStructGEP(opt_type_l, ref.address, 0);
+                    auto has_value = builder.CreateLoad(
+                        llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), has_value_p);
+                    emit_dbg_location(expr);
+                    auto msg = compile_string_literal("unwrapping null optional");
+                    auto opt_msg = compile_conversion(
+                        fn, msg, get_system_types()->string,
+                        get_resolver()->get_wrapped_type(
+                            get_system_types()->string, TypeKind::Optional));
+                    emit_runtime_assert(fn, has_value, opt_msg, expr);
+                    auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return RefValue::from_address(value_p);
                 }
                 if (data.resolved_call) {
@@ -6759,13 +6763,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto size_val =
                 llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), fa_size);
             auto cond = builder.CreateICmpULT(subscript, size_val);
-            auto assert_fn = get_system_fn("assert");
             auto msg =
                 compile_string_literal(fmt::format("index out of bounds (size {})", fa_size));
             auto opt_msg = compile_conversion(
                 fn, msg, get_system_types()->string,
                 get_resolver()->get_wrapped_type(get_system_types()->string, TypeKind::Optional));
-            builder.CreateCall(assert_fn->llvm_fn, {cond, opt_msg});
+            emit_runtime_assert(fn, cond, opt_msg, expr);
             emit_dbg_location(expr);
             auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), 0);
             return RefValue::from_address(
@@ -10503,6 +10506,31 @@ void Compiler::emit_dbg_location(ast::Node *node) {
     auto col_no = node->token->pos.col_number();
     builder->SetCurrentDebugLocation(
         llvm::DILocation::get(llvm_ctx, line_no, col_no, scope, nullptr));
+}
+
+void Compiler::emit_runtime_assert(Function *fn, llvm::Value *cond, llvm::Value *opt_msg,
+                                   ast::Node *site) {
+    auto builder = m_ctx->llvm_builder.get();
+    auto assert_fn = get_system_fn("assert");
+    emit_dbg_location(site);
+
+    if (site && site->module && site->token) {
+        auto set_loc_fn = get_system_fn("cx_set_panic_location");
+        auto clear_loc_fn = get_system_fn("cx_clear_panic_location");
+        auto file_value = compile_string_literal(site->module->display_path());
+        auto file_ptr = builder->CreateAlloca(compile_type(get_system_types()->string));
+        builder->CreateStore(file_value, file_ptr);
+        auto line = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx),
+                                           (uint32_t)site->token->pos.line_number());
+        auto col = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx),
+                                          (uint32_t)site->token->pos.col_number());
+        builder->CreateCall(set_loc_fn->llvm_fn, {file_ptr, line, col});
+        builder->CreateCall(assert_fn->llvm_fn, {cond, opt_msg});
+        builder->CreateCall(clear_loc_fn->llvm_fn, {});
+        return;
+    }
+
+    builder->CreateCall(assert_fn->llvm_fn, {cond, opt_msg});
 }
 
 void Compiler::dump_generics_comparison() {

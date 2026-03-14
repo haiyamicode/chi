@@ -51,7 +51,8 @@ TESTS_LIST = 00_fib.test \
 		48_stdlib.test \
 		49_tuple.test \
 		50_async_await_managed.test \
-		52_async_lifecycle_stress.test
+		52_async_lifecycle_stress.test \
+		53_panic.test
 TESTS ?= $(TESTS_LIST)
 CHI = $(BUILD_DIR)/src/bin/chi
 TMP = /tmp/chitests
@@ -220,6 +221,39 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 			failed=1; \
 		fi; \
 		rm -f $(TMP).48_stdlib_$$name.out; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
+
+# Panic tests: each file in testdata/53_panic/*.xs must compile, panic at runtime,
+# and include the expected panic text from `// expect-panic: ...`.
+53_panic.test:
+	echo Test: 53_panic...
+	@failed=0; \
+	for f in testdata/53_panic/*.xs; do \
+		name=$$(basename $$f .xs); \
+		expected=$$(grep '// expect-panic:' $$f | head -1 | sed 's/.*expect-panic: *//'); \
+		if [ -z "$$expected" ]; then \
+			echo "error: missing expect-panic comment in $$name"; \
+			failed=1; continue; \
+		fi; \
+		$(CHI) -o $(TMP).53_panic_$$name -c $$f -w /tmp/chitest_panic_$$name >/tmp/chitest_panic_compile_$$name.out 2>&1; \
+		if [ $$? -ne 0 ]; then \
+			echo "error: $$name failed to compile"; \
+			cat /tmp/chitest_panic_compile_$$name.out; \
+			failed=1; continue; \
+		fi; \
+		$(TMP).53_panic_$$name > $(TMP).53_panic_$$name.out 2>&1; \
+		rc=$$?; \
+		if [ $$rc -eq 0 ]; then \
+			echo "error: $$name should have panicked but exited successfully"; \
+			cat $(TMP).53_panic_$$name.out; \
+			failed=1; \
+		elif ! grep -q "$$expected" $(TMP).53_panic_$$name.out; then \
+			echo "error: $$name wrong panic output (expected '$$expected')"; \
+			cat $(TMP).53_panic_$$name.out; \
+			failed=1; \
+		fi; \
+		rm -f $(TMP).53_panic_$$name.out /tmp/chitest_panic_compile_$$name.out; \
 	done; \
 	if [ "$$failed" = "1" ]; then exit 1; fi
 

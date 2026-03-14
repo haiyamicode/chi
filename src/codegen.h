@@ -704,6 +704,7 @@ class Compiler {
     Function *compile_end_fn();
 
     void emit_dbg_location(ast::Node *node);
+    void emit_runtime_assert(Function *fn, llvm::Value *cond, llvm::Value *opt_msg, ast::Node *site);
     void emit_output();
     void dump_generics_comparison();
 };
