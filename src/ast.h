@@ -311,6 +311,7 @@ struct FnCallExpr {
 };
 
 struct IfExpr {
+    Node *binding_decl = nullptr; // optional VarDecl for if let/var binding
     Node *condition = nullptr;
     Node *then_block = nullptr;
     Node *else_node = nullptr; // can be null, block node, or another if node

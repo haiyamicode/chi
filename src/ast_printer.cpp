@@ -826,6 +826,18 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::IfExpr: {
         auto &data = node->data.if_expr;
         emit("if ");
+        if (data.binding_decl) {
+            auto kind = data.binding_decl->type == NodeType::DestructureDecl
+                            ? data.binding_decl->data.destructure_decl.kind
+                            : data.binding_decl->data.var_decl.kind;
+            emit(kind == VarKind::Mutable ? "var " : "let ");
+            if (data.binding_decl->type == NodeType::DestructureDecl) {
+                print_destructure_pattern(data.binding_decl);
+            } else {
+                emit(data.binding_decl->name);
+            }
+            emit(" = ");
+        }
         auto *cond = data.condition;
         if (cond && cond->type == NodeType::ParenExpr)
             cond = cond->data.child_expr;

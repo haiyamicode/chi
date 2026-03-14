@@ -3096,16 +3096,66 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto cond_type = resolve(data.condition, scope);
-        ensure_temp_owner(data.condition, cond_type, scope);
+        if (data.binding_decl) {
+            if (!cond_type || cond_type->kind != TypeKind::Optional) {
+                error(data.condition, "if let/var requires an optional expression, got '{}'",
+                      cond_type ? format_type_display(cond_type) : "<unknown>");
+            } else {
+                ast::Node *narrow_source = data.condition;
+                if (auto temp_var = ensure_temp_owner(data.condition, cond_type, scope, true)) {
+                    auto temp_ident = create_node(ast::NodeType::Identifier);
+                    temp_ident->token = temp_var->token;
+                    temp_ident->name = temp_var->name;
+                    temp_ident->module = node->module;
+                    temp_ident->parent_fn = scope.parent_fn_node;
+                    temp_ident->data.identifier.decl = temp_var;
+                    temp_ident->resolved_type = cond_type;
+                    narrow_source = temp_ident;
+                }
+                auto &block_data = data.then_block->data.block;
+                if (data.binding_decl->type == NodeType::DestructureDecl) {
+                    auto pattern = data.binding_decl;
+                    auto unwrap_expr = create_node(ast::NodeType::UnaryOpExpr);
+                    unwrap_expr->token = narrow_source->token;
+                    unwrap_expr->module = node->module;
+                    unwrap_expr->parent_fn = scope.parent_fn_node;
+                    unwrap_expr->data.unary_op_expr.is_suffix = true;
+                    unwrap_expr->data.unary_op_expr.op_type = TokenType::LNOT;
+                    unwrap_expr->data.unary_op_expr.op1 = narrow_source;
+                    unwrap_expr->resolved_type = cond_type->get_elem();
+                    pattern->data.destructure_decl.expr = unwrap_expr;
+                    auto then_scope = scope.set_block(&block_data);
+                    resolve(pattern, then_scope);
+                    block_data.implicit_vars.add(pattern);
+                } else {
+                    auto binding =
+                        create_narrowed_var(narrow_source, node, scope, cond_type->get_elem());
+                    binding->name = data.binding_decl->name;
+                    binding->token = data.binding_decl->token;
+                    binding->module = data.binding_decl->module;
+                    binding->parent_fn = scope.parent_fn_node;
+                    binding->data.var_decl.identifier = data.binding_decl->data.var_decl.identifier;
+                    binding->data.var_decl.kind = data.binding_decl->data.var_decl.kind;
+                    if (binding->data.var_decl.identifier) {
+                        binding->data.var_decl.identifier->node = binding;
+                    }
+                    data.binding_decl = binding;
+                    block_data.implicit_vars.add(binding);
+                    block_data.scope->put(binding->name, binding);
+                }
+            }
+        } else {
+            ensure_temp_owner(data.condition, cond_type, scope);
 
-        // Positive narrowing: identifiers narrowed when condition is truthy
-        array<ast::Node *> then_narrowables;
-        collect_narrowables(data.condition, true, then_narrowables);
-        for (auto ident : then_narrowables) {
-            auto var = create_narrowed_var(ident, node, scope);
-            auto &block_data = data.then_block->data.block;
-            block_data.implicit_vars.add(var);
-            block_data.scope->put(var->name, var);
+            // Positive narrowing: identifiers narrowed when condition is truthy
+            array<ast::Node *> then_narrowables;
+            collect_narrowables(data.condition, true, then_narrowables);
+            for (auto ident : then_narrowables) {
+                auto var = create_narrowed_var(ident, node, scope);
+                auto &block_data = data.then_block->data.block;
+                block_data.implicit_vars.add(var);
+                block_data.scope->put(var->name, var);
+            }
         }
 
         check_assignment(data.condition, cond_type, get_system_types()->bool_);
@@ -7759,25 +7809,29 @@ ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
     return node;
 }
 
-ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, ResolveScope &scope) {
-    // Whitelist: only node types that can produce a non-addressable temporary value
-    switch (expr->type) {
-    case NodeType::FnCallExpr:
-    case NodeType::ConstructExpr:
-    case NodeType::IfExpr:
-    case NodeType::SwitchExpr:
-    case NodeType::Block:
-        break;
-    default:
-        return nullptr;
+ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, ResolveScope &scope,
+                                       bool force_addressable) {
+    if (!force_addressable) {
+        // Whitelist: only node types that can produce a non-addressable temporary value
+        switch (expr->type) {
+        case NodeType::FnCallExpr:
+        case NodeType::ConstructExpr:
+        case NodeType::IfExpr:
+        case NodeType::SwitchExpr:
+        case NodeType::Block:
+            break;
+        default:
+            return nullptr;
+        }
     }
     if (is_addressable(expr))
         return nullptr;
     if (expr->resolved_outlet) // already has an outlet (e.g. move_outlet set earlier)
+        return expr->resolved_outlet;
+    if (!force_addressable && expr_type &&
+        expr_type->kind == TypeKind::MoveRef) // &move transfers ownership — no temp
         return nullptr;
-    if (expr_type && expr_type->kind == TypeKind::MoveRef) // &move transfers ownership — no temp
-        return nullptr;
-    if (!should_destroy(expr, expr_type))
+    if (!force_addressable && !should_destroy(expr, expr_type))
         return nullptr;
     if (!scope.block || !scope.parent_fn_node)
         return nullptr;
@@ -7790,8 +7844,10 @@ ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, Reso
 
     expr->resolved_outlet = temp;
     scope.block->stmt_temp_vars.add(temp);
-    scope.block->cleanup_vars.add(temp);
-    scope.parent_fn_def()->has_cleanup = true;
+    if (should_destroy(temp, expr_type)) {
+        add_cleanup_var(scope.block, temp);
+        scope.parent_fn_def()->has_cleanup = true;
+    }
     return temp;
 }
 

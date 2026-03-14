@@ -32,3 +32,18 @@ null: falsy
 ?Point(0,0): truthy
 ?null Point: falsy
 
+test_if_let:
+let point=(10, 20)
+let null else
+maybe_point(true)
+if let expr sum=16
+maybe_point(false)
+if let expr miss=-1
+var point mutated=(11, 22)
+let destructure=(3, 4)
+var destructure mutated=(15, 16)
+maybe_point(true)
+if let destructure expr=16
+field binding mutated=(31, 32)
+field destructure=(31, 32)
+

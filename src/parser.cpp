@@ -2378,7 +2378,29 @@ Node *Parser::parse_if_expr() {
     auto kw = expect(TokenType::KW_IF);
     auto node = create_node(NodeType::IfExpr, kw);
     auto scope = m_ctx->resolver->push_scope(node);
+    if (next_is(TokenType::KW_LET) || next_is(TokenType::KW_VAR)) {
+        auto bind_kw = read();
+        auto kind = bind_kw->type == TokenType::KW_VAR ? VarKind::Mutable : VarKind::Immutable;
+        if (starts_destructure_pattern()) {
+            node->data.if_expr.binding_decl = parse_any_destructure_pattern(kind);
+        } else {
+            auto iden = expect(TokenType::IDEN);
+            auto binding = create_node(NodeType::VarDecl, iden);
+            binding->data.var_decl.identifier = iden;
+            binding->data.var_decl.kind = kind;
+            binding->name = iden->get_name();
+            node->data.if_expr.binding_decl = binding;
+        }
+        expect(TokenType::ASS);
+    }
     node->data.if_expr.condition = parse_expr();
+    if (node->data.if_expr.binding_decl) {
+        if (node->data.if_expr.binding_decl->type == NodeType::DestructureDecl) {
+            register_destructure_bindings(this, node->data.if_expr.binding_decl);
+        } else {
+            add_to_scope(node->data.if_expr.binding_decl);
+        }
+    }
     // Then block: { ... } or => expr
     Token *then_arrow = next_is(TokenType::ARROW) ? read() : nullptr;
     node->data.if_expr.then_block = parse_block(scope, then_arrow);

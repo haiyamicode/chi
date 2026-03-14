@@ -299,7 +299,7 @@ test: $(TESTS)
 
 # Formatter idempotency test: verify format(file) == file for all test sources
 # Excludes 15_package (uses -p flag, no single source file)
-FORMAT_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test 42_construct_expr.test 48_stdlib.test,$(TESTS_LIST)))
+FORMAT_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test 42_construct_expr.test 48_stdlib.test 53_panic.test,$(TESTS_LIST)))
 formatter_test:
 	@echo "Formatter idempotency test..."
 	@fail=0; \

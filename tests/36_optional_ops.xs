@@ -7,6 +7,10 @@ struct Point {
     }
 }
 
+struct PointHolder {
+    point: ?Point = null;
+}
+
 func test_null_coalescing() {
     println("test_null_coalescing:");
 
@@ -144,6 +148,71 @@ func test_optional_truthiness() {
     println("");
 }
 
+func maybe_point(has_value: bool) ?Point {
+    printf("maybe_point({})\n", has_value);
+    if has_value {
+        return Point{x: 7, y: 9};
+    }
+    return null;
+}
+
+func test_if_let() {
+    println("test_if_let:");
+
+    var p: ?Point = Point{x: 10, y: 20};
+    if let point = p {
+        printf("let point=({}, {})\n", point.x, point.y);
+    }
+
+    var q: ?Point = null;
+    if let point = q {
+        printf("unexpected point=({}, {})\n", point.x, point.y);
+    } else {
+        println("let null else");
+    }
+
+    var sum = if let point = maybe_point(true) => point.x + point.y else => -1;
+    printf("if let expr sum={}\n", sum);
+
+    var miss = if let point = maybe_point(false) => point.x + point.y else => -1;
+    printf("if let expr miss={}\n", miss);
+
+    var r: ?Point = Point{x: 1, y: 2};
+    if var point = r {
+        point.x = 11;
+        point.y = 22;
+    }
+    printf("var point mutated=({}, {})\n", r!.x, r!.y);
+
+    var s: ?Point = Point{x: 3, y: 4};
+    if let {x, y} = s {
+        printf("let destructure=({}, {})\n", x, y);
+    }
+
+    var t: ?Point = Point{x: 5, y: 6};
+    if var {&mut x, &mut y} = t {
+        *x = 15;
+        *y = 16;
+    }
+    printf("var destructure mutated=({}, {})\n", t!.x, t!.y);
+
+    var destructured = if let {x, y} = maybe_point(true) => x + y else => -1;
+    printf("if let destructure expr={}\n", destructured);
+
+    var holder = PointHolder{point: Point{x: 21, y: 22}};
+    if var point = holder.point {
+        point.x = 31;
+        point.y = 32;
+    }
+    printf("field binding mutated=({}, {})\n", holder.point!.x, holder.point!.y);
+
+    if let {x, y} = holder.point {
+        printf("field destructure=({}, {})\n", x, y);
+    }
+
+    println("");
+}
+
 func main() {
     test_null_coalescing();
     test_optional_chain_field();
@@ -151,5 +220,6 @@ func main() {
     test_chaining();
     test_null_comparison();
     test_optional_truthiness();
+    test_if_let();
 }
 

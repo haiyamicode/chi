@@ -23,6 +23,68 @@ static ast::Node *resolve_scanned_decl(ast::Node *decl, cx::Scope *scope) {
     return replacement;
 }
 
+static bool cursor_in_node(ast::Node *node, Pos cursor_pos) {
+    if (!node || !node->start_token || !node->end_token) {
+        return false;
+    }
+    return cursor_pos.is_in_range(node->start_token->pos, node->end_token->pos) ||
+           cursor_pos.add_offset(-1).is_in_range(node->start_token->pos, node->end_token->pos);
+}
+
+static cx::Scope *find_stmt_scope(ast::Node *node, Pos cursor_pos, cx::Scope *fallback) {
+    if (!node) {
+        return fallback;
+    }
+
+    switch (node->type) {
+    case ast::NodeType::Block: {
+        auto &block = node->data.block;
+        auto scope = block.scope ? block.scope : fallback;
+        for (auto stmt : block.statements) {
+            if (cursor_in_node(stmt, cursor_pos)) {
+                return find_stmt_scope(stmt, cursor_pos, scope);
+            }
+        }
+        if (cursor_in_node(block.return_expr, cursor_pos)) {
+            return find_stmt_scope(block.return_expr, cursor_pos, scope);
+        }
+        return scope;
+    }
+    case ast::NodeType::IfExpr: {
+        auto &if_expr = node->data.if_expr;
+        if (if_expr.binding_decl && cursor_in_node(if_expr.binding_decl, cursor_pos) &&
+            if_expr.then_block && if_expr.then_block->type == ast::NodeType::Block &&
+            if_expr.then_block->data.block.scope) {
+            return if_expr.then_block->data.block.scope;
+        }
+        if (cursor_in_node(if_expr.then_block, cursor_pos)) {
+            return find_stmt_scope(if_expr.then_block, cursor_pos, fallback);
+        }
+        if (cursor_in_node(if_expr.else_node, cursor_pos)) {
+            return find_stmt_scope(if_expr.else_node, cursor_pos, fallback);
+        }
+        return fallback;
+    }
+    case ast::NodeType::CaseExpr:
+        return find_stmt_scope(node->data.case_expr.body, cursor_pos, fallback);
+    case ast::NodeType::SwitchExpr: {
+        for (auto c : node->data.switch_expr.cases) {
+            if (cursor_in_node(c, cursor_pos)) {
+                return find_stmt_scope(c, cursor_pos, fallback);
+            }
+        }
+        return fallback;
+    }
+    case ast::NodeType::TryExpr:
+        if (cursor_in_node(node->data.try_expr.catch_block, cursor_pos)) {
+            return find_stmt_scope(node->data.try_expr.catch_block, cursor_pos, fallback);
+        }
+        return fallback;
+    default:
+        return fallback;
+    }
+}
+
 Analyzer::Analyzer() { m_ctx.flags = FLAG_SAVE_TOKENS; }
 
 ast::Module *Analyzer::process_source(ast::Package *package, io::Buffer *src,
@@ -306,7 +368,10 @@ static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
     case ast::NodeType::PrefixExpr:
         return find_dot_expr(node->data.prefix_expr.expr, cursor_pos);
     case ast::NodeType::IfExpr: {
-        auto r = find_dot_expr(node->data.if_expr.condition, cursor_pos);
+        auto r = find_dot_expr(node->data.if_expr.binding_decl, cursor_pos);
+        if (r)
+            return r;
+        r = find_dot_expr(node->data.if_expr.condition, cursor_pos);
         if (r)
             return r;
         r = find_dot_expr(node->data.if_expr.then_block, cursor_pos);
@@ -426,7 +491,8 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
     case ast::NodeType::PrefixExpr:
         return find_fn_call(node->data.prefix_expr.expr, cursor_pos, result);
     case ast::NodeType::IfExpr:
-        return find_fn_call(node->data.if_expr.condition, cursor_pos, result) ||
+        return find_fn_call(node->data.if_expr.binding_decl, cursor_pos, result) ||
+               find_fn_call(node->data.if_expr.condition, cursor_pos, result) ||
                find_fn_call(node->data.if_expr.then_block, cursor_pos, result) ||
                find_fn_call(node->data.if_expr.else_node, cursor_pos, result);
     case ast::NodeType::ConstructExpr:
@@ -553,6 +619,7 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                             if (ce)
                                 result->construct_expr = ce;
                             result->stmt = stmt;
+                            result->scope = find_stmt_scope(stmt, cursor_pos, result->scope);
                             return true;
                         }
                     }
@@ -561,6 +628,7 @@ bool Analyzer::scan(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                     if (dot) {
                         result->dot_expr = dot;
                         result->is_dot = true;
+                        result->scope = find_stmt_scope(stmt, cursor_pos, result->scope);
                         return true;
                     }
                     return false;

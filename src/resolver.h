@@ -496,7 +496,8 @@ class Resolver {
 
     // If expr is not addressable and produces a destructible type, materializes
     // a synthetic __tmp VarDecl in scope.block to own it. Returns the temp or nullptr.
-    ast::Node *ensure_temp_owner(ast::Node *expr, ChiType *expr_type, ResolveScope &scope);
+    ast::Node *ensure_temp_owner(ast::Node *expr, ChiType *expr_type, ResolveScope &scope,
+                                 bool force_addressable = false);
 
     ast::Node *create_narrowed_var(ast::Node *identifier, ast::Node *parent_stmt,
                                    ResolveScope &scope, ChiType *narrowed_type = nullptr);
