@@ -53,6 +53,47 @@ static bool decl_emits_trailing_newline(Node *node) {
     }
 }
 
+static bool is_value_context(Node *node) {
+    if (!node || !node->parent)
+        return false;
+
+    auto *parent = node->parent;
+    switch (parent->type) {
+    case NodeType::ReturnStmt:
+    case NodeType::AwaitExpr:
+    case NodeType::ThrowStmt:
+    case NodeType::ParenExpr:
+    case NodeType::TupleExpr:
+    case NodeType::CastExpr:
+    case NodeType::PrefixExpr:
+    case NodeType::UnaryOpExpr:
+    case NodeType::BinOpExpr:
+    case NodeType::FieldInitExpr:
+    case NodeType::FnCallExpr:
+    case NodeType::ConstructExpr:
+    case NodeType::SubtypeExpr:
+    case NodeType::IndexExpr:
+    case NodeType::SliceExpr:
+    case NodeType::RangeExpr:
+    case NodeType::SwitchExpr:
+        return true;
+
+    case NodeType::CaseExpr:
+        return is_value_context(parent);
+
+    case NodeType::IfExpr:
+        if (parent->data.if_expr.then_block == node || parent->data.if_expr.else_node == node)
+            return is_value_context(parent);
+        return true;
+
+    case NodeType::Block:
+        return parent->data.block.return_expr == node || parent->data.block.is_arrow;
+
+    default:
+        return false;
+    }
+}
+
 string AstPrinter::format_to_string() {
     fmt::memory_buffer buf;
     m_buffer = &buf;
@@ -151,8 +192,11 @@ void AstPrinter::print_node(Node *node) {
                 emit(" ");
             }
             auto prev_fn_ret = m_fn_return_type;
+            auto prev_strip_arrow_return = m_strip_arrow_return;
             m_fn_return_type = data.fn_proto ? data.fn_proto->data.fn_proto.return_type : nullptr;
+            m_strip_arrow_return = data.fn_kind == FnKind::Lambda && data.body->data.block.is_arrow;
             print_node(data.body);
+            m_strip_arrow_return = prev_strip_arrow_return;
             m_fn_return_type = prev_fn_ret;
             if (data.fn_kind != FnKind::Lambda) {
                 emit("\n");
@@ -302,6 +346,7 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::Block: {
         auto &data = node->data.block;
         auto is_inline = !data.statements.len && !data.has_braces;
+        bool arrow_value_context = data.is_arrow && (m_strip_arrow_return || is_value_context(node));
         if (data.is_arrow) {
             emit(" => ");
         }
@@ -321,7 +366,7 @@ void AstPrinter::print_node(Node *node) {
         Node *prev_stmt = nullptr;
         for (auto stmt : data.statements) {
             // Arrow lambda bodies: print expression directly without 'return' keyword
-            if (data.is_arrow && stmt->type == NodeType::ReturnStmt &&
+            if (arrow_value_context && stmt->type == NodeType::ReturnStmt &&
                 stmt->data.return_stmt.expr) {
                 print_node(stmt->data.return_stmt.expr);
             } else {

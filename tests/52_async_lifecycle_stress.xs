@@ -47,7 +47,7 @@ async func double_it(value: int) Promise<int> {
 
 async func trace_value_after_delay(value: int) Promise<TraceStressValue> {
     var y = await time.sleep(1);
-    return TraceStressValue{value: value};
+    return TraceStressValue{:value};
 }
 
 async func trace_throw_after_delay() Promise<int> {
@@ -63,7 +63,7 @@ async func complex_stress() Promise<int> {
     printf("TraceStress.value({})\n", first.value);
     total = total + switch await double_it(0) {
         0 => first.value,
-        else => -2000,
+        else => -2000
     };
 
     var i = 0;
@@ -98,9 +98,8 @@ async func complex_stress() Promise<int> {
 }
 
 func main() {
-    complex_stress().then(
-        func (value: int) {
-            printf("stress result={}\n", value);
-        }
-    );
+    complex_stress().then(func (value: int) {
+        printf("stress result={}\n", value);
+    });
 }
+

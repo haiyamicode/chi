@@ -17,6 +17,7 @@ class AstPrinter {
     int m_indent = 0;
     bool m_suppress_func_keyword = false;
     bool m_suppress_construct_type = false;
+    bool m_strip_arrow_return = false;
     Node *m_fn_return_type = nullptr;
     array<Comment> *m_comments = nullptr;
     size_t m_comment_idx = 0;

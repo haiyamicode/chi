@@ -977,7 +977,7 @@ async func trace_async_throw_after_delay() Promise<int> {
 
 async func trace_async_value_after_delay(value: int) Promise<TraceAsyncValue> {
     var y = await time.sleep(215);
-    return TraceAsyncValue{value: value};
+    return TraceAsyncValue{:value};
 }
 
 async func trace_async_lifecycle_probe() Promise<int> {
@@ -1013,20 +1013,22 @@ func add_one_sync(x: int) int {
 
 async func switch_expr_await(tag: int, flip: bool) Promise<int> {
     return switch await double_it(tag) {
-        2 => if await double_it(if flip { 50 } else { 49 }) == 100 { 100 } else { 101 },
+        2 => if await double_it(if flip => 50 else => 49) == 100 => 100 else => 101,
         4 => add_one_sync(await double_it(10)),
-        6 => try add_one_sync(await async_throw_immediate()) catch { -7 },
-        else => switch await double_it(if flip { 2 } else { 3 }) {
-            4 => 400,
-            else => 500,
+        6 => try add_one_sync(await async_throw_immediate()) catch {
+            -7
         },
+        else => switch await double_it(if flip => 2 else => 3) {
+            4 => 400,
+            else => 500
+        }
     };
 }
 
 async func switch_stmt_await(tag: int, flip: bool) Promise<int> {
     switch await double_it(tag) {
         2 => {
-            if await double_it(if flip { 1 } else { 0 }) == 2 {
+            if await double_it(if flip => 1 else => 0) == 2 {
                 return 10;
             }
             return 11;
@@ -1036,10 +1038,12 @@ async func switch_stmt_await(tag: int, flip: bool) Promise<int> {
             return x + 2;
         },
         6 => {
-            return try add_one_sync(await async_throw_immediate()) catch { -30 };
+            return try add_one_sync(await async_throw_immediate()) catch {
+                -30
+            };
         },
         else => {
-            if await double_it(if flip { 2 } else { 3 }) == 4 {
+            if await double_it(if flip => 2 else => 3) == 4 {
                 return 40;
             }
             return 50;
@@ -1073,12 +1077,14 @@ interface AsyncShape {}
 
 struct AsyncCircle {
     radius: int = 0;
+
     impl AsyncShape {}
 }
 
 struct AsyncRect {
     w: int = 0;
     h: int = 0;
+
     impl AsyncShape {}
 }
 
@@ -1109,7 +1115,7 @@ async func type_switch_expr_await(flag: bool) Promise<int> {
     return switch s.(type) {
         &AsyncCircle => await double_it(s.radius + 1),
         &AsyncRect => await double_it(s.w + s.h + 2),
-        else => 88,
+        else => 88
     };
 }
 
@@ -1232,8 +1238,9 @@ async func try_await_branchy(flag1: bool, flag2: bool) Promise<int> {
     };
 }
 
-async func try_await_pathological(flag1: bool, flag2: bool, flag3: bool, flag4: bool,
-                                  base: int) Promise<int> {
+async func try_await_pathological(flag1: bool, flag2: bool, flag3: bool, flag4: bool, base: int) Promise<
+    int
+> {
     var root = await delayed_number(base);
 
     if await delayed_flag(flag1, 211) {
@@ -1309,10 +1316,9 @@ async func try_await_pathological(flag1: bool, flag2: bool, flag3: bool, flag4: 
             return e;
         }
 
-        return root + await delayed_number(33) +
-               try await settle_resolves_after_delay() catch {
-                   return -5001;
-               };
+        return root + await delayed_number(33) + try await settle_resolves_after_delay() catch {
+            return -5001;
+        };
     }
 
     if await delayed_flag(flag4, 224) {
@@ -1464,7 +1470,6 @@ func test_try_await() {
             return {};
         }
     );
-
 }
 
 func test_async_throw_immediate() {
@@ -1679,3 +1684,4 @@ func main() {
 
     println("All tests passed!");
 }
+
