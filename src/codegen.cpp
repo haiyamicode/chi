@@ -1308,15 +1308,20 @@ void Compiler::compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm:
 
 void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                          ChiType *dest_type) {
+    auto saved_outlet = expr->resolved_outlet;
+    expr->resolved_outlet = nullptr;
+
     auto src_type = get_chitype(expr);
     if (dest_type && dest_type->kind == TypeKind::Optional && src_type->kind != TypeKind::Optional &&
         src_type->kind != TypeKind::Null) {
         compile_optional_wrap_to_ptr(fn, expr, dest, dest_type);
+        expr->resolved_outlet = saved_outlet;
         return;
     }
     // RVO: construct directly at destination when types match
     if (expr->type == ast::NodeType::ConstructExpr && src_type == dest_type) {
         compile_construction(fn, dest, dest_type, expr);
+        expr->resolved_outlet = saved_outlet;
         return;
     }
     // RVO: forward dest as sret for function calls (non-lambda, non-optional-chain)
@@ -1327,6 +1332,7 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
                                  fn_call_data.fn_ref_expr->data.dot_expr.is_optional_chain;
         if (!is_lambda && !is_optional_chain) {
             compile_fn_call(fn, expr, nullptr, dest);
+            expr->resolved_outlet = saved_outlet;
             return;
         }
     }
@@ -1334,6 +1340,7 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
     if (value) {
         compile_store_or_copy(fn, value, dest, dest_type, expr);
     }
+    expr->resolved_outlet = saved_outlet;
 }
 
 llvm::Value *Compiler::compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest) {
@@ -4542,14 +4549,29 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 });
         }
         case TokenType::ASS: {
-            auto ref = compile_expr_ref(fn, data.op1);
+            auto assign_target = data.op1;
+            bool unwrap_optional_lhs = false;
+            if (data.op1->type == ast::NodeType::UnaryOpExpr) {
+                auto &lhs_unary = data.op1->data.unary_op_expr;
+                if (lhs_unary.is_suffix && lhs_unary.op_type == TokenType::LNOT &&
+                    lhs_unary.op1 && lhs_unary.op1->resolved_type &&
+                    lhs_unary.op1->resolved_type->kind == TypeKind::Optional) {
+                    assign_target = lhs_unary.op1;
+                    unwrap_optional_lhs = true;
+                }
+            }
+            auto ref = compile_expr_ref(fn, assign_target);
             assert(ref.address);
-            auto dest_type = get_chitype(data.op1);
+            auto dest_type = get_chitype(assign_target);
             auto src_type = get_chitype(data.op2);
             bool destruct_old = !data.is_initializing;
             if (dest_type && dest_type->kind == TypeKind::Optional &&
                 src_type->kind != TypeKind::Optional && src_type->kind != TypeKind::Null) {
                 compile_optional_wrap_to_ptr(fn, data.op2, ref.address, dest_type, destruct_old);
+                if (unwrap_optional_lhs) {
+                    auto value_p = builder.CreateStructGEP(compile_type(dest_type), ref.address, 1);
+                    return builder.CreateLoad(compile_type(dest_type->get_elem()), value_p);
+                }
                 return builder.CreateLoad(compile_type(dest_type), ref.address);
             }
             // Fallback for cloned AST nodes (e.g. subtype variants):
