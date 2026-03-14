@@ -11,6 +11,18 @@ struct PointHolder {
     point: ?Point = null;
 }
 
+enum MaybeValue {
+    Number(int),
+    Coord {
+        x: int;
+        y: int;
+    }
+}
+
+struct EnumHolder {
+    value: MaybeValue = Number{0};
+}
+
 func test_null_coalescing() {
     println("test_null_coalescing:");
 
@@ -213,6 +225,40 @@ func test_if_let() {
     println("");
 }
 
+func test_if_let_enum_pattern() {
+    println("test_if_let_enum_pattern:");
+
+    var number = MaybeValue.Number{42};
+    if let Number(value) = number {
+        printf("enum tuple={}\n", value);
+    }
+
+    var coord = MaybeValue.Coord{x: 3, y: 4};
+    if let Coord{x, y} = coord {
+        printf("enum struct=({}, {})\n", x, y);
+    }
+
+    var enum_source = MaybeValue.Number{55};
+    var enum_sum = if let Number(value) = enum_source => value else => -1;
+    printf("enum expr={}\n", enum_sum);
+
+    var enum_source2 = MaybeValue.Coord{x: 1, y: 2};
+    var enum_miss = if let Number(value) = enum_source2 => value else => -1;
+    printf("enum miss={}\n", enum_miss);
+
+    var coord2 = MaybeValue.Coord{x: 5, y: 6};
+    if let Coord{x, y} = coord2 {
+        printf("enum second struct=({}, {})\n", x, y);
+    }
+
+    var holder = EnumHolder{value: MaybeValue.Coord{x: 7, y: 8}};
+    if let Coord{x, y} = holder.value {
+        printf("enum field=({}, {})\n", x, y);
+    }
+
+    println("");
+}
+
 func main() {
     test_null_coalescing();
     test_optional_chain_field();
@@ -221,5 +267,6 @@ func main() {
     test_null_comparison();
     test_optional_truthiness();
     test_if_let();
+    test_if_let_enum_pattern();
 }
 

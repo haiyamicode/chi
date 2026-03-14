@@ -832,6 +832,9 @@ void AstPrinter::print_node(Node *node) {
                             : data.binding_decl->data.var_decl.kind;
             emit(kind == VarKind::Mutable ? "var " : "let ");
             if (data.binding_decl->type == NodeType::DestructureDecl) {
+                if (data.binding_clause) {
+                    print_node(data.binding_clause);
+                }
                 print_destructure_pattern(data.binding_decl);
             } else {
                 emit(data.binding_decl->name);

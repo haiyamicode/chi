@@ -3097,7 +3097,65 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto cond_type = resolve(data.condition, scope);
         if (data.binding_decl) {
-            if (!cond_type || cond_type->kind != TypeKind::Optional) {
+            if (data.binding_clause) {
+                auto switch_enum = get_enum_type(cond_type);
+                if (!switch_enum || switch_enum->kind != TypeKind::Enum) {
+                    error(data.condition, "if let enum pattern requires an enum expression, got '{}'",
+                          cond_type ? format_type_display(cond_type) : "<unknown>");
+                } else {
+                    auto clause_scope = scope.set_value_type(cond_type);
+                    auto clause_type = resolve(data.binding_clause, clause_scope);
+                    if (!clause_type || clause_type->kind != TypeKind::EnumValue) {
+                        error(data.binding_clause,
+                              "if let enum pattern requires an enum variant clause");
+                    } else if (get_enum_root(clause_type) != get_enum_root(cond_type)) {
+                        error(data.binding_clause, "enum variant '{}' does not belong to '{}'",
+                              format_type_display(clause_type), format_type_display(cond_type));
+                    } else if (data.binding_decl->type != NodeType::DestructureDecl) {
+                        error(data.binding_decl,
+                              "if let enum pattern currently requires destructuring syntax");
+                    } else {
+                        ast::Node *narrow_source = data.condition;
+                        if (auto temp_var = ensure_temp_owner(data.condition, cond_type, scope,
+                                                              true)) {
+                            auto temp_ident = create_node(ast::NodeType::Identifier);
+                            temp_ident->token = temp_var->token;
+                            temp_ident->name = temp_var->name;
+                            temp_ident->module = node->module;
+                            temp_ident->parent_fn = scope.parent_fn_node;
+                            temp_ident->data.identifier.decl = temp_var;
+                            temp_ident->resolved_type = cond_type;
+                            narrow_source = temp_ident;
+                        }
+
+                        auto &block_data = data.then_block->data.block;
+                        auto binding =
+                            create_narrowed_var(narrow_source, node, scope, clause_type);
+                        if (binding->name.empty()) {
+                            binding->name = "__if_let_variant";
+                        }
+                        block_data.implicit_vars.add(binding);
+                        block_data.scope->put(binding->name, binding);
+
+                        auto ident = create_node(NodeType::Identifier);
+                        ident->token = narrow_source->token;
+                        ident->module = narrow_source->module;
+                        ident->parent_fn = scope.parent_fn_node;
+                        ident->name = binding->name;
+                        ident->data.identifier.decl = binding;
+                        ident->data.identifier.kind = ast::IdentifierKind::Value;
+                        ident->resolved_type = clause_type;
+
+                        auto pattern = data.binding_decl;
+                        pattern->parent_fn = scope.parent_fn_node;
+                        pattern->data.destructure_decl.expr = ident;
+
+                        auto then_scope = scope.set_block(&block_data);
+                        resolve(pattern, then_scope);
+                        block_data.implicit_vars.add(pattern);
+                    }
+                }
+            } else if (!cond_type || cond_type->kind != TypeKind::Optional) {
                 error(data.condition, "if let/var requires an optional expression, got '{}'",
                       cond_type ? format_type_display(cond_type) : "<unknown>");
             } else {
@@ -3158,7 +3216,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        check_assignment(data.condition, cond_type, get_system_types()->bool_);
+        if (!data.binding_clause) {
+            check_assignment(data.condition, cond_type, get_system_types()->bool_);
+        }
 
         // Fork flow state for branch-aware analysis
         assert(scope.parent_fn_node);

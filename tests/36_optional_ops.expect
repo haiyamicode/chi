@@ -47,3 +47,11 @@ if let destructure expr=16
 field binding mutated=(31, 32)
 field destructure=(31, 32)
 
+test_if_let_enum_pattern:
+enum tuple=42
+enum struct=(3, 4)
+enum expr=55
+enum miss=-1
+enum second struct=(5, 6)
+enum field=(7, 8)
+

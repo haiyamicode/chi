@@ -5441,7 +5441,19 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
         }
 
-        auto cond = compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
+        llvm::Value *cond = nullptr;
+        if (data.binding_clause) {
+            auto expr_value = compile_comparator(fn, data.condition);
+            auto comparator_type = expr_value->getType();
+            auto clause_value = get_resolver()->resolve_constant_value(data.binding_clause);
+            assert(clause_value);
+            auto cond_value = compile_constant_value(fn, *clause_value,
+                                                     get_chitype(data.binding_clause),
+                                                     comparator_type);
+            cond = builder.CreateICmpEQ(expr_value, cond_value);
+        } else {
+            cond = compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
+        }
         auto then_b = fn->new_label("_if_then");
         auto end_b = fn->new_label("_if_end");
         label_t *else_b = nullptr;

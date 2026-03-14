@@ -2383,6 +2383,9 @@ Node *Parser::parse_if_expr() {
         auto kind = bind_kw->type == TokenType::KW_VAR ? VarKind::Mutable : VarKind::Immutable;
         if (starts_destructure_pattern()) {
             node->data.if_expr.binding_decl = parse_any_destructure_pattern(kind);
+        } else if (looks_like_case_pattern_clause()) {
+            node->data.if_expr.binding_clause = parse_type_expr(true);
+            node->data.if_expr.binding_decl = parse_any_destructure_pattern(kind);
         } else {
             auto iden = expect(TokenType::IDEN);
             auto binding = create_node(NodeType::VarDecl, iden);

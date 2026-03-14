@@ -312,6 +312,7 @@ struct FnCallExpr {
 
 struct IfExpr {
     Node *binding_decl = nullptr; // optional VarDecl for if let/var binding
+    Node *binding_clause = nullptr; // optional enum variant clause for if let pattern matching
     Node *condition = nullptr;
     Node *then_block = nullptr;
     Node *else_node = nullptr; // can be null, block node, or another if node
