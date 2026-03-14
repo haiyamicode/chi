@@ -11,6 +11,11 @@ extern "C" {
 
 
 
+
+
+
+
+
 export func now() uint64 {
     return __cx_time_now();
 }

@@ -15,9 +15,19 @@ extern "C" {
 
 
 
+
+
+
+
+
+
+
 export extern "C" {
     func memcmp(s1: *void, s2: *void, n: uint32) int;
 }
+
+
+
 
 
 

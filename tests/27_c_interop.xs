@@ -14,6 +14,12 @@ extern "C" {
 
 
 
+
+
+
+
+
+
 func test_sqrt() {
     println("testing C sqrt:");
     let result = sqrt(16.0);

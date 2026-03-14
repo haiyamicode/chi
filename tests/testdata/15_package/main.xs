@@ -15,10 +15,17 @@ extern "C" {
 
 
 
+
+
+
+
 // Test C header import with wildcard pattern
 extern "C" {
     import {strcpy, mem*} from "string.h";
 }
+
+
+
 
 
 

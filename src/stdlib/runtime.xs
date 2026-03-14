@@ -88,6 +88,49 @@ extern "C" {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 struct __CxEnumBase<T> {
     private __value: T = undefined;
 
@@ -1127,7 +1170,7 @@ export struct Promise<T = Unit> {
         return this.data.value;
     }
 
-    func error() ?&Error {
+    func error() ?(&Error) {
         return this.data.error?.as_ref();
     }
 
@@ -1278,7 +1321,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    func get(key: K) ?&V {
+    func get(key: K) ?(&V) {
         if this.buckets == null {
             return null;
         }
@@ -1428,3 +1471,4 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 }
+
