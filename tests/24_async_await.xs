@@ -367,6 +367,31 @@ async func do_branchy_returns(flag1: bool, flag2: bool, base: int) Promise<int> 
     return seed + c + 20;
 }
 
+async func delayed_flag(flag: bool, ms: int) Promise<bool> {
+    var y = await time.sleep(ms);
+    return flag;
+}
+
+async func do_condition_await_returns(flag1: bool, flag2: bool, base: int) Promise<int> {
+    var a = await delayed_number(base);
+
+    if await delayed_flag(flag1, 205) {
+        if await delayed_flag(flag2, 206) {
+            return a + 1000;
+        }
+
+        var b = await delayed_number(10);
+        return a + b + 100;
+    }
+
+    var c = await delayed_number(20);
+    if await delayed_flag(flag2, 207) {
+        return a + c + 10;
+    }
+
+    return a + c + 20;
+}
+
 func test_branchy_returns() {
     println("=== Branchy returns ===");
 
@@ -381,6 +406,23 @@ func test_branchy_returns() {
     });
     do_branchy_returns(false, false, 5).then(func (value: int) {
         printf("ff={}\n", value);
+    });
+}
+
+func test_condition_await_returns() {
+    println("=== Condition await returns ===");
+
+    do_condition_await_returns(true, true, 5).then(func (value: int) {
+        printf("cond tt={}\n", value);
+    });
+    do_condition_await_returns(true, false, 5).then(func (value: int) {
+        printf("cond tf={}\n", value);
+    });
+    do_condition_await_returns(false, true, 5).then(func (value: int) {
+        printf("cond ft={}\n", value);
+    });
+    do_condition_await_returns(false, false, 5).then(func (value: int) {
+        printf("cond ff={}\n", value);
     });
 }
 
@@ -624,6 +666,32 @@ async func try_await_nested_catch_err() Promise<int> {
     return value;
 }
 
+async func try_await_branchy(flag1: bool, flag2: bool) Promise<int> {
+    if await delayed_flag(flag1, 208) {
+        var a = try await settle_resolves_after_delay() catch {
+            return -101;
+        };
+
+        if await delayed_flag(flag2, 209) {
+            return a + 1000;
+        }
+
+        return try add_one_sync(await settle_resolves_after_delay()) catch {
+            return -102;
+        };
+    }
+
+    if await delayed_flag(flag2, 210) {
+        return try await settle_outer_throws() catch {
+            return -300;
+        };
+    }
+
+    return try add_one_sync(await settle_outer_throws()) catch {
+        return -400;
+    };
+}
+
 func test_try_await() {
     println("=== try await ===");
 
@@ -700,6 +768,34 @@ func test_try_await() {
     try_await_nested_catch_err().then(
         func (value: int) Unit {
             printf("try await nested catch err: {}\n", value);
+            return {};
+        }
+    );
+
+    try_await_branchy(true, true).then(
+        func (value: int) Unit {
+            printf("try branch tt={}\n", value);
+            return {};
+        }
+    );
+
+    try_await_branchy(true, false).then(
+        func (value: int) Unit {
+            printf("try branch tf={}\n", value);
+            return {};
+        }
+    );
+
+    try_await_branchy(false, true).then(
+        func (value: int) Unit {
+            printf("try branch ft={}\n", value);
+            return {};
+        }
+    );
+
+    try_await_branchy(false, false).then(
+        func (value: int) Unit {
+            printf("try branch ff={}\n", value);
             return {};
         }
     );
@@ -878,6 +974,7 @@ func main() {
     test_await_last();
     test_double_chain();
     test_branchy_returns();
+    test_condition_await_returns();
 
     // Await patterns (async-resolved via event loop)
     test_bare_await();

@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <list>
+#include <map>
 #include <optional>
 #include <set>
 #include <utility>
@@ -212,24 +213,42 @@ struct InvokeInfo {
     bool used = false; // true when an invoke was actually emitted
 };
 
-// Async/await support structures
-struct AsyncSegment {
-    std::vector<ast::Node *> stmts;      // statements in this segment
-    ast::Node *await_expr = nullptr;     // the await that ends this segment (null for final)
-    ast::Node *await_stmt = nullptr;     // the statement containing the await (any kind)
-    ast::Node *await_resume_expr = nullptr; // expression resumed by the callback (AwaitExpr/TryExpr)
-    ChiType *await_value_type = nullptr;    // type received by the continuation callback
-    std::set<ast::Node *> vars_to_capture; // variables needed in later segments
+struct AsyncResumeBinding {
+    ast::Node *await_expr = nullptr;
+    ChiType *value_type = nullptr;
 };
 
-struct AsyncContext {
+struct AsyncResumePoint {
+    ast::Node *block = nullptr;
+    int stmt_index = 0;
+    ast::Node *resume_stmt = nullptr;
+    std::vector<AsyncResumeBinding> resolved_awaits = {};
+};
+
+struct AsyncResumeState {
+    int id = 0;
+    AsyncResumePoint point = {};
+    llvm::Function *worker_fn = nullptr;
+};
+
+struct AsyncStateMachine {
     Function *parent_fn = nullptr;
-    std::vector<AsyncSegment> segments;
-    std::vector<llvm::Function *> continuations;       // LLVM functions for continuations
-    std::vector<Function *> continuation_fn_objects;   // Function objects for codegen
-    llvm::Value *result_promise_ptr = nullptr; // Pointer to the result Promise
-    ChiType *promise_type = nullptr;           // The Promise<T> return type
+    llvm::Value *result_promise_ptr = nullptr;
+    ChiType *promise_type = nullptr;
     llvm::StructType *promise_struct_type = nullptr;
+    llvm::StructType *frame_struct_type = nullptr;
+    llvm::Value *frame_capture_ptr = nullptr;
+    llvm::Value *frame_ptr = nullptr;
+    llvm::Function *dispatcher_fn = nullptr;
+    llvm::SwitchInst *dispatcher_switch = nullptr;
+    bool frame_owner_transferred = false;
+    int frame_state_index = -1;
+    int next_state_id = 1;
+    std::vector<ast::Node *> frame_vars = {};
+    std::vector<ast::Node *> frame_awaits = {};
+    std::vector<AsyncResumeState> states = {};
+    std::map<ast::Node *, int> frame_var_index = {};
+    std::map<ast::Node *, int> frame_await_index = {};
 };
 
 struct CodegenContext {
@@ -316,7 +335,7 @@ class Compiler {
     CodegenContext *m_ctx = nullptr;
     Function *m_fn = nullptr;
     ChiType *m_fn_eval_subtype = nullptr;
-    llvm::Value *m_async_await_value = nullptr; // resolved value in async continuation context
+    std::map<ast::Node *, llvm::Value *> m_async_await_values = {};
 
     llvm::Type *add_type(llvm::Type *type) { return *m_ctx->types.add(type); }
 
@@ -515,30 +534,54 @@ class Compiler {
     ast::Node *get_variant_member_node(ChiStructMember *member, std::optional<TypeId> variant_type_id);
 
     // Async/await codegen
-    std::vector<AsyncSegment> collect_async_segments(Function *fn, ast::Node *body);
     void collect_vars_used_in_node(ast::Node *node, std::set<ast::Node *> &vars);
-    std::pair<llvm::StructType *, std::vector<ast::Node *>> get_continuation_capture_info(
-        AsyncContext &ctx, int segment_index);
-    llvm::Function *create_continuation_fn_decl(AsyncContext &ctx, int segment_index);
-    void generate_async_continuation_body(AsyncContext &ctx, int segment_index);
-    llvm::Value *build_continuation_lambda(Function *fn, AsyncContext &ctx, int segment_index,
-                                           map<ast::Node *, llvm::Value *> &local_vars,
-                                           llvm::Value *result_promise_ptr);
-    llvm::Value *build_result_capture_lambda(Function *fn, AsyncContext &ctx,
-                                             llvm::Function *target_fn,
-                                             llvm::StructType *capture_struct_type,
-                                             uint32_t capture_size,
-                                             llvm::Value *result_promise_ptr,
-                                             const std::vector<ast::Node *> &captured_vars_ordered,
-                                             map<ast::Node *, llvm::Value *> *local_vars);
-    llvm::Value *build_try_await_forwarder_lambda(Function *fn, AsyncContext &ctx, int segment_index,
-                                                  map<ast::Node *, llvm::Value *> &local_vars,
-                                                  llvm::Value *result_promise_ptr, bool is_error);
-    llvm::Value *build_rejection_forwarder_lambda(Function *fn, AsyncContext &ctx,
-                                                  llvm::Value *result_promise_ptr);
-    void emit_promise_chain(Function *fn, AsyncContext &ctx, ast::Node *await_expr,
-                            int next_segment_index, map<ast::Node *, llvm::Value *> &local_vars,
+    bool contains_unresolved_await(ast::Node *node, const std::set<ast::Node *> &resolved);
+    AwaitSite find_unresolved_await_site(ast::Node *node, const std::set<ast::Node *> &resolved);
+    ChiType *get_async_resume_value_type(ast::Node *root, ast::Node *await_expr,
+                                         ast::Node *resume_expr = nullptr);
+    void collect_async_frame_nodes(ast::Node *node, std::vector<ast::Node *> &vars,
+                                   std::vector<ast::Node *> &awaits, std::set<ast::Node *> &seen_vars,
+                                   std::set<ast::Node *> &seen_awaits);
+    void initialize_async_frame(Function *fn, AsyncStateMachine &machine, ast::Node *body);
+    void initialize_async_dispatcher(Function *fn, AsyncStateMachine &machine);
+    llvm::Value *get_async_frame_field_ptr(Function *fn, AsyncStateMachine &machine, ast::Node *node);
+    llvm::Value *get_async_frame_await_ptr(Function *fn, AsyncStateMachine &machine, ast::Node *await_expr);
+    llvm::Value *get_async_frame_state_ptr(Function *fn, AsyncStateMachine &machine);
+    llvm::Value *build_async_frame_lambda(Function *fn, AsyncStateMachine &machine,
+                                          llvm::Function *target_fn);
+    llvm::Value *build_async_resume_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
+                                                     int state_id, ChiType *value_type,
+                                                     ast::Node *await_expr);
+    llvm::Value *build_async_try_await_forwarder_lambda(Function *fn, AsyncStateMachine &machine,
+                                                        int state_id,
+                                                        ChiType *settled_type,
+                                                        ast::Node *await_expr, bool is_error);
+    llvm::Value *build_async_rejection_forwarder_lambda(Function *fn, AsyncStateMachine &machine);
+    void sync_async_frame_var(Function *fn, AsyncStateMachine &machine, ast::Node *var,
+                              map<ast::Node *, llvm::Value *> &local_vars);
+    std::set<ast::Node *> get_async_resolved_awaits(const AsyncResumePoint *resume_point,
+                                                    ast::Node *resume_stmt);
+    AsyncResumePoint build_async_resume_point(ast::Node *block, int stmt_index,
+                                              ast::Node *resume_stmt,
+                                              const AsyncResumePoint *resume_point,
+                                              ast::Node *await_expr, ChiType *value_type);
+    void emit_async_suspend(Function *fn, AsyncStateMachine &machine, int state_id,
+                            ast::Node *await_expr, ChiType *settled_type,
                             llvm::Value *result_promise_ptr);
+    void emit_async_function_return(Function *fn, AsyncStateMachine &machine,
+                                    llvm::Value *result_promise_ptr);
+    int register_async_resume_state(Function *fn, AsyncStateMachine &machine,
+                                    const AsyncResumePoint &resume_point,
+                                    int forced_state_id = -1);
+    void compile_async_block_recursive(Function *fn, AsyncStateMachine &machine, ast::Node *block,
+                                       int stmt_index, map<ast::Node *, llvm::Value *> &local_vars,
+                                       llvm::Value *result_promise_ptr,
+                                        const AsyncResumePoint *resume_point = nullptr);
+    void compile_async_if_recursive(Function *fn, AsyncStateMachine &machine, ast::Node *if_stmt,
+                                    ast::Node *parent_block, int next_stmt_index,
+                                    map<ast::Node *, llvm::Value *> &local_vars,
+                                    llvm::Value *result_promise_ptr,
+                                    const AsyncResumePoint *resume_point = nullptr);
     void compile_async_fn_body(Function *fn);
     void emit_async_reject_landing_pad(Function *fn, llvm::Value *landing);
     void emit_async_promise_reject(Function *fn, llvm::Value *data_ptr, llvm::Value *vtable_ptr);

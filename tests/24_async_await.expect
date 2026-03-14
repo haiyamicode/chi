@@ -53,6 +53,7 @@ value: 198
 === Double chain ===
 value: 12
 === Branchy returns ===
+=== Condition await returns ===
 === Bare await ===
 === Bare then logic ===
 === Multiple bare ===
@@ -90,15 +91,15 @@ scheduled
 === sleep capture ===
 mutated: 999
 All tests passed!
+tt=1006
 bare ok
 x = 15
 after first
-tt=1006
 tf=116
-x still = 15
-after second
 ft=36
 ff=46
+x still = 15
+after second
 after third
 timeout fired
 sleep resolved
@@ -124,3 +125,11 @@ try await typed mismatch: other 77
 try await typed catch mismatch: other 77
 nested delayed caught: error 88
 3level caught: error 33
+cond tt=1005
+cond ft=35
+cond ff=45
+cond tf=115
+try branch tt=1055
+try branch ft=-300
+try branch ff=-400
+try branch tf=56
