@@ -922,13 +922,11 @@ void AstPrinter::print_node(Node *node) {
             emit(" ");
         }
         // Wrap inner type in parens when stacking different sigils for clarity
-        // Skip parens for ?& and ?* — those are common and unambiguous
         auto inner_sigil = data.type->type == NodeType::TypeSigil ? data.type->data.sigil_type.sigil
                                                                   : SigilKind::None;
         bool needs_parens =
             inner_sigil != SigilKind::None && inner_sigil != data.sigil &&
-            !(data.sigil == SigilKind::Optional &&
-              (inner_sigil == SigilKind::Reference || inner_sigil == SigilKind::Pointer)) &&
+            !(data.sigil == SigilKind::Optional && inner_sigil == SigilKind::Pointer) &&
             inner_sigil != SigilKind::FixedArray &&
             inner_sigil != SigilKind::Span;
         if (needs_parens)
