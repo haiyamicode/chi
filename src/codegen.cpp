@@ -2295,8 +2295,17 @@ void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machi
     if (data.else_node && data.else_node->type == ast::NodeType::Block) {
         compile_async_block_recursive(fn, machine, data.else_node, 0, else_locals,
                                       result_promise_ptr, nullptr);
-    }
-    if (!builder.GetInsertBlock()->getTerminator()) {
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, else_locals,
+                                          result_promise_ptr, nullptr);
+            if (!builder.GetInsertBlock()->getTerminator()) {
+                builder.CreateBr(done_b);
+            }
+        }
+    } else if (data.else_node && data.else_node->type == ast::NodeType::IfExpr) {
+        compile_async_if_recursive(fn, machine, data.else_node, parent_block, next_stmt_index,
+                                   else_locals, result_promise_ptr, nullptr);
+    } else if (!data.else_node) {
         compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, else_locals,
                                       result_promise_ptr, nullptr);
         if (!builder.GetInsertBlock()->getTerminator()) {

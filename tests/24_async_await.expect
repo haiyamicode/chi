@@ -54,6 +54,7 @@ value: 198
 value: 12
 === Branchy returns ===
 === Condition await returns ===
+=== Else if await returns ===
 === Bare await ===
 === Bare then logic ===
 === Multiple bare ===
@@ -124,6 +125,7 @@ try await typed catch err: -17
 try await typed mismatch: other 77
 try await typed catch mismatch: other 77
 nested delayed caught: error 88
+elif tt=15
 3level caught: error 33
 cond tt=1005
 try branch tt=1055
@@ -131,8 +133,10 @@ try branch ft=-300
 try branch ff=-400
 try branch tf=56
 cond tf=115
+elif ft=25
 path 1111=10060
 cond ft=35
+elif ff=90
 cond ff=45
 path 1110=1006
 path 1101=2072

@@ -399,6 +399,27 @@ async func run_condition_await_returns_cases() Promise {
     printf("cond ff={}\n", await do_condition_await_returns(false, false, 5));
 }
 
+async func do_else_if_await_returns(flag1: bool, flag2: bool, base: int) Promise<int> {
+    if await delayed_flag(flag1, 226) {
+        return base + 10;
+    } else if await delayed_flag(flag2, 227) {
+        return try await settle_outer_throws() catch {
+            return base + 20;
+        };
+    } else {
+        var value = try await settle_resolves_after_delay() catch {
+            return -1;
+        };
+        return base + value + 30;
+    }
+}
+
+async func run_else_if_await_returns_cases() Promise {
+    printf("elif tt={}\n", await do_else_if_await_returns(true, false, 5));
+    printf("elif ft={}\n", await do_else_if_await_returns(false, true, 5));
+    printf("elif ff={}\n", await do_else_if_await_returns(false, false, 5));
+}
+
 func test_branchy_returns() {
     println("=== Branchy returns ===");
 
@@ -419,6 +440,11 @@ func test_branchy_returns() {
 func test_condition_await_returns() {
     println("=== Condition await returns ===");
     run_condition_await_returns_cases();
+}
+
+func test_else_if_await_returns() {
+    println("=== Else if await returns ===");
+    run_else_if_await_returns_cases();
 }
 
 // --- Await: bare then logic ---
@@ -1081,6 +1107,7 @@ func main() {
     test_double_chain();
     test_branchy_returns();
     test_condition_await_returns();
+    test_else_if_await_returns();
 
     // Await patterns (async-resolved via event loop)
     test_bare_await();
