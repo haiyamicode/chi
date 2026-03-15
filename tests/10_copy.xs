@@ -271,8 +271,8 @@ func test_coalesce_conversion_matrix() {
     println("scope b");
 }
 
-struct MoveHolder {
-    value: MoveOnly;
+struct TracedHolder {
+    value: Traced;
 }
 
 struct MoveMaker {
@@ -291,7 +291,7 @@ func test_optional_chain_conversion_matrix() {
     println("=== Test 18: Optional-chain conversion matrix ===");
 
     println("-- optional chain field --");
-    var h: ?MoveHolder = MoveHolder{value: make_move_only(50)};
+    var h: ?TracedHolder = TracedHolder{value: make_traced(50)};
     var a = h?.value;
     println("scope a");
 

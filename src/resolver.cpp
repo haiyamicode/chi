@@ -1425,7 +1425,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             // NoCopy: error if initializing from a named value
             if (var_type && is_non_copyable(var_type) && is_addressable(data.expr) &&
-                !data.expr->escape.moved) {
+                !data.expr->escape.moved && should_destroy(data.expr, expr_type)) {
                 error(data.expr, errors::TYPE_NOT_COPYABLE,
                       format_type_display(var_type));
             }
@@ -1558,7 +1558,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.op2, t2, t1);
             // NoCopy: error if assigning from a named value
             if (is_non_copyable(t1) && is_addressable(data.op2) &&
-                !data.op2->escape.moved) {
+                !data.op2->escape.moved && should_destroy(data.op2, t2)) {
                 error(data.op2, errors::TYPE_NOT_COPYABLE, format_type_display(t1));
             }
             // RHS is a non-addressable temp (fn call, construct, etc.):
