@@ -4379,42 +4379,29 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto call_return_type = call_data.generated_fn
                                         ? get_chitype(call_data.generated_fn)->data.fn.return_type
                                         : call_data.fn_ref_expr->resolved_type->data.fn.return_type;
-            if (get_resolver()->type_needs_destruction(result_type)) {
-                llvm::Value *var = expr->resolved_outlet
-                                       ? compile_expr_ref(fn, expr->resolved_outlet).address
-                                       : compile_alloc(fn, expr, false);
-                return compile_optional_branch(
-                    fn, dot_data.expr, result_type_l, "optcall",
-                    [&](llvm::Value *) -> llvm::Value * {
-                        if (call_return_type == result_type) {
-                            compile_fn_call(fn, expr, nullptr, var);
-                        } else {
-                            auto has_value_p = builder.CreateStructGEP(result_type_l, var, 0);
-                            builder.CreateStore(
-                                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
-                                has_value_p);
-                            auto value_p = builder.CreateStructGEP(result_type_l, var, 1);
-                            compile_fn_call(fn, expr, nullptr, value_p);
-                        }
-                        return nullptr;
-                    },
-                    [&]() -> llvm::Value * {
-                        builder.CreateStore(llvm::ConstantAggregateZero::get(result_type_l), var);
-                        return nullptr;
-                    },
-                    var);
-            }
+            llvm::Value *var = expr->resolved_outlet
+                                   ? compile_expr_ref(fn, expr->resolved_outlet).address
+                                   : compile_alloc(fn, expr, false);
             return compile_optional_branch(
                 fn, dot_data.expr, result_type_l, "optcall",
-                [&](llvm::Value *) {
-                    auto call_result = compile_fn_call(fn, expr);
-                    // compile_fn_call returns T; wrap T -> ?T if needed
-                    if (call_result->getType() == result_type_l)
-                        return call_result;
-                    return compile_conversion(fn, call_result, result_type->get_elem(),
-                                              result_type);
+                [&](llvm::Value *) -> llvm::Value * {
+                    if (call_return_type == result_type) {
+                        compile_fn_call(fn, expr, nullptr, var);
+                    } else {
+                        auto has_value_p = builder.CreateStructGEP(result_type_l, var, 0);
+                        builder.CreateStore(
+                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
+                            has_value_p);
+                        auto value_p = builder.CreateStructGEP(result_type_l, var, 1);
+                        compile_fn_call(fn, expr, nullptr, value_p);
+                    }
+                    return nullptr;
                 },
-                [&]() -> llvm::Value * { return llvm::ConstantAggregateZero::get(result_type_l); });
+                [&]() -> llvm::Value * {
+                    builder.CreateStore(llvm::ConstantAggregateZero::get(result_type_l), var);
+                    return nullptr;
+                },
+                var);
         }
 
         if (fn->get_def()->has_cleanup || fn->async_reject_promise_ptr) {
