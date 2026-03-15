@@ -4373,8 +4373,37 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         if (call_data.fn_ref_expr->type == ast::NodeType::DotExpr &&
             call_data.fn_ref_expr->data.dot_expr.is_optional_chain) {
             auto &dot_data = call_data.fn_ref_expr->data.dot_expr;
+            auto &builder = *m_ctx->llvm_builder.get();
             auto result_type = get_chitype(expr);
             auto result_type_l = compile_type(result_type);
+            auto call_return_type = call_data.generated_fn
+                                        ? get_chitype(call_data.generated_fn)->data.fn.return_type
+                                        : call_data.fn_ref_expr->resolved_type->data.fn.return_type;
+            if (get_resolver()->type_needs_destruction(result_type)) {
+                llvm::Value *var = expr->resolved_outlet
+                                       ? compile_expr_ref(fn, expr->resolved_outlet).address
+                                       : compile_alloc(fn, expr, false);
+                return compile_optional_branch(
+                    fn, dot_data.expr, result_type_l, "optcall",
+                    [&](llvm::Value *) -> llvm::Value * {
+                        if (call_return_type == result_type) {
+                            compile_fn_call(fn, expr, nullptr, var);
+                        } else {
+                            auto has_value_p = builder.CreateStructGEP(result_type_l, var, 0);
+                            builder.CreateStore(
+                                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
+                                has_value_p);
+                            auto value_p = builder.CreateStructGEP(result_type_l, var, 1);
+                            compile_fn_call(fn, expr, nullptr, value_p);
+                        }
+                        return nullptr;
+                    },
+                    [&]() -> llvm::Value * {
+                        builder.CreateStore(llvm::ConstantAggregateZero::get(result_type_l), var);
+                        return nullptr;
+                    },
+                    var);
+            }
             return compile_optional_branch(
                 fn, dot_data.expr, result_type_l, "optcall",
                 [&](llvm::Value *) {

@@ -151,6 +151,10 @@ scope a
 -- optional chain call --
 MoveOnly(60) created
 scope b
+-- optional chain call traced --
+Traced(70) created
+scope c
+Traced(70) destroyed
 MoveOnly(60) destroyed
 MoveOnly(50) destroyed
 deleting direct

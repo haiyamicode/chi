@@ -271,6 +271,12 @@ struct MoveMaker {
     }
 }
 
+struct TracedMaker {
+    func make(id: int) Traced {
+        return make_traced(id);
+    }
+}
+
 func test_optional_chain_conversion_matrix() {
     println("=== Test 18: Optional-chain conversion matrix ===");
 
@@ -283,6 +289,11 @@ func test_optional_chain_conversion_matrix() {
     var m: ?MoveMaker = MoveMaker{};
     var b = m?.make(60);
     println("scope b");
+
+    println("-- optional chain call traced --");
+    var tm: ?TracedMaker = TracedMaker{};
+    var c = tm?.make(70);
+    println("scope c");
 }
 
 func main() {
