@@ -1193,6 +1193,13 @@ llvm::Value *Compiler::compile_c_string_literal(const string &str) {
 
 llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
                                                   ChiType *dest_type) {
+    if (expr->type == ast::NodeType::CastExpr) {
+        auto &cast_data = expr->data.cast_expr;
+        if (get_chitype(cast_data.expr) == get_chitype(expr) &&
+            (!dest_type || get_chitype(cast_data.expr) == dest_type)) {
+            return compile_assignment_to_type(fn, cast_data.expr, dest_type);
+        }
+    }
     auto src_type = get_chitype(expr);
 
     // Check if src_type has placeholder type params (for generic struct field defaults)
@@ -1377,6 +1384,14 @@ void Compiler::compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm:
 
 void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                          ChiType *dest_type, bool destruct_old) {
+    if (expr->type == ast::NodeType::CastExpr) {
+        auto &cast_data = expr->data.cast_expr;
+        if (get_chitype(cast_data.expr) == get_chitype(expr) &&
+            get_chitype(cast_data.expr) == dest_type) {
+            compile_assignment_to_ptr(fn, cast_data.expr, dest, dest_type, destruct_old);
+            return;
+        }
+    }
     auto saved_outlet = expr->resolved_outlet;
     expr->resolved_outlet = nullptr;
 
@@ -5510,6 +5525,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.cast_expr;
         auto from_type = get_chitype(data.expr);
         auto to_type = get_chitype(expr);
+        if (from_type == to_type) {
+            return compile_expr(fn, data.expr);
+        }
         if (expr->escape.use_owning_coercion) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto tmp = fn->entry_alloca(compile_type(to_type),
@@ -6992,8 +7010,18 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     case ast::NodeType::LiteralExpr:
     case ast::NodeType::UnitExpr:
     case ast::NodeType::TupleExpr:
-    case ast::NodeType::CastExpr:
     case ast::NodeType::AwaitExpr: {
+        auto it = m_async_await_refs.find(expr);
+        if (it != m_async_await_refs.end()) {
+            return it->second;
+        }
+        return RefValue::from_value(compile_expr(fn, expr));
+    }
+    case ast::NodeType::CastExpr: {
+        auto &data = expr->data.cast_expr;
+        if (get_chitype(data.expr) == get_chitype(expr)) {
+            return compile_expr_ref(fn, data.expr);
+        }
         auto it = m_async_await_refs.find(expr);
         if (it != m_async_await_refs.end()) {
             return it->second;

@@ -139,6 +139,11 @@ func test_optional_copy() {
     var cast_e = (move cast_moved_nocopy) as ?MoveOnly;
     println("scope opt e");
 
+    println("-- same-type cast optional --");
+    var same_opt_src: ?Traced = make_traced(17);
+    var same_opt = same_opt_src as ?Traced;
+    println("scope same opt");
+
     println("=== scope exit ===");
 }
 
@@ -245,6 +250,11 @@ func test_any_cast_conversion_matrix() {
     var moved_nocopy = MoveOnly{16};
     var e = (move moved_nocopy) as any;
     println("scope any e");
+
+    println("-- same-type cast any --");
+    var same_any_src: any = make_traced(18);
+    var f = same_any_src as any;
+    println("scope any f");
 }
 
 func test_coalesce_conversion_matrix() {

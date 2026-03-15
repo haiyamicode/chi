@@ -46,7 +46,13 @@ scope opt d
 -- move nocopy cast to optional --
 MoveOnly(11) created
 scope opt e
+-- same-type cast optional --
+Traced(17) created
+Traced(17) copied
+scope same opt
 === scope exit ===
+Traced(17) destroyed
+Traced(17) destroyed
 MoveOnly(11) destroyed
 MoveOnly(10) destroyed
 Traced(9) destroyed
@@ -129,6 +135,12 @@ scope any d
 -- move nocopy cast to any --
 MoveOnly(16) created
 scope any e
+-- same-type cast any --
+Traced(18) created
+Traced(18) copied
+scope any f
+Traced(18) destroyed
+Traced(18) destroyed
 MoveOnly(16) destroyed
 MoveOnly(15) destroyed
 Traced(14) destroyed
