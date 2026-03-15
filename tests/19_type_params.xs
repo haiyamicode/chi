@@ -77,4 +77,3 @@ func main() {
     var added = c1.add(c2);
     printf("added: {}\n", added.get());
 }
-

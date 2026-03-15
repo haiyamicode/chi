@@ -68,4 +68,3 @@ func main() {
     test_comparison();
     test_switch();
 }
-

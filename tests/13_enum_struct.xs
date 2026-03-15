@@ -642,4 +642,3 @@ func main() {
     test_enum_display_override();
     test_switch_statement();
 }
-

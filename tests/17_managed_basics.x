@@ -153,4 +153,3 @@ func main() {
 
     println("\nAll basic features working in managed mode!");
 }
-

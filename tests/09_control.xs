@@ -57,4 +57,3 @@ func main() {
     printf("result for first level: {}\n", result);
     test_if_expr();
 }
-

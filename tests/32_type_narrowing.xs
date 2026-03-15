@@ -458,4 +458,3 @@ func main() {
     dot_this_null();
     dot_this_assert();
 }
-

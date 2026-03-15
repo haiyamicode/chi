@@ -81,4 +81,3 @@ func main() {
     ms[0] = 100;
     printf("arr[0] after span mutation: {}\n", arr[0]);
 }
-

@@ -102,4 +102,3 @@ func main() {
         printf("stress result={}\n", value);
     });
 }
-

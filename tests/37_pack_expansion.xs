@@ -71,4 +71,3 @@ func main() {
     // Single element
     forward(999);
 }
-

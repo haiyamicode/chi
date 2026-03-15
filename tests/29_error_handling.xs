@@ -313,4 +313,3 @@ func main() {
     // Return from catch exits the function
     printf("early return = {}\n", test_catch_return());
 }
-

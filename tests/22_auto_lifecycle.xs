@@ -683,4 +683,3 @@ func main() {
     test_temp_move_semantics();
     println("All tests completed!");
 }
-

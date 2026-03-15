@@ -15,4 +15,3 @@ func main() {
     println("using imported members from sub-module");
     test2();
 }
-

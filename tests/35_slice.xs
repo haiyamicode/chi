@@ -25,4 +25,3 @@ func main() {
     var s6 = arr[0..1];
     printf("s6: {}\n", s6);
 }
-

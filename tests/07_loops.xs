@@ -86,4 +86,3 @@ func main() {
     empty_while();
     while_with_condition();
 }
-

@@ -230,4 +230,3 @@ func main() {
     var w17 = w16.wrap();
     printf("depth_wrap_ok\n");
 }
-

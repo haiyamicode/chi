@@ -163,4 +163,3 @@ func main() {
     printf("\n");
     printf("\nAll lambda inference tests passed!\n");
 }
-

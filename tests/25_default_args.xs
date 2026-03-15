@@ -85,4 +85,3 @@ func main() {
     optional_trailing(1, "hi");
     optional_trailing(2);
 }
-

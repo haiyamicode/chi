@@ -37,4 +37,3 @@ func main() {
     printf("p: {}\n", p);
     test_optional_ref();
 }
-

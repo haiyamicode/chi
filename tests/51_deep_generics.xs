@@ -34,4 +34,3 @@ func main() {
     var d10_copy = d10;
     printf("d10_copy.a_is_null={}\n", d10_copy.value.a == null);
 }
-

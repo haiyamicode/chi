@@ -84,11 +84,11 @@ struct MoveOnly {
 }
 
 func make_traced(id: int) Traced {
-    return Traced{id};
+    return {id};
 }
 
 func make_move_only(id: int) MoveOnly {
-    return MoveOnly{id};
+    return {id};
 }
 
 func test_optional_copy() {

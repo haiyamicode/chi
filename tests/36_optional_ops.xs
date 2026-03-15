@@ -269,4 +269,3 @@ func main() {
     test_if_let();
     test_if_let_enum_pattern();
 }
-

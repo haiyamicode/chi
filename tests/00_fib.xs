@@ -10,4 +10,3 @@ func fib(n: int) int {
     }
     return fib(n - 2) + fib(n - 1);
 }
-

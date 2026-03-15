@@ -230,4 +230,3 @@ func main() {
     test_ref_iteration();
     test_zeroinit();
 }
-

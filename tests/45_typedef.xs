@@ -134,4 +134,3 @@ func main() {
     sm.set("z", 99);
     printf("sm[z]: {}\n", sm["z"]);
 }
-

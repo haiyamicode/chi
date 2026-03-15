@@ -40,4 +40,3 @@ func main() {
     write_msg(&bc, "!!!");
     printf("count after fn: {}\n", bc.count);
 }
-

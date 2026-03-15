@@ -446,4 +446,3 @@ func main() {
 
     println("All managed async tests passed!");
 }
-

@@ -360,4 +360,3 @@ func main() {
 
     printf("\n=== All trait bound tests passed! ===\n");
 }
-

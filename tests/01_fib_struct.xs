@@ -22,4 +22,3 @@ struct Fib {
         return this.fib(n - 2) + this.fib(n - 1);
     }
 }
-

@@ -167,4 +167,3 @@ func main() {
 
     println("Test completed");
 }
-

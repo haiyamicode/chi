@@ -31,4 +31,3 @@ func main() {
     printf("magic_number = {}\n", magic_number);
     printf("module_greeting = {}\n", module_greeting);
 }
-

@@ -3228,6 +3228,7 @@ Node *Parser::parse_extern_decl(DeclSpec *decl_spec) {
         }
         if (token->type == TokenType::RBRACE) {
             consume();
+            node->end_token = token;
             break;
         }
 

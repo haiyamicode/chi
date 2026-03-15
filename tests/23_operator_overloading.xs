@@ -291,4 +291,3 @@ func main() {
 
     test_all_operators();
 }
-

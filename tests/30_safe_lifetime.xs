@@ -736,4 +736,3 @@ func main() {
     test_try_catch_maybe_move();
     test_try_catch_guard();
 }
-

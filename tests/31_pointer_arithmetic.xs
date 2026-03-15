@@ -135,4 +135,3 @@ func main() {
     test_ptr_indexing();
     test_ptr_null_compare();
 }
-

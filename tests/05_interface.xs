@@ -645,4 +645,3 @@ func main() {
     test_struct_embed();
     test_ops_composite();
 }
-

@@ -473,4 +473,3 @@ func main() {
     println("\n-- Mut ref destructure: array --");
     test_mut_ref_array();
 }
-

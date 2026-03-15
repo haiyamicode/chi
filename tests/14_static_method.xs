@@ -99,4 +99,3 @@ func main() {
     var box_str = Wrapper<string>.create("hello");
     printf("Wrapper<string>.create(\"hello\") = {}\n", box_str.get());
 }
-

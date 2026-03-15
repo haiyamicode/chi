@@ -274,4 +274,3 @@ func main() {
     test_string();
     test_box();
 }
-

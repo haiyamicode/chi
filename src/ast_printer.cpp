@@ -47,6 +47,7 @@ static bool decl_emits_trailing_newline(Node *node) {
     case NodeType::StructDecl:
     case NodeType::ImplementBlock:
     case NodeType::EnumDecl:
+    case NodeType::ExternDecl:
         return true;
     default:
         return false;
@@ -153,7 +154,12 @@ void AstPrinter::print_node(Node *node) {
             if (decl->type == NodeType::VarDecl) {
                 emit(";");
             }
-            emit("\n");
+            bool is_last_decl =
+                m_root->data.root.top_level_decls.len > 0 &&
+                decl == m_root->data.root.top_level_decls[m_root->data.root.top_level_decls.len - 1];
+            if (!(is_last_decl && decl_emits_trailing_newline(decl))) {
+                emit("\n");
+            }
             prev_decl = decl;
         }
         // Flush any trailing comments at end of file

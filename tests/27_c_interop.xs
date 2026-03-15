@@ -70,4 +70,3 @@ func main() {
     test_abs();
     test_snprintf();
 }
-

@@ -148,4 +148,3 @@ func main() {
     test_float_modulo();
     printf("All numeric type tests completed!\n");
 }
-

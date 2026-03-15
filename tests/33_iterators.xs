@@ -136,4 +136,3 @@ func main() {
     test_single_element();
     test_manual_iterator();
 }
-

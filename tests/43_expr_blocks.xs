@@ -99,4 +99,3 @@ func main() {
     switch_in_unsafe(1);
     switch_in_unsafe(5);
 }
-

@@ -72,4 +72,3 @@ func main() {
     test_assign_construct();
     test_foo();
 }
-
