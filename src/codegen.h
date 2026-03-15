@@ -488,10 +488,16 @@ class Compiler {
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
     llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type);
     llvm::Value *compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type);
+    bool needs_implicit_owning_conversion(ChiType *src_type, ChiType *dest_type);
+    bool compile_implicit_owning_conversion_to_ptr(Function *fn, ast::Node *expr,
+                                                   llvm::Value *dest, ChiType *dest_type,
+                                                   bool destruct_old = false);
+    void compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
+                                ChiType *dest_type, bool destruct_old = false);
     void compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                       ChiType *dest_type, bool destruct_old = false);
     void compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
-                                   ChiType *dest_type);
+                                   ChiType *dest_type, bool destruct_old = false);
 
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                       array<ast::FnCapture> *captures);

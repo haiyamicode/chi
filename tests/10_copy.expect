@@ -29,41 +29,111 @@ Traced(5) created
 Traced(4) destroyed
 Traced(5) copied
 t2.id=5, a.id=5
+=== Test 8: Optional cast conversion matrix ===
+-- named cast to optional --
+Traced(7) created
+Traced(7) copied
+scope opt a
+-- move cast to optional --
+Traced(8) created
+scope opt b
+-- temp cast to optional --
+Traced(9) created
+scope opt c
+-- temp nocopy cast to optional --
+MoveOnly(10) created
+scope opt d
+-- move nocopy cast to optional --
+MoveOnly(11) created
+scope opt e
 === scope exit ===
+MoveOnly(11) destroyed
+MoveOnly(10) destroyed
+Traced(9) destroyed
+Traced(8) destroyed
+Traced(7) destroyed
+Traced(7) destroyed
 Traced(5) destroyed
 Traced(1) destroyed
 Traced(2) destroyed
 Traced(2) destroyed
 Traced(5) destroyed
-=== Test 8: Any box + destroy ===
+=== Test 9: Any box + destroy ===
+Traced(1) created
+--- scope exit ---
+Traced(1) destroyed
+=== Test 10: Any copy ===
 Traced(1) created
 Traced(1) copied
 --- scope exit ---
 Traced(1) destroyed
-=== Test 9: Any copy ===
-Traced(1) created
-Traced(1) copied
-Traced(1) copied
---- scope exit ---
 Traced(1) destroyed
-Traced(1) destroyed
-=== Test 10: Any reassign ===
+=== Test 11: Any reassign ===
 Traced(1) created
-Traced(1) copied
+Traced(1) destroyed
 Traced(2) created
-Traced(2) copied
-Traced(1) destroyed
 --- scope exit ---
 Traced(2) destroyed
-=== Test 11: Any move T -> any ===
+=== Test 12: Any move T -> any ===
 Traced(3) created
-Traced(3) copied
 --- scope exit ---
 Traced(3) destroyed
-=== Test 12: Any with string ===
+=== Test 13: Any with string ===
 s=hello world
 --- scope exit ---
-=== Test 13: Any with int (trivial) ===
+=== Test 14: Any with int (trivial) ===
 --- scope exit ---
+=== Test 15: Any conversion matrix ===
+-- named init to any --
+Traced(1) created
+Traced(1) copied
+scope a
+-- move init to any --
+Traced(2) created
+scope b
+-- temp init to any --
+Traced(3) created
+scope c
+-- named assign to any --
+Traced(4) created
+Traced(4) copied
+scope d
+-- move assign to any --
+Traced(5) created
+scope e
+-- temp assign to any --
+Traced(6) created
+scope f
+Traced(6) destroyed
+Traced(5) destroyed
+Traced(4) destroyed
+Traced(4) destroyed
+Traced(3) destroyed
+Traced(2) destroyed
+Traced(1) destroyed
+Traced(1) destroyed
+=== Test 16: Any cast conversion matrix ===
+-- named cast to any --
+Traced(12) created
+Traced(12) copied
+scope any a
+-- move cast to any --
+Traced(13) created
+scope any b
+-- temp cast to any --
+Traced(14) created
+scope any c
+-- temp nocopy cast to any --
+MoveOnly(15) created
+scope any d
+-- move nocopy cast to any --
+MoveOnly(16) created
+scope any e
+MoveOnly(16) destroyed
+MoveOnly(15) destroyed
+Traced(14) destroyed
+Traced(13) destroyed
+Traced(12) destroyed
+Traced(12) destroyed
 deleting direct
 deleting local_b
