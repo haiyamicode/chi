@@ -21,8 +21,8 @@ t.id=2, b.id=2
 Traced(1) copied
 a.id=1, c.id=1
 === Test 6: Optional reassign from temp ===
-Traced(1) destroyed
 Traced(4) created
+Traced(1) destroyed
 a.id=4
 === Test 7: Optional reassign from var ===
 Traced(5) created
@@ -70,8 +70,8 @@ Traced(1) destroyed
 Traced(1) destroyed
 === Test 11: Any reassign ===
 Traced(1) created
-Traced(1) destroyed
 Traced(2) created
+Traced(1) destroyed
 --- scope exit ---
 Traced(2) destroyed
 === Test 12: Any move T -> any ===
