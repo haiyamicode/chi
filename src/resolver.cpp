@@ -730,6 +730,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (data.body) {
                 resolve(data.body, local_fn_scope);
                 check_lifetime_constraints(&data);
+                add_fn_body_param_cleanups(node, data.body);
             }
 
             // After body resolution, sync the FnLambda's is_placeholder with the inner Fn type
@@ -842,15 +843,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
 
             check_lifetime_constraints(&data);
-
-            // Add params to cleanup_vars on the body block
-            auto &proto_data = data.fn_proto->data.fn_proto;
-            for (auto param : proto_data.params) {
-                if (should_destroy(param) && !param->escape.is_capture()) {
-                    add_cleanup_var(&data.body->data.block, param);
-                    data.has_cleanup = true;
-                }
-            }
+            add_fn_body_param_cleanups(node, data.body);
         }
         return proto;
     }
@@ -3776,15 +3769,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (auto body = fn_member->data.fn_def.body) {
                     resolve(body, fn_scope);
                     check_lifetime_constraints(&fn_member->data.fn_def);
-
-                    // Add params to cleanup_vars on the body block
-                    auto &proto_data = fn_member->data.fn_def.fn_proto->data.fn_proto;
-                    for (auto param : proto_data.params) {
-                        if (should_destroy(param) && !param->escape.is_capture()) {
-                            add_cleanup_var(&body->data.block, param);
-                            fn_member->data.fn_def.has_cleanup = true;
-                        }
-                    }
+                    add_fn_body_param_cleanups(fn_member, body);
                 }
             };
             for (auto member : data.members) {
@@ -5504,9 +5489,13 @@ bool Resolver::is_addressable(ast::Node *node) {
 
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
-        return data.op_type == TokenType::MUL ||
-               data.op_type == TokenType::KW_MOVE ||
-               (data.op_type == TokenType::LNOT && data.is_suffix && data.resolved_call);
+        if (data.op_type == TokenType::MUL || data.op_type == TokenType::KW_MOVE) {
+            return true;
+        }
+        if (data.op_type == TokenType::LNOT && data.is_suffix) {
+            return data.op1 && is_addressable(data.op1);
+        }
+        return false;
     }
 
     default:
@@ -6900,6 +6889,33 @@ void Resolver::add_cleanup_var(ast::Block *block, ast::Node *var) {
         }
     }
     block->cleanup_vars.add(var);
+}
+
+void Resolver::add_fn_body_param_cleanups(ast::Node *fn_node, ast::Node *body) {
+    if (!fn_node || !body || body->type != NodeType::Block) {
+        return;
+    }
+
+    ast::FnProto *proto = nullptr;
+    bool *has_cleanup = nullptr;
+
+    if (fn_node->type == NodeType::FnDef) {
+        proto = &fn_node->data.fn_def.fn_proto->data.fn_proto;
+        has_cleanup = &fn_node->data.fn_def.has_cleanup;
+    } else if (fn_node->type == NodeType::GeneratedFn) {
+        proto = &fn_node->data.generated_fn.fn_proto->data.fn_proto;
+    } else {
+        return;
+    }
+
+    for (auto param : proto->params) {
+        if (should_destroy(param) && !param->escape.is_capture()) {
+            add_cleanup_var(&body->data.block, param);
+            if (has_cleanup) {
+                *has_cleanup = true;
+            }
+        }
+    }
 }
 
 ChiType *Resolver::get_enum_type(ChiType *type) {

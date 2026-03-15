@@ -7183,7 +7183,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             // User arguments always start from parameter index 1 (after binding struct)
             int param_index = i + 1;
             auto param_type = fn_spec.get_param_at(param_index);
-            args.push_back(compile_assignment_to_type(fn, arg, param_type));
+            args.push_back(compile_arg_for_call(fn, arg, param_type));
         }
 
         llvm::FunctionCallee callee(bound_fn_type_l, fn_ptr);

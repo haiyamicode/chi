@@ -154,6 +154,7 @@ try await typed catch mismatch: other 77
 nested delayed caught: error 88
 TraceAsyncValue.copy(1)
 TraceAsyncValue.copy(1)
+TraceAsyncValue.copy(1)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.got(1)
 TraceAsyncValue.delete(1)
@@ -163,6 +164,7 @@ type try rect=-200
 cond tt=1005
 trace caught: trace 30
 trace lifecycle=1
+TraceAsyncValue.copy(2)
 TraceAsyncValue.copy(2)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.copy(2)

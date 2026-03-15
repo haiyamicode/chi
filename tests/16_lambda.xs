@@ -20,6 +20,33 @@ struct TrackedBox {
     }
 }
 
+struct SharedTrackedBox {
+    value: int = 0;
+
+    mut func delete() {
+        printf("SharedTrackedBox.delete value={}\n", this.value);
+    }
+
+    impl ops.Copy {
+        mut func copy(source: &This) {
+            this.value = source.value;
+            printf("SharedTrackedBox.copy value={}\n", source.value);
+        }
+    }
+}
+
+struct SharedCallbackHolder {
+    payload: ?Shared<SharedTrackedBox> = null;
+    callback: ?func (item: Shared<SharedTrackedBox>) Unit = null;
+
+    mut func fire() {
+        printf("before call ref={}\n", this.payload!.ref_count());
+        this.callback!(this.payload!);
+        printf("after call ref={}\n", this.payload!.ref_count());
+        this.callback = null;
+    }
+}
+
 func test_basic_lambda() {
     println("testing basic lambda:");
     var simple_lambda = func () {
@@ -367,6 +394,22 @@ func test_lambda_return_capture() {
     println("");
 }
 
+func test_lambda_value_param_lifecycle() {
+    println("testing lambda value param lifecycle:");
+    var h = SharedCallbackHolder{};
+    h.payload = Shared<SharedTrackedBox>.from_value({value: 7});
+    printf("initial ref={}\n", h.payload!.ref_count());
+    h.callback = func (item: Shared<SharedTrackedBox>) Unit {
+        printf("callback ref={} value={}\n", item.ref_count(), item.as_ref().value);
+        return {};
+    };
+    h.fire();
+    printf("final ref={}\n", h.payload!.ref_count());
+    h.payload = null;
+    println("cleared payload");
+    println("");
+}
+
 func main() {
     test_basic_lambda();
     test_lambda_capture();
@@ -380,6 +423,6 @@ func main() {
     test_lambda_capture_lifecycle();
     test_void_to_unit_conversion();
     test_lambda_return_capture();
+    test_lambda_value_param_lifecycle();
     println("All lambda tests completed!");
 }
-

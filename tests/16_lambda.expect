@@ -71,4 +71,15 @@ TrackedBox(7) destroyed
 f() = 7
 
 TrackedBox(7) destroyed
+testing lambda value param lifecycle:
+SharedTrackedBox.copy value=7
+SharedTrackedBox.delete value=7
+initial ref=1
+before call ref=1
+callback ref=2 value=7
+after call ref=1
+final ref=1
+SharedTrackedBox.delete value=7
+cleared payload
+
 All lambda tests completed!
