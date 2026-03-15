@@ -2044,7 +2044,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.cast_expr;
         auto dest_type = resolve_value(data.dest_type, scope);
         auto from_type = resolve(data.expr, scope);
+        node->escape.use_owning_coercion = use_implicit_owning_coercion(from_type, dest_type);
         ensure_temp_owner(data.expr, from_type, scope);
+        if (data.expr) {
+            if (node->escape.use_owning_coercion &&
+                !data.expr->escape.moved && !is_addressable(data.expr) &&
+                should_destroy(data.expr, from_type)) {
+                data.expr->escape.moved = true;
+            }
+            if (data.expr->escape.moved) {
+                node->escape.moved = true;
+            }
+        }
         if (!scope.is_unsafe_block &&
             (from_type->is_raw_pointer() || dest_type->is_raw_pointer())) {
             error(node, "pointer cast requires unsafe block");
@@ -2224,7 +2235,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ParenExpr: {
         auto &child = node->data.child_expr;
-        return resolve(child, scope);
+        auto type = resolve(child, scope);
+        if (child && child->escape.moved) {
+            node->escape.moved = true;
+        }
+        return type;
     }
     case NodeType::UnitExpr: {
         return get_system_types()->unit;
@@ -6016,6 +6031,38 @@ bool Resolver::should_destroy(ast::Node *node, ChiType *type_override) {
     return type_needs_destruction(resolved_type);
 }
 
+ast::Node *Resolver::get_moved_expr(ast::Node *expr) {
+    if (!expr || !expr->escape.moved) {
+        return expr;
+    }
+    switch (expr->type) {
+    case NodeType::ParenExpr:
+        return get_moved_expr(expr->data.child_expr);
+    case NodeType::CastExpr:
+        return get_moved_expr(expr->data.cast_expr.expr);
+    default:
+        return expr;
+    }
+}
+
+bool Resolver::use_implicit_owning_coercion(ChiType *from_type, ChiType *to_type) {
+    if (!from_type || !to_type) {
+        return false;
+    }
+    if (to_type->kind == TypeKind::Optional &&
+        from_type->kind != TypeKind::Optional &&
+        from_type->kind != TypeKind::Null) {
+        return true;
+    }
+    if (to_type->kind == TypeKind::Any &&
+        from_type->kind != TypeKind::Any &&
+        from_type->kind != TypeKind::Undefined &&
+        from_type->kind != TypeKind::ZeroInit) {
+        return true;
+    }
+    return false;
+}
+
 bool Resolver::should_resolve_fn_body(ResolveScope &scope) {
     auto parent_struct = scope.parent_struct;
     if (!parent_struct) {
@@ -9730,16 +9777,21 @@ void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiTy
 
     auto &fn_def = parent_fn_node->data.fn_def;
     ast::Node *moved_src = nullptr;
+    ast::Node *move_expr = get_moved_expr(expr);
 
-    if (expr->type == NodeType::UnaryOpExpr &&
-        expr->data.unary_op_expr.op_type == TokenType::MOVEREF) {
+    if (move_expr && move_expr != expr && move_expr->resolved_outlet) {
+        moved_src = move_expr->resolved_outlet;
+    }
+
+    if (!moved_src && move_expr && move_expr->type == NodeType::UnaryOpExpr &&
+        move_expr->data.unary_op_expr.op_type == TokenType::MOVEREF) {
         // Explicit &move expression: always a move
-        moved_src = find_root_decl(expr->data.unary_op_expr.op1);
-    } else if (expr->type == NodeType::UnaryOpExpr &&
-               expr->data.unary_op_expr.op_type == TokenType::KW_MOVE) {
+        moved_src = find_root_decl(move_expr->data.unary_op_expr.op1);
+    } else if (!moved_src && move_expr && move_expr->type == NodeType::UnaryOpExpr &&
+               move_expr->data.unary_op_expr.op_type == TokenType::KW_MOVE) {
         // Explicit move expression (value move): always a move
-        moved_src = find_root_decl(expr->data.unary_op_expr.op1);
-    } else if (expr->type == NodeType::Identifier && expr_type &&
+        moved_src = find_root_decl(move_expr->data.unary_op_expr.op1);
+    } else if (!moved_src && expr->type == NodeType::Identifier && expr_type &&
                expr_type->kind == TypeKind::MoveRef && dest_type &&
                dest_type->kind == TypeKind::MoveRef) {
         // &move T identifier passed/assigned to &move destination: natural move

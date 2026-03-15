@@ -415,6 +415,8 @@ class Resolver {
     // Returns all traits for a placeholder: declared traits + active where-clause bounds
     array<ChiType *> get_placeholder_traits(ChiType *ph);
     bool should_destroy(ast::Node *node, ChiType *type_override = nullptr);
+    ast::Node *get_moved_expr(ast::Node *expr);
+    bool use_implicit_owning_coercion(ChiType *from_type, ChiType *to_type);
 
     void context_init_primitives();
     void context_init_builtins(ast::Module *builtin_module);

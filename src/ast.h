@@ -529,6 +529,7 @@ struct CapturePath {
 struct EscapeAnalysis {
     bool escaped = false;
     bool moved = false;
+    bool use_owning_coercion = false;
     array<CapturePath> capture_path = {}; // Path from original declaration to current context
 
     bool is_capture() { return capture_path.len > 0; }

@@ -5443,7 +5443,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.cast_expr;
         auto from_type = get_chitype(data.expr);
         auto to_type = get_chitype(expr);
-        if (needs_implicit_owning_conversion(from_type, to_type)) {
+        if (expr->escape.use_owning_coercion) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto tmp = fn->entry_alloca(compile_type(to_type),
                                         to_type->kind == TypeKind::Any ? "cast_any" : "cast_wrap");
