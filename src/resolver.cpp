@@ -2056,6 +2056,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (data.expr->escape.moved) {
                 node->escape.moved = true;
             }
+            if (is_addressable(data.expr) && !data.expr->escape.moved &&
+                is_non_copyable(from_type)) {
+                error(data.expr, errors::TYPE_NOT_COPYABLE, format_type_display(from_type));
+            }
         }
         if (!scope.is_unsafe_block &&
             (from_type->is_raw_pointer() || dest_type->is_raw_pointer())) {
@@ -5999,6 +6003,9 @@ bool Resolver::is_non_copyable(ChiType *type) {
         auto final_type = type->data.subtype.final_type;
         if (final_type)
             return is_non_copyable(final_type);
+    }
+    if (type->kind == TypeKind::Optional) {
+        return is_non_copyable(type->get_elem());
     }
     if (type->kind == TypeKind::Placeholder) {
         bool has_nocopy = false;
