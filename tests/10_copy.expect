@@ -144,5 +144,14 @@ MoveOnly(40) created
 scope b
 MoveOnly(40) destroyed
 MoveOnly(30) destroyed
+=== Test 18: Optional-chain conversion matrix ===
+-- optional chain field --
+MoveOnly(50) created
+scope a
+-- optional chain call --
+MoveOnly(60) created
+scope b
+MoveOnly(60) destroyed
+MoveOnly(50) destroyed
 deleting direct
 deleting local_b

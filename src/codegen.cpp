@@ -5345,6 +5345,39 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto opt_type = get_chitype(dot_data.expr);
             auto result_type = get_chitype(expr);
             auto result_type_l = compile_type(result_type);
+            if (get_resolver()->type_needs_destruction(result_type)) {
+                llvm::Value *var = nullptr;
+                if (expr->resolved_outlet) {
+                    var = compile_expr_ref(fn, expr->resolved_outlet).address;
+                } else {
+                    var = compile_alloc(fn, expr, false);
+                }
+                return compile_optional_branch(
+                    fn, dot_data.expr, result_type_l, "optchain",
+                    [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
+                        auto unwrapped_type = opt_type->get_elem();
+                        llvm::Value *struct_ptr;
+                        ChiType *struct_type;
+                        if (unwrapped_type->is_pointer_like()) {
+                            struct_type = unwrapped_type->get_elem();
+                            struct_ptr =
+                                builder.CreateLoad(compile_type(unwrapped_type), unwrapped_ptr);
+                        } else {
+                            struct_type = unwrapped_type;
+                            struct_ptr = unwrapped_ptr;
+                        }
+                        auto gep = compile_dot_access(fn, struct_ptr, struct_type,
+                                                      dot_data.resolved_struct_member);
+                        auto field_type = dot_data.resolved_struct_member->resolved_type;
+                        compile_copy_with_ref(fn, RefValue::from_address(gep), var, result_type,
+                                              dot_data.expr, false);
+                        return nullptr;
+                    },
+                    [&]() -> llvm::Value * {
+                        return llvm::ConstantAggregateZero::get(result_type_l);
+                    },
+                    var);
+            }
             return compile_optional_branch(
                 fn, dot_data.expr, result_type_l, "optchain",
                 [&](llvm::Value *unwrapped_ptr) {

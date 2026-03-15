@@ -261,6 +261,30 @@ func test_coalesce_conversion_matrix() {
     println("scope b");
 }
 
+struct MoveHolder {
+    value: MoveOnly;
+}
+
+struct MoveMaker {
+    func make(id: int) MoveOnly {
+        return make_move_only(id);
+    }
+}
+
+func test_optional_chain_conversion_matrix() {
+    println("=== Test 18: Optional-chain conversion matrix ===");
+
+    println("-- optional chain field --");
+    var h: ?MoveHolder = MoveHolder{value: make_move_only(50)};
+    var a = h?.value;
+    println("scope a");
+
+    println("-- optional chain call --");
+    var m: ?MoveMaker = MoveMaker{};
+    var b = m?.make(60);
+    println("scope b");
+}
+
 func main() {
     println("=== Test 1: Return local variable ===");
     var foo = return_local();
@@ -284,4 +308,5 @@ func main() {
     test_any_conversion_matrix();
     test_any_cast_conversion_matrix();
     test_coalesce_conversion_matrix();
+    test_optional_chain_conversion_matrix();
 }
