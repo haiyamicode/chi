@@ -1430,10 +1430,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                       format_type_display(var_type));
             }
             // RHS is a non-addressable temp: transfer ownership (move, don't copy)
-            if (var_type && !is_addressable(data.expr) && !data.expr->escape.moved &&
-                should_destroy(data.expr, var_type)) {
-                data.expr->escape.moved = true;
-            }
+            mark_temp_moved_if_needed(data.expr, var_type);
         }
         if (!var_type) {
             // Failed to resolve variable type due to malformed expression
@@ -1475,6 +1472,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::BinOpExpr: {
         auto &data = node->data.bin_op_expr;
+        if (data.op_type == TokenType::QUES && scope.move_outlet) {
+            node->resolved_outlet = scope.move_outlet;
+            node->escape.moved = true;
+        }
         auto op1_scope = scope;
         if (is_assignment_op(data.op_type)) {
             op1_scope = scope.set_is_lhs(true);
@@ -1562,10 +1563,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             // RHS is a non-addressable temp (fn call, construct, etc.):
             // transfer ownership to the LHS — move, don't copy.
-            if (!is_addressable(data.op2) && !data.op2->escape.moved &&
-                should_destroy(data.op2, t2)) {
-                data.op2->escape.moved = true;
-            }
+            mark_temp_moved_if_needed(data.op2, t2);
             return t1;
         }
         // For compound assignment operators, validate the base op
@@ -1654,6 +1652,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
             auto elem_type = t1->get_elem();
+            data.op2->escape.use_owning_coercion = use_implicit_owning_coercion(t2, elem_type);
+            mark_temp_moved_if_needed(data.op2, t2);
+            if (data.op2->escape.moved) {
+                node->escape.moved = true;
+            }
             check_assignment(data.op2, t2, elem_type);
             return elem_type;
         }
@@ -2047,10 +2050,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         node->escape.use_owning_coercion = use_implicit_owning_coercion(from_type, dest_type);
         ensure_temp_owner(data.expr, from_type, scope);
         if (data.expr) {
-            if (node->escape.use_owning_coercion &&
-                !data.expr->escape.moved && !is_addressable(data.expr) &&
-                should_destroy(data.expr, from_type)) {
-                data.expr->escape.moved = true;
+            if (node->escape.use_owning_coercion) {
+                mark_temp_moved_if_needed(data.expr, from_type);
             }
             if (data.expr->escape.moved) {
                 node->escape.moved = true;
@@ -2193,9 +2194,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         }
                     }
                 }
-            } else if (!is_addressable(data.expr) && expr_type &&
-                       should_destroy(data.expr, expr_type)) {
-                data.expr->escape.moved = true;
+            } else if (expr_type) {
+                mark_temp_moved_if_needed(data.expr, expr_type);
             }
         }
 
@@ -6031,6 +6031,13 @@ bool Resolver::should_destroy(ast::Node *node, ChiType *type_override) {
     return type_needs_destruction(resolved_type);
 }
 
+void Resolver::mark_temp_moved_if_needed(ast::Node *expr, ChiType *type) {
+    if (!expr || expr->escape.moved || is_addressable(expr) || !should_destroy(expr, type)) {
+        return;
+    }
+    expr->escape.moved = true;
+}
+
 ast::Node *Resolver::get_moved_expr(ast::Node *expr) {
     if (!expr || !expr->escape.moved) {
         return expr;
@@ -6040,6 +6047,13 @@ ast::Node *Resolver::get_moved_expr(ast::Node *expr) {
         return get_moved_expr(expr->data.child_expr);
     case NodeType::CastExpr:
         return get_moved_expr(expr->data.cast_expr.expr);
+    case NodeType::BinOpExpr: {
+        auto &data = expr->data.bin_op_expr;
+        if (data.op_type == TokenType::QUES && data.op2 && data.op2->escape.moved) {
+            return get_moved_expr(data.op2);
+        }
+        return expr;
+    }
     default:
         return expr;
     }

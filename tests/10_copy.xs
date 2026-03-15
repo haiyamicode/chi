@@ -247,6 +247,20 @@ func test_any_cast_conversion_matrix() {
     println("scope any e");
 }
 
+func test_coalesce_conversion_matrix() {
+    println("=== Test 17: Coalesce conversion matrix ===");
+
+    println("-- coalesce optional --");
+    var none1: ?MoveOnly = null;
+    var a = none1 ?? make_move_only(30);
+    println("scope a");
+
+    println("-- coalesce any --");
+    var none2: ?MoveOnly = null;
+    var b: any = none2 ?? make_move_only(40);
+    println("scope b");
+}
+
 func main() {
     println("=== Test 1: Return local variable ===");
     var foo = return_local();
@@ -269,4 +283,5 @@ func main() {
     test_any_int();
     test_any_conversion_matrix();
     test_any_cast_conversion_matrix();
+    test_coalesce_conversion_matrix();
 }

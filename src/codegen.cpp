@@ -4605,16 +4605,34 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             return builder.CreateCmp(cmpop, lhs, rhs);
         }
         case TokenType::QUES: {
-            auto result_type_l = compile_type(get_chitype(expr));
+            auto result_type = get_chitype(expr);
+            auto result_type_l = compile_type(result_type);
+            if (get_resolver()->type_needs_destruction(result_type)) {
+                llvm::Value *var = nullptr;
+                if (expr->resolved_outlet) {
+                    var = compile_expr_ref(fn, expr->resolved_outlet).address;
+                } else {
+                    var = compile_alloc(fn, expr, false);
+                }
+                return compile_optional_branch(
+                    fn, data.op1, result_type_l, "coalesce",
+                    [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
+                        compile_copy_with_ref(fn, RefValue::from_address(unwrapped_ptr), var,
+                                              result_type, data.op1, false);
+                        return nullptr;
+                    },
+                    [&]() -> llvm::Value * {
+                        compile_assignment_to_ptr(fn, data.op2, var, result_type);
+                        return nullptr;
+                    },
+                    var);
+            }
             return compile_optional_branch(
                 fn, data.op1, result_type_l, "coalesce",
                 [&](llvm::Value *unwrapped_ptr) {
                     return builder.CreateLoad(result_type_l, unwrapped_ptr);
                 },
-                [&]() {
-                    auto rhs = compile_expr(fn, data.op2);
-                    return compile_conversion(fn, rhs, get_chitype(data.op2), get_chitype(expr));
-                });
+                [&]() { return compile_assignment_to_type(fn, data.op2, result_type); });
         }
         case TokenType::ASS: {
             auto assign_target = data.op1;
@@ -6598,7 +6616,7 @@ llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
 llvm::Value *Compiler::compile_optional_branch(
     Function *fn, ast::Node *opt_expr, llvm::Type *result_type_l, const char *label,
     std::function<llvm::Value *(llvm::Value *unwrapped_ptr)> on_has_value,
-    std::function<llvm::Value *()> on_null) {
+    std::function<llvm::Value *()> on_null, llvm::Value *result_slot) {
     auto &builder = *m_ctx->llvm_builder.get();
     auto base_ref = compile_expr_ref(fn, opt_expr);
     auto opt_type_l = compile_type(get_chitype(opt_expr));
@@ -6623,6 +6641,9 @@ llvm::Value *Compiler::compile_optional_branch(
     builder.CreateBr(merge_bb);
 
     fn->use_label(merge_bb);
+    if (result_slot) {
+        return builder.CreateLoad(result_type_l, result_slot);
+    }
     auto phi = builder.CreatePHI(result_type_l, 2, string("_") + label);
     phi->addIncoming(has_val_result, has_val_end);
     phi->addIncoming(null_result, null_end);

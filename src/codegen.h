@@ -458,7 +458,7 @@ class Compiler {
     llvm::Value *compile_optional_branch(
         Function *fn, ast::Node *opt_expr, llvm::Type *result_type_l, const char *label,
         std::function<llvm::Value *(llvm::Value *unwrapped_ptr)> on_has_value,
-        std::function<llvm::Value *()> on_null);
+        std::function<llvm::Value *()> on_null, llvm::Value *result_slot = nullptr);
 
     llvm::Value *compile_dot_access(Function *fn, llvm::Value *ptr, ChiType *type,
                                     ChiStructMember *member);

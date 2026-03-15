@@ -135,5 +135,14 @@ Traced(14) destroyed
 Traced(13) destroyed
 Traced(12) destroyed
 Traced(12) destroyed
+=== Test 17: Coalesce conversion matrix ===
+-- coalesce optional --
+MoveOnly(30) created
+scope a
+-- coalesce any --
+MoveOnly(40) created
+scope b
+MoveOnly(40) destroyed
+MoveOnly(30) destroyed
 deleting direct
 deleting local_b
