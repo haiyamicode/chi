@@ -1,0 +1,10 @@
+load0 = 1
+load1 = 2
+cmp1 old=2 ok=true
+load2 = 5
+cmp2 old=5 ok=false
+load3 = 5
+add old=5
+load4 = 8
+sub old=8
+load5 = 6

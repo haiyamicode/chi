@@ -1,5 +1,6 @@
 import "std/ops" as ops;
 import "std/mem" as mem;
+import "std/atomic" as atomic;
 
 extern "C" {
     unsafe func cx_print(str: string);
@@ -72,10 +73,10 @@ struct __CxEnumBase<T> {
 }
 
 struct SharedHeader {
-    ref_count: uint32;
+    ref_count: atomic.Atomic<uint32>;
 
     mut func new() {
-        this.ref_count = 1;
+        this.ref_count = atomic.Atomic<uint32>.from_value(1);
     }
 }
 
@@ -92,15 +93,14 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
 
     private mut func retain() {
         if this._header {
-            this._header.ref_count = this._header.ref_count + 1;
+            this._header.ref_count.fetch_add(1);
         }
     }
 
     private mut func release() {
         if this._header {
-            var rc = this._header.ref_count - 1;
-            this._header.ref_count = rc;
-            if rc == 0 {
+            var old = this._header.ref_count.fetch_sub(1);
+            if old == 1 {
                 unsafe {
                     delete this._ptr;
                     delete this._header;
@@ -126,14 +126,14 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
     }
 
     func ref_count() uint32 {
-        return this._header.ref_count;
+        return this._header.ref_count.load();
     }
 
     impl ops.Copy {
         mut func copy(source: &This) {
             var header = source._header;
             if header {
-                header.ref_count = header.ref_count + 1;
+                header.ref_count.fetch_add(1);
             }
             this._header = header;
             this._ptr = source._ptr;

@@ -7318,6 +7318,24 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
     if (!callee_decl)
         return false;
 
+    auto atomic_element_type_from_arg = [&](ast::Node *arg) -> ChiType * {
+        auto *node = arg;
+        while (node && node->type == ast::NodeType::CastExpr) {
+            auto *inner = node->data.cast_expr.expr;
+            auto *inner_type = get_chitype(inner);
+            if (inner_type && inner_type->is_pointer_like() && inner_type->get_elem() &&
+                inner_type->get_elem()->kind != TypeKind::Void) {
+                return inner_type->get_elem();
+            }
+            node = inner;
+        }
+
+        auto *type = get_chitype(arg);
+        return type && type->is_pointer_like() ? type->get_elem() : nullptr;
+    };
+
+    auto atomic_order = llvm::AtomicOrdering::SequentiallyConsistent;
+
     // __copy(dest, src, destruct_old) — deep copy via copy constructor
     if (callee_decl->name == "__copy" && data.args.len == 3) {
         auto dest_ptr = compile_expr(fn, data.args[0]);
@@ -7351,6 +7369,84 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), src_ptr, llvm::MaybeAlign(), size);
         builder.CreateMemSet(src_ptr, builder.getInt8(0), size, llvm::MaybeAlign());
         // Intrinsics can't throw — no invoke needed, just continue linearly
+        return true;
+    }
+
+    if (callee_decl->name == "__atomic_load" && data.args.len == 2) {
+        auto ptr = compile_expr(fn, data.args[0]);
+        auto out_ptr = compile_expr(fn, data.args[1]);
+        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        assert(elem_type && "could not recover atomic load element type");
+        auto elem_type_l = compile_type(elem_type);
+        auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
+        auto *load = builder.CreateAlignedLoad(elem_type_l, ptr, align);
+        load->setAtomic(atomic_order);
+        builder.CreateStore(load, out_ptr);
+        return true;
+    }
+
+    if (callee_decl->name == "__atomic_store" && data.args.len == 2) {
+        auto ptr = compile_expr(fn, data.args[0]);
+        auto value_ptr = compile_expr(fn, data.args[1]);
+        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        assert(elem_type && "could not recover atomic store element type");
+        auto elem_type_l = compile_type(elem_type);
+        auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
+        auto value = builder.CreateLoad(elem_type_l, value_ptr);
+        auto *store = builder.CreateAlignedStore(value, ptr, align);
+        store->setAtomic(atomic_order);
+        return true;
+    }
+
+    if (callee_decl->name == "__atomic_compare_exchange" && data.args.len == 5) {
+        auto ptr = compile_expr(fn, data.args[0]);
+        auto expected_ptr = compile_expr(fn, data.args[1]);
+        auto desired_ptr = compile_expr(fn, data.args[2]);
+        auto out_old_ptr = compile_expr(fn, data.args[3]);
+        auto out_ok_ptr = compile_expr(fn, data.args[4]);
+        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        assert(elem_type && "could not recover atomic compare_exchange element type");
+        auto elem_type_l = compile_type(elem_type);
+        auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
+        auto expected = builder.CreateLoad(elem_type_l, expected_ptr);
+        auto desired = builder.CreateLoad(elem_type_l, desired_ptr);
+        auto *cmpxchg =
+            builder.CreateAtomicCmpXchg(ptr, expected, desired, align, atomic_order, atomic_order);
+        cmpxchg->setWeak(false);
+        auto old_value = builder.CreateExtractValue(cmpxchg, {0});
+        auto ok_value = builder.CreateExtractValue(cmpxchg, {1});
+        builder.CreateStore(old_value, out_old_ptr);
+        builder.CreateStore(ok_value, out_ok_ptr);
+        return true;
+    }
+
+    if (callee_decl->name == "__atomic_fetch_add" && data.args.len == 3) {
+        auto ptr = compile_expr(fn, data.args[0]);
+        auto value_ptr = compile_expr(fn, data.args[1]);
+        auto out_old_ptr = compile_expr(fn, data.args[2]);
+        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        assert(elem_type && "could not recover atomic fetch_add element type");
+        auto elem_type_l = compile_type(elem_type);
+        auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
+        auto value = builder.CreateLoad(elem_type_l, value_ptr);
+        auto *old_value = builder.CreateAtomicRMW(llvm::AtomicRMWInst::Add, ptr, value, align,
+                                                  atomic_order);
+        builder.CreateStore(old_value, out_old_ptr);
+        return true;
+    }
+
+    if (callee_decl->name == "__atomic_fetch_sub" && data.args.len == 3) {
+        auto ptr = compile_expr(fn, data.args[0]);
+        auto value_ptr = compile_expr(fn, data.args[1]);
+        auto out_old_ptr = compile_expr(fn, data.args[2]);
+        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        assert(elem_type && "could not recover atomic fetch_sub element type");
+        auto elem_type_l = compile_type(elem_type);
+        auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
+        auto value = builder.CreateLoad(elem_type_l, value_ptr);
+        auto *old_value = builder.CreateAtomicRMW(llvm::AtomicRMWInst::Sub, ptr, value, align,
+                                                  atomic_order);
+        builder.CreateStore(old_value, out_old_ptr);
         return true;
     }
 

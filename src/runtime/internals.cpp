@@ -833,14 +833,15 @@ void *cx_capture_new(uint32_t payload_size, TypeInfo *type, void *dtor) {
 void cx_capture_retain(void *capture_ptr) {
     if (!capture_ptr) return;
     auto capture = (CxCapture *)capture_ptr;
-    capture->ref_count++;
+    __atomic_fetch_add(&capture->ref_count, 1u, __ATOMIC_RELAXED);
 }
 
 void cx_capture_release(void *capture_ptr) {
     if (!capture_ptr) return;
     auto capture = (CxCapture *)capture_ptr;
-    capture->ref_count--;
-    if (capture->ref_count == 0) {
+    auto old = __atomic_fetch_sub(&capture->ref_count, 1u, __ATOMIC_ACQ_REL);
+    if (old == 1) {
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
         if (capture->dtor) {
             capture->dtor(capture->data);
         }
