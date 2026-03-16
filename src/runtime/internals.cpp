@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <type_traits>
 #include <unistd.h>
 #include <sstream>
 #include <sys/time.h>
@@ -63,6 +64,288 @@ struct CxCapture {
 
 static tgc_t gc;
 static thread_local StackTrace st;
+
+namespace {
+
+struct MainThreadUvTask {
+    MainThreadUvTask *next = nullptr;
+    virtual ~MainThreadUvTask() = default;
+    virtual void run() = 0;
+};
+
+static uv_loop_t *main_uv_loop = nullptr;
+static uv_async_t main_uv_async;
+static uv_mutex_t main_uv_mutex;
+static bool main_uv_mutex_ready = false;
+static MainThreadUvTask *main_uv_task_head = nullptr;
+static MainThreadUvTask *main_uv_task_tail = nullptr;
+static uv_thread_t main_uv_thread_id;
+static bool main_uv_thread_id_ready = false;
+static bool main_uv_async_ready = false;
+static bool main_uv_stopping = false;
+
+struct SpawnedThread {
+    uv_thread_t thread;
+    uv_mutex_t mutex;
+    bool done = false;
+    void (*fn_ptr)(void *);
+    void *captures;
+    SpawnedThread *next = nullptr;
+};
+
+static uv_mutex_t spawned_thread_mutex;
+static bool spawned_thread_mutex_ready = false;
+static SpawnedThread *spawned_thread_head = nullptr;
+
+static bool is_main_uv_thread() {
+    if (!main_uv_thread_id_ready) {
+        return true;
+    }
+    auto current = uv_thread_self();
+    return uv_thread_equal(&main_uv_thread_id, &current) != 0;
+}
+
+static void run_pending_main_uv_tasks() {
+    while (true) {
+        MainThreadUvTask *task = nullptr;
+        uv_mutex_lock(&main_uv_mutex);
+        if (main_uv_task_head) {
+            task = main_uv_task_head;
+            main_uv_task_head = task->next;
+            if (!main_uv_task_head) {
+                main_uv_task_tail = nullptr;
+            }
+        }
+        uv_mutex_unlock(&main_uv_mutex);
+        if (!task) {
+            break;
+        }
+        task->run();
+    }
+}
+
+static void main_uv_async_cb(uv_async_t *) {
+    run_pending_main_uv_tasks();
+}
+
+static void init_main_uv_dispatcher() {
+    if (main_uv_async_ready) {
+        return;
+    }
+
+    main_uv_loop = uv_default_loop();
+    if (!main_uv_mutex_ready) {
+        uv_mutex_init(&main_uv_mutex);
+        main_uv_mutex_ready = true;
+    }
+    if (!spawned_thread_mutex_ready) {
+        uv_mutex_init(&spawned_thread_mutex);
+        spawned_thread_mutex_ready = true;
+    }
+    main_uv_thread_id = uv_thread_self();
+    main_uv_thread_id_ready = true;
+    auto r = uv_async_init(main_uv_loop, &main_uv_async, main_uv_async_cb);
+    if (r < 0) {
+        panic("failed to initialize main-thread libuv dispatcher: {}", uv_strerror(r));
+    }
+    uv_unref((uv_handle_t *)&main_uv_async);
+    main_uv_async_ready = true;
+    main_uv_stopping = false;
+}
+
+static void enqueue_main_uv_task(MainThreadUvTask *task) {
+    uv_mutex_lock(&main_uv_mutex);
+    if (!main_uv_async_ready || main_uv_stopping) {
+        uv_mutex_unlock(&main_uv_mutex);
+        panic("main-thread libuv dispatcher is not available");
+    }
+    task->next = nullptr;
+    if (main_uv_task_tail) {
+        main_uv_task_tail->next = task;
+    } else {
+        main_uv_task_head = task;
+    }
+    main_uv_task_tail = task;
+    uv_mutex_unlock(&main_uv_mutex);
+
+    auto r = uv_async_send(&main_uv_async);
+    if (r < 0) {
+        panic("failed to wake main-thread libuv dispatcher: {}", uv_strerror(r));
+    }
+}
+
+static bool is_spawned_thread_done(SpawnedThread *thread) {
+    uv_mutex_lock(&thread->mutex);
+    bool done = thread->done;
+    uv_mutex_unlock(&thread->mutex);
+    return done;
+}
+
+static SpawnedThread *take_finished_spawned_thread() {
+    uv_mutex_lock(&spawned_thread_mutex);
+    SpawnedThread *prev = nullptr;
+    auto *cur = spawned_thread_head;
+    while (cur) {
+        if (is_spawned_thread_done(cur)) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                spawned_thread_head = cur->next;
+            }
+            cur->next = nullptr;
+            uv_mutex_unlock(&spawned_thread_mutex);
+            return cur;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+    uv_mutex_unlock(&spawned_thread_mutex);
+    return nullptr;
+}
+
+static bool has_spawned_threads() {
+    uv_mutex_lock(&spawned_thread_mutex);
+    bool has_threads = spawned_thread_head != nullptr;
+    uv_mutex_unlock(&spawned_thread_mutex);
+    return has_threads;
+}
+
+static void join_finished_spawned_threads() {
+    while (auto *thread = take_finished_spawned_thread()) {
+        uv_thread_join(&thread->thread);
+        uv_mutex_destroy(&thread->mutex);
+        delete thread;
+    }
+}
+
+static void pump_main_uv_until_threads_done(uv_loop_t *loop) {
+    while (has_spawned_threads()) {
+        run_pending_main_uv_tasks();
+        uv_run(loop, UV_RUN_NOWAIT);
+        join_finished_spawned_threads();
+        if (has_spawned_threads()) {
+            usleep(1000);
+        }
+    }
+}
+
+static void spawned_thread_entry(void *arg) {
+    auto *thread = (SpawnedThread *)arg;
+    void *payload = thread->captures ? cx_capture_get_data(thread->captures) : nullptr;
+    thread->fn_ptr(payload);
+    if (thread->captures) {
+        cx_capture_release(thread->captures);
+    }
+    uv_mutex_lock(&thread->mutex);
+    thread->done = true;
+    uv_mutex_unlock(&thread->mutex);
+}
+
+template <typename Fn>
+auto run_on_main_uv_thread_sync(Fn &&fn) -> decltype(fn()) {
+    using ReturnType = decltype(fn());
+
+    if (is_main_uv_thread()) {
+        return fn();
+    }
+
+    if constexpr (std::is_void_v<ReturnType>) {
+        struct Task final : MainThreadUvTask {
+            std::decay_t<Fn> fn;
+            uv_mutex_t mutex;
+            uv_cond_t cond;
+            bool done = false;
+
+            explicit Task(Fn &&cb) : fn(std::forward<Fn>(cb)) {
+                uv_mutex_init(&mutex);
+                uv_cond_init(&cond);
+            }
+
+            ~Task() override {
+                uv_cond_destroy(&cond);
+                uv_mutex_destroy(&mutex);
+            }
+
+            void run() override {
+                fn();
+                uv_mutex_lock(&mutex);
+                done = true;
+                uv_cond_signal(&cond);
+                uv_mutex_unlock(&mutex);
+            }
+        };
+
+        Task task(std::forward<Fn>(fn));
+        enqueue_main_uv_task(&task);
+
+        uv_mutex_lock(&task.mutex);
+        while (!task.done) {
+            uv_cond_wait(&task.cond, &task.mutex);
+        }
+        uv_mutex_unlock(&task.mutex);
+        return;
+    } else {
+        struct Task final : MainThreadUvTask {
+            std::decay_t<Fn> fn;
+            uv_mutex_t mutex;
+            uv_cond_t cond;
+            ReturnType result{};
+            bool done = false;
+
+            explicit Task(Fn &&cb) : fn(std::forward<Fn>(cb)) {
+                uv_mutex_init(&mutex);
+                uv_cond_init(&cond);
+            }
+
+            ~Task() override {
+                uv_cond_destroy(&cond);
+                uv_mutex_destroy(&mutex);
+            }
+
+            void run() override {
+                result = fn();
+                uv_mutex_lock(&mutex);
+                done = true;
+                uv_cond_signal(&cond);
+                uv_mutex_unlock(&mutex);
+            }
+        };
+
+        Task task(std::forward<Fn>(fn));
+        enqueue_main_uv_task(&task);
+
+        uv_mutex_lock(&task.mutex);
+        while (!task.done) {
+            uv_cond_wait(&task.cond, &task.mutex);
+        }
+        uv_mutex_unlock(&task.mutex);
+        return task.result;
+    }
+}
+
+template <typename Fn>
+void run_on_main_uv_thread_async(Fn &&fn) {
+    if (is_main_uv_thread()) {
+        fn();
+        return;
+    }
+
+    struct Task final : MainThreadUvTask {
+        std::decay_t<Fn> fn;
+
+        explicit Task(Fn &&cb) : fn(std::forward<Fn>(cb)) {}
+
+        void run() override {
+            auto self = this;
+            fn();
+            delete self;
+        }
+    };
+
+    enqueue_main_uv_task(new Task(std::forward<Fn>(fn)));
+}
+
+} // namespace
 
 static void *get_any_data(const CxAny *v) {
     auto p = v->inlined ? (intptr_t)v->data : *(intptr_t *)(v->data);
@@ -822,6 +1105,7 @@ static void fault_signal_handler(int signal_num, siginfo_t *info, void *ucontext
 void cx_runtime_start(void *stack) {
     init_backtrace(getenv("DEBUG_FILE"));
     tgc_start(&gc, stack);
+    init_main_uv_dispatcher();
 
     auto trace_mode = getenv("CHI_BACKTRACE");
     bool enable_trace = true;
@@ -843,9 +1127,33 @@ void cx_runtime_start(void *stack) {
 }
 
 void cx_runtime_stop() {
-    // run event loop
-    uv_loop_t *loop = uv_default_loop();
+    // Run any cross-thread submissions that arrived before the loop starts.
+    run_pending_main_uv_tasks();
+
+    uv_loop_t *loop = main_uv_loop ? main_uv_loop : uv_default_loop();
+    pump_main_uv_until_threads_done(loop);
+    run_pending_main_uv_tasks();
     uv_run(loop, UV_RUN_DEFAULT);
+    run_pending_main_uv_tasks();
+
+    if (main_uv_async_ready) {
+        main_uv_stopping = true;
+        uv_close((uv_handle_t *)&main_uv_async, nullptr);
+        uv_run(loop, UV_RUN_DEFAULT);
+        main_uv_async_ready = false;
+        main_uv_loop = nullptr;
+        main_uv_thread_id_ready = false;
+    }
+
+    if (main_uv_mutex_ready) {
+        uv_mutex_destroy(&main_uv_mutex);
+        main_uv_mutex_ready = false;
+    }
+    if (spawned_thread_mutex_ready) {
+        uv_mutex_destroy(&spawned_thread_mutex);
+        spawned_thread_mutex_ready = false;
+    }
+
     uv_loop_close(loop);
 
     tgc_stop(&gc);
@@ -859,6 +1167,36 @@ _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context) {
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
+}
+
+void cx_thread_spawn(void *callback_ptr) {
+    auto lambda = (CxLambda *)callback_ptr;
+    auto *thread = new SpawnedThread();
+    uv_mutex_init(&thread->mutex);
+    thread->fn_ptr = (void (*)(void *))lambda->fn_ptr;
+    thread->captures = lambda->captures;
+    if (thread->captures) {
+        cx_capture_retain(thread->captures);
+    }
+
+    auto r = uv_thread_create(&thread->thread, spawned_thread_entry, thread);
+    if (r < 0) {
+        if (thread->captures) {
+            cx_capture_release(thread->captures);
+        }
+        uv_mutex_destroy(&thread->mutex);
+        delete thread;
+        panic("uv_thread_create failed: {}", uv_strerror(r));
+    }
+
+    uv_mutex_lock(&spawned_thread_mutex);
+    thread->next = spawned_thread_head;
+    spawned_thread_head = thread;
+    uv_mutex_unlock(&spawned_thread_mutex);
+}
+
+bool cx_is_main_thread() {
+    return is_main_uv_thread();
 }
 
 struct TimeoutData {
@@ -887,10 +1225,28 @@ void cx_timeout(uint64_t delay, void *lambda_ptr) {
     if (captures)
         cx_capture_retain(captures);
 
-    auto timer = new uv_timer_t();
-    timer->data = td;
-    uv_timer_init(uv_default_loop(), timer);
-    uv_timer_start(timer, timeout_cb, delay, 0);
+    run_on_main_uv_thread_async([delay, td]() {
+        auto timer = new uv_timer_t();
+        timer->data = td;
+
+        auto init_r = uv_timer_init(main_uv_loop, timer);
+        if (init_r < 0) {
+            if (td->captures)
+                cx_capture_release(td->captures);
+            delete td;
+            delete timer;
+            panic("uv_timer_init failed: {}", uv_strerror(init_r));
+        }
+
+        auto start_r = uv_timer_start(timer, timeout_cb, delay, 0);
+        if (start_r < 0) {
+            if (td->captures)
+                cx_capture_release(td->captures);
+            delete td;
+            uv_close((uv_handle_t *)timer, [](uv_handle_t *h) { delete (uv_timer_t *)h; });
+            panic("uv_timer_start failed: {}", uv_strerror(start_r));
+        }
+    });
 }
 
 static inline uint32_t meiyan_hash(const char *key, int count) {
@@ -1129,18 +1485,22 @@ int32_t __cx_fs_flags(int32_t which) {
 }
 
 int32_t __cx_fs_open(const char *path, int32_t flags, int32_t mode) {
-    uv_fs_t req;
-    int32_t fd = uv_fs_open(uv_default_loop(), &req, path, flags, mode, NULL);
-    uv_fs_req_cleanup(&req);
-    return fd;
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t fd = uv_fs_open(main_uv_loop, &req, path, flags, mode, NULL);
+        uv_fs_req_cleanup(&req);
+        return fd;
+    });
 }
 
 int32_t __cx_fs_read(int32_t fd, void *buf, uint32_t size) {
-    uv_fs_t req;
-    uv_buf_t uvbuf = uv_buf_init((char *)buf, size);
-    int32_t n = uv_fs_read(uv_default_loop(), &req, fd, &uvbuf, 1, -1, NULL);
-    uv_fs_req_cleanup(&req);
-    return n < 0 ? n : n;
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        uv_buf_t uvbuf = uv_buf_init((char *)buf, size);
+        int32_t n = uv_fs_read(main_uv_loop, &req, fd, &uvbuf, 1, -1, NULL);
+        uv_fs_req_cleanup(&req);
+        return n;
+    });
 }
 
 struct FsReadAsyncData {
@@ -1191,20 +1551,25 @@ void __cx_fs_read_async(int32_t fd, void *buf, uint32_t size, void *resolve_lamb
         cx_capture_retain(data->reject_captures);
     data->req.data = data;
 
-    auto r = uv_fs_read(uv_default_loop(), &data->req, fd, &data->buf, 1, -1, fs_read_async_cb);
-    if (r < 0) {
-        void *payload = data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
-        data->reject_fn(payload, r);
-        fs_read_async_cleanup(data);
-    }
+    run_on_main_uv_thread_async([data, fd]() {
+        auto r = uv_fs_read(main_uv_loop, &data->req, fd, &data->buf, 1, -1, fs_read_async_cb);
+        if (r < 0) {
+            void *payload =
+                data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
+            data->reject_fn(payload, r);
+            fs_read_async_cleanup(data);
+        }
+    });
 }
 
 int32_t __cx_fs_write(int32_t fd, const void *data, uint32_t size) {
-    uv_fs_t req;
-    uv_buf_t uvbuf = uv_buf_init((char *)data, size);
-    int32_t n = uv_fs_write(uv_default_loop(), &req, fd, &uvbuf, 1, -1, NULL);
-    uv_fs_req_cleanup(&req);
-    return n < 0 ? n : n;
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        uv_buf_t uvbuf = uv_buf_init((char *)data, size);
+        int32_t n = uv_fs_write(main_uv_loop, &req, fd, &uvbuf, 1, -1, NULL);
+        uv_fs_req_cleanup(&req);
+        return n;
+    });
 }
 
 struct FsWriteAsyncData {
@@ -1261,40 +1626,51 @@ void __cx_fs_write_async(int32_t fd, const void *src_data, uint32_t size, void *
         cx_capture_retain(data->reject_captures);
     data->req.data = data;
 
-    auto r = uv_fs_write(uv_default_loop(), &data->req, fd, &data->buf, 1, -1, fs_write_async_cb);
-    if (r < 0) {
-        void *payload = data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
-        data->reject_fn(payload, r);
-        fs_write_async_cleanup(data);
-    }
+    run_on_main_uv_thread_async([data, fd]() {
+        auto r = uv_fs_write(main_uv_loop, &data->req, fd, &data->buf, 1, -1, fs_write_async_cb);
+        if (r < 0) {
+            void *payload =
+                data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
+            data->reject_fn(payload, r);
+            fs_write_async_cleanup(data);
+        }
+    });
 }
 
 int32_t __cx_fs_close(int32_t fd) {
-    uv_fs_t req;
-    int32_t r = uv_fs_close(uv_default_loop(), &req, fd, NULL);
-    uv_fs_req_cleanup(&req);
-    return r;
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t r = uv_fs_close(main_uv_loop, &req, fd, NULL);
+        uv_fs_req_cleanup(&req);
+        return r;
+    });
 }
 
 int32_t __cx_file_exists(const char *path) {
-    uv_fs_t req;
-    int32_t r = uv_fs_stat(uv_default_loop(), &req, path, NULL);
-    uv_fs_req_cleanup(&req);
-    return r == 0 ? 1 : 0;
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t r = uv_fs_stat(main_uv_loop, &req, path, NULL);
+        uv_fs_req_cleanup(&req);
+        return r == 0 ? 1 : 0;
+    });
 }
 
 int32_t __cx_file_remove(const char *path) {
-    uv_fs_t req;
-    int32_t r = uv_fs_unlink(uv_default_loop(), &req, path, NULL);
-    uv_fs_req_cleanup(&req);
-    return r;
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t r = uv_fs_unlink(main_uv_loop, &req, path, NULL);
+        uv_fs_req_cleanup(&req);
+        return r;
+    });
 }
 
 int32_t __cx_mkdir(const char *path) {
-    uv_fs_t req;
-    int32_t r = uv_fs_mkdir(uv_default_loop(), &req, path, 0755, NULL);
-    uv_fs_req_cleanup(&req);
-    return r;
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t r = uv_fs_mkdir(main_uv_loop, &req, path, 0755, NULL);
+        uv_fs_req_cleanup(&req);
+        return r;
+    });
 }
 
 int32_t __cx_get_errno() {
@@ -1302,25 +1678,29 @@ int32_t __cx_get_errno() {
 }
 
 void __cx_uv_strerror(int32_t errnum, CxString *result) {
-    auto msg = uv_strerror(errnum);
-    cx_string_from_chars(msg, strlen(msg), result);
+    run_on_main_uv_thread_sync([=]() {
+        auto msg = uv_strerror(errnum);
+        cx_string_from_chars(msg, strlen(msg), result);
+    });
 }
 
 int32_t __cx_list_dir(const char *path, CxArray *result) {
-    uv_fs_t req;
-    int32_t n = uv_fs_scandir(uv_default_loop(), &req, path, 0, NULL);
-    if (n < 0) {
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t n = uv_fs_scandir(main_uv_loop, &req, path, 0, NULL);
+        if (n < 0) {
+            uv_fs_req_cleanup(&req);
+            return n;
+        }
+        uv_dirent_t entry;
+        while (uv_fs_scandir_next(&req, &entry) != UV_EOF) {
+            CxString s;
+            cx_string_from_chars(entry.name, strlen(entry.name), &s);
+            CxString *slot = (CxString *)cx_array_add(result, sizeof(CxString));
+            *slot = s;
+        }
         uv_fs_req_cleanup(&req);
-        return n;
-    }
-    uv_dirent_t entry;
-    while (uv_fs_scandir_next(&req, &entry) != UV_EOF) {
-        CxString s;
-        cx_string_from_chars(entry.name, strlen(entry.name), &s);
-        CxString *slot = (CxString *)cx_array_add(result, sizeof(CxString));
-        *slot = s;
-    }
-    uv_fs_req_cleanup(&req);
-    return 0;
+        return 0;
+    });
 }
 }

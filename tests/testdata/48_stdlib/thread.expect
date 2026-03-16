@@ -1,0 +1,13 @@
+main = true
+done
+worker 9 main=false text=hello timeout=true
+worker 8 main=false text=hello timeout=true
+worker 7 main=false text=hello timeout=true
+worker 6 main=false text=hello timeout=true
+worker 5 main=false text=hello timeout=true
+worker 4 main=false text=hello timeout=true
+worker 3 main=false text=hello timeout=true
+worker 2 main=false text=hello timeout=true
+worker 1 main=false text=hello timeout=true
+worker 0 main=false text=hello timeout=true
+cleanup = true
