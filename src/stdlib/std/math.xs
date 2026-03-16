@@ -18,40 +18,6 @@ extern "C" {
     func __cx_fmod(x: float64, y: float64) float64;
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 export let PI: float64 = 3.141592653589793;
 export let E: float64 = 2.718281828459045;
 export let INF: float64 = 1.0 / 0.0;

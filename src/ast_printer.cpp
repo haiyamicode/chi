@@ -10,6 +10,19 @@
 using namespace cx;
 using namespace cx::ast;
 
+static bool node_spells_name(Node *node, const string &name) {
+    if (!node)
+        return false;
+    if (node->name == name)
+        return true;
+    return node->token && node->token->get_name() == name;
+}
+
+static bool should_collapse_promise_unit_subtype(SubtypeExpr &data) {
+    return node_spells_name(data.type, "Promise") && data.lifetime_args.len == 0 &&
+           data.args.len == 1 && node_spells_name(data.args[0], "Unit");
+}
+
 string get_sigil_symbol(SigilKind sigil) {
     switch (sigil) {
     case SigilKind::Pointer:
@@ -913,6 +926,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::SubtypeExpr: {
         auto &data = node->data.subtype_expr;
         print_node(data.type);
+        if (should_collapse_promise_unit_subtype(data)) {
+            break;
+        }
         emit("<");
         for (int i = 0; i < data.lifetime_args.len; i++) {
             if (i > 0)

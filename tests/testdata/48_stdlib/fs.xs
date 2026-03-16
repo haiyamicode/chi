@@ -1,6 +1,6 @@
 import "std/fs" as fs;
 
-async func run_async_wrapper_cases() Promise<Unit> {
+async func run_async_wrapper_cases() Promise {
     println("=== File.async().read_string ===");
     fs.write_file("/tmp/chi_fs_stdlib_test/async.txt", "async hello");
     println(await fs.read_file_async("/tmp/chi_fs_stdlib_test/async.txt"));

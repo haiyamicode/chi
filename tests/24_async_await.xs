@@ -190,12 +190,12 @@ async func do_bare_await() Promise {
     println("bare ok");
 }
 
-async func do_unit_fallthrough_after_await() Promise<Unit> {
+async func do_unit_fallthrough_after_await() Promise {
     await time.sleep(1);
     println("unit fallthrough body");
 }
 
-async func do_explicit_unit_return_after_await() Promise<Unit> {
+async func do_explicit_unit_return_after_await() Promise {
     await time.sleep(1);
     println("unit explicit body");
     return ();
@@ -214,9 +214,11 @@ func test_bare_await() {
 
 func test_unit_fallthrough_after_await() {
     println("=== Unit fallthrough after await ===");
-    probe_unit_fallthrough_after_await().then(func (value: int) {
-        printf("unit fallthrough resolved: {}\n", value);
-    });
+    probe_unit_fallthrough_after_await().then(
+        func (value: int) {
+            printf("unit fallthrough resolved: {}\n", value);
+        }
+    );
 }
 
 // --- Await: func arg ---

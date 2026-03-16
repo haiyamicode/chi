@@ -293,13 +293,11 @@ export async func read_file_async(path: string) Promise<string> {
 export async func write_file_async(path: string, data: string) Promise<Unit> {
     var f = File.create(path);
     await f.async().write_string(data);
-    return ();
 }
 
 export async func append_file_async(path: string, data: string) Promise<Unit> {
     var f = File.open(path, OpenMode.Append);
     await f.async().write_string(data);
-    return ();
 }
 
 export func exists(path: string) bool {

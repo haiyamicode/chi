@@ -5,14 +5,6 @@ extern "C" {
     unsafe func __cx_parse_float(str: *byte, out: *float64) int;
 }
 
-
-
-
-
-
-
-
-
 export func parse_int(s: string) ?int {
     var result: int64 = 0;
     var cs = s.to_cstring();

@@ -11,24 +11,10 @@ extern "C" {
     func util_func() int64;
 }
 
-
-
-
-
-
-
-
-
 // Test C header import with wildcard pattern
 extern "C" {
     import {strcpy, mem*} from "string.h";
 }
-
-
-
-
-
-
 
 func main() {
     let lib_result = lib_compute();
