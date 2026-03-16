@@ -470,8 +470,12 @@ struct ChiType {
         return kind == TypeKind::Reference || kind == TypeKind::MutRef || kind == TypeKind::MoveRef;
     }
 
+    bool is_int() {
+        return kind == TypeKind::Int || kind == TypeKind::Byte || kind == TypeKind::Rune;
+    }
+
     bool is_int_like() {
-        return kind == TypeKind::Int || kind == TypeKind::Bool || kind == TypeKind::Byte || kind == TypeKind::Rune;
+        return is_int() || kind == TypeKind::Bool;
     }
 
     string get_display_name() {

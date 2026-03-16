@@ -4309,7 +4309,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             return builder.CreateLoad(iface_type_l, vp);
         }
         // Int to pointer
-        if (from_type->is_int_like()) {
+        if (from_type->is_int()) {
             return m_ctx->llvm_builder->CreateIntToPtr(value, compile_type(to_type));
         }
         return value;
@@ -4845,7 +4845,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 auto lhs = compile_expr(fn, data.op1);
                 auto rhs = compile_expr(fn, data.op2);
 
-                if (lhs_type->kind == TypeKind::Pointer && rhs_type->is_int_like()) {
+                if (lhs_type->kind == TypeKind::Pointer && rhs_type->is_int()) {
                     // ptr + n / ptr - n
                     auto elem_type_l = compile_type(lhs_type->get_elem());
                     auto index = rhs;
@@ -4854,7 +4854,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     }
                     return builder.CreateGEP(elem_type_l, lhs, {index});
                 }
-                if (lhs_type->is_int_like() && rhs_type->kind == TypeKind::Pointer) {
+                if (lhs_type->is_int() && rhs_type->kind == TypeKind::Pointer) {
                     // n + ptr
                     auto elem_type_l = compile_type(rhs_type->get_elem());
                     return builder.CreateGEP(elem_type_l, rhs, {lhs});

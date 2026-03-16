@@ -457,7 +457,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         }
 
         // Int to pointer conversion must be explicit (after pointer/ref checks)
-        if (from_type->is_int_like()) {
+        if (from_type->is_int()) {
             return is_explicit;
         }
 
@@ -1665,8 +1665,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (data.op_type == TokenType::ADD || data.op_type == TokenType::SUB) {
                 bool lhs_ptr = t1->kind == TypeKind::Pointer;
                 bool rhs_ptr = t2->kind == TypeKind::Pointer;
-                bool lhs_int = t1->is_int_like();
-                bool rhs_int = t2->is_int_like();
+                bool lhs_int = t1->is_int();
+                bool rhs_int = t2->is_int();
 
                 // ptr + int, ptr - int
                 if (lhs_ptr && rhs_int) {
@@ -1714,7 +1714,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
             // For integer operations, use the larger type
-            else if (t1->is_int_like() && t2->is_int_like()) {
+            else if (t1->is_int() && t2->is_int()) {
                 // If either operand is rune, result is rune
                 if (t1->kind == TypeKind::Rune || t2->kind == TypeKind::Rune) {
                     result_type = get_system_types()->rune_;
@@ -1792,9 +1792,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 return t;
             }
-            check_assignment(data.op1, t,
-                             t->kind == TypeKind::Float ? t : get_system_types()->int_);
-            return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
+            if (t->kind != TypeKind::Float && !t->is_int()) {
+                error(data.op1, errors::INVALID_OPERATOR, get_token_symbol(tt),
+                      format_type_display(t));
+                return nullptr;
+            }
+            return t;
         case TokenType::NOT: {
             // For struct types, try Not interface (bitwise not ~x)
             if (t->kind == TypeKind::Struct) {
@@ -1806,8 +1809,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
             // Primitive bitwise NOT
-            check_assignment(data.op1, t, get_system_types()->int_);
-            return t->kind == TypeKind::Bool ? get_system_types()->int_ : t;
+            if (!t->is_int()) {
+                error(data.op1, errors::INVALID_OPERATOR, get_token_symbol(tt),
+                      format_type_display(t));
+                return nullptr;
+            }
+            return t;
         }
         case TokenType::MUL: {
             if (ChiTypeStruct::is_pointer_type(t) && t->get_elem()->kind != TypeKind::Void) {
@@ -9526,13 +9533,13 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
 bool Resolver::builtin_satisfies_intrinsic(ChiType *type, IntrinsicSymbol symbol) {
     switch (symbol) {
     case IntrinsicSymbol::Add:
-        return type->is_int_like() || type->kind == TypeKind::Float;
+        return type->is_int() || type->kind == TypeKind::Float;
     case IntrinsicSymbol::Sub:
     case IntrinsicSymbol::Mul:
     case IntrinsicSymbol::Div:
     case IntrinsicSymbol::Rem:
     case IntrinsicSymbol::Neg:
-        return type->is_int_like() || type->kind == TypeKind::Float;
+        return type->is_int() || type->kind == TypeKind::Float;
     case IntrinsicSymbol::Eq:
     case IntrinsicSymbol::Ord:
         return type->is_int_like() || type->kind == TypeKind::Float ||
@@ -9550,7 +9557,7 @@ bool Resolver::builtin_satisfies_intrinsic(ChiType *type, IntrinsicSymbol symbol
     case IntrinsicSymbol::BitNot:
     case IntrinsicSymbol::Shl:
     case IntrinsicSymbol::Shr:
-        return type->is_int_like();
+        return type->is_int();
     default:
         return false;
     }
