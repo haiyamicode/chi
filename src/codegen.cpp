@@ -1237,6 +1237,9 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
     if (src_type->kind == TypeKind::ZeroInit) {
         return llvm::Constant::getNullValue(compile_type(dest_type));
     }
+    if (!dest_type || src_type == dest_type) {
+        return src_value;
+    }
     if (expr->type == ast::NodeType::ConstructExpr && src_type == dest_type) {
         return src_value;
     }
@@ -4038,7 +4041,11 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         if (from_type->kind == TypeKind::Any) {
             return value;
         }
-
+        if (get_resolver()->type_needs_destruction(from_type)) {
+            panic("naive value conversion is forbidden for non-trivial type {} in function {}",
+                  get_resolver()->format_type_display(from_type),
+                  fn && fn->node ? fn->node->name : "<null>");
+        }
         auto &llvm_builder = *(m_ctx->llvm_builder.get());
         auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
         auto ti_p = compile_type_info(from_type);
@@ -4175,6 +4182,12 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         if (from_type->kind == TypeKind::Null) {
             // null -> null optional
             return llvm::ConstantAggregateZero::get(compile_type(to_type));
+        }
+        if (get_resolver()->type_needs_destruction(from_type)) {
+            panic("naive value conversion is forbidden for non-trivial type {} -> {} in function {}",
+                  get_resolver()->format_type_display(from_type),
+                  get_resolver()->format_type_display(to_type),
+                  fn && fn->node ? fn->node->name : "<null>");
         }
         if (from_type->kind == TypeKind::Optional) {
             // Same optional type - return as-is
@@ -4472,11 +4485,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         builder.CreateLoad(compile_type(get_system_types()->bool_), has_value_p);
                     emit_dbg_location(expr);
                     auto msg = compile_string_literal("unwrapping null optional");
-                    auto opt_msg =
-                        compile_conversion(fn, msg, get_system_types()->string,
-                                           get_resolver()->get_wrapped_type(
-                                               get_system_types()->string, TypeKind::Optional));
-                    emit_runtime_assert(fn, has_value, opt_msg, expr);
+                    emit_runtime_assert(fn, has_value, msg, expr);
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
@@ -6912,11 +6921,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                         llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), has_value_p);
                     emit_dbg_location(expr);
                     auto msg = compile_string_literal("unwrapping null optional");
-                    auto opt_msg = compile_conversion(
-                        fn, msg, get_system_types()->string,
-                        get_resolver()->get_wrapped_type(
-                            get_system_types()->string, TypeKind::Optional));
-                    emit_runtime_assert(fn, has_value, opt_msg, expr);
+                    emit_runtime_assert(fn, has_value, msg, expr);
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return RefValue::from_address(value_p);
                 }
@@ -6962,10 +6967,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto cond = builder.CreateICmpULT(subscript, size_val);
             auto msg =
                 compile_string_literal(fmt::format("index out of bounds (size {})", fa_size));
-            auto opt_msg = compile_conversion(
-                fn, msg, get_system_types()->string,
-                get_resolver()->get_wrapped_type(get_system_types()->string, TypeKind::Optional));
-            emit_runtime_assert(fn, cond, opt_msg, expr);
+            emit_runtime_assert(fn, cond, msg, expr);
             emit_dbg_location(expr);
             auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), 0);
             return RefValue::from_address(
@@ -10698,10 +10700,20 @@ void Compiler::emit_dbg_location(ast::Node *node) {
         llvm::DILocation::get(llvm_ctx, line_no, col_no, scope, nullptr));
 }
 
-void Compiler::emit_runtime_assert(Function *fn, llvm::Value *cond, llvm::Value *opt_msg,
+void Compiler::emit_runtime_assert(Function *fn, llvm::Value *cond, llvm::Value *msg,
                                    ast::Node *site) {
     auto builder = m_ctx->llvm_builder.get();
     auto assert_fn = get_system_fn("assert");
+    auto opt_string_type =
+        get_resolver()->get_wrapped_type(get_system_types()->string, TypeKind::Optional);
+    auto opt_msg_ptr = builder->CreateAlloca(compile_type(opt_string_type), nullptr, "assert_msg");
+    auto opt_type_l = compile_type(opt_string_type);
+    auto has_value_p = builder->CreateStructGEP(opt_type_l, opt_msg_ptr, 0);
+    builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
+                         has_value_p);
+    auto value_p = builder->CreateStructGEP(opt_type_l, opt_msg_ptr, 1);
+    compile_copy(fn, msg, value_p, get_system_types()->string, nullptr);
+    auto opt_msg = builder->CreateLoad(opt_type_l, opt_msg_ptr);
     emit_dbg_location(site);
 
     if (site && site->module && site->token) {
