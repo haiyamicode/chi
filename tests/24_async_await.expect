@@ -23,6 +23,8 @@ deferred: 'resolved later'
 value: 'from struct'
 === Async no await ===
 value: 17
+=== Async interface default method ===
+value: 123
 === Var decl ===
 value: 10
 === Await in func arg ===

@@ -2046,6 +2046,11 @@ void Compiler::initialize_async_frame(Function *fn, AsyncStateMachine &machine, 
     frame_types.push_back(builder.getInt8PtrTy());
     machine.frame_state_index = (int)frame_types.size();
     frame_types.push_back(builder.getInt32Ty());
+    if (fn->fn_type && fn->fn_type->data.fn.container_ref && fn->get_bind_param()) {
+        machine.bind_type = fn->fn_type->data.fn.container_ref;
+        machine.frame_bind_index = (int)frame_types.size();
+        frame_types.push_back(compile_type(machine.bind_type));
+    }
     for (auto var : machine.frame_vars) {
         machine.frame_var_index[var] = (int)frame_types.size();
         frame_types.push_back(compile_type(get_async_frame_node_type(var)));
@@ -2090,6 +2095,11 @@ void Compiler::initialize_async_frame(Function *fn, AsyncStateMachine &machine, 
         builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, machine.frame_state_index);
     builder.CreateStore(capture_ptr, capture_ptr_slot);
     builder.CreateStore(llvm::ConstantInt::get(builder.getInt32Ty(), 0), state_ptr);
+    if (machine.frame_bind_index >= 0) {
+        auto bind_ptr =
+            builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, machine.frame_bind_index);
+        builder.CreateStore(fn->get_this_arg(), bind_ptr);
+    }
     builder.CreateCall(get_fn(get_variant_member_node(
                            get_resolver()->resolve_struct_type(machine.promise_type)->find_member("new"),
                            resolve_variant_type_id(fn, machine.promise_type)))
@@ -2779,6 +2789,12 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
         builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
     state_fn->async_reject_promise_ptr = result_promise_ptr;
     state_fn->async_promise_type = machine.promise_type;
+    state_fn->default_method_struct = fn->default_method_struct;
+    if (machine.frame_bind_index >= 0 && machine.bind_type) {
+        auto bind_slot =
+            builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, machine.frame_bind_index);
+        state_fn->bind_ptr = builder.CreateLoad(compile_type(machine.bind_type), bind_slot);
+    }
 
     restore_async_loop_stack(state_fn, resume_point.loop_stack);
 

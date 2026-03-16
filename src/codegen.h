@@ -136,6 +136,9 @@ struct Function {
     }
     bool use_sret() { return get_sret_param() != nullptr; }
     llvm::Value *get_this_arg() {
+        if (bind_ptr) {
+            return bind_ptr;
+        }
         auto bind_param = get_bind_param();
         return bind_param ? llvm_fn->getArg(bind_param->llvm_index) : nullptr;
     }
@@ -264,6 +267,8 @@ struct AsyncStateMachine {
     llvm::SwitchInst *dispatcher_switch = nullptr;
     bool frame_owner_transferred = false;
     int frame_state_index = -1;
+    int frame_bind_index = -1;
+    ChiType *bind_type = nullptr;
     int next_state_id = 1;
     std::vector<ast::Node *> frame_vars = {};
     std::vector<ast::Node *> frame_awaits = {};

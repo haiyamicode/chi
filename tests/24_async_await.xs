@@ -147,6 +147,30 @@ func test_async_no_await() {
     printf("value: {}\n", p.value()!);
 }
 
+interface AsyncDefaultReader {
+    func next_value() Promise<int>;
+
+    async func read_value() Promise<int> {
+        return await this.next_value();
+    }
+}
+
+struct AsyncDefaultReaderImpl {
+    impl AsyncDefaultReader {
+        func next_value() Promise<int> {
+            var p = Promise<int>{};
+            p.resolve(123);
+            return p;
+        }
+    }
+}
+
+func test_async_interface_default_method() {
+    println("=== Async interface default method ===");
+    var reader = AsyncDefaultReaderImpl{};
+    printf("value: {}\n", reader.read_value().value()!);
+}
+
 // --- Await: var decl ---
 
 async func do_var_decl() Promise<int> {
@@ -1627,6 +1651,7 @@ func main() {
 
     // Async no await
     test_async_no_await();
+    test_async_interface_default_method();
 
     // Await patterns (sync-resolved)
     test_var_decl();
