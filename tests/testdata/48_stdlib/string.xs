@@ -2,7 +2,7 @@ func main() {
     // byte-level basics
     var s = "hello";
     printf("byte_length = {}\n", s.byte_length());
-    printf("byte_at(0) = {}\n", s.byte_at(0));
+    printf("byte_at(0) = '{}'\n", s.byte_at(0));
     printf("byte_slice(1,4) = '{}'\n", s.byte_slice(1, 4));
 
     // char_length - ASCII

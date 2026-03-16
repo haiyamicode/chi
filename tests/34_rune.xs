@@ -1,6 +1,6 @@
 func test_basic_rune() {
     var c: byte = 'A';
-    printf("byte: {}\n", c);
+    printf("byte: '{}'\n", c);
 
     var r: rune = 'A';
     printf("rune ascii: {}\n", r);
@@ -24,7 +24,7 @@ func test_implicit_conversion() {
 func test_explicit_conversion() {
     var r: rune = 'Z';
     var c: byte = r as byte;
-    printf("rune->byte: {}\n", c);
+    printf("rune->byte: '{}'\n", c);
 
     var r2: rune = 65 as rune;
     printf("int->rune: {}\n", r2);

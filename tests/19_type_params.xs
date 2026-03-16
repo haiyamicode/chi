@@ -34,9 +34,9 @@ func main() {
     var int_result_inferred = identity(42);
     printf("identity(42) [inferred] = {}\n", int_result_inferred);
     var char_result = identity<byte>('A');
-    printf("identity<byte>('A') = {}\n", char_result);
+    printf("identity<byte>('A') = '{}'\n", char_result);
     var char_result_inferred = identity('A');
-    printf("identity('A') [inferred] = {}\n", char_result_inferred);
+    printf("identity('A') [inferred] = '{}'\n", char_result_inferred);
     var doubled = transform<int, int>(5, func (x: int) int {
         return x * 2;
     });
@@ -52,14 +52,14 @@ func main() {
         }
     );
     var final_value = zmap_result.get();
-    printf("final value: {}\n", final_value);
+    printf("final value: '{}'\n", final_value);
     var zmap_result_inferred = container.zmap(
         func (value: int) byte {
             return (value + 10) as byte;
         }
     );
     var final_value_inferred = zmap_result_inferred.get();
-    printf("final value [inferred]: {}\n", final_value_inferred);
+    printf("final value [inferred]: '{}'\n", final_value_inferred);
     var float_container = container.zmap<float>(
         func (i: int) float {
             return i as float * 0.5;

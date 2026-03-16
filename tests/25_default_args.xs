@@ -3,7 +3,7 @@ func greet(name: string, greeting: string = "Hello") {
 }
 
 func format_number(n: int, width: int = 0, fill: byte = ' ') int {
-    printf("n={}, width={}, fill={}\n", n, width, fill);
+    printf("n={}, width={}, fill='{}'\n", n, width, fill);
     return n;
 }
 

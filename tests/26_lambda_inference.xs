@@ -68,7 +68,7 @@ func main() {
     var upper = apply_char('a', func (c) {
         return (c as int - 32) as byte;
     });
-    printf("apply_char('a', to_upper) = {}\n", upper);
+    printf("apply_char('a', to_upper) = '{}'\n", upper);
     printf("\nTest 5: Transform with inference\n");
     var squared = transform_int(6, func (x) {
         return x * x;
