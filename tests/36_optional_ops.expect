@@ -32,6 +32,13 @@ null: falsy
 ?Point(0,0): truthy
 ?null Point: falsy
 
+test_optional_void:
+a != null: true
+b != null: false
+a truthy
+b falsy
+unwrap ok
+
 test_if_let:
 let point=(10, 20)
 let null else

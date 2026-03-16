@@ -2734,6 +2734,20 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
     default:
         if (next_is(TokenType::KW_IMPL)) {
             auto kw = expect(TokenType::KW_IMPL);
+            auto parse_impl_members = [&](ast::Node *impl_node, array<Node *> &members_out) {
+                expect(TokenType::LBRACE);
+                while (get()->type != TokenType::RBRACE) {
+                    if (get()->type == TokenType::END) {
+                        error(get(), errors::UNEXPECTED_EOF);
+                        break;
+                    }
+                    auto member = parse_fn_decl(FN_BODY_REQUIRED);
+                    members_out.add(member);
+                    member->parent = impl_node;
+                }
+                impl_node->end_token = get();
+                expect(TokenType::RBRACE);
+            };
             // impl where T: Bound { ... } — alternative syntax for where blocks
             if (next_is(TokenType::KW_WHERE)) {
                 consume(); // consume 'where'
@@ -2750,18 +2764,13 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
                         node->data.implement_block.where_clauses.add(clause);
                     } while (next_is(TokenType::ADD) && (consume(), true));
                 } while (next_is(TokenType::COMMA) && (consume(), true));
-                expect(TokenType::LBRACE);
-                while (get()->type != TokenType::RBRACE) {
-                    if (get()->type == TokenType::END) {
-                        error(get(), errors::UNEXPECTED_EOF);
-                        break;
-                    }
-                    auto member = parse_fn_decl(FN_BODY_REQUIRED);
-                    node->data.implement_block.members.add(member);
-                    member->parent = node;
+                parse_impl_members(node, node->data.implement_block.members);
+                if (next_is(TokenType::KW_ELSE)) {
+                    consume();
+                    auto else_scope = m_ctx->resolver->push_scope(get_scope()->owner);
+                    parse_impl_members(node, node->data.implement_block.else_members);
+                    m_ctx->resolver->pop_scope();
                 }
-                node->end_token = get();
-                expect(TokenType::RBRACE);
                 return node;
             }
             auto node = create_node(NodeType::ImplementBlock, kw);
@@ -2783,18 +2792,10 @@ Node *Parser::parse_struct_member(ContainerKind container_kind, Node *parent) {
                     } while (next_is(TokenType::ADD) && (consume(), true));
                 } while (next_is(TokenType::COMMA) && (consume(), true));
             }
-            expect(TokenType::LBRACE);
-            while (get()->type != TokenType::RBRACE) {
-                if (get()->type == TokenType::END) {
-                    error(get(), errors::UNEXPECTED_EOF);
-                    break;
-                }
-                auto member = parse_fn_decl(FN_BODY_REQUIRED);
-                node->data.implement_block.members.add(member);
-                member->parent = node;
+            parse_impl_members(node, node->data.implement_block.members);
+            if (node->data.implement_block.where_clauses.len > 0 && next_is(TokenType::KW_ELSE)) {
+                error(get(), "'else' is only supported for 'impl where ...' blocks");
             }
-            node->end_token = get();
-            expect(TokenType::RBRACE);
             return node;
         }
         auto spec = parse_decl_spec();

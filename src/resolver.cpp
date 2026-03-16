@@ -3683,6 +3683,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         if (sm && impl_data.resolved_where_cond)
                             sm->where_condition = impl_data.resolved_where_cond;
                     }
+                    for (auto impl_member : impl_data.else_members) {
+                        auto *sm = resolve_struct_member(struct_type, impl_member, struct_scope);
+                        if (sm && impl_data.resolved_where_cond) {
+                            sm->where_condition = impl_data.resolved_where_cond;
+                            sm->where_condition_inverted = true;
+                        }
+                    }
                 } else if (member->type == NodeType::VarDecl &&
                            member->data.var_decl.is_embed && !member->data.var_decl.is_field) {
                     // Interface embed (...InterfaceName): resolve type only, don't add as
@@ -3818,6 +3825,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
 
                     for (auto impl_member : impl_data.members) {
+                        resolve_fn_body(impl_member);
+                    }
+
+                    for (auto impl_member : impl_data.else_members) {
                         resolve_fn_body(impl_member);
                     }
 
@@ -5328,18 +5339,53 @@ string Resolver::format_type_qualified_name(ChiType *type, const string &module_
     }
 }
 
+static string get_conditional_impl_member_suffix(ast::Node *node) {
+    if (!node || !node->parent || node->parent->type != ast::NodeType::ImplementBlock) {
+        return "";
+    }
+    auto *impl = node->parent;
+    auto &impl_data = impl->data.implement_block;
+    if (impl_data.where_clauses.len == 0) {
+        return "";
+    }
+    auto is_same_member = [&](ast::Node *candidate) {
+        return candidate == node ||
+               (candidate && node && candidate->token == node->token &&
+                candidate->name == node->name);
+    };
+    for (int i = 0; i < impl_data.members.len; i++) {
+        if (is_same_member(impl_data.members[i])) {
+            return fmt::format(".__where{}", i);
+        }
+    }
+    for (int i = 0; i < impl_data.else_members.len; i++) {
+        if (is_same_member(impl_data.else_members[i])) {
+            return fmt::format(".__else{}", i);
+        }
+    }
+    return "";
+}
+
+string Resolver::resolve_member_local_name(ast::Node *node) {
+    if (!node) {
+        return "";
+    }
+    return node->name + get_conditional_impl_member_suffix(node);
+}
+
 string Resolver::resolve_qualified_name(ast::Node *node) {
     switch (node->type) {
     case NodeType::FnDef:
         if (node->resolved_type && node->resolved_type->kind == TypeKind::Fn) {
             auto container_ref = node->resolved_type->data.fn.container_ref;
+            auto local_name = resolve_member_local_name(node);
             if (container_ref) {
                 auto container = container_ref->get_elem();
                 return fmt::format("{}.{}",
                                    format_type_qualified_name(container, node->module->global_id()),
-                                   node->name);
+                                   local_name);
             }
-            return node->name;
+            return local_name;
         }
         if (node->parent) {
             return fmt::format("{}.{}", resolve_qualified_name(node->parent), node->name);
@@ -7927,6 +7973,9 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
 }
 
 ChiType *Resolver::create_pointer_type(ChiType *elem, TypeKind kind) {
+    if (kind == TypeKind::Optional && elem && elem->kind == TypeKind::Void) {
+        elem = m_ctx->rt_unit_type;
+    }
     auto pt = create_type(kind);
     pt->data.pointer.elem = elem;
     pt->is_placeholder = elem->is_placeholder;
@@ -7934,6 +7983,9 @@ ChiType *Resolver::create_pointer_type(ChiType *elem, TypeKind kind) {
 }
 
 ChiType *Resolver::get_pointer_type(ChiType *elem, TypeKind kind) {
+    if (kind == TypeKind::Optional && elem && elem->kind == TypeKind::Void) {
+        elem = m_ctx->rt_unit_type;
+    }
     auto &m = m_ctx->pointer_of[(int)kind];
     if (auto cached = m.get(elem)) {
         return *cached;
@@ -9375,7 +9427,8 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
     for (auto member : base.members) {
         if (!member->resolved_type)
             continue;
-        if (!check_where_condition(member->where_condition, &data))
+        if (!check_where_condition(member->where_condition, &data,
+                                   member->where_condition_inverted))
             continue;
         // For promoted methods (from struct embedding), verify the method still exists in
         // the concrete embedded type — where conditions on that type's methods may have
@@ -9410,6 +9463,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
         node->name = member->node->name;
         node->token = member->node->token;
         node->module = member->node->module;
+        node->parent = member->node->parent;
         node->resolved_type = type;
         node->root_node = member->node->get_root_node();
 
@@ -9451,7 +9505,8 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
     for (auto member : base.static_members) {
         if (!member->resolved_type)
             continue;
-        if (!check_where_condition(member->where_condition, &data))
+        if (!check_where_condition(member->where_condition, &data,
+                                   member->where_condition_inverted))
             continue;
         auto type = m_ctx->allocator->create_type(member->resolved_type->kind);
         member->resolved_type->clone(type);
@@ -9509,7 +9564,8 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
     // not the generic Index<uint32, T>).
     for (auto iface_impl : base.interfaces) {
         if (iface_impl->where_condition &&
-            !check_where_condition(iface_impl->where_condition, &data))
+            !check_where_condition(iface_impl->where_condition, &data,
+                                   iface_impl->where_condition_inverted))
             continue;
         scpy.interfaces.add(iface_impl);
         // Populate interface_table with the concrete (specialized) interface type as key.
@@ -9625,6 +9681,9 @@ ChiType *Resolver::get_system_type(TypeKind kind) {
 }
 
 ChiType *Resolver::get_wrapped_type(ChiType *elem, TypeKind kind) {
+    if (kind == TypeKind::Optional && elem && elem->kind == TypeKind::Void) {
+        elem = m_ctx->rt_unit_type;
+    }
     switch (kind) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
@@ -10691,10 +10750,30 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
     // Placeholder: check declared traits directly
     if (check_arg->kind == TypeKind::Placeholder) {
         for (auto t : get_placeholder_traits(check_arg)) {
-            if (t == trait_type)
+            if (t == trait_type || is_same_type(t, trait_type))
                 return true;
         }
         return false;
+    }
+
+    auto is_trait_like_bound = [&](ChiType *bound) {
+        if (!bound) {
+            return false;
+        }
+        if (bound->kind == TypeKind::Struct) {
+            if (ChiTypeStruct::is_interface(bound)) {
+                return true;
+            }
+            if (bound->data.struct_.node &&
+                resolve_intrinsic_symbol(bound->data.struct_.node) != IntrinsicSymbol::None) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (!is_trait_like_bound(trait_type)) {
+        return is_same_type(type_arg, trait_type);
     }
 
     // For subtypes, use the generic struct directly — no need to resolve
@@ -10782,13 +10861,16 @@ WhereCondition *Resolver::build_where_condition(ast::ImplementBlockData &impl_da
     return cond;
 }
 
-bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data) {
+bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data,
+                                     bool inverted) {
     if (!cond)
-        return true; // No condition = always included
+        return !inverted; // No condition = always included, unless explicitly inverted
 
+    bool satisfied = true;
     for (auto &bound : cond->bounds) {
         if (bound.param_index < 0 || bound.param_index >= (long)subtype_data->args.len) {
-            return false;
+            satisfied = false;
+            break;
         }
 
         auto type_arg = subtype_data->args[bound.param_index];
@@ -10798,10 +10880,10 @@ bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subty
             continue;
 
         if (!check_trait_bound(type_arg, bound.trait))
-            return false;
+            satisfied = false;
     }
 
-    return true;
+    return inverted ? !satisfied : satisfied;
 }
 
 // ============================================================================

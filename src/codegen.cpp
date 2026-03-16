@@ -317,6 +317,9 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             for (auto impl_member : member->data.implement_block.members) {
                 fn_members.add(impl_member);
             }
+            for (auto impl_member : member->data.implement_block.else_members) {
+                fn_members.add(impl_member);
+            }
         }
     }
 
@@ -411,7 +414,8 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         auto fn_node = member->node;
         auto struct_name =
             get_resolver()->format_type_qualified_name(type, fn_node->module->global_id());
-        auto name = struct_name + "." + fn_node->name;
+        auto member_name = get_resolver()->resolve_member_local_name(fn_node);
+        auto name = struct_name + "." + member_name;
         // For embedding proxies, look up the orig_fn via the concrete embedded struct's
         // own member node (not the clone) so the function_table key matches correctly.
         Function *orig_fn = nullptr;
@@ -426,7 +430,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
         auto fn =
             compile_fn_proto(fn_node->data.fn_def.fn_proto, fn_node, name, member->resolved_type);
         fn->container_type = type;
-        auto key = fn_node->module->global_id() + "." + struct_name + "." + fn_node->name;
+        auto key = fn_node->module->global_id() + "." + struct_name + "." + member_name;
         m_ctx->function_table[key] = fn;
 
         if (member->parent_member) {
@@ -10233,8 +10237,9 @@ Function *Compiler::get_fn(ast::Node *node) {
             auto container_id = container->global_id.empty()
                                     ? get_resolver()->format_type_id(container)
                                     : container->global_id;
+            auto member_name = get_resolver()->resolve_member_local_name(node);
             auto subst_id =
-                fmt::format("{}.{}.{}", node->module->global_id(), container_id, node->name);
+                fmt::format("{}.{}.{}", node->module->global_id(), container_id, member_name);
             entry = m_ctx->function_table.get(subst_id);
         }
     }
@@ -10271,7 +10276,7 @@ Function *Compiler::get_fn(ast::Node *node) {
                     fmt::format("{}.{}.{}", node->module->global_id(),
                                 get_resolver()->format_type_qualified_name(
                                     struct_type, node->module->global_id()),
-                                node->name);
+                                get_resolver()->resolve_member_local_name(node));
                 entry = m_ctx->function_table.get(key);
             }
         }
@@ -10303,7 +10308,7 @@ Function *Compiler::get_fn(ast::Node *node, ChiType *struct_type) {
         auto key = fmt::format("{}.{}.{}", node->module->global_id(),
                                get_resolver()->format_type_qualified_name(
                                    struct_type, node->module->global_id()),
-                               node->name);
+                               get_resolver()->resolve_member_local_name(node));
         auto entry = m_ctx->function_table.get(key);
         if (entry)
             return *entry;

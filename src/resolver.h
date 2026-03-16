@@ -359,7 +359,8 @@ class Resolver {
     bool struct_satisfies_interface(ChiType *struct_type, ChiType *iface_type);
     bool check_trait_bound(ChiType *type_arg, ChiType *trait_type);
     bool is_constructor_interface_compatible(ChiType *type, ChiType *iface_type);
-    bool check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data);
+    bool check_where_condition(WhereCondition *cond, ChiTypeSubtype *subtype_data,
+                               bool inverted = false);
     WhereCondition *build_where_condition(ast::ImplementBlockData &impl_data,
                                           ChiTypeStruct *struct_, ResolveScope &scope);
 
@@ -441,6 +442,7 @@ class Resolver {
     string format_type_data(TypeKind kind, ChiType::Data *data, bool for_display = false);
 
     string resolve_global_id(ast::Node *node);
+    string resolve_member_local_name(ast::Node *node);
 
     bool has_interface_impl(ChiTypeStruct *struct_type, string interface_id);
 

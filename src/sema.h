@@ -92,6 +92,7 @@ struct ChiStructMember {
     long vtable_index = -1;
     bool is_impl_method = false;  // true if declared inside an impl block
     WhereCondition *where_condition = nullptr;
+    bool where_condition_inverted = false;
 
     string get_name();
     Visibility get_visibility();
@@ -111,6 +112,7 @@ struct InterfaceImpl {
     ImplMembers impl_members = {};
     long itable_index = -1;
     WhereCondition *where_condition = nullptr; // non-null for `impl Iface where T: Bound`
+    bool where_condition_inverted = false;
 };
 
 MAKE_ENUM(ResolveStatus, None, MemberTypesKnown, EmbedsResolved, BodiesResolved, Done);

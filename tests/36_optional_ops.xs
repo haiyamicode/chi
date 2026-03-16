@@ -160,6 +160,35 @@ func test_optional_truthiness() {
     println("");
 }
 
+func maybe_void(has_value: bool) ?void {
+    if has_value {
+        return ();
+    }
+    return null;
+}
+
+func test_optional_void() {
+    println("test_optional_void:");
+
+    var a = maybe_void(true);
+    var b = maybe_void(false);
+
+    printf("a != null: {}\n", a != null);
+    printf("b != null: {}\n", b != null);
+
+    if a {
+        println("a truthy");
+    }
+    if !b {
+        println("b falsy");
+    }
+
+    a!;
+    println("unwrap ok");
+
+    println("");
+}
+
 func maybe_point(has_value: bool) ?Point {
     printf("maybe_point({})\n", has_value);
     if has_value {
@@ -266,6 +295,7 @@ func main() {
     test_chaining();
     test_null_comparison();
     test_optional_truthiness();
+    test_optional_void();
     test_if_let();
     test_if_let_enum_pattern();
 }
