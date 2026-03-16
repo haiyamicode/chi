@@ -378,6 +378,7 @@ class Compiler {
 
     ChiType *eval_type(ChiType *type);
     ChiType *get_chitype(ast::Node *node);
+    ChiType *get_value_chitype(ast::Node *node);
 
     llvm::Type *_compile_type(ChiType *type);
     llvm::DISubroutineType *compile_di_fn_type(Function *fn);

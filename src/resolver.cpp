@@ -1322,6 +1322,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(node, "missing type annotation for parameter '{}'", node->name);
             return create_type(TypeKind::Void);
         }
+        result = normalize_void_in_value_context(result);
         // Resolve default value if present
         if (data.default_value) {
             auto default_scope = scope.set_value_type(result);
@@ -1376,6 +1377,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *var_type = nullptr;
         if (data.type) {
             var_type = resolve_value(data.type, scope);
+            var_type = normalize_void_in_value_context(var_type);
             // Interface embed nodes (...InterfaceName inside an interface) are allowed
             // to reference bare interface types. Struct embeds have is_field=true.
             bool is_interface_embed = data.is_embed && !data.is_field;
@@ -4040,10 +4042,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         array<ChiType *> resolved_args;
         for (size_t i = 0; i < data.args.len; i++) {
             auto resolved = resolve_value(data.args[i], scope);
-            if (resolved && resolved->kind == TypeKind::Void) {
-                error(data.args[i], "'void' cannot be used as a type parameter");
-                return nullptr;
-            }
             resolved_args.add(resolved);
         }
         // Build final args, packing variadic excess into a Tuple
@@ -4064,11 +4062,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!has_variadic) {
             for (auto i = data.args.len; i < params.len; i++) {
                 auto resolved = resolve_value(decl_params[i]->data.type_param.default_type, scope);
-                if (resolved && resolved->kind == TypeKind::Void) {
-                    error(decl_params[i]->data.type_param.default_type,
-                          "'void' cannot be used as a type parameter");
-                    return nullptr;
-                }
                 args.add(resolved);
             }
         }
@@ -6250,6 +6243,13 @@ bool Resolver::use_implicit_owning_coercion(ChiType *from_type, ChiType *to_type
     return false;
 }
 
+ChiType *Resolver::normalize_void_in_value_context(ChiType *type) {
+    if (type && type->kind == TypeKind::Void) {
+        return m_ctx->rt_unit_type;
+    }
+    return type;
+}
+
 bool Resolver::should_resolve_fn_body(ResolveScope &scope) {
     auto parent_struct = scope.parent_struct;
     if (!parent_struct) {
@@ -6327,7 +6327,8 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         auto ret = make_recursive_call(data.return_type, subs);
         fn_type->data.fn.return_type = ret;
         for (auto param : data.params) {
-            fn_type->data.fn.params.add(make_recursive_call(param, subs));
+            auto param_type = make_recursive_call(param, subs);
+            fn_type->data.fn.params.add(normalize_void_in_value_context(param_type));
         }
         // Preserve type parameters that don't belong to the source we're substituting
         for (auto type_param : data.type_params) {

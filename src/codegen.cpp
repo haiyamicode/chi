@@ -121,6 +121,10 @@ ChiType *Compiler::get_chitype(ast::Node *node) {
     return eval_type(node->resolved_type);
 }
 
+ChiType *Compiler::get_value_chitype(ast::Node *node) {
+    return get_resolver()->normalize_void_in_value_context(get_chitype(node));
+}
+
 llvm::DICompileUnit *Compiler::get_module_cu(ast::Module *module) {
     auto id = module->global_id();
     auto entry = m_ctx->module_cu_table.get(id);
@@ -824,7 +828,7 @@ llvm::DISubroutineType *Compiler::compile_di_fn_type(Function *fn) {
         types.push_back(compile_di_type(fn->fn_type->data.fn.container_ref));
     }
     for (auto param : fn->fn_type->data.fn.params) {
-        types.push_back(compile_di_type(param));
+        types.push_back(compile_di_type(get_resolver()->normalize_void_in_value_context(eval_type(param))));
     }
     return m_ctx->dbg_builder->createSubroutineType(
         m_ctx->dbg_builder->getOrCreateTypeArray(types));
@@ -1000,7 +1004,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             }
 
             auto param = fn_proto.params[idx];
-            auto param_type = param_info.type;
+            auto param_type = get_resolver()->normalize_void_in_value_context(eval_type(param_info.type));
             // Never heap-allocate parameters - use stack allocation regardless of escape status
             // Parameters are function arguments and should always be stack-local
             auto var = fn->entry_alloca(compile_type(param_type), param->name);
@@ -3760,7 +3764,7 @@ void Compiler::compile_async_fn_body(Function *fn) {
         if (m_ctx->var_table.has_key(param))
             continue;
         auto llvm_param = fn->llvm_fn->getArg(param_info.llvm_index);
-        auto param_type = param_info.type;
+        auto param_type = get_resolver()->normalize_void_in_value_context(eval_type(param_info.type));
         auto var = fn->entry_alloca(compile_type(param_type), param->name);
         builder.CreateStore(llvm_param, var);
         add_var(param, var);
@@ -4436,7 +4440,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::FnCallExpr: {
         // Write result directly into resolved_outlet alloca, then load from it
-        if (expr->resolved_outlet) {
+        if (expr->resolved_outlet && get_chitype(expr)->kind != TypeKind::Void) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto dest = get_var(expr->resolved_outlet);
             auto type_l = compile_type(get_chitype(expr));
@@ -4493,7 +4497,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.identifier;
         auto &builder = *m_ctx->llvm_builder.get();
         auto ref = compile_expr_ref(fn, expr);
-        auto type_l = compile_type(get_chitype(expr));
+        auto type_l = compile_type(get_value_chitype(expr));
         return ref.address ? builder.CreateLoad(type_l, ref.address) : ref.value;
     }
     case ast::NodeType::LiteralExpr: {
@@ -4539,12 +4543,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto msg = compile_string_literal("unwrapping null optional");
                     emit_runtime_assert(fn, has_value, msg, expr);
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
-                    return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
+                    return builder.CreateLoad(compile_type(get_value_chitype(expr)), value_p);
                 }
 
                 if (data.resolved_call) {
                     auto ref_ptr = compile_fn_call(fn, data.resolved_call);
-                    auto elem = expr->resolved_type;
+                    auto elem = get_value_chitype(expr);
                     if (ChiTypeStruct::is_interface(elem))
                         return ref_ptr;
                     return builder.CreateLoad(compile_type(elem), ref_ptr);
@@ -4581,7 +4585,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // move x — bitwise load + zero source (skip copy)
             auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
-            auto type = get_chitype(data.op1);
+            auto type = get_value_chitype(data.op1);
             auto type_l = compile_type(type);
             auto value = builder.CreateLoad(type_l, ref.address);
             auto size = llvm_type_size(type_l);
@@ -5380,7 +5384,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             }
             assert(it->second.address && "await ref must have value or address");
             auto &builder = *m_ctx->llvm_builder.get();
-            return builder.CreateLoad(compile_type(get_chitype(expr)), it->second.address);
+            return builder.CreateLoad(compile_type(get_value_chitype(expr)), it->second.address);
         }
 
         // Synchronous await fallback for already-resolved promises.
@@ -8195,9 +8199,12 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             }
         }
 
+        auto var_type = get_chitype(stmt);
+        if (var_type->kind == TypeKind::Void) {
+            break;
+        }
         auto var = compile_alloc(fn, stmt);
         add_var(stmt, var);
-        auto var_type = get_chitype(stmt);
 
         // Allocate drop flag for maybe-moved variables
         if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(stmt)) {
@@ -10597,7 +10604,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
             param_count = data.get_va_start();
         }
         for (size_t i = 0; i < param_count; i++) {
-            auto param = data.params[i];
+            auto param = get_resolver()->normalize_void_in_value_context(eval_type(data.params[i]));
             param_types.push_back(compile_type(param));
         }
         // For extern variadic functions, use LLVM's native variadic support

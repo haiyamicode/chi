@@ -529,6 +529,7 @@ class Resolver {
     bool always_terminates(ast::Node *node);
 
     void collect_narrowables(ast::Node *expr, bool when_truthy, array<ast::Node *> &out);
+    ChiType *normalize_void_in_value_context(ChiType *type);
 
     optional<ConstantValue> resolve_constant_value(ast::Node *node);
 
