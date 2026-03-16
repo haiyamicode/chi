@@ -195,6 +195,26 @@ func test_reassign() {
     println(x.1);
 }
 
+// Regression: generic struct methods returning Tuple<T, bool> must specialize correctly.
+struct AtomicLike<T> {
+    value: T;
+
+    static func from_value(value: T) AtomicLike<T> {
+        return {value: value};
+    }
+
+    func compare_exchange(expected: T) Tuple<T, bool> {
+        return (expected, false);
+    }
+}
+
+func test_generic_tuple_method_return() {
+    var value = AtomicLike<int>.from_value(1);
+    var (old, ok) = value.compare_exchange(7);
+    println(old);
+    println(ok);
+}
+
 func main() {
     test_basic();
     test_pair();
@@ -213,4 +233,5 @@ func main() {
     test_destructure_rest();
     test_as_tuple();
     test_reassign();
+    test_generic_tuple_method_return();
 }

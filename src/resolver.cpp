@@ -6288,6 +6288,14 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         return fn_type;
     }
 
+    case TypeKind::Tuple: {
+        TypeList elements;
+        for (auto elem : type->data.tuple.elements) {
+            elements.add(make_recursive_call(elem, subs));
+        }
+        return get_tuple_type(elements);
+    }
+
     case TypeKind::Enum: {
         auto &data = type->data.enum_;
 
