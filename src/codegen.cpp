@@ -409,7 +409,8 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
             continue;
 
         auto fn_node = member->node;
-        auto struct_name = get_resolver()->format_type_display(struct_type);
+        auto struct_name =
+            get_resolver()->format_type_qualified_name(type, fn_node->module->global_id());
         auto name = struct_name + "." + fn_node->name;
         // For embedding proxies, look up the orig_fn via the concrete embedded struct's
         // own member node (not the clone) so the function_table key matches correctly.
@@ -453,7 +454,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     for (auto member : struct_type->data.struct_.members) {
         if (member->is_method() && !member->resolved_type->is_placeholder &&
             !member->resolved_type->has_unresolved_subtype()) {
-            auto method_fn = get_fn(member->node, struct_type);
+            auto method_fn = get_fn(member->node, type);
             member->vtable_index = m_ctx->reflection_vtable.size();
             m_ctx->reflection_vtable.push_back(method_fn->llvm_fn);
         }
@@ -600,8 +601,10 @@ void Compiler::compile_enum_name_intrinsics(ChiTypeEnum *enum_data, ChiType *bas
                     member->symbol != expected_symbol) {
                     break; // User overrode this method; don't replace
                 }
+                auto type_key = get_resolver()->format_type_qualified_name(
+                    base_value_type, member->node->module->global_id());
                 auto key = fmt::format("{}.{}.{}", member->node->module->global_id(),
-                                       type_display, method_name);
+                                       type_key, method_name);
                 auto fn = new Function(m_ctx, llvm_fn, member->node);
                 fn->qualified_name = key;
                 m_ctx->function_table[key] = fn;
@@ -10046,7 +10049,10 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
         llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
     // Generate unique name for the constructor
-    auto type_name = get_resolver()->format_type_display(struct_type);
+    auto type_name = get_resolver()->format_type_qualified_name(
+        struct_type,
+        resolved_type->data.struct_.node ? resolved_type->data.struct_.node->module->global_id()
+                                         : "");
     auto fn_name = fmt::format("{}.__new", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
@@ -10218,7 +10224,9 @@ Function *Compiler::get_fn(ast::Node *node) {
                     struct_type = struct_type->data.subtype.final_type;
                 auto key =
                     fmt::format("{}.{}.{}", node->module->global_id(),
-                                get_resolver()->format_type_display(struct_type), node->name);
+                                get_resolver()->format_type_qualified_name(
+                                    struct_type, node->module->global_id()),
+                                node->name);
                 entry = m_ctx->function_table.get(key);
             }
         }
@@ -10248,7 +10256,9 @@ Function *Compiler::get_fn(ast::Node *node) {
 Function *Compiler::get_fn(ast::Node *node, ChiType *struct_type) {
     if (struct_type) {
         auto key = fmt::format("{}.{}.{}", node->module->global_id(),
-                               get_resolver()->format_type_display(struct_type), node->name);
+                               get_resolver()->format_type_qualified_name(
+                                   struct_type, node->module->global_id()),
+                               node->name);
         auto entry = m_ctx->function_table.get(key);
         if (entry)
             return *entry;

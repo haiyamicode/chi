@@ -5219,6 +5219,81 @@ bool Resolver::has_interface_impl(ChiTypeStruct *struct_type, string interface_i
     return false;
 }
 
+static string qualify_base_name(const string &local_name, ast::Module *module,
+                                const string &relative_module_id) {
+    if (!module || relative_module_id.empty() || module->global_id() == relative_module_id) {
+        return local_name;
+    }
+    return fmt::format("{}.{}", module->global_id(), local_name);
+}
+
+static string format_container_qualified_name(Resolver *resolver, const string &base_name,
+                                              ast::Module *module, TypeList *type_params,
+                                              const string &module_id) {
+    auto qualified = qualify_base_name(base_name, module, module_id);
+    if (!type_params || type_params->len == 0) {
+        return qualified;
+    }
+
+    std::stringstream ss;
+    ss << qualified << "<";
+    for (int i = 0; i < type_params->len; i++) {
+        if (i > 0) ss << ",";
+        ss << resolver->format_type_qualified_name((*type_params)[i], module_id);
+    }
+    ss << ">";
+    return ss.str();
+}
+
+string Resolver::format_type_qualified_name(ChiType *type, const string &module_id) {
+    if (!type) {
+        return "<invalid-type>";
+    }
+
+    switch (type->kind) {
+    case TypeKind::This:
+        return format_type_qualified_name(type->eval(), module_id);
+    case TypeKind::TypeSymbol:
+        if (type->name) {
+            return *type->name;
+        }
+        if (type->display_name) {
+            return *type->display_name;
+        }
+        return format_type_display(type);
+    case TypeKind::Subtype: {
+        auto &data = type->data.subtype;
+        if (data.generic->kind == TypeKind::Fn || data.generic->kind == TypeKind::FnLambda) {
+            return format_type_qualified_name(data.final_type, module_id);
+        }
+        std::stringstream ss;
+        ss << format_type_qualified_name(data.generic, module_id) << "<";
+        for (int i = 0; i < data.args.len; i++) {
+            if (i > 0) ss << ",";
+            ss << format_type_qualified_name(data.args[i], module_id);
+        }
+        ss << ">";
+        return ss.str();
+    }
+    case TypeKind::Struct: {
+        auto &sty = type->data.struct_;
+        auto base_name = type->name.value_or(sty.node ? sty.node->name : string("<anon>"));
+        return format_container_qualified_name(this, base_name,
+                                               sty.node ? sty.node->module : nullptr,
+                                               &sty.type_params, module_id);
+    }
+    case TypeKind::Enum: {
+        auto &ety = type->data.enum_;
+        auto base_name = type->name.value_or(ety.node ? ety.node->name : string("<anon>"));
+        return format_container_qualified_name(this, base_name,
+                                               ety.node ? ety.node->module : nullptr,
+                                               &ety.type_params, module_id);
+    }
+    default:
+        return format_type_id(type);
+    }
+}
+
 string Resolver::resolve_qualified_name(ast::Node *node) {
     switch (node->type) {
     case NodeType::FnDef:
@@ -5226,8 +5301,9 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
             auto container_ref = node->resolved_type->data.fn.container_ref;
             if (container_ref) {
                 auto container = container_ref->get_elem();
-                // Use for_display=true to get just the type name, not the full global_id
-                return fmt::format("{}.{}", format_type_display(container), node->name);
+                return fmt::format("{}.{}",
+                                   format_type_qualified_name(container, node->module->global_id()),
+                                   node->name);
             }
             return node->name;
         }

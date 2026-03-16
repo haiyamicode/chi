@@ -436,6 +436,7 @@ class Resolver {
     // Convenience wrappers: display = human-readable for errors, id = unique internal key
     string format_type_display(ChiType *type) { return format_type(type, true); }
     string format_type_id(ChiType *type) { return format_type(type, false); }
+    string format_type_qualified_name(ChiType *type, const string &module_id = "");
 
     string format_type_data(TypeKind kind, ChiType::Data *data, bool for_display = false);
 
