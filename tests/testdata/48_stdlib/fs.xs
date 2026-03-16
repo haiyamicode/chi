@@ -1,11 +1,33 @@
 import "std/fs" as fs;
 
+async func read_async_string(path: string) Promise<string> {
+    var f = fs.File.open(path);
+    var reader = f.async();
+    var content = await reader.read_string();
+    f.close();
+    return content;
+}
+
+async func write_async_string(path: string, content: string) Promise<string> {
+    var f = fs.File.create(path);
+    var writer = f.async();
+    await writer.write_string(content);
+    f.close();
+    return fs.read_file(path);
+}
+
 func main() {
-    let test_dir = "/tmp/chi_fs_test";
-    let test_file = "/tmp/chi_fs_test/hello.txt";
+    let test_dir = "/tmp/chi_fs_stdlib_test";
+    let test_file = "/tmp/chi_fs_stdlib_test/hello.txt";
 
     println("=== fs.mkdir ===");
     fs.mkdir_all(test_dir);
+    if fs.exists("/tmp/chi_fs_stdlib_test/async.txt") {
+        fs.remove("/tmp/chi_fs_stdlib_test/async.txt");
+    }
+    if fs.exists("/tmp/chi_fs_stdlib_test/async_write.txt") {
+        fs.remove("/tmp/chi_fs_stdlib_test/async_write.txt");
+    }
     println(fs.exists(test_dir));
 
     println("=== File class ===");
@@ -45,7 +67,7 @@ func main() {
     fs.remove(test_file);
 
     println("=== fs.exists (nonexistent) ===");
-    println(fs.exists("/tmp/chi_fs_test_nonexistent_12345"));
+    println(fs.exists("/tmp/chi_fs_stdlib_test_nonexistent_12345"));
 
     println("=== error: open nonexistent ===");
     try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError as err {
@@ -84,6 +106,23 @@ func main() {
         },
         else => {}
     }
+
+    println("=== File.async().read_string ===");
+    fs.write_file("/tmp/chi_fs_stdlib_test/async.txt", "async hello");
+    read_async_string("/tmp/chi_fs_stdlib_test/async.txt").then(
+        func (content) {
+            println(content);
+            fs.remove("/tmp/chi_fs_stdlib_test/async.txt");
+        }
+    );
+
+    println("=== File.async().write_string ===");
+    write_async_string("/tmp/chi_fs_stdlib_test/async_write.txt", "async write").then(
+        func (content) {
+            println(content);
+            fs.remove("/tmp/chi_fs_stdlib_test/async_write.txt");
+        }
+    );
 
     println("done");
 }

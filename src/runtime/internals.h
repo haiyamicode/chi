@@ -163,7 +163,11 @@ CHI_RT_EXPORT int32_t __cx_fs_error_kind(int32_t uv_err);
 CHI_RT_EXPORT int32_t __cx_fs_flags(int32_t which);
 CHI_RT_EXPORT int32_t __cx_fs_open(const char *path, int32_t flags, int32_t mode);
 CHI_RT_EXPORT int32_t __cx_fs_read(int32_t fd, void *buf, uint32_t size);
+CHI_RT_EXPORT void __cx_fs_read_async(int32_t fd, void *buf, uint32_t size, void *resolve_lambda,
+                                      void *reject_lambda);
 CHI_RT_EXPORT int32_t __cx_fs_write(int32_t fd, const void *data, uint32_t size);
+CHI_RT_EXPORT void __cx_fs_write_async(int32_t fd, const void *data, uint32_t size,
+                                       void *resolve_lambda, void *reject_lambda);
 CHI_RT_EXPORT int32_t __cx_fs_close(int32_t fd);
 CHI_RT_EXPORT int32_t __cx_file_exists(const char *path);
 CHI_RT_EXPORT int32_t __cx_file_remove(const char *path);

@@ -1143,12 +1143,130 @@ int32_t __cx_fs_read(int32_t fd, void *buf, uint32_t size) {
     return n < 0 ? n : n;
 }
 
+struct FsReadAsyncData {
+    uv_fs_t req;
+    uv_buf_t buf;
+    void (*resolve_fn)(void *, uint32_t);
+    void *resolve_captures;
+    void (*reject_fn)(void *, int32_t);
+    void *reject_captures;
+};
+
+static void fs_read_async_cleanup(FsReadAsyncData *data) {
+    if (data->resolve_captures)
+        cx_capture_release(data->resolve_captures);
+    if (data->reject_captures)
+        cx_capture_release(data->reject_captures);
+    uv_fs_req_cleanup(&data->req);
+    delete data;
+}
+
+static void fs_read_async_cb(uv_fs_t *req) {
+    auto data = (FsReadAsyncData *)req->data;
+    auto result = req->result;
+    if (result >= 0) {
+        void *payload = data->resolve_captures ? cx_capture_get_data(data->resolve_captures) : nullptr;
+        data->resolve_fn(payload, (uint32_t)result);
+    } else {
+        void *payload = data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
+        data->reject_fn(payload, (int32_t)result);
+    }
+    fs_read_async_cleanup(data);
+}
+
+void __cx_fs_read_async(int32_t fd, void *buf, uint32_t size, void *resolve_lambda_ptr,
+                        void *reject_lambda_ptr) {
+    auto resolve_lambda = (CxLambda *)resolve_lambda_ptr;
+    auto reject_lambda = (CxLambda *)reject_lambda_ptr;
+
+    auto data = new FsReadAsyncData();
+    data->buf = uv_buf_init((char *)buf, size);
+    data->resolve_fn = (void (*)(void *, uint32_t))resolve_lambda->fn_ptr;
+    data->resolve_captures = resolve_lambda->captures;
+    data->reject_fn = (void (*)(void *, int32_t))reject_lambda->fn_ptr;
+    data->reject_captures = reject_lambda->captures;
+    if (data->resolve_captures)
+        cx_capture_retain(data->resolve_captures);
+    if (data->reject_captures)
+        cx_capture_retain(data->reject_captures);
+    data->req.data = data;
+
+    auto r = uv_fs_read(uv_default_loop(), &data->req, fd, &data->buf, 1, -1, fs_read_async_cb);
+    if (r < 0) {
+        void *payload = data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
+        data->reject_fn(payload, r);
+        fs_read_async_cleanup(data);
+    }
+}
+
 int32_t __cx_fs_write(int32_t fd, const void *data, uint32_t size) {
     uv_fs_t req;
     uv_buf_t uvbuf = uv_buf_init((char *)data, size);
     int32_t n = uv_fs_write(uv_default_loop(), &req, fd, &uvbuf, 1, -1, NULL);
     uv_fs_req_cleanup(&req);
     return n < 0 ? n : n;
+}
+
+struct FsWriteAsyncData {
+    uv_fs_t req;
+    uv_buf_t buf;
+    char *data;
+    void (*resolve_fn)(void *);
+    void *resolve_captures;
+    void (*reject_fn)(void *, int32_t);
+    void *reject_captures;
+};
+
+static void fs_write_async_cleanup(FsWriteAsyncData *data) {
+    if (data->resolve_captures)
+        cx_capture_release(data->resolve_captures);
+    if (data->reject_captures)
+        cx_capture_release(data->reject_captures);
+    free(data->data);
+    uv_fs_req_cleanup(&data->req);
+    delete data;
+}
+
+static void fs_write_async_cb(uv_fs_t *req) {
+    auto data = (FsWriteAsyncData *)req->data;
+    auto result = req->result;
+    if (result >= 0) {
+        void *payload = data->resolve_captures ? cx_capture_get_data(data->resolve_captures) : nullptr;
+        data->resolve_fn(payload);
+    } else {
+        void *payload = data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
+        data->reject_fn(payload, (int32_t)result);
+    }
+    fs_write_async_cleanup(data);
+}
+
+void __cx_fs_write_async(int32_t fd, const void *src_data, uint32_t size, void *resolve_lambda_ptr,
+                         void *reject_lambda_ptr) {
+    auto resolve_lambda = (CxLambda *)resolve_lambda_ptr;
+    auto reject_lambda = (CxLambda *)reject_lambda_ptr;
+
+    auto data = new FsWriteAsyncData();
+    data->data = (char *)malloc(size);
+    if (size > 0) {
+        memcpy(data->data, src_data, size);
+    }
+    data->buf = uv_buf_init(data->data, size);
+    data->resolve_fn = (void (*)(void *))resolve_lambda->fn_ptr;
+    data->resolve_captures = resolve_lambda->captures;
+    data->reject_fn = (void (*)(void *, int32_t))reject_lambda->fn_ptr;
+    data->reject_captures = reject_lambda->captures;
+    if (data->resolve_captures)
+        cx_capture_retain(data->resolve_captures);
+    if (data->reject_captures)
+        cx_capture_retain(data->reject_captures);
+    data->req.data = data;
+
+    auto r = uv_fs_write(uv_default_loop(), &data->req, fd, &data->buf, 1, -1, fs_write_async_cb);
+    if (r < 0) {
+        void *payload = data->reject_captures ? cx_capture_get_data(data->reject_captures) : nullptr;
+        data->reject_fn(payload, r);
+        fs_write_async_cleanup(data);
+    }
 }
 
 int32_t __cx_fs_close(int32_t fd) {

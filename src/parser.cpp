@@ -111,6 +111,10 @@ Token *Parser::expect_identifier() {
     case TokenType::KW_NEW:
     case TokenType::KW_DELETE:
     case TokenType::KW_CATCH:
+    case TokenType::KW_ASYNC:
+        if (token->type == TokenType::KW_ASYNC) {
+            token->type = TokenType::IDEN;
+        }
         return token;
 
     default:

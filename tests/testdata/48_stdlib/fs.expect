@@ -32,4 +32,8 @@ op: list_dir
 === error: result mode ===
 kind: ErrorKind.NotFound
 op: open
+=== File.async().read_string ===
+=== File.async().write_string ===
 done
+async hello
+async write

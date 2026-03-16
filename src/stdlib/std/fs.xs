@@ -7,7 +7,11 @@ extern "C" {
     unsafe func __cx_fs_flags(which: int32) int32;
     unsafe func __cx_fs_open(path: *byte, flags: int32, mode: int32) int32;
     unsafe func __cx_fs_read(fd: int32, buf: *void, size: uint32) int32;
+    unsafe func __cx_fs_read_async(fd: int32, buf: *void, size: uint32, resolve: *void,
+                                   reject: *void);
     unsafe func __cx_fs_write(fd: int32, data: *void, size: uint32) int32;
+    unsafe func __cx_fs_write_async(fd: int32, data: *void, size: uint32, resolve: *void,
+                                    reject: *void);
     unsafe func __cx_fs_close(fd: int32) int32;
     unsafe func __cx_file_exists(path: *byte) int32;
     unsafe func __cx_file_remove(path: *byte) int32;
@@ -104,9 +108,11 @@ export enum OpenMode {
 
 struct FileHandle {
     private fd: int32 = -1;
+    private path: string = "";
 
-    mut func new(fd: int32) {
+    mut func new(fd: int32, path: string) {
         this.fd = fd;
+        this.path = move path;
     }
 
     mut func close() {
@@ -134,6 +140,14 @@ struct FileHandle {
         }
     }
 
+    func raw_fd() int32 {
+        return this.fd;
+    }
+
+    func file_path() string {
+        return this.path;
+    }
+
     mut func delete() {
         this.close();
     }
@@ -144,8 +158,8 @@ struct FileHandle {
 export struct File {
     private handle: Shared<FileHandle>;
 
-    private mut func new(fd: int32) {
-        this.handle = {new FileHandle{fd}};
+    private mut func new(fd: int32, path: string) {
+        this.handle = {new FileHandle{fd, move path}};
     }
 
     static func open(path: string, mode: OpenMode = OpenMode.Read) File {
@@ -155,7 +169,7 @@ export struct File {
             if fd < 0 {
                 throw_fs_error("open", path, fd);
             }
-            return {fd};
+            return {fd, path};
         }
     }
 
@@ -178,6 +192,80 @@ export struct File {
     impl io.Close {
         mut func close() {
             this.handle.close();
+        }
+    }
+
+    func async() FileAsync {
+        return {this.handle};
+    }
+}
+
+export struct FileAsync {
+    private handle: Shared<FileHandle>;
+
+    mut func new(handle: Shared<FileHandle>) {
+        this.handle = move handle;
+    }
+
+    impl io.ReadAsync {
+        func read(buf: []mut byte) Promise<uint32> {
+            var promise = Promise<uint32>{};
+            var path = this.handle.file_path();
+            var resolve = func [promise] (num_bytes: uint32) {
+                promise.resolve(num_bytes);
+            };
+            var reject = func [promise, path] (err: int32) {
+                promise.reject(
+                    new FsError{
+                        kind: error_kind_from(err),
+                        op: "read",
+                        :path,
+                        raw_code: err,
+                        detail: uv_strerror(err)
+                    }
+                );
+            };
+            unsafe {
+                __cx_fs_read_async(
+                    this.handle.raw_fd(),
+                    buf.as_ptr(),
+                    buf.length,
+                    &resolve,
+                    &reject
+                );
+            }
+            return promise;
+        }
+    }
+
+    impl io.WriteAsync {
+        func write(data: []byte) Promise<Unit> {
+            var promise = Promise<Unit>{};
+            var path = this.handle.file_path();
+            var resolve = func [promise] () {
+                promise.resolve(());
+            };
+            var reject = func [promise, path] (err: int32) {
+                promise.reject(
+                    new FsError{
+                        kind: error_kind_from(err),
+                        op: "write",
+                        :path,
+                        raw_code: err,
+                        detail: uv_strerror(err)
+                    }
+                );
+            };
+            unsafe {
+                __cx_fs_write_async(
+                    this.handle.raw_fd(),
+                    data.as_ptr(),
+                    data.length,
+                    &resolve,
+                    &reject
+                );
+            }
+            return promise;
         }
     }
 }
