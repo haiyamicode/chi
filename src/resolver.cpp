@@ -5227,6 +5227,40 @@ static string qualify_base_name(const string &local_name, ast::Module *module,
     return fmt::format("{}.{}", module->global_id(), local_name);
 }
 
+static string format_container_name(Resolver *resolver, const string &base_name,
+                                     TypeList *type_params, const string &module_id,
+                                     ast::Module *module = nullptr) {
+    auto qualified = qualify_base_name(base_name, module, module_id);
+    if (!type_params || type_params->len == 0) {
+        return qualified;
+    }
+
+    std::stringstream ss;
+    ss << qualified << "<";
+    for (int i = 0; i < type_params->len; i++) {
+        if (i > 0) ss << ",";
+        ss << resolver->format_type_qualified_name((*type_params)[i], module_id);
+    }
+    ss << ">";
+    return ss.str();
+}
+
+static string format_container_display_name(Resolver *resolver, const string &base_name,
+                                            TypeList *type_params) {
+    if (!type_params || type_params->len == 0) {
+        return base_name;
+    }
+
+    std::stringstream ss;
+    ss << base_name << "<";
+    for (int i = 0; i < type_params->len; i++) {
+        if (i > 0) ss << ",";
+        ss << resolver->format_type_display((*type_params)[i]);
+    }
+    ss << ">";
+    return ss.str();
+}
+
 static string format_container_qualified_name(Resolver *resolver, const string &base_name,
                                               ast::Module *module, TypeList *type_params,
                                               const string &module_id) {
@@ -5329,6 +5363,16 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     if (for_display) {
         if (type->display_name) {
             return *type->display_name;
+        }
+        if (type->kind == TypeKind::Struct) {
+            auto &sty = type->data.struct_;
+            auto base_name = sty.node ? sty.node->name : type->name.value_or(string("<anon>"));
+            return format_container_display_name(this, base_name, &sty.type_params);
+        }
+        if (type->kind == TypeKind::Enum) {
+            auto &ety = type->data.enum_;
+            auto base_name = ety.node ? ety.node->name : type->name.value_or(string("<anon>"));
+            return format_container_display_name(this, base_name, &ety.type_params);
         }
         if (type->name) {
             return *type->name;
