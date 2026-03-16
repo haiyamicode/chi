@@ -16,32 +16,6 @@ extern "C" {
     unsafe func __cx_uv_strerror(errnum: int32, result: *string);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 func uv_strerror(code: int32) string {
     let result = "";
     unsafe {
@@ -279,4 +253,3 @@ export func list_dir(path: string) Array<string> {
     }
     return result;
 }
-
