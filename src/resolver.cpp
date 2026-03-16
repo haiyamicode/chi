@@ -4029,10 +4029,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         array<ChiType *> resolved_args;
         for (size_t i = 0; i < data.args.len; i++) {
             auto resolved = resolve_value(data.args[i], scope);
-            if (resolved && resolved->kind == TypeKind::Void) {
-                error(data.args[i], "'void' cannot be used as a type parameter");
-                return nullptr;
-            }
             resolved_args.add(resolved);
         }
         // Build final args, packing variadic excess into a Tuple
@@ -4053,11 +4049,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!has_variadic) {
             for (auto i = data.args.len; i < params.len; i++) {
                 auto resolved = resolve_value(decl_params[i]->data.type_param.default_type, scope);
-                if (resolved && resolved->kind == TypeKind::Void) {
-                    error(decl_params[i]->data.type_param.default_type,
-                          "'void' cannot be used as a type parameter");
-                    return nullptr;
-                }
                 args.add(resolved);
             }
         }
@@ -10702,10 +10693,11 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         check_arg = check_arg->data.subtype.generic;
     }
 
-    // Sized is structural: everything is Sized except interfaces
+    // Sized is structural: everything is Sized except interfaces and void.
     if (trait_type->kind == TypeKind::Struct && trait_type->data.struct_.node &&
         resolve_intrinsic_symbol(trait_type->data.struct_.node) == IntrinsicSymbol::Sized) {
-        return !(check_arg->kind == TypeKind::Struct && ChiTypeStruct::is_interface(check_arg));
+        return check_arg->kind != TypeKind::Void &&
+               !(check_arg->kind == TypeKind::Struct && ChiTypeStruct::is_interface(check_arg));
     }
 
     // NoCopy bound: allows all types through (both copyable and non-copyable)

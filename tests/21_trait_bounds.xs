@@ -114,6 +114,8 @@ struct SizedBox<T: ops.Construct> {
     }
 }
 
+struct UnsizedPhantom<T: ops.Unsized> {}
+
 // Struct with all-default-param constructor — implements Construct
 struct DefaultCtor {
     x: int;
@@ -245,6 +247,9 @@ func main() {
     printf("struct: ({}, {})\n", sp.x, sp.y);
     var sb = SizedBox<int>{value: 99};
     printf("SizedBox<int>: {}\n", sb.get());
+    var up = UnsizedPhantom<void>{};
+    let _ = up;
+    printf("Unsized<void>: ok\n");
 
     printf("\n-- Construct trait --\n");
 

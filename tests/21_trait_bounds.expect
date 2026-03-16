@@ -30,6 +30,7 @@ bool: true
 float: 3.14
 struct: (5, 10)
 SizedBox<int>: 99
+Unsized<void>: ok
 
 -- Construct trait --
 default ctor: 42
