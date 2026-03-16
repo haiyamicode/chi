@@ -64,6 +64,14 @@ captures to unit: 5+99
 explicit var: 77
 chained: val=42
 
+testing loop lambda capture:
+by-ref: 0
+by-value: 0
+by-ref: 1
+by-value: 1
+by-ref: 2
+by-value: 2
+
 testing returned lambda capture lifecycle:
 TrackedBox(7) constructed
 TrackedBox(0) copied from TrackedBox(7)

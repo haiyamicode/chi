@@ -2458,12 +2458,14 @@ Node *Parser::parse_for_stmt() {
                 lookahead(1)->type == TokenType::COMMA) {
                 auto iden = expect(TokenType::IDEN);
                 auto bind = create_node(NodeType::BindIdentifier, iden);
+                bind->parent_fn = get_scope()->find_parent(NodeType::FnDef);
                 node->data.for_stmt.bind = bind;
                 kind = ForLoopKind::Range;
                 if (next_is(TokenType::COMMA)) {
                     consume();
                     auto index_iden = expect(TokenType::IDEN);
                     auto index_bind = create_node(NodeType::BindIdentifier, index_iden);
+                    index_bind->parent_fn = get_scope()->find_parent(NodeType::FnDef);
                     node->data.for_stmt.index_bind = index_bind;
                 }
                 expect(TokenType::KW_IN);
