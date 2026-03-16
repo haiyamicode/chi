@@ -33,7 +33,9 @@ op: list_dir
 kind: ErrorKind.NotFound
 op: open
 === File.async().read_string ===
-=== File.async().write_string ===
 done
 async hello
+=== fs.write_file_async ===
 async write
+=== fs.append_file_async ===
+prefix!

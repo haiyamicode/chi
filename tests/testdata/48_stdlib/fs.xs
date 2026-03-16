@@ -1,19 +1,22 @@
 import "std/fs" as fs;
 
-async func read_async_string(path: string) Promise<string> {
-    var f = fs.File.open(path);
-    var reader = f.async();
-    var content = await reader.read_string();
-    f.close();
-    return content;
-}
+async func run_async_wrapper_cases() Promise<Unit> {
+    println("=== File.async().read_string ===");
+    fs.write_file("/tmp/chi_fs_stdlib_test/async.txt", "async hello");
+    println(await fs.read_file_async("/tmp/chi_fs_stdlib_test/async.txt"));
+    fs.remove("/tmp/chi_fs_stdlib_test/async.txt");
 
-async func write_async_string(path: string, content: string) Promise<string> {
-    var f = fs.File.create(path);
-    var writer = f.async();
-    await writer.write_string(content);
-    f.close();
-    return fs.read_file(path);
+    println("=== fs.write_file_async ===");
+    await fs.write_file_async("/tmp/chi_fs_stdlib_test/async_write.txt", "async write");
+    println(fs.read_file("/tmp/chi_fs_stdlib_test/async_write.txt"));
+    fs.remove("/tmp/chi_fs_stdlib_test/async_write.txt");
+
+    println("=== fs.append_file_async ===");
+    fs.write_file("/tmp/chi_fs_stdlib_test/async_append.txt", "prefix");
+    await fs.append_file_async("/tmp/chi_fs_stdlib_test/async_append.txt", "!");
+    println(fs.read_file("/tmp/chi_fs_stdlib_test/async_append.txt"));
+    fs.remove("/tmp/chi_fs_stdlib_test/async_append.txt");
+    return ();
 }
 
 func main() {
@@ -27,6 +30,9 @@ func main() {
     }
     if fs.exists("/tmp/chi_fs_stdlib_test/async_write.txt") {
         fs.remove("/tmp/chi_fs_stdlib_test/async_write.txt");
+    }
+    if fs.exists("/tmp/chi_fs_stdlib_test/async_append.txt") {
+        fs.remove("/tmp/chi_fs_stdlib_test/async_append.txt");
     }
     println(fs.exists(test_dir));
 
@@ -107,22 +113,7 @@ func main() {
         else => {}
     }
 
-    println("=== File.async().read_string ===");
-    fs.write_file("/tmp/chi_fs_stdlib_test/async.txt", "async hello");
-    read_async_string("/tmp/chi_fs_stdlib_test/async.txt").then(
-        func (content) {
-            println(content);
-            fs.remove("/tmp/chi_fs_stdlib_test/async.txt");
-        }
-    );
-
-    println("=== File.async().write_string ===");
-    write_async_string("/tmp/chi_fs_stdlib_test/async_write.txt", "async write").then(
-        func (content) {
-            println(content);
-            fs.remove("/tmp/chi_fs_stdlib_test/async_write.txt");
-        }
-    );
+    run_async_wrapper_cases();
 
     println("done");
 }

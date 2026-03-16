@@ -272,21 +272,34 @@ export struct FileAsync {
 
 export func read_file(path: string) string {
     var f = File.open(path);
-    var content = f.read_string();
-    f.close();
-    return content;
+    return f.read_string();
 }
 
 export func write_file(path: string, data: string) {
     var f = File.create(path);
     f.write_string(data);
-    f.close();
 }
 
 export func append_file(path: string, data: string) {
     var f = File.open(path, OpenMode.Append);
     f.write_string(data);
-    f.close();
+}
+
+export async func read_file_async(path: string) Promise<string> {
+    var f = File.open(path);
+    return await f.async().read_string();
+}
+
+export async func write_file_async(path: string, data: string) Promise<Unit> {
+    var f = File.create(path);
+    await f.async().write_string(data);
+    return ();
+}
+
+export async func append_file_async(path: string, data: string) Promise<Unit> {
+    var f = File.open(path, OpenMode.Append);
+    await f.async().write_string(data);
+    return ();
 }
 
 export func exists(path: string) bool {
