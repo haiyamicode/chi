@@ -35,4 +35,3 @@ func main() {
     };
     consume(move h); // error: may have been moved
 }
-

@@ -19,4 +19,3 @@ func main() {
     take(a);
     println(a.value); // error: 'a' used after move
 }
-

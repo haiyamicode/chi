@@ -13,4 +13,3 @@ struct Holder {
 }
 
 func main() {}
-

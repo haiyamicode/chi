@@ -6,4 +6,3 @@ func main() {
     var p2: *int = &y;
     var result = p1 < p2;
 }
-

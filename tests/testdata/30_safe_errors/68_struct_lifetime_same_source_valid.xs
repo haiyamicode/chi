@@ -17,4 +17,3 @@ func main() {
     var p = bad();
     printf("{}\n", *p.long_ref);
 }
-

@@ -43,4 +43,3 @@ func main() {
     w2.write_string("test write_string");
     printf("write_string: {}\n", out.to_string());
 }
-

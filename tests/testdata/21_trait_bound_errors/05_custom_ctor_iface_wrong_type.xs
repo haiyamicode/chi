@@ -21,4 +21,3 @@ struct Holder<T: IntConstruct> {
 func main() {
     var h = Holder<WrongParam>{};
 }
-

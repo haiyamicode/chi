@@ -22,4 +22,3 @@ func main() {
     var h = exploit();
     printf("{}\n", h.f());
 }
-

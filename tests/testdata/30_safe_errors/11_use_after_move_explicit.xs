@@ -13,4 +13,3 @@ func main() {
     var b = &move a; // explicit move, a is sunk
     println(a.value); // error: 'a' used after move
 }
-

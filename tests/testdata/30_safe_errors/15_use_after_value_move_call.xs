@@ -13,4 +13,3 @@ func main() {
     consume(move a); // value move into function arg
     println(a.value); // error: 'a' used after move
 }
-

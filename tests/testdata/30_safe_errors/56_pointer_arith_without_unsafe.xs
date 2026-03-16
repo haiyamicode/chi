@@ -4,4 +4,3 @@ func main() {
     var p: *int = &x;
     var p2 = p + 1;
 }
-

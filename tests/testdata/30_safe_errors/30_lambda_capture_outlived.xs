@@ -11,4 +11,3 @@ func main() {
     };
     printf("{}\n", f());
 }
-

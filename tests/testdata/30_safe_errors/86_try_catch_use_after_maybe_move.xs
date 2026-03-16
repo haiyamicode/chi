@@ -35,4 +35,3 @@ func main() {
     };
     println(h.value); // error: h may have been moved
 }
-

@@ -16,4 +16,3 @@ func exploit() (func () int) {
 func main() {
     printf("{}\n", exploit()());
 }
-

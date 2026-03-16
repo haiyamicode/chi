@@ -18,4 +18,3 @@ func get_dangling() &int {
 func main() {
     printf("{}\n", get_dangling()!);
 }
-

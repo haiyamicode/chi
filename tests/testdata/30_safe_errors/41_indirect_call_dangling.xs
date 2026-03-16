@@ -16,4 +16,3 @@ func main() {
     var r = dangle();
     printf("{}\n", *r);
 }
-

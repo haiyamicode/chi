@@ -25,4 +25,3 @@ func main() {
     var p = make_pair(&safe);
     printf("a={}, b={}\n", *p.a, *p.b);
 }
-

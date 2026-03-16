@@ -6,4 +6,3 @@ func main() {
         println("nope");
     }
 }
-

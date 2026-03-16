@@ -11,4 +11,3 @@ func make_fn() (func () int) {
 func main() {
     printf("{}\n", make_fn()());
 }
-

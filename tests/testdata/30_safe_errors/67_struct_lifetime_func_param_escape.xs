@@ -16,4 +16,3 @@ func main() {
     var h = make();
     printf("{}\n", *h.ref);
 }
-

@@ -16,4 +16,3 @@ func make_chain() (func () int) {
 func main() {
     printf("{}\n", make_chain()());
 }
-

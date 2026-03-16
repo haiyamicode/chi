@@ -25,4 +25,3 @@ func main() {
     }
     println(h.value); // error: moved in both branches
 }
-

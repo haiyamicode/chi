@@ -22,4 +22,3 @@ func main() {
     };
     printf("{}\n", *t.first);
 }
-

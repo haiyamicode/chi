@@ -14,4 +14,3 @@ func main() {
     }
     printf("{}\n", a.value); // error: 'a' used after move
 }
-

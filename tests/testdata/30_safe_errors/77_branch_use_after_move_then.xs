@@ -23,4 +23,3 @@ func main() {
         println(h.value); // error: use after move
     }
 }
-

@@ -14,4 +14,3 @@ func main() {
     var h = make_holder(5);
     printf("held: {}\n", *h.ref);
 }
-

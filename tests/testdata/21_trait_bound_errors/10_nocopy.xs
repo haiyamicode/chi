@@ -14,4 +14,3 @@ func main() {
     var a = Handle{};
     var b = a; // copy via var init — rejected
 }
-

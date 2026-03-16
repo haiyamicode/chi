@@ -12,4 +12,3 @@ func main() {
     var f = capture_param(42);
     printf("{}\n", f());
 }
-

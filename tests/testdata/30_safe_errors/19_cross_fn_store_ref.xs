@@ -23,4 +23,3 @@ func main() {
     }
     printf("{}\n", *h.val);
 }
-

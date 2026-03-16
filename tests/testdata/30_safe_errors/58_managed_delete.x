@@ -9,4 +9,3 @@ func main() {
     var f = new Foo{};
     delete f;
 }
-

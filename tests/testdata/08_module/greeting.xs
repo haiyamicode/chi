@@ -15,4 +15,3 @@ export struct Greeting {
 export func hello() {
     println("hello from module");
 }
-

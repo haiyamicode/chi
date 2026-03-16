@@ -2,4 +2,3 @@
 extern "C" {
     export {str*} from "string.h";
 }
-

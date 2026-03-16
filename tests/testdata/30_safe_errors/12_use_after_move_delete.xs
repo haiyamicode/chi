@@ -21,4 +21,3 @@ func main() {
         delete a; // error: 'a' used after move
     }
 }
-

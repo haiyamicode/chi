@@ -27,4 +27,3 @@ func main() {
     var w = Wrapper{inner: Dog{}};
     var g: &Greet = &w; // expect-error: cannot convert
 }
-

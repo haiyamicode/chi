@@ -19,4 +19,3 @@ func bad() Holder {
 }
 
 func main() {}
-

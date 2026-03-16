@@ -49,4 +49,3 @@ export interface Write {
 export interface Close {
     func close();
 }
-

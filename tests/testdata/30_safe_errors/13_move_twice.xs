@@ -19,4 +19,3 @@ func main() {
     var b = a; // first move
     var c = a; // error: 'a' used after move
 }
-

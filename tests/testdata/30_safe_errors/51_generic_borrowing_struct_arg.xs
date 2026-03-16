@@ -18,4 +18,3 @@ func main() {
     var w = Wrapper{&x};
     var w2 = identity<Wrapper>(w);
 }
-

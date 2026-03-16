@@ -13,4 +13,3 @@ struct Container {
 }
 
 func main() {}
-

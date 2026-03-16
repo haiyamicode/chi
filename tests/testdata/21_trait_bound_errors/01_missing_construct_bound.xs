@@ -7,4 +7,3 @@ struct MissingBoundBox<T> {
 func main() {
     var b = MissingBoundBox<int>{};
 }
-

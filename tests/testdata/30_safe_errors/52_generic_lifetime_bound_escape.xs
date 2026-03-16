@@ -13,4 +13,3 @@ func dangle() &int {
 func main() {
     printf("{}\n", dangle()!);
 }
-

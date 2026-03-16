@@ -20,4 +20,3 @@ func bad() {
 }
 
 func main() {}
-

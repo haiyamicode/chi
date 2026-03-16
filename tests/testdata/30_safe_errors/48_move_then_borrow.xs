@@ -10,4 +10,3 @@ func main() {
     var b = move a;
     var r: &Obj = &a; // error: 'a' used after move
 }
-

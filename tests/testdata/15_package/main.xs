@@ -84,4 +84,3 @@ func main() {
         printf("strcpy result: {}\n", copied);
     }
 }
-

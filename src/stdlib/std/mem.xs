@@ -59,4 +59,3 @@ export unsafe func memset(address: *void, v: uint8, n: uint32) {
 export unsafe func write<T>(dest: *T, value: T) {
     __move(dest as *void, &value, sizeof T);
 }
-

@@ -9,4 +9,3 @@ func use_hash<T: ops.Hash>(x: T) {
 func main() {
     use_hash(42);
 }
-

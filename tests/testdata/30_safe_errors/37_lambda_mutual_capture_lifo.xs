@@ -15,4 +15,3 @@ func main() {
     };
     printf("{}\n", f1());
 }
-

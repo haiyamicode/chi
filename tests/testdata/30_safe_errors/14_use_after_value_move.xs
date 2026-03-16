@@ -9,4 +9,3 @@ func main() {
     var b = move a; // value move, a is sunk
     println(a.value); // error: 'a' used after move
 }
-

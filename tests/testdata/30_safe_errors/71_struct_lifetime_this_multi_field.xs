@@ -14,4 +14,3 @@ func main() {
     t = {first: &a, second: &b};
     printf("{} {}\n", *t.first, *t.second);
 }
-

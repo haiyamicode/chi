@@ -4,6 +4,7 @@ import "std/ops" as ops;
 
 struct MoveOnly {
     value: int;
+
     impl ops.NoCopy {}
 }
 

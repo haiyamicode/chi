@@ -8,4 +8,3 @@ struct Vec2 {
 func main() {
     var v = Vec2{y: 3};
 }
-

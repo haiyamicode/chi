@@ -18,4 +18,3 @@ func main() {
     var a = Handle{};
     take_handle(a); // copy via param — rejected
 }
-

@@ -11,4 +11,3 @@ func bad() &int {
 }
 
 func main() {}
-

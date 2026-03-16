@@ -18,4 +18,3 @@ func main() {
         println("equal");
     }
 }
-

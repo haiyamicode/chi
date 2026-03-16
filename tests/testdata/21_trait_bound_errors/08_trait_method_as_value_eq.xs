@@ -9,4 +9,3 @@ func use_eq<T: ops.Eq>(a: T) {
 func main() {
     use_eq(42);
 }
-

@@ -17,4 +17,3 @@ struct Wrapper<T> {
 func main() {
     var w = Wrapper<Handle>{data: {}};
 }
-

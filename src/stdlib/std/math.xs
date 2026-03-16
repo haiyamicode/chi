@@ -148,4 +148,3 @@ export func is_nan(x: float64) bool {
 export func is_inf(x: float64) bool {
     return x == INF || x == -INF;
 }
-

@@ -12,4 +12,3 @@ func main() {
     h = {ref: &x};
     printf("{}\n", *h.ref);
 }
-

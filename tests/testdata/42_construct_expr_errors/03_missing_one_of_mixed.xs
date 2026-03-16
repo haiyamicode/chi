@@ -8,4 +8,3 @@ struct Config {
 func main() {
     var c = Config{value: 42};
 }
-

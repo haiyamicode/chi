@@ -20,4 +20,3 @@ func main() {
         use_pair(p);
     }
 }
-

@@ -53,4 +53,3 @@ export func cwd() string {
         return string.from_raw(result, __cx_strlen(result));
     }
 }
-

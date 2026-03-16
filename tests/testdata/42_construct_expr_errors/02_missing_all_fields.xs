@@ -8,4 +8,3 @@ struct Pair {
 func main() {
     var p = Pair{};
 }
-

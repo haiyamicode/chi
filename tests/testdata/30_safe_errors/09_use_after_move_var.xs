@@ -13,4 +13,3 @@ func main() {
     var b = a; // a is moved to b
     println(a.value); // error: 'a' used after move
 }
-
