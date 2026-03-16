@@ -1725,7 +1725,12 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
                         auto current_bstruct_l = (llvm::StructType *)compile_type(current_bstruct);
                         auto nested_gep =
                             builder.CreateStructGEP(current_bstruct_l, fn->bind_ptr, j);
-                        src_addr = builder.CreateLoad(current_bstruct_l->elements()[j], nested_gep);
+                        if (current_captures[j].mode == ast::CaptureMode::ByValue) {
+                            src_addr = nested_gep;
+                        } else {
+                            src_addr =
+                                builder.CreateLoad(current_bstruct_l->elements()[j], nested_gep);
+                        }
                         break;
                     }
                 }

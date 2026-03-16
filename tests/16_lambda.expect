@@ -71,6 +71,18 @@ by-ref: 1
 by-value: 1
 by-ref: 2
 by-value: 2
+nested by-value: 0
+nested by-ref: 0
+nested by-value: 1
+nested by-ref: 1
+nested by-value: 2
+nested by-ref: 2
+deep by-value: 0 100
+deep mixed: 0 100
+deep by-value: 1 101
+deep mixed: 1 101
+deep by-value: 2 102
+deep mixed: 2 102
 
 testing returned lambda capture lifecycle:
 TrackedBox(7) constructed

@@ -393,6 +393,38 @@ func test_loop_lambda_capture() {
         };
         by_value();
     }
+
+    for i in 0..3 {
+        let outer = func [i] () {
+            let inner_value = func [i] () {
+                printf("nested by-value: {}\n", i);
+            };
+            let inner_ref = func () {
+                printf("nested by-ref: {}\n", i);
+            };
+            inner_value();
+            inner_ref();
+        };
+        outer();
+    }
+
+    for i in 0..3 {
+        let outer = func [i] () {
+            let offset = i + 100;
+            let middle = func [i, offset] () {
+                let inner_value = func [i, offset] () {
+                    printf("deep by-value: {} {}\n", i, offset);
+                };
+                let inner_ref = func () {
+                    printf("deep mixed: {} {}\n", i, offset);
+                };
+                inner_value();
+                inner_ref();
+            };
+            middle();
+        };
+        outer();
+    }
     println("");
 }
 
