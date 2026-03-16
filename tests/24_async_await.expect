@@ -80,6 +80,7 @@ type stmt rect=18
 type expr circle=16
 type expr rect=18
 === Bare await ===
+=== Unit fallthrough after await ===
 === Bare then logic ===
 === Multiple bare ===
 === reject ===
@@ -119,11 +120,14 @@ All tests passed!
 tt=1006
 iter mutate=11
 bare ok
+unit fallthrough body
 x = 15
 after first
 tf=116
 ft=36
 ff=46
+unit explicit body
+unit fallthrough resolved: 1
 x still = 15
 after second
 while plain=3

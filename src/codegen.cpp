@@ -3709,6 +3709,35 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
     if (!scope->branched && !builder.GetInsertBlock()->getTerminator()) {
         compile_block_cleanup(fn, &data, nullptr, data.exit_flow);
     }
+
+    if (!data.return_expr && !continue_block && !builder.GetInsertBlock()->getTerminator()) {
+        auto inner_type = get_resolver()->get_promise_value_type(machine.promise_type);
+        if (inner_type && inner_type->kind == TypeKind::Unit) {
+            auto promise_struct = get_resolver()->resolve_struct_type(machine.promise_type);
+            std::optional<TypeId> variant_type_id = std::nullopt;
+            if (machine.promise_type->kind == TypeKind::Subtype &&
+                !machine.promise_type->is_placeholder) {
+                variant_type_id = machine.promise_type->id;
+            }
+            auto resolve_member = promise_struct->find_member("resolve");
+            assert(resolve_member && "Promise.resolve() method not found");
+            auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
+            auto resolve_method = get_fn(resolve_method_node);
+            builder.CreateCall(resolve_method->llvm_fn,
+                               {result_promise_ptr,
+                                llvm::Constant::getNullValue(compile_type(inner_type))});
+
+            if (fn->return_label) {
+                emit_async_function_return(fn, machine, result_promise_ptr);
+            } else {
+                builder.CreateRetVoid();
+            }
+            fn->active_blocks.pop_back();
+            fn->pop_scope();
+            return;
+        }
+    }
+
     fn->active_blocks.pop_back();
     fn->pop_scope();
 }
