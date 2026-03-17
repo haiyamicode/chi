@@ -825,6 +825,9 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
     auto iden = expect(TokenType::KW_FUNC);
     auto kind = parse_fn_identifier(&iden);
+    if (kind == FnKind::Constructor && decl_spec && decl_spec->is_static()) {
+        error(iden, errors::STATIC_CONSTRUCTOR_NOT_ALLOWED);
+    }
 
     auto fn = create_node(NodeType::FnDef, iden);
     fn->start_token = iden;
