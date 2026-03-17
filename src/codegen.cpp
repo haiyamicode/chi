@@ -1372,7 +1372,7 @@ void Compiler::compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value
     auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), type_size);
     auto heap_ptr = builder.CreateCall(malloc_fn->llvm_fn, {size_l, get_null_ptr()}, "any_alloc");
     compile_assignment_to_ptr(fn, expr, heap_ptr, src_type);
-    builder.CreateStore(heap_ptr, data_gep);
+    builder.CreateAlignedStore(heap_ptr, data_gep, llvm::Align(1));
 }
 
 void Compiler::compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
@@ -4347,7 +4347,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         } else {
             auto copy_p = llvm_builder.CreateAlloca(from_type_l, nullptr, "any_data_copy");
             compile_copy(fn, value, copy_p, from_type, nullptr);
-            llvm_builder.CreateStore(copy_p, data_gep);
+            llvm_builder.CreateAlignedStore(copy_p, data_gep, llvm::Align(1));
         }
         return llvm_builder.CreateLoad(any_type_l, any_var);
     }
@@ -6471,8 +6471,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         auto is_inlined = builder.CreateICmpNE(inlined, llvm::ConstantInt::get(i8_ty, 0));
 
         // Load copier and size from TypeInfo
-        auto ti_header_l =
-            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type, ptr_type}, false);
+        auto ti_header_l = get_typeinfo_llvm_type();
         auto size_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 1);
         auto typesize = builder.CreateLoad(i32_ty, size_gep, "any_typesize");
         auto copier_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 4);
@@ -9304,8 +9303,7 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         fn->use_label(bb_has_ti);
 
         // Load destructor from TypeInfo (field 3: kind, size, data, destructor, copier, ...)
-        auto ti_header_l =
-            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type}, false);
+        auto ti_header_l = get_typeinfo_llvm_type();
         auto dtor_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 3);
         auto dtor_ptr = builder.CreateLoad(ptr_type, dtor_gep, "any_dtor");
 
@@ -9501,6 +9499,24 @@ void Compiler::call_vtable_copier(Function *fn, llvm::Value *vtable_ptr, llvm::V
 
 llvm::ConstantPointerNull *Compiler::get_null_ptr() {
     return llvm::ConstantPointerNull::get(llvm::PointerType::get(*m_ctx->llvm_ctx, 0));
+}
+
+llvm::StructType *Compiler::get_typeinfo_llvm_type() {
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
+    constexpr size_t tidata_word_count =
+        (sizeof(TypeInfoData) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+    auto tidata_type_l =
+        llvm::ArrayType::get(llvm::Type::getInt64Ty(llvm_ctx), (uint32_t)tidata_word_count);
+    auto i8_ty = llvm::Type::getInt8Ty(llvm_ctx);
+
+    return llvm::StructType::get(
+        llvm_ctx,
+        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_type_l,
+         ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l,
+         llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
+         llvm::ArrayType::get(i8_ty, sizeof(TypeInfo::name))},
+        false);
 }
 
 llvm::Value *Compiler::load_typesize_from_vtable(llvm::Value *vtable_ptr) {

@@ -404,6 +404,7 @@ class Compiler {
     llvm::Value *find_interface_vtable(Function *fn, ChiType *iface_type);
     llvm::Value *load_typesize_from_vtable(llvm::Value *vtable_ptr);
     llvm::ConstantPointerNull *get_null_ptr();
+    llvm::StructType *get_typeinfo_llvm_type();
     Function *generate_destructor(ChiType *type, ChiType *container_type = nullptr);
     Function *generate_copier(ChiType *type);
     Function *generate_any_destructor(ChiType *type);

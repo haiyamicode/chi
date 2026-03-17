@@ -348,7 +348,13 @@ void run_on_main_uv_thread_async(Fn &&fn) {
 } // namespace
 
 static void *get_any_data(const CxAny *v) {
-    return v->inlined ? (void *)v->data : *(void **)(v->data);
+    if (v->inlined) {
+        return (void *)v->data;
+    }
+
+    void *ptr = nullptr;
+    memcpy(&ptr, v->data, sizeof(ptr));
+    return ptr;
 }
 
 void cx_string_set_data(CxString *dest, const char *data) {
@@ -556,6 +562,13 @@ static std::string get_struct_display(TypeInfo *type, const void *data_p) {
 
 static std::string get_value_display_from_ptr(TypeInfo *type, const void *data_p) {
     switch ((TypeKind)type->kind) {
+    case TypeKind::Any: {
+        auto any = (const CxAny *)data_p;
+        if (!any->type) {
+            return "null";
+        }
+        return get_value_display_from_ptr(any->type, get_any_data(any));
+    }
     case TypeKind::String: {
         auto s = (const CxString *)data_p;
         return string(s->data, s->size);
