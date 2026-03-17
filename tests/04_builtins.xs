@@ -262,6 +262,23 @@ func test_box() {
     println("");
 }
 
+struct DisplayInner {
+    value: int = 5;
+    private hidden: int = 99;
+}
+
+struct DisplayOuter {
+    name: string = "chi";
+    protected inner: DisplayInner = {};
+    private secret: int = 42;
+}
+
+func test_struct_display() {
+    println("testing struct display:");
+    println(DisplayInner{});
+    println(DisplayOuter{});
+}
+
 func main() {
     test_optional();
     test_array();
@@ -273,4 +290,5 @@ func main() {
     test_nested_shared();
     test_string();
     test_box();
+    test_struct_display();
 }

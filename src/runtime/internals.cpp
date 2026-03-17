@@ -479,12 +479,11 @@ static void **program_vtable;
 void cx_set_program_vtable(void *ptr) { program_vtable = (void **)ptr; }
 
 static void *get_typemeta_display_method(TypeInfo *type) {
-    if (type->meta_table_len == 0) {
+    if (type->meta_table_len == 0 || !type->meta_table) {
         return nullptr;
     }
 
-    auto offset = (uintptr_t)(&type->meta_table) - (uintptr_t)(&type->kind);
-    auto table = (TypeMetaEntry *)((uintptr_t)type + offset);
+    auto table = type->meta_table;
     for (int i = 0; i < type->meta_table_len; i++) {
         auto entry = &table[i];
         if (entry->symbol == IntrinsicSymbol::Display && entry->vtable_index >= 0) {
@@ -512,6 +511,56 @@ static std::string encode_utf8(uint32_t codepoint) {
         result.push_back((char)(0x80 | (codepoint & 0x3F)));
     }
     return result;
+}
+
+static std::string get_type_name(TypeInfo *type) {
+    if (!type || type->name_len == 0) {
+        return "";
+    }
+    return std::string(type->name, type->name_len);
+}
+
+static bool is_field_visible(const TypeFieldEntry &field) {
+    return field.visibility == (int32_t)Visibility::Public ||
+           field.visibility == (int32_t)Visibility::Protected;
+}
+
+static std::string get_struct_display(const CxAny &v) {
+    auto data_p = get_any_data(&v);
+    auto type_name = get_type_name(v.type);
+    if (type_name.empty()) {
+        type_name = "struct";
+    }
+
+    std::stringstream ss;
+    ss << type_name << "{";
+    bool first = true;
+    for (int i = 0; i < v.type->field_table_len; i++) {
+        auto &field = v.type->field_table[i];
+        if (!field.type || !is_field_visible(field)) {
+            continue;
+        }
+
+        auto field_ptr = (uint8_t *)data_p + field.offset;
+        CxAny inner = {};
+        inner.type = field.type;
+        if (field.type->size <= (int32_t)sizeof(inner.data)) {
+            inner.inlined = true;
+            memcpy(inner.data, field_ptr, field.type->size);
+        } else {
+            inner.inlined = false;
+            memcpy(inner.data, &field_ptr, sizeof(field_ptr));
+        }
+
+        if (!first) {
+            ss << ", ";
+        }
+        first = false;
+        ss.write(field.name, field.name_len);
+        ss << ": " << get_value_display(inner);
+    }
+    ss << "}";
+    return ss.str();
 }
 
 std::string get_value_display(const CxAny &v) {
@@ -598,6 +647,10 @@ std::string get_value_display(const CxAny &v) {
             auto str = string(s.data, s.size);
             cx_string_delete(&s);
             return str;
+        }
+        if (v.type->kind == (int32_t)TypeKind::Struct && v.type->field_table &&
+            v.type->field_table_len >= 0) {
+            return get_struct_display(v);
         }
         return fmt::format("<TypeKind:{}>", PRINT_ENUM((TypeKind)v.type->kind));
     }

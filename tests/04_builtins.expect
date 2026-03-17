@@ -79,3 +79,6 @@ before scope exit:
   Traced.delete(1)
 after helper returned
 
+testing struct display:
+DisplayInner{value: 5}
+DisplayOuter{name: chi, inner: DisplayInner{value: 5}}

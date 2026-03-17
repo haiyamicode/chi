@@ -1511,11 +1511,15 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto &llvm_module = *(m_ctx->llvm_module.get());
     auto tidata_type_l =
-        llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), sizeof(TypeInfoData));
+        llvm::IntegerType::get(llvm_ctx, sizeof(TypeInfoData) * 8);
+    auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
+    auto i8_ty = llvm::Type::getInt8Ty(llvm_ctx);
 
     // Compile meta table
     auto meta_table_len = 0;
     TypeMetaEntry *meta_table_data = nullptr;
+    auto field_table_len = 0;
+    std::vector<llvm::Constant *> field_table_consts = {};
 
     if (type->kind == TypeKind::Struct || type->kind == TypeKind::Array ||
         type->kind == TypeKind::Span || type->kind == TypeKind::EnumValue) {
@@ -1536,19 +1540,87 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
                 new_entry->vtable_index = member->vtable_index;
                 new_entry->symbol = member->symbol;
                 auto member_name = member->get_name();
-                new_entry->name_len = member_name.size();
+                auto name_len = (uint32_t)member_name.size();
+                if (name_len > sizeof(new_entry->name)) {
+                    name_len = sizeof(new_entry->name);
+                }
+                new_entry->name_len = name_len;
                 memset(new_entry->name, 0, sizeof(meta_table_data->name));
-                memcpy(new_entry->name, member_name.data(), sizeof(member_name));
+                if (name_len > 0) {
+                    memcpy(new_entry->name, member_name.data(), name_len);
+                }
                 meta_table_len = new_len;
+            }
+        }
+
+        if (type->kind == TypeKind::Struct && !ChiTypeStruct::is_interface(type)) {
+            auto own_fields = sty->own_fields();
+            if (own_fields.len > 0) {
+                auto layout = llvm_module.getDataLayout().getStructLayout((llvm::StructType *)type_l);
+                for (auto field : own_fields) {
+                    auto new_len = field_table_len + 1;
+                    auto field_name = field->get_name();
+                    auto name_len = (uint32_t)field_name.size();
+                    if (name_len > sizeof(TypeFieldEntry::name)) {
+                        name_len = sizeof(TypeFieldEntry::name);
+                    }
+                    std::vector<uint8_t> field_name_buf(sizeof(TypeFieldEntry::name), 0);
+                    if (name_len > 0) {
+                        memcpy(field_name_buf.data(), field_name.data(), name_len);
+                    }
+                    auto field_name_l = llvm::ConstantDataArray::get(
+                        llvm_ctx, llvm::ArrayRef<uint8_t>(field_name_buf.data(), field_name_buf.size()));
+                    auto field_entry_ty = llvm::StructType::get(
+                        llvm_ctx,
+                        {ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
+                         llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx),
+                         llvm::ArrayType::get(i8_ty, field_name_buf.size())},
+                        false);
+                    auto field_type_info =
+                        llvm::ConstantExpr::getPointerCast((llvm::Constant *)compile_type_info(eval_type(field->resolved_type)),
+                                                           ptr_type_l);
+                    field_table_consts.push_back(llvm::ConstantStruct::get(
+                        field_entry_ty,
+                        {field_type_info,
+                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx),
+                                                (int32_t)layout->getElementOffset(field->field_index)),
+                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx),
+                                                (int32_t)field->get_visibility()),
+                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), name_len),
+                         field_name_l}));
+                    field_table_len = new_len;
+                }
             }
         }
     }
 
     auto meta_table_size = sizeof(TypeMetaEntry) * meta_table_len;
-    auto ti_meta_table_l = llvm::ConstantDataArray::get(
-        llvm_ctx, llvm::ArrayRef<uint8_t>((uint8_t *)meta_table_data, meta_table_size));
-    auto ti_meta_table_type_l =
-        llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), meta_table_size);
+    llvm::Constant *meta_table_ptr_l = get_null_ptr();
+    if (meta_table_size > 0) {
+        auto ti_meta_table_l = llvm::ConstantDataArray::get(
+            llvm_ctx, llvm::ArrayRef<uint8_t>((uint8_t *)meta_table_data, meta_table_size));
+        auto ti_meta_table_type_l = llvm::ArrayType::get(i8_ty, meta_table_size);
+        auto meta_global =
+            new llvm::GlobalVariable(llvm_module, ti_meta_table_type_l, true,
+                                     llvm::GlobalValue::PrivateLinkage, ti_meta_table_l,
+                                     "typeinfo.meta." + get_resolver()->format_type_display(type));
+        meta_table_ptr_l =
+            llvm::ConstantExpr::getPointerCast(meta_global, ptr_type_l);
+    }
+
+    llvm::Constant *field_table_ptr_l = get_null_ptr();
+    if (field_table_len > 0) {
+        auto field_entry_ty = field_table_consts[0]->getType();
+        auto ti_field_table_type_l = llvm::ArrayType::get(field_entry_ty, field_table_len);
+        auto ti_field_table_l = llvm::ConstantArray::get(
+            ti_field_table_type_l, field_table_consts);
+        auto field_global =
+            new llvm::GlobalVariable(llvm_module, ti_field_table_type_l, true,
+                                     llvm::GlobalValue::PrivateLinkage, ti_field_table_l,
+                                     "typeinfo.fields." + get_resolver()->format_type_display(type));
+        field_table_ptr_l =
+            llvm::ConstantExpr::getPointerCast(field_global, ptr_type_l);
+    }
 
     auto typesize = llvm_type_size(type_l);
 
@@ -1560,17 +1632,15 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
          type->kind == TypeKind::MoveRef || type->kind == TypeKind::Pointer ||
          type->kind == TypeKind::Optional) &&
         type->get_elem()) {
-        auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
         tidata_actual_l = ptr_type_l;
         typedata_l = (llvm::Constant *)compile_type_info(type->get_elem());
     } else {
         tidata_actual_l = tidata_type_l;
         auto typedata = (uint8_t *)&type->data;
-        typedata_l = llvm::ConstantDataArray::get(
-            llvm_ctx, llvm::ArrayRef<uint8_t>(typedata, sizeof(TypeInfoData)));
+        uint64_t typedata_bits = 0;
+        memcpy(&typedata_bits, typedata, sizeof(TypeInfoData));
+        typedata_l = llvm::ConstantInt::get(tidata_type_l, typedata_bits);
     }
-
-    auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
 
     // Generate destructor/copier wrappers for any type-erasure
     auto dtor_fn = generate_any_destructor(type);
@@ -1578,10 +1648,24 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     auto copy_fn = generate_any_copier(type);
     llvm::Constant *copy_ptr = copy_fn ? (llvm::Constant *)copy_fn->llvm_fn : get_null_ptr();
 
+    std::vector<uint8_t> type_name_buf(sizeof(TypeInfo::name), 0);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto type_name_len = (uint32_t)type_name.size();
+    if (type_name_len > type_name_buf.size()) {
+        type_name_len = (uint32_t)type_name_buf.size();
+    }
+    if (type_name_len > 0) {
+        memcpy(type_name_buf.data(), type_name.data(), type_name_len);
+    }
+    auto type_name_l = llvm::ConstantDataArray::get(
+        llvm_ctx, llvm::ArrayRef<uint8_t>(type_name_buf.data(), type_name_buf.size()));
+
     auto ti_type_l = llvm::StructType::create(
         {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
-         ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ti_meta_table_type_l},
-        "TypeInfo", true);
+         ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l,
+         llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
+         llvm::ArrayType::get(i8_ty, type_name_buf.size())},
+        "TypeInfo", false);
 
     auto info_l = llvm::ConstantStruct::get(
         ti_type_l,
@@ -1596,10 +1680,18 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
             dtor_ptr,
             /* copier */
             copy_ptr,
-            /* vtable_len */
+            /* meta_table_len */
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), meta_table_len),
-            /* vtable */
-            ti_meta_table_l,
+            /* meta_table */
+            meta_table_ptr_l,
+            /* field_table_len */
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), field_table_len),
+            /* field_table */
+            field_table_ptr_l,
+            /* name_len */
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), type_name_len),
+            /* name */
+            type_name_l,
         });
 
     auto info_global =
@@ -6227,7 +6319,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
 
         // Load copier and size from TypeInfo
         auto ti_header_l =
-            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type, ptr_type}, true);
+            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type, ptr_type}, false);
         auto size_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 1);
         auto typesize = builder.CreateLoad(i32_ty, size_gep, "any_typesize");
         auto copier_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 4);
@@ -8960,7 +9052,7 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
 
         // Load destructor from TypeInfo (field 3: kind, size, data, destructor, copier, ...)
         auto ti_header_l =
-            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type}, true);
+            llvm::StructType::get(llvm_ctx, {i32_ty, i32_ty, ptr_type, ptr_type}, false);
         auto dtor_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 3);
         auto dtor_ptr = builder.CreateLoad(ptr_type, dtor_gep, "any_dtor");
 
@@ -9166,7 +9258,7 @@ llvm::Value *Compiler::load_typesize_from_vtable(llvm::Value *vtable_ptr) {
     // vtable[0] = typeinfo pointer
     auto typeinfo_ptr = builder.CreateLoad(ptr_type, vtable_ptr, "typeinfo_ptr");
 
-    // TypeInfo struct is packed: {i32 kind, i32 typesize, ...}
+    // TypeInfo header starts with {i32 kind, i32 typesize, ...}
     // We only need to read the first two i32 fields
     auto ti_header_l = llvm::StructType::get(
         llvm_ctx, {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx)}, true);
