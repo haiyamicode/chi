@@ -1619,6 +1619,7 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
 
     if (final_type->kind == TypeKind::Struct || final_type->kind == TypeKind::Array ||
         final_type->kind == TypeKind::Span || final_type->kind == TypeKind::EnumValue ||
+        final_type->kind == TypeKind::Tuple || final_type->kind == TypeKind::FixedArray ||
         reflect_kind == TypeKind::Array) {
         ChiTypeStruct *sty;
         if (final_type->kind == TypeKind::EnumValue) {
@@ -1626,32 +1627,36 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
             // and all variants share the same method layout
             auto parent_enum = final_type->data.enum_value.parent_enum();
             sty = get_resolver()->resolve_struct_type(parent_enum->base_value_type);
+        } else if (final_type->kind == TypeKind::Tuple || final_type->kind == TypeKind::FixedArray) {
+            sty = nullptr;
         } else {
             sty = get_resolver()->resolve_struct_type(final_type);
         }
-        for (auto member : sty->members) {
-            if (member->is_method() && member->vtable_index >= 0) {
-                auto new_len = meta_table_len + 1;
-                meta_table_data = reallocate_nonzero(meta_table_data, meta_table_len, new_len);
-                auto new_entry = &meta_table_data[meta_table_len];
-                new_entry->vtable_index = member->vtable_index;
-                new_entry->symbol = member->symbol;
-                auto member_name = member->get_name();
-                auto name_len = (uint32_t)member_name.size();
-                if (name_len > sizeof(new_entry->name)) {
-                    name_len = sizeof(new_entry->name);
+        if (sty) {
+            for (auto member : sty->members) {
+                if (member->is_method() && member->vtable_index >= 0) {
+                    auto new_len = meta_table_len + 1;
+                    meta_table_data = reallocate_nonzero(meta_table_data, meta_table_len, new_len);
+                    auto new_entry = &meta_table_data[meta_table_len];
+                    new_entry->vtable_index = member->vtable_index;
+                    new_entry->symbol = member->symbol;
+                    auto member_name = member->get_name();
+                    auto name_len = (uint32_t)member_name.size();
+                    if (name_len > sizeof(new_entry->name)) {
+                        name_len = sizeof(new_entry->name);
+                    }
+                    new_entry->name_len = name_len;
+                    memset(new_entry->name, 0, sizeof(meta_table_data->name));
+                    if (name_len > 0) {
+                        memcpy(new_entry->name, member_name.data(), name_len);
+                    }
+                    meta_table_len = new_len;
                 }
-                new_entry->name_len = name_len;
-                memset(new_entry->name, 0, sizeof(meta_table_data->name));
-                if (name_len > 0) {
-                    memcpy(new_entry->name, member_name.data(), name_len);
-                }
-                meta_table_len = new_len;
             }
         }
 
         if ((final_type->kind == TypeKind::Struct || reflect_kind == TypeKind::Array) &&
-            !ChiTypeStruct::is_interface(final_type)) {
+            sty && !ChiTypeStruct::is_interface(final_type)) {
             auto own_fields = sty->own_fields();
             if (own_fields.len > 0) {
                 auto layout = llvm_module.getDataLayout().getStructLayout((llvm::StructType *)type_l);
@@ -1687,6 +1692,79 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
                          field_name_l}));
                     field_table_len = new_len;
                 }
+            }
+        } else if (final_type->kind == TypeKind::Tuple) {
+            auto &elements = final_type->data.tuple.elements;
+            if (elements.len > 0) {
+                auto layout = llvm_module.getDataLayout().getStructLayout((llvm::StructType *)type_l);
+                for (int i = 0; i < elements.len; i++) {
+                    auto elem_type = elements[i];
+                    auto field_name = std::to_string(i);
+                    auto name_len = (uint32_t)field_name.size();
+                    if (name_len > sizeof(TypeFieldEntry::name)) {
+                        name_len = sizeof(TypeFieldEntry::name);
+                    }
+                    std::vector<uint8_t> field_name_buf(sizeof(TypeFieldEntry::name), 0);
+                    if (name_len > 0) {
+                        memcpy(field_name_buf.data(), field_name.data(), name_len);
+                    }
+                    auto field_name_l = llvm::ConstantDataArray::get(
+                        llvm_ctx, llvm::ArrayRef<uint8_t>(field_name_buf.data(), field_name_buf.size()));
+                    auto field_entry_ty = llvm::StructType::get(
+                        llvm_ctx,
+                        {ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
+                         llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx),
+                         llvm::ArrayType::get(i8_ty, field_name_buf.size())},
+                        false);
+                    auto field_type_info = llvm::ConstantExpr::getPointerCast(
+                        ensure_type_info_global(elem_type, false), ptr_type_l);
+                    field_table_consts.push_back(llvm::ConstantStruct::get(
+                        field_entry_ty,
+                        {field_type_info,
+                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx),
+                                                (int32_t)layout->getElementOffset(i)),
+                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx),
+                                                (int32_t)Visibility::Public),
+                         llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), name_len),
+                         field_name_l}));
+                    field_table_len++;
+                }
+            }
+        } else if (final_type->kind == TypeKind::FixedArray) {
+            auto elem_type = final_type->data.fixed_array.elem;
+            auto elem_llvm_type = compile_type(elem_type);
+            auto elem_size =
+                (int32_t)llvm_module.getDataLayout().getTypeAllocSize(elem_llvm_type);
+            for (uint32_t i = 0; i < final_type->data.fixed_array.size; i++) {
+                auto field_name = std::to_string(i);
+                auto name_len = (uint32_t)field_name.size();
+                if (name_len > sizeof(TypeFieldEntry::name)) {
+                    name_len = sizeof(TypeFieldEntry::name);
+                }
+                std::vector<uint8_t> field_name_buf(sizeof(TypeFieldEntry::name), 0);
+                if (name_len > 0) {
+                    memcpy(field_name_buf.data(), field_name.data(), name_len);
+                }
+                auto field_name_l = llvm::ConstantDataArray::get(
+                    llvm_ctx, llvm::ArrayRef<uint8_t>(field_name_buf.data(), field_name_buf.size()));
+                auto field_entry_ty = llvm::StructType::get(
+                    llvm_ctx,
+                    {ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
+                     llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx),
+                     llvm::ArrayType::get(i8_ty, field_name_buf.size())},
+                    false);
+                auto field_type_info = llvm::ConstantExpr::getPointerCast(
+                    ensure_type_info_global(elem_type, false), ptr_type_l);
+                field_table_consts.push_back(llvm::ConstantStruct::get(
+                    field_entry_ty,
+                    {field_type_info,
+                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx),
+                                            (int32_t)(i * elem_size)),
+                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx),
+                                            (int32_t)Visibility::Public),
+                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), name_len),
+                     field_name_l}));
+                field_table_len++;
             }
         }
     }

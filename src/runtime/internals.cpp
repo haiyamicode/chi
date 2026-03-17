@@ -557,8 +557,34 @@ static std::string get_struct_display(TypeInfo *type, const void *data_p) {
     return ss.str();
 }
 
+static std::string get_indexed_display(TypeInfo *type, const void *data_p, const char *open,
+                                       const char *close) {
+    std::stringstream ss;
+    ss << open;
+    bool first = true;
+    for (int i = 0; i < type->field_table_len; i++) {
+        auto &field = type->field_table[i];
+        if (!field.type) {
+            continue;
+        }
+
+        auto field_ptr = (const uint8_t *)data_p + field.offset;
+        if (!first) {
+            ss << ", ";
+        }
+        first = false;
+        ss << get_value_display_from_ptr(field.type, field_ptr);
+    }
+    ss << close;
+    return ss.str();
+}
+
 static std::string get_value_display_from_ptr(TypeInfo *type, const void *data_p) {
     switch ((TypeKind)type->kind) {
+    case TypeKind::Null:
+        return "null";
+    case TypeKind::Unit:
+        return "()";
     case TypeKind::Any: {
         auto any = (const CxAny *)data_p;
         if (!any->type) {
@@ -626,6 +652,10 @@ static std::string get_value_display_from_ptr(TypeInfo *type, const void *data_p
             return "0";
         }
     }
+    case TypeKind::Fn:
+        return "<function>";
+    case TypeKind::FnLambda:
+        return "<function_lambda>";
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
@@ -652,6 +682,16 @@ static std::string get_value_display_from_ptr(TypeInfo *type, const void *data_p
             return "null";
         }
     }
+    case TypeKind::FixedArray:
+        if (type->field_table && type->field_table_len >= 0) {
+            return get_indexed_display(type, data_p, "[", "]");
+        }
+        return "[]";
+    case TypeKind::Tuple:
+        if (type->field_table && type->field_table_len >= 0) {
+            return get_indexed_display(type, data_p, "(", ")");
+        }
+        return "()";
     case cx::TypeKind::Array:
     case cx::TypeKind::Span:
     case cx::TypeKind::Struct: {
