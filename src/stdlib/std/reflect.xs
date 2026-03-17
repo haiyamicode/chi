@@ -199,8 +199,7 @@ export struct Type {
 
     func elem() ?Type {
         let kind = this.kind();
-        if kind == Kind.Pointer || kind == Kind.Reference || kind == Kind.MutRef ||
-           kind == Kind.MoveRef {
+        if kind == Kind.Pointer || kind == Kind.Reference || kind == Kind.MutRef || kind == Kind.MoveRef {
             if !this.raw.data.elem {
                 return null;
             }

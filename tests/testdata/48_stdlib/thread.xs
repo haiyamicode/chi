@@ -23,10 +23,18 @@ func main() {
             let worker_is_main = cx_is_main_thread();
             assert(!worker_is_main);
             let delay = ((10 - i) * 20) as uint64;
-            time.timeout(delay, func [i, text, worker_is_main] () {
-                printf("worker {} main={} text={} timeout={}\n", i, worker_is_main, text,
-                       cx_is_main_thread());
-            });
+            time.timeout(
+                delay,
+                func [i, text, worker_is_main] () {
+                    printf(
+                        "worker {} main={} text={} timeout={}\n",
+                        i,
+                        worker_is_main,
+                        text,
+                        cx_is_main_thread()
+                    );
+                }
+            );
         };
 
         unsafe {
@@ -34,12 +42,15 @@ func main() {
         }
     }
 
-    time.timeout(250, func () {
-        printf("cleanup = {}\n", cx_is_main_thread());
-        if fs.exists(TEST_PATH) {
-            fs.remove(TEST_PATH);
+    time.timeout(
+        250,
+        func () {
+            printf("cleanup = {}\n", cx_is_main_thread());
+            if fs.exists(TEST_PATH) {
+                fs.remove(TEST_PATH);
+            }
         }
-    });
+    );
 
     println("done");
 }

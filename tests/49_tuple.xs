@@ -200,7 +200,7 @@ struct AtomicLike<T> {
     value: T;
 
     static func from_value(value: T) AtomicLike<T> {
-        return {value: value};
+        return {:value};
     }
 
     func compare_exchange(expected: T) Tuple<T, bool> {

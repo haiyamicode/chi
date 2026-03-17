@@ -32,6 +32,6 @@ func main() {
 
     switch shape.(type) {
         &Point => println("switch ok"),
-        else => println("switch bad"),
+        else => println("switch bad")
     }
 }

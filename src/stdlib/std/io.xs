@@ -84,9 +84,9 @@ export interface Write {
 }
 
 export interface WriteAsync {
-    func write(data: []byte) Promise<Unit>;
+    func write(data: []byte) Promise;
 
-    func write_string(text: string) Promise<Unit> {
+    func write_string(text: string) Promise {
         return this.write(text.byte_span());
     }
 }

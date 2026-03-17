@@ -7,11 +7,21 @@ extern "C" {
     unsafe func __cx_fs_flags(which: int32) int32;
     unsafe func __cx_fs_open(path: *byte, flags: int32, mode: int32) int32;
     unsafe func __cx_fs_read(fd: int32, buf: *void, size: uint32) int32;
-    unsafe func __cx_fs_read_async(fd: int32, buf: *void, size: uint32, resolve: *void,
-                                   reject: *void);
+    unsafe func __cx_fs_read_async(
+        fd: int32,
+        buf: *void,
+        size: uint32,
+        resolve: *void,
+        reject: *void
+    );
     unsafe func __cx_fs_write(fd: int32, data: *void, size: uint32) int32;
-    unsafe func __cx_fs_write_async(fd: int32, data: *void, size: uint32, resolve: *void,
-                                    reject: *void);
+    unsafe func __cx_fs_write_async(
+        fd: int32,
+        data: *void,
+        size: uint32,
+        resolve: *void,
+        reject: *void
+    );
     unsafe func __cx_fs_close(fd: int32) int32;
     unsafe func __cx_file_exists(path: *byte) int32;
     unsafe func __cx_file_remove(path: *byte) int32;
@@ -239,8 +249,8 @@ export struct FileAsync {
     }
 
     impl io.WriteAsync {
-        func write(data: []byte) Promise<Unit> {
-            var promise = Promise<Unit>{};
+        func write(data: []byte) Promise {
+            var promise = Promise{};
             var path = this.handle.file_path();
             var resolve = func [promise] () {
                 promise.resolve(());
@@ -290,12 +300,12 @@ export async func read_file_async(path: string) Promise<string> {
     return await f.async().read_string();
 }
 
-export async func write_file_async(path: string, data: string) Promise<Unit> {
+export async func write_file_async(path: string, data: string) Promise {
     var f = File.create(path);
     await f.async().write_string(data);
 }
 
-export async func append_file_async(path: string, data: string) Promise<Unit> {
+export async func append_file_async(path: string, data: string) Promise {
     var f = File.open(path, OpenMode.Append);
     await f.async().write_string(data);
 }
