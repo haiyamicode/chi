@@ -1359,10 +1359,10 @@ void Compiler::compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value
     auto inlined_gep = builder.CreateStructGEP(any_type_l, dest, 1);
     auto src_type_l = compile_type(src_type);
     auto type_size = llvm_type_size(src_type_l);
-    auto inlined = type_size <= sizeof(CxAny::data);
+    auto inlined = type_size <= sizeof(CxAnyStorage);
     builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), inlined), inlined_gep);
 
-    auto data_gep = builder.CreateStructGEP(any_type_l, dest, 2);
+    auto data_gep = builder.CreateStructGEP(any_type_l, dest, 3);
     if (inlined) {
         compile_assignment_to_ptr(fn, expr, data_gep, src_type);
         return;
@@ -1372,7 +1372,7 @@ void Compiler::compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value
     auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), type_size);
     auto heap_ptr = builder.CreateCall(malloc_fn->llvm_fn, {size_l, get_null_ptr()}, "any_alloc");
     compile_assignment_to_ptr(fn, expr, heap_ptr, src_type);
-    builder.CreateAlignedStore(heap_ptr, data_gep, llvm::Align(1));
+    builder.CreateStore(heap_ptr, data_gep);
 }
 
 void Compiler::compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
@@ -4338,16 +4338,16 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         auto type_size = llvm_type_size(from_type_l);
 
         // Copy and inline the data if possible, otherwise allocate it
-        auto inlined = type_size <= sizeof(CxAny::data);
+        auto inlined = type_size <= sizeof(CxAnyStorage);
         llvm_builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), inlined),
                                  inlined_gep);
-        auto data_gep = llvm_builder.CreateStructGEP(any_type_l, any_var, 2);
+        auto data_gep = llvm_builder.CreateStructGEP(any_type_l, any_var, 3);
         if (inlined) {
             compile_copy(fn, value, data_gep, from_type, nullptr);
         } else {
             auto copy_p = llvm_builder.CreateAlloca(from_type_l, nullptr, "any_data_copy");
             compile_copy(fn, value, copy_p, from_type, nullptr);
-            llvm_builder.CreateAlignedStore(copy_p, data_gep, llvm::Align(1));
+            llvm_builder.CreateStore(copy_p, data_gep);
         }
         return llvm_builder.CreateLoad(any_type_l, any_var);
     }
@@ -6477,8 +6477,8 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         auto copier_gep = builder.CreateStructGEP(ti_header_l, ti_ptr, 4);
         auto copier_ptr = builder.CreateLoad(ptr_type, copier_gep, "any_copier");
 
-        auto src_data_gep = builder.CreateStructGEP(any_type_l, src_addr, 2);
-        auto dst_data_gep = builder.CreateStructGEP(any_type_l, dest, 2);
+        auto src_data_gep = builder.CreateStructGEP(any_type_l, src_addr, 3);
+        auto dst_data_gep = builder.CreateStructGEP(any_type_l, dest, 3);
 
         auto bb_inlined = fn->new_label("any_cp_inlined");
         auto bb_heap = fn->new_label("any_cp_heap");
@@ -9311,7 +9311,7 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         auto inlined_gep = builder.CreateStructGEP(any_type_l, address, 1);
         auto inlined = builder.CreateLoad(i8_ty, inlined_gep, "any_inlined");
         auto is_inlined = builder.CreateICmpNE(inlined, llvm::ConstantInt::get(i8_ty, 0));
-        auto data_gep = builder.CreateStructGEP(any_type_l, address, 2);
+        auto data_gep = builder.CreateStructGEP(any_type_l, address, 3);
 
         auto bb_inlined = fn->new_label("any_data_inlined");
         auto bb_heap = fn->new_label("any_data_heap");
@@ -11098,7 +11098,15 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         std::vector<llvm::Type *> members;
         members.push_back(get_llvm_ptr_type());
         members.push_back(llvm::Type::getInt8Ty(llvm_ctx));
-        members.push_back(llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), 23));
+        auto any_storage_offset = offsetof(CxAny, storage);
+        auto any_inlined_offset = offsetof(CxAny, inlined);
+        auto any_padding = any_storage_offset - any_inlined_offset - sizeof(bool);
+        if (any_padding > 0) {
+            members.push_back(
+                llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), (uint32_t)any_padding));
+        }
+        members.push_back(
+            llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), (uint32_t)sizeof(CxAnyStorage)));
         return llvm::StructType::create(members, "Any");
     }
     case TypeKind::Struct: {

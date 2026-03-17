@@ -349,12 +349,9 @@ void run_on_main_uv_thread_async(Fn &&fn) {
 
 static void *get_any_data(const CxAny *v) {
     if (v->inlined) {
-        return (void *)v->data;
+        return (void *)v->storage.inline_data;
     }
-
-    void *ptr = nullptr;
-    memcpy(&ptr, v->data, sizeof(ptr));
-    return ptr;
+    return v->storage.heap_ptr;
 }
 
 void cx_string_set_data(CxString *dest, const char *data) {
@@ -429,7 +426,7 @@ static std::string istringf(const CxAny &v) {
     auto typedata = &v.type->data;
     auto &spec = typedata->int_;
 
-#define _FORMAT_INT(T, v) fmt::format("{}", (T)(*(T *)(&v.data)))
+#define _FORMAT_INT(T, v) fmt::format("{}", (T)(*(T *)(&v.storage.inline_data)))
     if (!spec.is_unsigned) {
         switch (spec.bit_count) {
         case 8:
@@ -465,7 +462,7 @@ static std::string fstringf(const CxAny &v) {
     auto typedata = &v.type->data;
     auto &spec = typedata->float_;
 
-#define _FORMAT_FLOAT(T, v) fmt::format("{}", (T)(*(T *)(&v.data)))
+#define _FORMAT_FLOAT(T, v) fmt::format("{}", (T)(*(T *)(&v.storage.inline_data)))
     switch (spec.bit_count) {
     case 32:
         return _FORMAT_FLOAT(float, v);

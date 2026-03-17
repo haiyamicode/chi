@@ -27,12 +27,16 @@ struct Data64ab {
     char b[8];
 };
 
+union alignas(uint64_t) CxAnyStorage {
+    char inline_data[24];
+    void *heap_ptr;
+};
+
 struct CxAny {
     TypeInfo *type;
 
     bool inlined = 0;
-    // store 23 bytes of data
-    char data[23];
+    CxAnyStorage storage = {};
 };
 
 struct CxArray {

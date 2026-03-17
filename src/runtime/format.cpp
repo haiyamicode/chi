@@ -80,25 +80,66 @@ FormatSpec parse_format_spec(const char *spec, int len) {
 // Integer helpers
 // ---------------------------------------------------------------------------
 
+static const void *get_any_payload(const CxAny &v) {
+    if (v.inlined) {
+        return v.storage.inline_data;
+    }
+    return v.storage.heap_ptr;
+}
+
 // Extract a raw 64-bit integer (sign-extended or zero-extended) from CxAny.
 static int64_t extract_signed_int(const CxAny &v) {
     auto &spec = v.type->data.int_;
+    auto data = get_any_payload(v);
     switch (spec.bit_count) {
-    case 8:  return *(int8_t *)v.data;
-    case 16: return *(int16_t *)v.data;
-    case 32: return *(int32_t *)v.data;
-    case 64: return *(int64_t *)v.data;
+    case 8: {
+        int8_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
+    case 16: {
+        int16_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
+    case 32: {
+        int32_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
+    case 64: {
+        int64_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
     default: return 0;
     }
 }
 
 static uint64_t extract_unsigned_int(const CxAny &v) {
     auto &spec = v.type->data.int_;
+    auto data = get_any_payload(v);
     switch (spec.bit_count) {
-    case 8:  return *(uint8_t *)v.data;
-    case 16: return *(uint16_t *)v.data;
-    case 32: return *(uint32_t *)v.data;
-    case 64: return *(uint64_t *)v.data;
+    case 8: {
+        uint8_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
+    case 16: {
+        uint16_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
+    case 32: {
+        uint32_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
+    case 64: {
+        uint64_t value = 0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
     default: return 0;
     }
 }
@@ -182,9 +223,18 @@ static std::string format_int_with_base(const CxAny &v, const FormatSpec &fs) {
 
 static double extract_float(const CxAny &v) {
     auto &spec = v.type->data.float_;
+    auto data = get_any_payload(v);
     switch (spec.bit_count) {
-    case 32: return (double)(*(float *)v.data);
-    case 64: return *(double *)v.data;
+    case 32: {
+        float value = 0.0f;
+        memcpy(&value, data, sizeof(value));
+        return (double)value;
+    }
+    case 64: {
+        double value = 0.0;
+        memcpy(&value, data, sizeof(value));
+        return value;
+    }
     default: return 0.0;
     }
 }
