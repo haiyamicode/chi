@@ -1,0 +1,7 @@
+static: Point (struct, 8b, 2 fields)
+static fields: [x: int, y: int]
+shape type: &Shape (ref, 16b, elem=Shape)
+shape elem: Shape (struct, 1b)
+shape dyn elem: Point (struct, 8b, 2 fields)
+shape dyn fields: [x: int, y: int]
+switch ok

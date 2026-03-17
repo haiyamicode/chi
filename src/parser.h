@@ -242,6 +242,7 @@ class Parser {
     Node *parse_sizeof_expr();
 
     Node *parse_dot_expr(Node *expr, bool is_optional_chain = false);
+    Node *parse_type_info_expr(Node *expr);
 
     Node *parse_index_expr(Node *expr);
 

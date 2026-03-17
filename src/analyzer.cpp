@@ -310,6 +310,15 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
 static ast::Node *find_dot_expr(ast::Node *node, Pos cursor_pos) {
     if (!node)
         return nullptr;
+    if (node->type == ast::NodeType::TypeInfoExpr && node->token) {
+        auto dot_offset = node->token->pos.offset;
+        if (cursor_pos.offset >= dot_offset &&
+            cursor_pos.offset <= dot_offset + string(".(type)").size()) {
+            auto inner = find_dot_expr(node->data.type_info_expr.expr, cursor_pos);
+            return inner ? inner : node;
+        }
+        return find_dot_expr(node->data.type_info_expr.expr, cursor_pos);
+    }
     if (node->type == ast::NodeType::DotExpr && node->token) {
         // the DotExpr's token is the '.' itself; cursor is right after it
         auto dot_offset = node->token->pos.offset;
@@ -491,6 +500,8 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
         return find_fn_call(node->data.cast_expr.expr, cursor_pos, result);
     case ast::NodeType::DotExpr:
         return find_fn_call(node->data.dot_expr.expr, cursor_pos, result);
+    case ast::NodeType::TypeInfoExpr:
+        return find_fn_call(node->data.type_info_expr.expr, cursor_pos, result);
     case ast::NodeType::PrefixExpr:
         return find_fn_call(node->data.prefix_expr.expr, cursor_pos, result);
     case ast::NodeType::IfExpr:

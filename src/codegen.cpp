@@ -256,6 +256,8 @@ void Compiler::compile_module(ast::Module *module) {
             m_fn = nullptr;
         }
     }
+
+    finalize_pending_typeinfos();
 }
 
 llvm::Value *Compiler::compile_reflection_vtable() {
@@ -1502,16 +1504,58 @@ void Compiler::compile_struct_vtables(ChiType *type, ChiType *lookup_type /*= nu
     }
 }
 
-llvm::Value *Compiler::compile_type_info(ChiType *type) {
-    if (auto info = m_ctx->typeinfo_table.get(type)) {
+llvm::GlobalVariable *Compiler::ensure_type_info_global(ChiType *type, bool queue) {
+    type = eval_type(type);
+    auto typeinfo_key =
+        type->global_id.empty() ? get_resolver()->format_type_id(type) : type->global_id;
+    if (auto info = m_ctx->typeinfo_table.get(typeinfo_key)) {
+        if (queue) {
+            if (!m_ctx->pending_typeinfo_types.has_key(typeinfo_key)) {
+                m_ctx->pending_typeinfo_keys.add(typeinfo_key);
+            }
+            m_ctx->pending_typeinfo_types[typeinfo_key] = type;
+        }
         return *info;
     }
 
+    auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
+    auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
+    auto tidata_type_l = llvm::IntegerType::get(llvm_ctx, sizeof(TypeInfoData) * 8);
+    llvm::Type *tidata_actual_l = tidata_type_l;
+    if ((type->kind == TypeKind::Reference || type->kind == TypeKind::MutRef ||
+         type->kind == TypeKind::MoveRef || type->kind == TypeKind::Pointer ||
+         type->kind == TypeKind::Optional) &&
+        type->get_elem()) {
+        tidata_actual_l = ptr_type_l;
+    }
+    auto ti_type_l = llvm::StructType::get(
+        llvm_ctx,
+        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
+         ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l,
+         llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
+         llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), sizeof(TypeInfo::name))},
+        false);
+
+    auto info_global = new llvm::GlobalVariable(
+        *m_ctx->llvm_module, ti_type_l, true, llvm::GlobalValue::PrivateLinkage,
+        llvm::Constant::getNullValue(ti_type_l),
+        "typeinfo." + get_resolver()->format_type_display(type));
+    m_ctx->typeinfo_table[typeinfo_key] = info_global;
+
+    if (!m_ctx->pending_typeinfo_types.has_key(typeinfo_key)) {
+        m_ctx->pending_typeinfo_keys.add(typeinfo_key);
+    }
+    m_ctx->pending_typeinfo_types[typeinfo_key] = type;
+
+    return info_global;
+}
+
+llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
+    type = eval_type(type);
     auto type_l = compile_type(type);
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto &llvm_module = *(m_ctx->llvm_module.get());
-    auto tidata_type_l =
-        llvm::IntegerType::get(llvm_ctx, sizeof(TypeInfoData) * 8);
+    auto tidata_type_l = llvm::IntegerType::get(llvm_ctx, sizeof(TypeInfoData) * 8);
     auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
     auto i8_ty = llvm::Type::getInt8Ty(llvm_ctx);
 
@@ -1577,7 +1621,8 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
                          llvm::ArrayType::get(i8_ty, field_name_buf.size())},
                         false);
                     auto field_type_info =
-                        llvm::ConstantExpr::getPointerCast((llvm::Constant *)compile_type_info(eval_type(field->resolved_type)),
+                        llvm::ConstantExpr::getPointerCast(
+                            ensure_type_info_global(eval_type(field->resolved_type), false),
                                                            ptr_type_l);
                     field_table_consts.push_back(llvm::ConstantStruct::get(
                         field_entry_ty,
@@ -1633,7 +1678,7 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
          type->kind == TypeKind::Optional) &&
         type->get_elem()) {
         tidata_actual_l = ptr_type_l;
-        typedata_l = (llvm::Constant *)compile_type_info(type->get_elem());
+        typedata_l = ensure_type_info_global(type->get_elem(), false);
     } else {
         tidata_actual_l = tidata_type_l;
         auto typedata = (uint8_t *)&type->data;
@@ -1660,12 +1705,13 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
     auto type_name_l = llvm::ConstantDataArray::get(
         llvm_ctx, llvm::ArrayRef<uint8_t>(type_name_buf.data(), type_name_buf.size()));
 
-    auto ti_type_l = llvm::StructType::create(
+    auto ti_type_l = llvm::StructType::get(
+        llvm_ctx,
         {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
          ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l,
          llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
          llvm::ArrayType::get(i8_ty, type_name_buf.size())},
-        "TypeInfo", false);
+        false);
 
     auto info_l = llvm::ConstantStruct::get(
         ti_type_l,
@@ -1693,11 +1739,28 @@ llvm::Value *Compiler::compile_type_info(ChiType *type) {
             /* name */
             type_name_l,
         });
+    return info_l;
+}
 
-    auto info_global =
-        new llvm::GlobalVariable(llvm_module, ti_type_l, true, llvm::GlobalValue::PrivateLinkage,
-                                 info_l, "typeinfo." + get_resolver()->format_type_display(type));
-    return info_global;
+void Compiler::finalize_pending_typeinfos() {
+    while (m_ctx->pending_typeinfo_keys.len) {
+        auto keys = m_ctx->pending_typeinfo_keys;
+        m_ctx->pending_typeinfo_keys.clear();
+        for (auto &key : keys) {
+            auto type_p = m_ctx->pending_typeinfo_types.get(key);
+            auto global_p = m_ctx->typeinfo_table.get(key);
+            if (!type_p || !global_p) {
+                continue;
+            }
+            auto initializer = build_type_info_initializer(*type_p);
+            (*global_p)->setInitializer(initializer);
+            m_ctx->pending_typeinfo_types.unset(key);
+        }
+    }
+}
+
+llvm::Value *Compiler::compile_type_info(ChiType *type) {
+    return ensure_type_info_global(type, true);
 }
 
 // ============================================================================
@@ -5510,6 +5573,25 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto value_ptr = builder.CreateStructGEP(optional_type_l, optional_ptr, 1, "await_value");
         return builder.CreateLoad(result_type_l, value_ptr, "await_result");
     }
+    case ast::NodeType::TypeInfoExpr: {
+        auto &data = expr->data.type_info_expr;
+        auto &builder = *m_ctx->llvm_builder.get();
+        auto expr_type = get_chitype(data.expr);
+        auto result_type = get_chitype(expr);
+        auto raw_type_info = compile_type_info(expr_type);
+
+        auto dest = compile_alloc(fn, expr, false);
+        auto generated_ctor = generate_constructor(result_type, nullptr);
+        if (generated_ctor) {
+            builder.CreateCall(generated_ctor->llvm_fn, {dest});
+        }
+
+        auto ctor_fn = get_fn(data.resolved_ctor);
+        assert(ctor_fn && "reflect.Type.new must be compiled");
+        auto ctor_type_l = (llvm::FunctionType *)compile_type(get_chitype(data.resolved_ctor));
+        builder.CreateCall(ctor_type_l, ctor_fn->llvm_fn, {dest, raw_type_info});
+        return builder.CreateLoad(compile_type(result_type), dest, "type_expr");
+    }
     case ast::NodeType::DotExpr: {
         auto &dot_data = expr->data.dot_expr;
 
@@ -7152,6 +7234,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     case ast::NodeType::IfExpr:
     case ast::NodeType::SwitchExpr:
     case ast::NodeType::TryExpr:
+    case ast::NodeType::TypeInfoExpr:
     case ast::NodeType::BinOpExpr:
     case ast::NodeType::ConstructExpr:
     case ast::NodeType::LiteralExpr:
@@ -7403,12 +7486,16 @@ llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
     return nullptr;
 }
 
-bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invoke) {
+llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invoke,
+                                         bool *handled) {
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
     auto callee_decl = data.fn_ref_expr->get_decl();
+    if (handled) {
+        *handled = false;
+    }
     if (!callee_decl)
-        return false;
+        return nullptr;
 
     auto atomic_element_type_from_arg = [&](ast::Node *arg) -> ChiType * {
         auto *node = arg;
@@ -7426,10 +7513,80 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         return type && type->is_pointer_like() ? type->get_elem() : nullptr;
     };
 
+    auto dyn_elem_value_type_from_arg = [&](ast::Node *arg) -> ChiType * {
+        auto *node = arg;
+        while (node && node->type == ast::NodeType::CastExpr) {
+            node = node->data.cast_expr.expr;
+        }
+        if (node && node->type == ast::NodeType::UnaryOpExpr) {
+            auto &unary = node->data.unary_op_expr;
+            if (unary.op_type == TokenType::AND || unary.op_type == TokenType::MUTREF ||
+                unary.op_type == TokenType::MOVEREF) {
+                node = unary.op1;
+            }
+        }
+        auto *type = get_chitype(node);
+        return type ? eval_type(type) : nullptr;
+    };
+
     auto atomic_order = llvm::AtomicOrdering::SequentiallyConsistent;
+    auto ptr_type = get_llvm_ptr_type();
+
+    if (callee_decl->name == "__reflect_dyn_elem" && data.args.len == 2) {
+        if (handled) {
+            *handled = true;
+        }
+
+        auto value_ptr = compile_expr(fn, data.args[1]);
+        auto value_type = dyn_elem_value_type_from_arg(data.args[1]);
+        if (!value_type) {
+            return get_null_ptr();
+        }
+
+        if (value_type->kind == TypeKind::Any) {
+            auto any_type_l = (llvm::StructType *)compile_type(value_type);
+            auto type_gep = builder.CreateStructGEP(any_type_l, value_ptr, 0);
+            return builder.CreateLoad(ptr_type, type_gep, "dyn_elem_any_ti");
+        }
+
+        if (value_type->is_pointer_like()) {
+            auto elem_type = eval_type(value_type->get_elem());
+            if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
+                auto fat_ptr_type_l = compile_type(value_type);
+                auto fat_ptr = builder.CreateLoad(fat_ptr_type_l, value_ptr, "dyn_elem_fat_ptr");
+                auto vtable_ptr = builder.CreateExtractValue(fat_ptr, {1}, "dyn_elem_vtable_ptr");
+                auto vtable_is_null = builder.CreateICmpEQ(vtable_ptr, get_null_ptr());
+
+                auto bb_runtime = fn->new_label("dyn_elem_runtime");
+                auto bb_done = fn->new_label("dyn_elem_done");
+                auto cur_bb = builder.GetInsertBlock();
+                builder.CreateCondBr(vtable_is_null, bb_done, bb_runtime);
+
+                fn->use_label(bb_runtime);
+                auto runtime_ti = builder.CreateLoad(ptr_type, vtable_ptr, "dyn_elem_runtime_ti");
+                builder.CreateBr(bb_done);
+                auto runtime_bb = builder.GetInsertBlock();
+
+                fn->use_label(bb_done);
+                auto result = builder.CreatePHI(ptr_type, 2, "dyn_elem_ti");
+                result->addIncoming(get_null_ptr(), cur_bb);
+                result->addIncoming(runtime_ti, runtime_bb);
+                return result;
+            }
+
+            if (elem_type) {
+                return compile_type_info(elem_type);
+            }
+        }
+
+        return get_null_ptr();
+    }
 
     // __copy(dest, src, destruct_old) — deep copy via copy constructor
     if (callee_decl->name == "__copy" && data.args.len == 3) {
+        if (handled) {
+            *handled = true;
+        }
         auto dest_ptr = compile_expr(fn, data.args[0]);
         auto src_ptr = compile_expr(fn, data.args[1]);
         auto elem_type = get_chitype(data.args[0])->get_elem();
@@ -7449,22 +7606,28 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
                                   nullptr, destruct_old);
         }
         // Intrinsics can't throw — no invoke needed, just continue linearly
-        return true;
+        return nullptr;
     }
 
     // __move(dest, src, size) — raw memcpy + zero source, no destruction on either side
     // Used for placement stores into uninitialized memory.
     if (callee_decl->name == "__move" && data.args.len == 3) {
+        if (handled) {
+            *handled = true;
+        }
         auto dest_ptr = compile_expr(fn, data.args[0]);
         auto src_ptr = compile_expr(fn, data.args[1]);
         auto size = compile_expr(fn, data.args[2]);
         builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), src_ptr, llvm::MaybeAlign(), size);
         builder.CreateMemSet(src_ptr, builder.getInt8(0), size, llvm::MaybeAlign());
         // Intrinsics can't throw — no invoke needed, just continue linearly
-        return true;
+        return nullptr;
     }
 
     if (callee_decl->name == "__atomic_load" && data.args.len == 2) {
+        if (handled) {
+            *handled = true;
+        }
         auto ptr = compile_expr(fn, data.args[0]);
         auto out_ptr = compile_expr(fn, data.args[1]);
         auto elem_type = atomic_element_type_from_arg(data.args[1]);
@@ -7474,10 +7637,13 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         auto *load = builder.CreateAlignedLoad(elem_type_l, ptr, align);
         load->setAtomic(atomic_order);
         builder.CreateStore(load, out_ptr);
-        return true;
+        return nullptr;
     }
 
     if (callee_decl->name == "__atomic_store" && data.args.len == 2) {
+        if (handled) {
+            *handled = true;
+        }
         auto ptr = compile_expr(fn, data.args[0]);
         auto value_ptr = compile_expr(fn, data.args[1]);
         auto elem_type = atomic_element_type_from_arg(data.args[1]);
@@ -7487,10 +7653,13 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         auto value = builder.CreateLoad(elem_type_l, value_ptr);
         auto *store = builder.CreateAlignedStore(value, ptr, align);
         store->setAtomic(atomic_order);
-        return true;
+        return nullptr;
     }
 
     if (callee_decl->name == "__atomic_compare_exchange" && data.args.len == 5) {
+        if (handled) {
+            *handled = true;
+        }
         auto ptr = compile_expr(fn, data.args[0]);
         auto expected_ptr = compile_expr(fn, data.args[1]);
         auto desired_ptr = compile_expr(fn, data.args[2]);
@@ -7509,10 +7678,13 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         auto ok_value = builder.CreateExtractValue(cmpxchg, {1});
         builder.CreateStore(old_value, out_old_ptr);
         builder.CreateStore(ok_value, out_ok_ptr);
-        return true;
+        return nullptr;
     }
 
     if (callee_decl->name == "__atomic_fetch_add" && data.args.len == 3) {
+        if (handled) {
+            *handled = true;
+        }
         auto ptr = compile_expr(fn, data.args[0]);
         auto value_ptr = compile_expr(fn, data.args[1]);
         auto out_old_ptr = compile_expr(fn, data.args[2]);
@@ -7524,10 +7696,13 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         auto *old_value = builder.CreateAtomicRMW(llvm::AtomicRMWInst::Add, ptr, value, align,
                                                   atomic_order);
         builder.CreateStore(old_value, out_old_ptr);
-        return true;
+        return nullptr;
     }
 
     if (callee_decl->name == "__atomic_fetch_sub" && data.args.len == 3) {
+        if (handled) {
+            *handled = true;
+        }
         auto ptr = compile_expr(fn, data.args[0]);
         auto value_ptr = compile_expr(fn, data.args[1]);
         auto out_old_ptr = compile_expr(fn, data.args[2]);
@@ -7539,10 +7714,10 @@ bool Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invo
         auto *old_value = builder.CreateAtomicRMW(llvm::AtomicRMWInst::Sub, ptr, value, align,
                                                   atomic_order);
         builder.CreateStore(old_value, out_old_ptr);
-        return true;
+        return nullptr;
     }
 
-    return false;
+    return nullptr;
 }
 
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke,
@@ -7550,8 +7725,15 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
 
-    if (compile_intrinsic(fn, expr, invoke))
-        return nullptr;
+    bool intrinsic_handled = false;
+    auto intrinsic_ret = compile_intrinsic(fn, expr, invoke, &intrinsic_handled);
+    if (intrinsic_handled) {
+        if (intrinsic_ret && sret_dest) {
+            builder.CreateStore(intrinsic_ret, sret_dest);
+            return nullptr;
+        }
+        return intrinsic_ret;
+    }
 
     if (data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda) {
         auto ref = compile_expr_ref(fn, data.fn_ref_expr);

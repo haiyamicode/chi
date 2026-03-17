@@ -348,8 +348,7 @@ void run_on_main_uv_thread_async(Fn &&fn) {
 } // namespace
 
 static void *get_any_data(const CxAny *v) {
-    auto p = v->inlined ? (intptr_t)v->data : *(intptr_t *)(v->data);
-    return (void *)p;
+    return v->inlined ? (void *)v->data : *(void **)(v->data);
 }
 
 void cx_string_set_data(CxString *dest, const char *data) {
@@ -525,9 +524,10 @@ static bool is_field_visible(const TypeFieldEntry &field) {
            field.visibility == (int32_t)Visibility::Protected;
 }
 
-static std::string get_struct_display(const CxAny &v) {
-    auto data_p = get_any_data(&v);
-    auto type_name = get_type_name(v.type);
+static std::string get_value_display_from_ptr(TypeInfo *type, const void *data_p);
+
+static std::string get_struct_display(TypeInfo *type, const void *data_p) {
+    auto type_name = get_type_name(type);
     if (type_name.empty()) {
         type_name = "struct";
     }
@@ -535,45 +535,35 @@ static std::string get_struct_display(const CxAny &v) {
     std::stringstream ss;
     ss << type_name << "{";
     bool first = true;
-    for (int i = 0; i < v.type->field_table_len; i++) {
-        auto &field = v.type->field_table[i];
+    for (int i = 0; i < type->field_table_len; i++) {
+        auto &field = type->field_table[i];
         if (!field.type || !is_field_visible(field)) {
             continue;
         }
 
-        auto field_ptr = (uint8_t *)data_p + field.offset;
-        CxAny inner = {};
-        inner.type = field.type;
-        if (field.type->size <= (int32_t)sizeof(inner.data)) {
-            inner.inlined = true;
-            memcpy(inner.data, field_ptr, field.type->size);
-        } else {
-            inner.inlined = false;
-            memcpy(inner.data, &field_ptr, sizeof(field_ptr));
-        }
+        auto field_ptr = (const uint8_t *)data_p + field.offset;
 
         if (!first) {
             ss << ", ";
         }
         first = false;
         ss.write(field.name, field.name_len);
-        ss << ": " << get_value_display(inner);
+        ss << ": " << get_value_display_from_ptr(field.type, field_ptr);
     }
     ss << "}";
     return ss.str();
 }
 
-std::string get_value_display(const CxAny &v) {
-    switch ((TypeKind)v.type->kind) {
+static std::string get_value_display_from_ptr(TypeInfo *type, const void *data_p) {
+    switch ((TypeKind)type->kind) {
     case TypeKind::String: {
-        auto data_p = get_any_data(&v);
-        auto s = (CxString *)data_p;
+        auto s = (const CxString *)data_p;
         return string(s->data, s->size);
     }
     case TypeKind::Bool:
-        return fmt::format("{}", *(bool *)&v.data);
+        return fmt::format("{}", *(const bool *)data_p);
     case TypeKind::Byte: {
-        uint8_t char_value = *(uint8_t *)&v.data;
+        uint8_t char_value = *(const uint8_t *)data_p;
         // Only display as character if it's printable, otherwise show as number
         if (char_value >= 32 && char_value <= 126) {
             return fmt::format("{}", (char)char_value);
@@ -581,53 +571,71 @@ std::string get_value_display(const CxAny &v) {
         return fmt::format("{}", char_value);
     }
     case TypeKind::Rune: {
-        uint32_t rune_value = *(uint32_t *)&v.data;
+        uint32_t rune_value = *(const uint32_t *)data_p;
         return encode_utf8(rune_value);
     }
     case TypeKind::Int: {
-        return istringf(v);
+        auto &spec = type->data.int_;
+        if (spec.is_unsigned) {
+            switch (spec.bit_count) {
+            case 8:
+                return fmt::format("{}", *(const uint8_t *)data_p);
+            case 16:
+                return fmt::format("{}", *(const uint16_t *)data_p);
+            case 32:
+                return fmt::format("{}", *(const uint32_t *)data_p);
+            case 64:
+                return fmt::format("{}", *(const uint64_t *)data_p);
+            default:
+                break;
+            }
+        } else {
+            switch (spec.bit_count) {
+            case 8:
+                return fmt::format("{}", *(const int8_t *)data_p);
+            case 16:
+                return fmt::format("{}", *(const int16_t *)data_p);
+            case 32:
+                return fmt::format("{}", *(const int32_t *)data_p);
+            case 64:
+                return fmt::format("{}", *(const int64_t *)data_p);
+            default:
+                break;
+            }
+        }
+        return "0";
     }
-    case TypeKind::Float:
-        return fstringf(v);
+    case TypeKind::Float: {
+        auto &spec = type->data.float_;
+        switch (spec.bit_count) {
+        case 32:
+            return fmt::format("{}", *(const float *)data_p);
+        case 64:
+            return fmt::format("{}", *(const double *)data_p);
+        default:
+            return "0";
+        }
+    }
     case TypeKind::Pointer:
     case TypeKind::Reference:
-    case TypeKind::MutRef: {
-        auto ptr = *(void **)&v.data;
-        auto elem_ti = v.type->data.pointer.elem;
+    case TypeKind::MutRef:
+    case TypeKind::MoveRef: {
+        auto ptr = *(void *const *)data_p;
+        auto elem_ti = type->data.pointer.elem;
         if (elem_ti && ptr) {
-            CxAny inner;
-            inner.type = elem_ti;
-            inner.inlined = true;
-            auto elem_size = elem_ti->size;
-            if (elem_size <= (int32_t)sizeof(inner.data)) {
-                memcpy(inner.data, ptr, elem_size);
-            } else {
-                inner.inlined = false;
-                memcpy(inner.data, &ptr, sizeof(ptr));
-            }
-            return get_value_display(inner);
+            return get_value_display_from_ptr(elem_ti, ptr);
         }
-        return fmt::format("{:#x}", *(intptr_t *)&v.data);
+        return fmt::format("{:#x}", (intptr_t)ptr);
     }
     case TypeKind::Optional: {
-        auto data_p = get_any_data(&v);
-        auto has_value = *(bool *)data_p;
+        auto has_value = *(const bool *)data_p;
         if (has_value) {
-            auto elem_ti = v.type->data.pointer.elem;
+            auto elem_ti = type->data.pointer.elem;
             if (elem_ti) {
                 // Value offset = optional size - elem size
-                auto value_offset = v.type->size - elem_ti->size;
-                auto value_p = (uint8_t *)data_p + value_offset;
-                CxAny inner;
-                inner.type = elem_ti;
-                inner.inlined = true;
-                if (elem_ti->size <= (int32_t)sizeof(inner.data)) {
-                    memcpy(inner.data, value_p, elem_ti->size);
-                } else {
-                    inner.inlined = false;
-                    memcpy(inner.data, &value_p, sizeof(value_p));
-                }
-                return get_value_display(inner);
+                auto value_offset = type->size - elem_ti->size;
+                auto value_p = (const uint8_t *)data_p + value_offset;
+                return get_value_display_from_ptr(elem_ti, value_p);
             }
             return "<optional>";
         } else {
@@ -637,42 +645,42 @@ std::string get_value_display(const CxAny &v) {
     case cx::TypeKind::Array:
     case cx::TypeKind::Span:
     case cx::TypeKind::Struct: {
-        auto display_method = get_typemeta_display_method(v.type);
+        auto display_method = get_typemeta_display_method(type);
         if (display_method) {
             auto fn = (void (*)(void *a, void *b))display_method;
-            auto p = get_any_data(&v);
-            auto a = (CxArray *)v.data;
             CxString s;
-            fn(&s, (void *)p);
+            fn(&s, const_cast<void *>(data_p));
             auto str = string(s.data, s.size);
             cx_string_delete(&s);
             return str;
         }
-        if (v.type->kind == (int32_t)TypeKind::Struct && v.type->field_table &&
-            v.type->field_table_len >= 0) {
-            return get_struct_display(v);
+        if (type->kind == (int32_t)TypeKind::Struct && type->field_table &&
+            type->field_table_len >= 0) {
+            return get_struct_display(type, data_p);
         }
-        return fmt::format("<TypeKind:{}>", PRINT_ENUM((TypeKind)v.type->kind));
+        return fmt::format("<TypeKind:{}>", PRINT_ENUM((TypeKind)type->kind));
     }
     case cx::TypeKind::EnumValue: {
-        auto display_method = get_typemeta_display_method(v.type);
+        auto display_method = get_typemeta_display_method(type);
         if (display_method) {
             auto fn = (void (*)(void *a, void *b))display_method;
-            auto p = get_any_data(&v);
             CxString s;
-            fn(&s, (void *)p);
+            fn(&s, const_cast<void *>(data_p));
             auto str = string(s.data, s.size);
             cx_string_delete(&s);
             return str;
         }
-        auto data_p = get_any_data(&v);
-        auto ev = (CxEnumValue *)data_p;
+        auto ev = (const CxEnumValue *)data_p;
         string display_name(ev->display_name->data, ev->display_name->size);
         return fmt::format("{}", display_name);
     }
     default:
-        return fmt::format("<TypeKind:{}>", PRINT_ENUM(v.type->kind));
+        return fmt::format("<TypeKind:{}>", PRINT_ENUM(type->kind));
     }
+}
+
+std::string get_value_display(const CxAny &v) {
+    return get_value_display_from_ptr(v.type, get_any_data(&v));
 }
 
 void cx_print_any(CxAny *value) { fmt::print("{}", get_value_display(*value)); }

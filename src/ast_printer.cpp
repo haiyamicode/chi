@@ -712,6 +712,12 @@ void AstPrinter::print_node(Node *node) {
         emit("{}{}", data.is_optional_chain ? "?." : ".", data.field->str);
         break;
     }
+    case NodeType::TypeInfoExpr: {
+        auto &data = node->data.type_info_expr;
+        print_node(data.expr);
+        emit(".(type)");
+        break;
+    }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
         if (data.is_array_literal) {
@@ -1809,6 +1815,8 @@ bool AstPrinter::types_match(Node *a, Node *b) {
     case NodeType::DotExpr:
         return a->data.dot_expr.field->str == b->data.dot_expr.field->str &&
                types_match(a->data.dot_expr.expr, b->data.dot_expr.expr);
+    case NodeType::TypeInfoExpr:
+        return types_match(a->data.type_info_expr.expr, b->data.type_info_expr.expr);
     default:
         return false;
     }

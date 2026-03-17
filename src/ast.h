@@ -22,7 +22,7 @@ struct Scope;
 
 MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, VarDecl, BinOpExpr,
           UnaryOpExpr, LiteralExpr, IfExpr, FnCallExpr, Primitive, Identifier, EmptyStmt,
-          ConstructExpr, ParenExpr, StructDecl, DotExpr, SubtypeExpr, IndexExpr, SliceExpr,
+          ConstructExpr, ParenExpr, StructDecl, DotExpr, TypeInfoExpr, SubtypeExpr, IndexExpr, SliceExpr,
           RangeExpr, TypedefDecl, TypeSigil, EnumVariant, CastExpr, ForStmt, WhileStmt, BranchStmt,
           TypeParam, LifetimeParam, PrefixExpr, ExternDecl, TryExpr, AwaitExpr, InferredType,
           ImportDecl, SizeofExpr, DeclAttribute, BindIdentifier, SwitchExpr, CaseExpr, ImportSymbol,
@@ -413,6 +413,11 @@ struct DotExpr {
     Node *narrowed_var = nullptr;
 };
 
+struct TypeInfoExpr {
+    Node *expr = nullptr;
+    Node *resolved_ctor = nullptr;
+};
+
 struct SubtypeExpr {
     Node *type = nullptr;
     array<Node *> args = {};
@@ -648,6 +653,7 @@ struct Node {
         StructDecl struct_decl;
         ConstructExpr construct_expr;
         DotExpr dot_expr;
+        TypeInfoExpr type_info_expr;
         SubtypeExpr subtype_expr;
         IndexExpr index_expr;
         SliceExpr slice_expr;
@@ -826,6 +832,8 @@ struct Node {
             }
             return nullptr;
         }
+        case NodeType::TypeInfoExpr:
+            return nullptr;
         case NodeType::ImportSymbol:
             return data.import_symbol.resolved_decl;
         case NodeType::ExportDecl:

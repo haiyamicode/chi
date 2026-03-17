@@ -264,6 +264,8 @@ static bool visit_async_children(ast::Node *node, bool include_try_catch, F &&vi
         return visit_many(node->data.tuple_expr.items);
     case ast::NodeType::DotExpr:
         return visit_one(node->data.dot_expr.expr);
+    case ast::NodeType::TypeInfoExpr:
+        return visit_one(node->data.type_info_expr.expr);
     case ast::NodeType::IndexExpr:
         return visit_one(node->data.index_expr.expr) ||
                visit_one(node->data.index_expr.subscript);
@@ -368,6 +370,10 @@ class Resolver {
     bool should_resolve_fn_body(ResolveScope &scope);
 
     ChiType *resolve_comparator(ChiType *type, ResolveScope &scope);
+
+    ast::Module *load_module(const string &path, ResolveScope &scope);
+    ast::Module *load_and_import_module(const string &path, ResolveScope &scope);
+    ast::Node *get_reflect_type_decl(ResolveScope &scope);
 
     ChiType *resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
 

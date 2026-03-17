@@ -60,6 +60,56 @@ static bool matches_pattern(const std::string &name, const std::string &pattern)
 
 Resolver::Resolver(ResolveContext *ctx) { m_ctx = ctx; }
 
+ast::Module *Resolver::load_module(const string &path, ResolveScope &scope) {
+    auto *comp_ctx = static_cast<CompilationContext *>(m_ctx->allocator);
+    auto path_info = m_ctx->allocator->find_module_path(path, scope.module ? scope.module->path : "");
+    if (!path_info) {
+        return nullptr;
+    }
+
+    auto abs_path = fs::absolute(path_info->entry_path).string();
+    if (auto cached_mod = comp_ctx->source_modules.get(abs_path)) {
+        return *cached_mod;
+    }
+
+    auto target_package = m_ctx->allocator->get_or_create_package(path_info->package_id_path);
+    auto src = io::Buffer::from_file(path_info->entry_path);
+    auto module = m_ctx->allocator->process_source(target_package, &src, path_info->entry_path);
+    comp_ctx->source_modules[abs_path] = module;
+    return module;
+}
+
+ast::Module *Resolver::load_and_import_module(const string &path, ResolveScope &scope) {
+    auto *module = load_module(path, scope);
+    if (!module || !scope.module) {
+        return module;
+    }
+
+    for (auto import : scope.module->imports) {
+        if (import == module) {
+            return module;
+        }
+    }
+
+    scope.module->imports.add(module);
+    return module;
+}
+
+ast::Node *Resolver::get_reflect_type_decl(ResolveScope &scope) {
+    auto *module = load_and_import_module("std/reflect", scope);
+    if (!module || !module->scope) {
+        return nullptr;
+    }
+
+    for (auto decl : module->root->data.root.top_level_decls) {
+        if (decl->type == NodeType::StructDecl && decl->name == "Type" &&
+            decl->declspec().is_exported()) {
+            return decl;
+        }
+    }
+    return nullptr;
+}
+
 ast::Node *Resolver::add_primitive(const string &name, ChiType *type) {
     auto node = create_node(ast::NodeType::Primitive);
     node->token = nullptr;
@@ -2264,6 +2314,45 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             elements.add(elem_type);
         }
         return get_tuple_type(elements);
+    }
+    case NodeType::TypeInfoExpr: {
+        auto &data = node->data.type_info_expr;
+        auto expr_type = resolve(data.expr, scope, flags);
+        if (!expr_type) {
+            return nullptr;
+        }
+        ensure_temp_owner(data.expr, expr_type, scope);
+
+        auto reflect_type_decl = get_reflect_type_decl(scope);
+        if (!reflect_type_decl) {
+            error(node, "failed to load std/reflect.Type");
+            return nullptr;
+        }
+
+        auto reflect_type = reflect_type_decl->resolved_type;
+        if (reflect_type && reflect_type->kind == TypeKind::TypeSymbol) {
+            reflect_type = reflect_type->data.type_symbol.underlying_type;
+        }
+        if (!reflect_type || reflect_type->kind != TypeKind::Struct) {
+            error(node, "std/reflect.Type is not a struct type");
+            return nullptr;
+        }
+
+        ast::Node *ctor_node = nullptr;
+        for (auto member : reflect_type_decl->data.struct_decl.members) {
+            if (member->type == NodeType::FnDef &&
+                member->data.fn_def.fn_kind == ast::FnKind::Constructor) {
+                ctor_node = member;
+                break;
+            }
+        }
+        if (!ctor_node) {
+            error(node, "std/reflect.Type.new(raw: *void) not found");
+            return nullptr;
+        }
+
+        data.resolved_ctor = ctor_node;
+        return reflect_type;
     }
     case NodeType::DotExpr: {
         auto &data = node->data.dot_expr;

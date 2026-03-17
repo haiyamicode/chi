@@ -293,6 +293,7 @@ struct CodegenContext {
     array<llvm::Type *> types = {};
     array<box<string>> strings = {};
     array<Function *> pending_fns = {};
+    array<string> pending_typeinfo_keys = {};
     std::vector<llvm::Constant *> reflection_vtable = {};
 
     map<ast::Node *, llvm::Value *> var_table = {};
@@ -303,7 +304,8 @@ struct CodegenContext {
     map<string, Function *> system_functions = {};
     map<string, ast::Node *> generic_functions =
         {}; // Maps function global_id to AST node for instantiation
-    map<ChiType *, llvm::Value *> typeinfo_table = {};
+    map<string, llvm::GlobalVariable *> typeinfo_table = {};
+    map<string, ChiType *> pending_typeinfo_types = {};
     map<string, llvm::Type *> anon_type_table = {};
     map<InterfaceImpl *, llvm::Value *> impl_table = {};
     map<ChiEnumVariant *, llvm::Value *> enum_variant_table = {};
@@ -478,7 +480,8 @@ class Compiler {
         Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call);
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr,
                                  llvm::Value *sret_dest = nullptr);
-    bool compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invoke);
+    llvm::Value *compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invoke,
+                                   bool *handled);
     llvm::Value *compile_builtin_trait_call(Function *fn, ast::Node *expr,
                                             ChiType *concrete_type, const std::string &method_name,
                                             ast::FnCallExpr &fn_call_data);
@@ -552,6 +555,9 @@ class Compiler {
     void compile_extern(ast::Node *node);
 
     llvm::Value *compile_reflection_vtable();
+    llvm::GlobalVariable *ensure_type_info_global(ChiType *type, bool queue = true);
+    llvm::Constant *build_type_info_initializer(ChiType *type);
+    void finalize_pending_typeinfos();
 
     Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "",
                               ChiType *fn_type_override = nullptr);

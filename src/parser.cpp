@@ -1740,9 +1740,10 @@ Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
         auto token = get();
         switch (token->type) {
         case TokenType::DOT:
-            // .(type) is type switch syntax, not a DotExpr
-            if (lookahead(1)->type == TokenType::LPAREN)
-                return node;
+            if (lookahead(1)->type == TokenType::LPAREN) {
+                node = parse_type_info_expr(node);
+                break;
+            }
             node = parse_dot_expr(node);
             break;
 
@@ -3632,16 +3633,9 @@ Node *Parser::parse_switch_expr() {
         node->data.switch_expr.expr = create_node(NodeType::LiteralExpr, kw);
     }
 
-    // Check for .(type) suffix → type switch
-    if (next_is(TokenType::DOT) && lookahead(1)->type == TokenType::LPAREN) {
-        consume(); // .
-        consume(); // (
-        auto tok = get();
-        if (tok->type == TokenType::IDEN && tok->str == "type") {
-            consume(); // type
-            node->data.switch_expr.is_type_switch = true;
-        }
-        expect(TokenType::RPAREN);
+    if (node->data.switch_expr.expr->type == NodeType::TypeInfoExpr) {
+        node->data.switch_expr.is_type_switch = true;
+        node->data.switch_expr.expr = node->data.switch_expr.expr->data.type_info_expr.expr;
     }
 
     expect(TokenType::LBRACE);
@@ -3659,6 +3653,22 @@ Node *Parser::parse_switch_expr() {
     }
     expect(TokenType::RBRACE);
     m_ctx->resolver->pop_scope();
+    return node;
+}
+
+Node *Parser::parse_type_info_expr(Node *expr) {
+    auto dot = expect(TokenType::DOT);
+    expect(TokenType::LPAREN);
+    auto type_tok = get();
+    if (type_tok->type != TokenType::IDEN || type_tok->str != "type") {
+        error(type_tok, "expected 'type' after '.('");
+    } else {
+        consume();
+    }
+    expect(TokenType::RPAREN);
+
+    auto node = create_node(NodeType::TypeInfoExpr, dot);
+    node->data.type_info_expr.expr = expr;
     return node;
 }
 
