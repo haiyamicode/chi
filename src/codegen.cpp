@@ -1504,33 +1504,80 @@ void Compiler::compile_struct_vtables(ChiType *type, ChiType *lookup_type /*= nu
     }
 }
 
+static bool is_reflect_array_type(Resolver *resolver, ChiType *type) {
+    if (!type) {
+        return false;
+    }
+    if (type->kind == TypeKind::Array) {
+        return true;
+    }
+    auto rt_array_type = resolver->get_context()->rt_array_type;
+    if (type->kind == TypeKind::Subtype && rt_array_type && type->data.subtype.generic &&
+        resolver->to_value_type(type->data.subtype.generic) == resolver->to_value_type(rt_array_type) &&
+        type->data.subtype.args.len > 0) {
+        return true;
+    }
+    return false;
+}
+
+static ChiType *get_reflect_array_elem_type(Resolver *resolver, ChiType *type) {
+    if (!type) {
+        return nullptr;
+    }
+    if (type->kind == TypeKind::Array) {
+        return type->get_elem();
+    }
+    auto rt_array_type = resolver->get_context()->rt_array_type;
+    if (type->kind == TypeKind::Subtype && rt_array_type && type->data.subtype.generic &&
+        resolver->to_value_type(type->data.subtype.generic) == resolver->to_value_type(rt_array_type) &&
+        type->data.subtype.args.len > 0) {
+        return type->data.subtype.args[0];
+    }
+    return nullptr;
+}
+
+TypeInfoWorkItem Compiler::get_typeinfo_work_item(ChiType *type) {
+    auto final_type = eval_type(type);
+    if (is_reflect_array_type(get_resolver(), type)) {
+        return {type, final_type};
+    }
+    return {final_type, final_type};
+}
+
+string Compiler::get_typeinfo_cache_key(const TypeInfoWorkItem &item) {
+    auto reflect_id = item.reflect_type->global_id.empty()
+                          ? get_resolver()->format_type_id(item.reflect_type)
+                          : item.reflect_type->global_id;
+    if (item.reflect_type != item.final_type) {
+        return "reflect_typeid:" + reflect_id;
+    }
+    return reflect_id;
+}
+
 llvm::GlobalVariable *Compiler::ensure_type_info_global(ChiType *type, bool queue) {
-    type = eval_type(type);
-    auto typeinfo_key =
-        type->global_id.empty() ? get_resolver()->format_type_id(type) : type->global_id;
-    if (auto info = m_ctx->typeinfo_table.get(typeinfo_key)) {
+    auto item = get_typeinfo_work_item(type);
+    auto reflect_type = item.reflect_type;
+    auto final_type = item.final_type;
+    auto key = get_typeinfo_cache_key(item);
+    if (auto info = m_ctx->typeinfo_table.get(key)) {
         if (queue) {
-            if (!m_ctx->pending_typeinfo_types.has_key(typeinfo_key)) {
-                m_ctx->pending_typeinfo_keys.add(typeinfo_key);
+            if (!m_ctx->pending_typeinfo_items.has_key(key)) {
+                m_ctx->pending_typeinfo_keys.add(key);
             }
-            m_ctx->pending_typeinfo_types[typeinfo_key] = type;
+            m_ctx->pending_typeinfo_items[key] = item;
         }
         return *info;
     }
 
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
-    auto tidata_type_l = llvm::IntegerType::get(llvm_ctx, sizeof(TypeInfoData) * 8);
-    llvm::Type *tidata_actual_l = tidata_type_l;
-    if ((type->kind == TypeKind::Reference || type->kind == TypeKind::MutRef ||
-         type->kind == TypeKind::MoveRef || type->kind == TypeKind::Pointer ||
-         type->kind == TypeKind::Optional) &&
-        type->get_elem()) {
-        tidata_actual_l = ptr_type_l;
-    }
+    constexpr size_t tidata_word_count =
+        (sizeof(TypeInfoData) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+    auto tidata_type_l =
+        llvm::ArrayType::get(llvm::Type::getInt64Ty(llvm_ctx), (uint32_t)tidata_word_count);
     auto ti_type_l = llvm::StructType::get(
         llvm_ctx,
-        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
+        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_type_l,
          ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l,
          llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
          llvm::ArrayType::get(llvm::Type::getInt8Ty(llvm_ctx), sizeof(TypeInfo::name))},
@@ -1539,23 +1586,28 @@ llvm::GlobalVariable *Compiler::ensure_type_info_global(ChiType *type, bool queu
     auto info_global = new llvm::GlobalVariable(
         *m_ctx->llvm_module, ti_type_l, true, llvm::GlobalValue::PrivateLinkage,
         llvm::Constant::getNullValue(ti_type_l),
-        "typeinfo." + get_resolver()->format_type_display(type));
-    m_ctx->typeinfo_table[typeinfo_key] = info_global;
+        "typeinfo." + get_resolver()->format_type_display(reflect_type));
+    m_ctx->typeinfo_table[key] = info_global;
 
-    if (!m_ctx->pending_typeinfo_types.has_key(typeinfo_key)) {
-        m_ctx->pending_typeinfo_keys.add(typeinfo_key);
+    if (!m_ctx->pending_typeinfo_items.has_key(key)) {
+        m_ctx->pending_typeinfo_keys.add(key);
     }
-    m_ctx->pending_typeinfo_types[typeinfo_key] = type;
+    m_ctx->pending_typeinfo_items[key] = item;
 
     return info_global;
 }
 
 llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
-    type = eval_type(type);
-    auto type_l = compile_type(type);
+    auto reflect_type = type;
+    auto final_type = eval_type(type);
+    auto reflect_kind = is_reflect_array_type(get_resolver(), reflect_type) ? TypeKind::Array : final_type->kind;
+    auto type_l = compile_type(final_type);
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto &llvm_module = *(m_ctx->llvm_module.get());
-    auto tidata_type_l = llvm::IntegerType::get(llvm_ctx, sizeof(TypeInfoData) * 8);
+    constexpr size_t tidata_word_count =
+        (sizeof(TypeInfoData) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
+    auto tidata_type_l =
+        llvm::ArrayType::get(llvm::Type::getInt64Ty(llvm_ctx), (uint32_t)tidata_word_count);
     auto ptr_type_l = llvm::PointerType::get(llvm_ctx, 0);
     auto i8_ty = llvm::Type::getInt8Ty(llvm_ctx);
 
@@ -1565,16 +1617,17 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
     auto field_table_len = 0;
     std::vector<llvm::Constant *> field_table_consts = {};
 
-    if (type->kind == TypeKind::Struct || type->kind == TypeKind::Array ||
-        type->kind == TypeKind::Span || type->kind == TypeKind::EnumValue) {
+    if (final_type->kind == TypeKind::Struct || final_type->kind == TypeKind::Array ||
+        final_type->kind == TypeKind::Span || final_type->kind == TypeKind::EnumValue ||
+        reflect_kind == TypeKind::Array) {
         ChiTypeStruct *sty;
-        if (type->kind == TypeKind::EnumValue) {
+        if (final_type->kind == TypeKind::EnumValue) {
             // Use the parent enum's base value struct — vtable indices are assigned there,
             // and all variants share the same method layout
-            auto parent_enum = type->data.enum_value.parent_enum();
+            auto parent_enum = final_type->data.enum_value.parent_enum();
             sty = get_resolver()->resolve_struct_type(parent_enum->base_value_type);
         } else {
-            sty = get_resolver()->resolve_struct_type(type);
+            sty = get_resolver()->resolve_struct_type(final_type);
         }
         for (auto member : sty->members) {
             if (member->is_method() && member->vtable_index >= 0) {
@@ -1597,7 +1650,8 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
             }
         }
 
-        if (type->kind == TypeKind::Struct && !ChiTypeStruct::is_interface(type)) {
+        if ((final_type->kind == TypeKind::Struct || reflect_kind == TypeKind::Array) &&
+            !ChiTypeStruct::is_interface(final_type)) {
             auto own_fields = sty->own_fields();
             if (own_fields.len > 0) {
                 auto layout = llvm_module.getDataLayout().getStructLayout((llvm::StructType *)type_l);
@@ -1620,10 +1674,8 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
                          llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx),
                          llvm::ArrayType::get(i8_ty, field_name_buf.size())},
                         false);
-                    auto field_type_info =
-                        llvm::ConstantExpr::getPointerCast(
-                            ensure_type_info_global(eval_type(field->resolved_type), false),
-                                                           ptr_type_l);
+                    auto field_type_info = llvm::ConstantExpr::getPointerCast(
+                        ensure_type_info_global(field->resolved_type, false), ptr_type_l);
                     field_table_consts.push_back(llvm::ConstantStruct::get(
                         field_entry_ty,
                         {field_type_info,
@@ -1672,29 +1724,48 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
     // For reference/pointer types, store elem TypeInfo* in the data field.
     // For other types, serialize the data as raw bytes.
     llvm::Constant *typedata_l;
-    llvm::Type *tidata_actual_l;
-    if ((type->kind == TypeKind::Reference || type->kind == TypeKind::MutRef ||
-         type->kind == TypeKind::MoveRef || type->kind == TypeKind::Pointer ||
-         type->kind == TypeKind::Optional) &&
-        type->get_elem()) {
-        tidata_actual_l = ptr_type_l;
-        typedata_l = ensure_type_info_global(type->get_elem(), false);
+    auto array_elem_type = get_reflect_array_elem_type(get_resolver(), reflect_type);
+    if (reflect_kind == TypeKind::Array && array_elem_type) {
+        std::vector<llvm::Constant *> word_consts = {
+            llvm::ConstantExpr::getPtrToInt(ensure_type_info_global(final_type, false),
+                                            llvm::Type::getInt64Ty(llvm_ctx)),
+            llvm::ConstantExpr::getPtrToInt(ensure_type_info_global(array_elem_type, false),
+                                            llvm::Type::getInt64Ty(llvm_ctx))};
+        typedata_l = llvm::ConstantArray::get(tidata_type_l, word_consts);
+    } else if ((final_type->kind == TypeKind::Reference || final_type->kind == TypeKind::MutRef ||
+                final_type->kind == TypeKind::MoveRef || final_type->kind == TypeKind::Pointer ||
+                final_type->kind == TypeKind::Optional) &&
+               final_type->get_elem()) {
+        uint64_t elem_offset = 0;
+        if (final_type->kind == TypeKind::Optional) {
+            auto layout = llvm_module.getDataLayout().getStructLayout((llvm::StructType *)type_l);
+            elem_offset = layout->getElementOffset(1);
+        }
+        std::vector<llvm::Constant *> word_consts = {
+            llvm::ConstantExpr::getPtrToInt(ensure_type_info_global(final_type->get_elem(), false),
+                                            llvm::Type::getInt64Ty(llvm_ctx)),
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(llvm_ctx), elem_offset)};
+        typedata_l = llvm::ConstantArray::get(tidata_type_l, word_consts);
     } else {
-        tidata_actual_l = tidata_type_l;
-        auto typedata = (uint8_t *)&type->data;
-        uint64_t typedata_bits = 0;
-        memcpy(&typedata_bits, typedata, sizeof(TypeInfoData));
-        typedata_l = llvm::ConstantInt::get(tidata_type_l, typedata_bits);
+        auto typedata = (uint8_t *)&final_type->data;
+        std::array<uint64_t, tidata_word_count> words = {};
+        memcpy(words.data(), typedata, sizeof(TypeInfoData));
+        std::vector<llvm::Constant *> word_consts;
+        word_consts.reserve(words.size());
+        for (auto word : words) {
+            word_consts.push_back(llvm::ConstantInt::get(llvm::Type::getInt64Ty(llvm_ctx), word));
+        }
+        typedata_l = llvm::ConstantArray::get(tidata_type_l, word_consts);
     }
 
     // Generate destructor/copier wrappers for any type-erasure
-    auto dtor_fn = generate_any_destructor(type);
+    auto dtor_fn = generate_any_destructor(final_type);
     llvm::Constant *dtor_ptr = dtor_fn ? (llvm::Constant *)dtor_fn->llvm_fn : get_null_ptr();
-    auto copy_fn = generate_any_copier(type);
+    auto copy_fn = generate_any_copier(final_type);
     llvm::Constant *copy_ptr = copy_fn ? (llvm::Constant *)copy_fn->llvm_fn : get_null_ptr();
 
     std::vector<uint8_t> type_name_buf(sizeof(TypeInfo::name), 0);
-    auto type_name = get_resolver()->format_type_display(type);
+    auto type_name = get_resolver()->format_type_display(reflect_kind == TypeKind::Array ? reflect_type : final_type);
     auto type_name_len = (uint32_t)type_name.size();
     if (type_name_len > type_name_buf.size()) {
         type_name_len = (uint32_t)type_name_buf.size();
@@ -1707,7 +1778,7 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
 
     auto ti_type_l = llvm::StructType::get(
         llvm_ctx,
-        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_actual_l,
+        {llvm::Type::getInt32Ty(llvm_ctx), llvm::Type::getInt32Ty(llvm_ctx), tidata_type_l,
          ptr_type_l, ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l,
          llvm::Type::getInt32Ty(llvm_ctx), ptr_type_l, llvm::Type::getInt32Ty(llvm_ctx),
          llvm::ArrayType::get(i8_ty, type_name_buf.size())},
@@ -1717,7 +1788,7 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
         ti_type_l,
         {
             /* kind */
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), (int32_t)type->kind),
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), (int32_t)reflect_kind),
             /* typesize */
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), (int32_t)typesize),
             /* data */
@@ -1747,14 +1818,14 @@ void Compiler::finalize_pending_typeinfos() {
         auto keys = m_ctx->pending_typeinfo_keys;
         m_ctx->pending_typeinfo_keys.clear();
         for (auto &key : keys) {
-            auto type_p = m_ctx->pending_typeinfo_types.get(key);
+            auto item_p = m_ctx->pending_typeinfo_items.get(key);
             auto global_p = m_ctx->typeinfo_table.get(key);
-            if (!type_p || !global_p) {
+            if (!item_p || !global_p) {
                 continue;
             }
-            auto initializer = build_type_info_initializer(*type_p);
+            auto initializer = build_type_info_initializer(item_p->reflect_type);
             (*global_p)->setInitializer(initializer);
-            m_ctx->pending_typeinfo_types.unset(key);
+            m_ctx->pending_typeinfo_items.unset(key);
         }
     }
 }
@@ -11108,7 +11179,8 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return get_llvm_ptr_type();
     }
     default:
-        panic("compile_type not implemented for TypeKind::{}", (int)type->kind);
+        panic("compile_type not implemented for TypeKind::{} ({})", (int)type->kind,
+              get_resolver()->format_type_display(type));
     }
     return nullptr;
 }

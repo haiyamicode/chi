@@ -281,6 +281,11 @@ struct AsyncStateMachine {
     std::map<ast::Node *, int> loop_head_state_ids = {};
 };
 
+struct TypeInfoWorkItem {
+    ChiType *reflect_type = nullptr;
+    ChiType *final_type = nullptr;
+};
+
 struct CodegenContext {
     CodegenContext(const CodegenContext &) = delete;
     CodegenContext &operator=(const CodegenContext &) = delete;
@@ -305,7 +310,7 @@ struct CodegenContext {
     map<string, ast::Node *> generic_functions =
         {}; // Maps function global_id to AST node for instantiation
     map<string, llvm::GlobalVariable *> typeinfo_table = {};
-    map<string, ChiType *> pending_typeinfo_types = {};
+    map<string, TypeInfoWorkItem> pending_typeinfo_items = {};
     map<string, llvm::Type *> anon_type_table = {};
     map<InterfaceImpl *, llvm::Value *> impl_table = {};
     map<ChiEnumVariant *, llvm::Value *> enum_variant_table = {};
@@ -555,6 +560,8 @@ class Compiler {
     void compile_extern(ast::Node *node);
 
     llvm::Value *compile_reflection_vtable();
+    TypeInfoWorkItem get_typeinfo_work_item(ChiType *type);
+    string get_typeinfo_cache_key(const TypeInfoWorkItem &item);
     llvm::GlobalVariable *ensure_type_info_global(ChiType *type, bool queue = true);
     llvm::Constant *build_type_info_initializer(ChiType *type);
     void finalize_pending_typeinfos();

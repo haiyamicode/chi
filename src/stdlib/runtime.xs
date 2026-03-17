@@ -351,6 +351,9 @@ export struct Array<T> {
     }
 
     mut func delete() {
+        if !this.data {
+            return;
+        }
         unsafe {
             for var i: uint32 = 0; i < this.length; i++ {
                 delete this.data[i];

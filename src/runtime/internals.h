@@ -112,6 +112,8 @@ CHI_RT_EXPORT void cx_array_write_str(CxArray *dest, CxString *str);
 
 CHI_RT_EXPORT void cx_array_append(CxArray *dest, CxArray *src, uint32_t elem_size);
 
+CHI_RT_EXPORT void cx_typeinfo_destroy(TypeInfo *type, void *data);
+
 CHI_RT_EXPORT void cx_print_string(CxString *message);
 
 CHI_RT_EXPORT void cx_debug_i(const char *prefix, int value);

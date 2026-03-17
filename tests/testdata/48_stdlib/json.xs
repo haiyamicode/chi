@@ -1,27 +1,44 @@
 import "std/json" as json;
 
+struct Version {
+    major: uint32 = 0;
+    minor: uint32 = 0;
+}
+
+struct Config {
+    name: string = "";
+    version: Version = {};
+    alias: ?string = null;
+    latest: ?Version = null;
+    history: Array<Version> = [];
+    numbers: Array<int> = [];
+    active: bool = false;
+    count: int = 0;
+    ratio: float64 = 0.0;
+}
+
 func main() {
     println("=== json.parse object ===");
-    var obj = json.parse("{\"name\": \"chi\", \"version\": 1, \"active\": true}");
+    var obj = json.parse_raw("{\"name\": \"chi\", \"version\": 1, \"active\": true}");
     println(obj.is_object());
     println(obj.get("name").to_string());
     println(obj.get("version").to_int());
     println(obj.get("active").to_bool());
 
     println("=== json.parse array ===");
-    var arr = json.parse("[1, 2, 3]");
+    var arr = json.parse_raw("[1, 2, 3]");
     println(arr.is_array());
     println(arr.length());
     println(arr.at(0).to_int());
     println(arr.at(2).to_int());
 
     println("=== type checks ===");
-    var null_val = json.parse("null");
+    var null_val = json.parse_raw("null");
     println(null_val.is_null());
-    var str_val = json.parse("\"hello\"");
+    var str_val = json.parse_raw("\"hello\"");
     println(str_val.is_string());
     println(str_val.to_string());
-    var bool_val = json.parse("false");
+    var bool_val = json.parse_raw("false");
     println(bool_val.is_bool());
     println(bool_val.to_bool());
 
@@ -37,6 +54,35 @@ func main() {
     printf("{}\n", obj.kind);
     printf("{}\n", arr.kind);
     printf("{}\n", null_val.kind);
+
+    println("=== typed parse ===");
+    let cfg2 = json.parse<Config>(
+        "{\"name\": \"chi\", \"version\": {\"major\": 1, \"minor\": 7}, \"alias\": \"chi-lang\", \"latest\": {\"major\": 2, \"minor\": 0}, \"history\": [{\"major\": 0, \"minor\": 9}, {\"major\": 1, \"minor\": 0}], \"numbers\": [3, 5, 8], \"active\": true, \"count\": 42, \"ratio\": 2.5}"
+    );
+    printf("typed name={}\n", cfg2.name);
+    printf("typed version={}.{}\n", cfg2.version.major, cfg2.version.minor);
+
+    println("=== parse_into ===");
+    var cfg = Config{};
+    json.parse_into(
+        "{\"name\": \"chi\", \"version\": {\"major\": 1, \"minor\": 7}, \"alias\": \"chi-lang\", \"latest\": {\"major\": 2, \"minor\": 0}, \"history\": [{\"major\": 0, \"minor\": 9}, {\"major\": 1, \"minor\": 0}], \"numbers\": [3, 5, 8], \"active\": true, \"count\": 42, \"ratio\": 2.5}",
+        &cfg
+    );
+    printf("name={}\n", cfg.name);
+    printf("version={}.{}\n", cfg.version.major, cfg.version.minor);
+    if let alias = cfg.alias {
+        printf("alias={}\n", alias);
+    }
+    if let latest = cfg.latest {
+        printf("latest={}.{}\n", latest.major, latest.minor);
+    }
+    printf("history.length={}\n", cfg.history.length);
+    printf("history[0]={}.{}\n", cfg.history[0].major, cfg.history[0].minor);
+    printf("history[1]={}.{}\n", cfg.history[1].major, cfg.history[1].minor);
+    printf("numbers={}\n", cfg.numbers);
+    printf("active={}\n", cfg.active);
+    printf("count={}\n", cfg.count);
+    printf("ratio={}\n", cfg.ratio);
 
     println("done");
 }

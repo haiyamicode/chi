@@ -558,12 +558,19 @@ struct TypeFieldEntry;
 
 struct ChiTypePointerInfoData {
     TypeInfo *elem;
+    int32_t elem_offset = 0;
+};
+
+struct ChiTypeArrayInfoData {
+    TypeInfo *internal;
+    TypeInfo *elem;
 };
 
 union TypeInfoData {
     ChiTypeInt int_;
     ChiTypeFloat float_;
     ChiTypePointerInfoData pointer;
+    ChiTypeArrayInfoData array;
 };
 
 struct TypeInfo {

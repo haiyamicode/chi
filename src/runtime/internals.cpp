@@ -768,6 +768,14 @@ void cx_array_delete(CxArray *dest) {
     dest->data = NULL;
 }
 
+extern "C" void cx_typeinfo_destroy(TypeInfo *type, void *data) {
+    if (!type || !data || !type->destructor) {
+        return;
+    }
+    auto dtor = (void (*)(void *))type->destructor;
+    dtor(data);
+}
+
 void cx_array_reserve(CxArray *dest, uint32_t elem_size, uint32_t new_cap) {
     if (dest->capacity >= new_cap)
         return;

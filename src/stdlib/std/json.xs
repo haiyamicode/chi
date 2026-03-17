@@ -1,5 +1,6 @@
 // std/json — JSON parsing and manipulation
 import "std/ops" as ops;
+import "std/reflect" as reflect;
 
 extern "C" {
     unsafe func cx_parse_json(str: *string, result: *void);
@@ -9,6 +10,20 @@ extern "C" {
     unsafe func cx_json_array_index(data: *void, index: uint32, result: *void);
     unsafe func cx_json_array_length(data: *void) uint32;
     unsafe func cx_json_value_copy(data: *void, result: *void);
+    unsafe func cx_array_new(dest: *void);
+    unsafe func cx_array_add(dest: *void, elem_size: uint32) *void;
+    unsafe func cx_memset(address: *void, v: uint8, n: uint32);
+    unsafe func __move(dest: *void, src: *void, size: uint32);
+}
+
+struct RawArray {
+    data: *void = null;
+    length: uint32 = 0;
+    capacity: uint32 = 0;
+}
+
+struct RawOptional {
+    has_value: bool = false;
 }
 
 export enum ValueKind {
@@ -93,6 +108,15 @@ export struct Value {
         return result;
     }
 
+    func to_uint() uint64 {
+        this.assert_kind(ValueKind.Uint64);
+        let result: uint64 = 0;
+        unsafe {
+            cx_json_value_convert(this.data, ValueKind.Uint64.discriminator(), &result);
+        }
+        return result;
+    }
+
     func to_float() float64 {
         this.assert_kind(ValueKind.Double);
         let result: float64 = 0.0;
@@ -149,6 +173,10 @@ export struct Value {
         return this.kind == ValueKind.Double;
     }
 
+    func is_uint() bool {
+        return this.kind == ValueKind.Uint64;
+    }
+
     func is_array() bool {
         return this.kind == ValueKind.Array;
     }
@@ -171,10 +199,258 @@ export struct Value {
     }
 }
 
-export func parse(str: string) Value {
+export func parse_raw(str: string) Value {
     let result = Value{};
     unsafe {
         cx_parse_json(&str, &result);
     }
+    return result;
+}
+
+func json_type_error(path: string, ty: reflect.Type, value: Value) never {
+    panic(
+        stringf("std/json.parse_into: field '{}' expects {}, got {}", path, ty.name(), value.kind)
+    );
+}
+
+unsafe func json_write_value<T>(dest: *void, value: T) {
+    var tmp = value;
+    __move(dest, &tmp as *T as *void, sizeof T);
+}
+
+unsafe func json_write_64_from_words(dest: *void, words: *uint32) {
+    var out = dest as *uint32;
+    *out = *words;
+    *(out + 1) = *(words + 1);
+}
+
+unsafe func json_write_int64(dest: *void, value: int64) {
+    var tmp = value;
+    json_write_64_from_words(dest, &tmp as *int64 as *uint32);
+}
+
+unsafe func json_write_uint64(dest: *void, value: uint64) {
+    var tmp = value;
+    json_write_64_from_words(dest, &tmp as *uint64 as *uint32);
+}
+
+unsafe func json_write_float64(dest: *void, value: float64) {
+    var tmp = value;
+    json_write_64_from_words(dest, &tmp as *float64 as *uint32);
+}
+
+unsafe func json_assign_int(path: string, value: Value, ty: reflect.Type, dest: *void) {
+    let bits = ty.int_bits();
+    if ty.int_is_unsigned() {
+        var raw: uint64 = 0;
+        if value.kind == ValueKind.Uint64 {
+            raw = value.to_uint();
+        } else if value.kind == ValueKind.Int64 {
+            raw = value.to_int() as uint64;
+        } else {
+            json_type_error(path, ty, value);
+        }
+
+        if bits == 8 {
+            json_write_value(dest, raw as uint8);
+        } else if bits == 16 {
+            json_write_value(dest, raw as uint16);
+        } else if bits == 32 {
+            json_write_value(dest, raw as uint32);
+        } else if bits == 64 {
+            json_write_uint64(dest, raw);
+        } else {
+            panic(stringf("std/json.parse_into: unsupported unsigned integer width {}", bits));
+        }
+        return;
+    }
+
+    var raw: int64 = 0;
+    if value.kind == ValueKind.Int64 {
+        raw = value.to_int();
+    } else if value.kind == ValueKind.Uint64 {
+        raw = value.to_uint() as int64;
+    } else {
+        json_type_error(path, ty, value);
+    }
+
+    if bits == 8 {
+        json_write_value(dest, raw as int8);
+    } else if bits == 16 {
+        json_write_value(dest, raw as int16);
+    } else if bits == 32 {
+        json_write_value(dest, raw as int32);
+    } else if bits == 64 {
+        json_write_int64(dest, raw);
+    } else {
+        panic(stringf("std/json.parse_into: unsupported integer width {}", bits));
+    }
+}
+
+unsafe func json_assign_float(path: string, value: Value, ty: reflect.Type, dest: *void) {
+    var raw: float64 = 0.0;
+    if value.kind == ValueKind.Double {
+        raw = value.to_float();
+    } else if value.kind == ValueKind.Int64 {
+        raw = value.to_int() as float64;
+    } else if value.kind == ValueKind.Uint64 {
+        raw = value.to_uint() as float64;
+    } else {
+        json_type_error(path, ty, value);
+    }
+
+    if ty.float_bits() == 32 {
+        json_write_value(dest, raw as float);
+    } else if ty.float_bits() == 64 {
+        json_write_float64(dest, raw);
+    } else {
+        panic(stringf("std/json.parse_into: unsupported float width {}", ty.float_bits()));
+    }
+}
+
+unsafe func json_assign_array(path: string, value: Value, ty: reflect.Type, dest: *void) {
+    if !value.is_array() {
+        json_type_error(path, ty, value);
+    }
+
+    let elem = ty.elem();
+    var elem_type: reflect.Type = undefined;
+    if elem {
+        elem_type = elem;
+    } else {
+        panic(stringf("std/json.parse_into: array type '{}' has no element type", ty.name()));
+    }
+
+    let existing = dest as *RawArray;
+    if existing.data && ty.has_destructor() {
+        ty.destroy(dest);
+    }
+    cx_array_new(dest);
+    let len = value.length();
+    var i: uint32 = 0;
+    while i < len {
+        let item = value.at(i);
+        let slot = cx_array_add(dest, elem_type.size());
+        let item_path = stringf("{}[{}]", path, i);
+        json_assign(item_path, item, elem_type, slot);
+        i = i + 1;
+    }
+}
+
+unsafe func json_assign_optional(path: string, value: Value, ty: reflect.Type, dest: *void) {
+    let elem = ty.elem();
+    var elem_type: reflect.Type = undefined;
+    if elem {
+        elem_type = elem;
+    } else {
+        panic(stringf("std/json.parse_into: optional type '{}' has no element type", ty.name()));
+    }
+
+    let optional = dest as *RawOptional;
+    if value.is_null() {
+        if optional.has_value && ty.has_destructor() {
+            ty.destroy(dest);
+        }
+        optional.has_value = false;
+        return;
+    }
+
+    let value_ptr = ((dest as *byte) + (ty.optional_value_offset() as int)) as *void;
+    if !optional.has_value {
+        cx_memset(value_ptr, 0, elem_type.size());
+    }
+    optional.has_value = true;
+    json_assign(path, value, elem_type, value_ptr);
+}
+
+unsafe func json_assign(path: string, value: Value, ty: reflect.Type, dest: *void) {
+    switch ty.kind() {
+        reflect.Kind.Array => json_assign_array(path, value, ty, dest),
+        reflect.Kind.Optional => json_assign_optional(path, value, ty, dest),
+        reflect.Kind.Struct => {
+            if !value.is_object() {
+                json_type_error(path, ty, value);
+            }
+            for field in ty.fields() {
+                let field_value = value.get(field.name());
+                if field_value.is_null() {
+                    continue;
+                }
+                var field_path = "";
+                if path == "" {
+                    field_path = field.name();
+                } else {
+                    field_path = path + "." + field.name();
+                }
+                json_assign(field_path, field_value, field.type(), field.ptr_at(dest));
+            }
+        },
+        reflect.Kind.Bool => {
+            if !value.is_bool() {
+                json_type_error(path, ty, value);
+            }
+            json_write_value(dest, value.to_bool());
+        },
+        reflect.Kind.String => {
+            if !value.is_string() {
+                json_type_error(path, ty, value);
+            }
+            *(dest as *string) = value.to_string();
+        },
+        reflect.Kind.Int => json_assign_int(path, value, ty, dest),
+        reflect.Kind.Byte => {
+            if value.kind != ValueKind.Int64 && value.kind != ValueKind.Uint64 {
+                json_type_error(path, ty, value);
+            }
+            var raw: uint64 = 0;
+            if value.kind == ValueKind.Uint64 {
+                raw = value.to_uint();
+            } else {
+                raw = value.to_int() as uint64;
+            }
+            json_write_value(dest, raw as byte);
+        },
+        reflect.Kind.Rune => {
+            if value.kind != ValueKind.Int64 && value.kind != ValueKind.Uint64 {
+                json_type_error(path, ty, value);
+            }
+            var raw: uint64 = 0;
+            if value.kind == ValueKind.Uint64 {
+                raw = value.to_uint();
+            } else {
+                raw = value.to_int() as uint64;
+            }
+            json_write_value(dest, raw as rune);
+        },
+        reflect.Kind.Float => json_assign_float(path, value, ty, dest),
+        else => panic(stringf("std/json.parse_into: unsupported type '{}'", ty.name()))
+    }
+}
+
+export func parse_into<T>(str: string, dest: &T) {
+    let value = parse_raw(str);
+    let dest_type = dest.(type);
+    let elem = dest_type.elem();
+    var struct_type: reflect.Type = undefined;
+    if elem {
+        struct_type = elem;
+    } else {
+        panic("std/json.parse_into expects a reference destination");
+    }
+
+    if struct_type.kind() != reflect.Kind.Struct {
+        panic(
+            stringf("std/json.parse_into expects a struct destination, got {}", struct_type.name())
+        );
+    }
+
+    unsafe {
+        json_assign("", value, struct_type, dest as *T as *void);
+    }
+}
+
+export func parse<T: ops.Construct>(str: string) T {
+    var result = T{};
+    parse_into(str, &result);
     return result;
 }

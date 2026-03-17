@@ -23,4 +23,19 @@ false
 object
 array
 null
+=== typed parse ===
+typed name=chi
+typed version=1.7
+=== parse_into ===
+name=chi
+version=1.7
+alias=chi-lang
+latest=2.0
+history.length=2
+history[0]=0.9
+history[1]=1.0
+numbers=[3, 5, 8]
+active=true
+count=42
+ratio=2.5
 done

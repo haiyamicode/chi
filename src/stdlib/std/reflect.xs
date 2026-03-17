@@ -43,6 +43,7 @@ export enum Kind {
 extern "C" {
     unsafe func cx_string_from_chars(data: *void, size: uint32, str: *string);
     unsafe func __reflect_dyn_elem(parent: *void, value: *void) *void;
+    unsafe func cx_typeinfo_destroy(type_info: *void, data: *void);
 }
 
 struct __TypeFieldEntry {
@@ -53,14 +54,29 @@ struct __TypeFieldEntry {
     name_bytes: [256]byte = zeroinit;
 }
 
-struct __TypeInfoData {
+struct __TypeIntData {
+    bit_count: int32 = 0;
+    is_unsigned: bool = false;
+}
+
+struct __TypeFloatData {
+    bit_count: int32 = 0;
+}
+
+struct __TypePointerInfoData {
+    elem: *void = null;
+    elem_offset: int32 = 0;
+}
+
+struct __TypeArrayInfoData {
+    internal: *void = null;
     elem: *void = null;
 }
 
 struct __TypeInfo {
     kind_value: int32 = 0;
     size_value: int32 = 0;
-    data: __TypeInfoData = zeroinit;
+    data: [2]uint64 = zeroinit;
     destructor: *void = null;
     copier: *void = null;
     meta_table_len: int32 = 0;
@@ -71,20 +87,36 @@ struct __TypeInfo {
     name_bytes: [256]byte = zeroinit;
 }
 
-unsafe func __string_from_inline_name(bytes: *byte, len: uint32) string {
+unsafe func string_from_inline_name(bytes: *byte, len: uint32) string {
     let result = "";
     cx_string_from_chars(bytes as *void, len, &result);
     return result;
 }
 
-unsafe func __type_name(type_info: *__TypeInfo) string {
+unsafe func type_name_from_info(type_info: *__TypeInfo) string {
     if !type_info {
         return "";
     }
-    return __string_from_inline_name(&type_info.name_bytes[0], type_info.name_len);
+    return string_from_inline_name(&type_info.name_bytes[0], type_info.name_len);
 }
 
-func __kind_name(kind: Kind) string {
+unsafe func type_int_data(type_info: *__TypeInfo) *__TypeIntData {
+    return &type_info.data[0] as *uint64 as *byte as *__TypeIntData;
+}
+
+unsafe func type_float_data(type_info: *__TypeInfo) *__TypeFloatData {
+    return &type_info.data[0] as *uint64 as *byte as *__TypeFloatData;
+}
+
+unsafe func type_pointer_data(type_info: *__TypeInfo) *__TypePointerInfoData {
+    return &type_info.data[0] as *uint64 as *byte as *__TypePointerInfoData;
+}
+
+unsafe func type_array_data(type_info: *__TypeInfo) *__TypeArrayInfoData {
+    return &type_info.data[0] as *uint64 as *byte as *__TypeArrayInfoData;
+}
+
+func kind_name(kind: Kind) string {
     return switch kind {
         Kind.TypeSymbol => "type",
         Kind.Fn => "fn",
@@ -147,7 +179,7 @@ export struct Field {
             return "";
         }
         unsafe {
-            return __string_from_inline_name(&this.raw.name_bytes[0], this.raw.name_len);
+            return string_from_inline_name(&this.raw.name_bytes[0], this.raw.name_len);
         }
     }
 
@@ -156,8 +188,20 @@ export struct Field {
             return "";
         }
         unsafe {
-            return __type_name(this.raw.type_info as *__TypeInfo);
+            return type_name_from_info(this.raw.type_info as *__TypeInfo);
         }
+    }
+
+    func type() Type {
+        return {this.raw.type_info};
+    }
+
+    func offset() uint32 {
+        return this.raw.offset as uint32;
+    }
+
+    unsafe func ptr_at(base: *void) *void {
+        return ((base as *byte) + (this.raw.offset as int)) as *void;
     }
 
     impl ops.Display {
@@ -185,7 +229,7 @@ export struct Type {
 
     func name() string {
         unsafe {
-            return __type_name(this.raw);
+            return type_name_from_info(this.raw);
         }
     }
 
@@ -199,13 +243,57 @@ export struct Type {
 
     func elem() ?Type {
         let kind = this.kind();
-        if kind == Kind.Pointer || kind == Kind.Reference || kind == Kind.MutRef || kind == Kind.MoveRef {
-            if !this.raw.data.elem {
-                return null;
+        if kind == Kind.Pointer || kind == Kind.Reference || kind == Kind.MutRef || kind == Kind.MoveRef || kind == Kind.Optional {
+            unsafe {
+                let ptr_data = type_pointer_data(this.raw);
+                if !ptr_data.elem {
+                    return null;
+                }
+                return Type{ptr_data.elem};
             }
-            return Type{this.raw.data.elem};
+        }
+        if kind == Kind.Array {
+            unsafe {
+                let array_data = type_array_data(this.raw);
+                if !array_data.elem {
+                    return null;
+                }
+                return Type{array_data.elem};
+            }
         }
         return null;
+    }
+
+    func int_bits() uint32 {
+        unsafe {
+            return type_int_data(this.raw).bit_count as uint32;
+        }
+    }
+
+    func int_is_unsigned() bool {
+        unsafe {
+            return type_int_data(this.raw).is_unsigned;
+        }
+    }
+
+    func float_bits() uint32 {
+        unsafe {
+            return type_float_data(this.raw).bit_count as uint32;
+        }
+    }
+
+    func has_destructor() bool {
+        return this.raw.destructor != null;
+    }
+
+    unsafe func destroy(ptr: *void) {
+        cx_typeinfo_destroy(this.raw as *void, ptr);
+    }
+
+    func optional_value_offset() uint32 {
+        unsafe {
+            return type_pointer_data(this.raw).elem_offset as uint32;
+        }
     }
 
     func dyn_elem<T: ops.Unsized>(value: &T) ?Type {
@@ -251,7 +339,7 @@ export struct Type {
     impl ops.Display {
         func display() string {
             let name = this.name();
-            let kind = __kind_name(this.kind());
+            let kind = kind_name(this.kind());
             let size = this.size();
             let field_count = this.field_count();
             if field_count > 0 {
