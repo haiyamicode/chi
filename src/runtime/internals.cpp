@@ -64,6 +64,8 @@ struct CxCapture {
 
 static tgc_t gc;
 static thread_local StackTrace st;
+static int32_t program_argc = 0;
+static char **program_argv = nullptr;
 
 namespace {
 
@@ -1246,6 +1248,11 @@ void cx_runtime_start(void *stack) {
     }
 }
 
+void cx_set_program_args(int32_t argc, char **argv) {
+    program_argc = argc;
+    program_argv = argv;
+}
+
 void cx_runtime_stop() {
     // Run any cross-thread submissions that arrived before the loop starts.
     run_pending_main_uv_tasks();
@@ -1548,6 +1555,15 @@ char *__cx_getcwd(void) {
     static char buf[4096];
     if (getcwd(buf, sizeof(buf))) return buf;
     return (char *)"";
+}
+
+int32_t __cx_argc(void) { return program_argc; }
+
+const char *__cx_argv(int32_t index) {
+    if (index < 0 || index >= program_argc || !program_argv) {
+        return nullptr;
+    }
+    return program_argv[index];
 }
 
 int32_t __cx_parse_float(const char *str, double *out) {

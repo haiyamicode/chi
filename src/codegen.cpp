@@ -1038,12 +1038,17 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (is_entry) {
         emit_dbg_location(fn_def.body);
         auto runtime_start = get_system_fn("cx_runtime_start");
+        auto set_program_args = get_system_fn("cx_set_program_args");
         auto stack_marker = fn->return_value;
         if (!fn->return_value) {
             stack_marker = builder.CreateAlloca(llvm::IntegerType::getInt1Ty(llvm_ctx), nullptr,
                                                 "_stack_marker");
         }
         builder.CreateCall(runtime_start->llvm_fn, {stack_marker});
+        if (fn->llvm_fn->arg_size() >= 2) {
+            builder.CreateCall(set_program_args->llvm_fn,
+                               {fn->llvm_fn->getArg(0), fn->llvm_fn->getArg(1)});
+        }
 
         auto vtable = compile_reflection_vtable();
         if (vtable) {
@@ -10909,7 +10914,15 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
         name = get_resolver()->resolve_qualified_name(fn);
     }
 
-    auto ftype_l = (llvm::FunctionType *)compile_type(ftype);
+    llvm::FunctionType *ftype_l = nullptr;
+    if (declspec.has_flag(ast::DECL_IS_ENTRY)) {
+        ftype_l = llvm::FunctionType::get(llvm::Type::getVoidTy(*m_ctx->llvm_ctx),
+                                          {llvm::Type::getInt32Ty(*m_ctx->llvm_ctx),
+                                           llvm::PointerType::get(*m_ctx->llvm_ctx, 0)},
+                                          false);
+    } else {
+        ftype_l = (llvm::FunctionType *)compile_type(ftype);
+    }
 
     // For extern C functions, reuse existing declaration if already compiled
     if (declspec.is_extern()) {

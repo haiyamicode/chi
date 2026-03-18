@@ -140,6 +140,7 @@ CHI_RT_EXPORT void cx_free(void *address);
 CHI_RT_EXPORT void cx_memset(void *dest, uint8_t value, uint32_t size);
 
 CHI_RT_EXPORT void cx_runtime_start(void *stack);
+CHI_RT_EXPORT void cx_set_program_args(int32_t argc, char **argv);
 CHI_RT_EXPORT void cx_runtime_stop();
 CHI_RT_EXPORT void cx_thread_spawn(void *callback);
 CHI_RT_EXPORT bool cx_is_main_thread();
@@ -183,6 +184,8 @@ CHI_RT_EXPORT int32_t __cx_mkdir(const char *path);
 CHI_RT_EXPORT int32_t __cx_get_errno();
 CHI_RT_EXPORT void __cx_uv_strerror(int32_t errnum, CxString *result);
 CHI_RT_EXPORT int32_t __cx_list_dir(const char *path, CxArray *result);
+CHI_RT_EXPORT int32_t __cx_argc(void);
+CHI_RT_EXPORT const char *__cx_argv(int32_t index);
 
 #ifdef __cplusplus
 }

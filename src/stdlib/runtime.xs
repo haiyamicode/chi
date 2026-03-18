@@ -21,6 +21,7 @@ extern "C" {
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
     unsafe func __move(dest: *void, src: *void, size: uint32);
     unsafe func cx_runtime_start(stack: *void);
+    unsafe func cx_set_program_args(argc: int32, argv: *void);
     unsafe func cx_set_program_vtable(ptr: *void);
     unsafe func cx_runtime_stop();
     unsafe func cx_panic(message: *string);
