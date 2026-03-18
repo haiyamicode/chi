@@ -1,7 +1,7 @@
 BUILD_DIR=build
 BASE=$(shell pwd)
 LOCAL_DIR=local
-CHI = $(BUILD_DIR)/src/bin/chi
+CHIC = $(BUILD_DIR)/src/bin/chic
 INPUT_FILE ?= $(LOCAL_DIR)/test.xs
 INPUT_PACKAGE ?= $(LOCAL_DIR)/test_package
 BUILD_MODE ?= Debug
@@ -24,16 +24,16 @@ install:
 	cd $(BUILD_DIR) && $(MAKE) install
 
 compile_example_debug: build install
-	$(CHI) -d -c $(INPUT_FILE) -o local/test -w local/build
+	$(CHIC) -d -c $(INPUT_FILE) -o local/test -w local/build
 
 run_example_debug: compile_example_debug
 	./local/test
 
 debug_compile_example: build install
-	lldb -o run -o "bt all" -o quit -- $(CHI) -d -c $(INPUT_FILE) -o local/test -w local/build
+	lldb -o run -o "bt all" -o quit -- $(CHIC) -d -c $(INPUT_FILE) -o local/test -w local/build
 
 ast: build
-	$(CHI) -a -c $(INPUT_FILE)
+	$(CHIC) -a -c $(INPUT_FILE)
 
 test: test_compiler
 
@@ -60,10 +60,10 @@ clean:
 	rm -rf $(BUILD_DIR)/* && mkdir -p $(BUILD_DIR)
 
 compile_example: build install
-	$(CHI) -c $(INPUT_FILE) -o local/test -w local/build
+	$(CHIC) -c $(INPUT_FILE) -o local/test -w local/build
 
 compile_example_safe: build install
-	$(CHI) -s -c $(INPUT_FILE) -o local/test -w local/build
+	$(CHIC) -s -c $(INPUT_FILE) -o local/test -w local/build
 
 run_example: compile_example
 	./local/test
@@ -72,16 +72,16 @@ debug_example: compile_example
 	lldb -o run ./local/test
 
 compile_example_package: build install
-	$(CHI) -p $(INPUT_PACKAGE) -o local/test_package_exe -w local/build
+	$(CHIC) -p $(INPUT_PACKAGE) -o local/test_package_exe -w local/build
 
 run_example_package: compile_example_package
 	./local/test_package_exe
 
 analyze_example: build install
-	$(CHI) -analyzer -c $(INPUT_FILE)
+	$(CHIC) -analyzer -c $(INPUT_FILE)
 
 format_example: build install
-	$(CHI) -f -c $(INPUT_FILE)
+	$(CHIC) -f -c $(INPUT_FILE)
 
 format_all: build install
 	@echo "Formatting all .xs and .x files in src/stdlib and tests..."
@@ -91,6 +91,6 @@ format_all: build install
 			continue; \
 		fi; \
 		echo "Formatting $$file..."; \
-		$(CHI) -f -c "$$file" > "$$file.tmp" && mv "$$file.tmp" "$$file"; \
+		$(CHIC) -f -c "$$file" > "$$file.tmp" && mv "$$file.tmp" "$$file"; \
 	done
 	@echo "Formatting complete!"

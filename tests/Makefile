@@ -54,16 +54,16 @@ TESTS_LIST = 00_fib.test \
 		52_async_lifecycle_stress.test \
 		53_panic.test
 TESTS ?= $(TESTS_LIST)
-CHI = $(BUILD_DIR)/src/bin/chi
+CHIC = $(BUILD_DIR)/src/bin/chic
 TMP = /tmp/chitests
 OUTPUT_DIR = $(BUILD_DIR)/tests
 
 %.test: %.expect
 	echo Test: $*...
 	@if [ -f $*.xs ]; then \
-		$(CHI) -o $(TMP).$* -c $*.xs && $(TMP).$* 2>&1 >$*.output; \
+		$(CHIC) -o $(TMP).$* -c $*.xs && $(TMP).$* 2>&1 >$*.output; \
 	elif [ -f $*.x ]; then \
-		$(CHI) -o $(TMP).$* -c $*.x && $(TMP).$* 2>&1 >$*.output; \
+		$(CHIC) -o $(TMP).$* -c $*.x && $(TMP).$* 2>&1 >$*.output; \
 	else \
 		echo "No source file found for test $*"; \
 		exit 1; \
@@ -79,7 +79,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for enum struct test — also tests rejection cases
 13_enum_struct.test: 13_enum_struct.expect
 	echo Test: 13_enum_struct...
-	@$(CHI) -o $(TMP).13_enum_struct -c 13_enum_struct.xs && $(TMP).13_enum_struct 2>&1 >13_enum_struct.output
+	@$(CHIC) -o $(TMP).13_enum_struct -c 13_enum_struct.xs && $(TMP).13_enum_struct 2>&1 >13_enum_struct.output
 	@if [ "x`diff -qbu 13_enum_struct.expect 13_enum_struct.output`" != "x" ]; \
 	then \
 		echo "error in test 13_enum_struct (output mismatch)"; \
@@ -91,7 +91,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	@failed=0; \
 	for f in testdata/13_enum_struct_errors/*.xs; do \
 		name=$$(basename $$f); \
-		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_enum 2>&1); \
+		errmsg=$$($(CHIC) -o /dev/null -c $$f -w /tmp/chitest_enum 2>&1); \
 		if [ $$? -eq 0 ]; then \
 			echo "error: $$name should have been rejected but compiled successfully"; \
 			failed=1; \
@@ -109,7 +109,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for construct expr test — also tests rejection cases
 42_construct_expr.test: 42_construct_expr.expect
 	echo Test: 42_construct_expr...
-	@$(CHI) -o $(TMP).42_construct_expr -c 42_construct_expr.xs && $(TMP).42_construct_expr 2>&1 >42_construct_expr.output
+	@$(CHIC) -o $(TMP).42_construct_expr -c 42_construct_expr.xs && $(TMP).42_construct_expr 2>&1 >42_construct_expr.output
 	@if [ "x`diff -qbu 42_construct_expr.expect 42_construct_expr.output`" != "x" ]; \
 	then \
 		echo "error in test 42_construct_expr (output mismatch)"; \
@@ -121,7 +121,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	@failed=0; \
 	for f in testdata/42_construct_expr_errors/*.xs; do \
 		name=$$(basename $$f); \
-		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_construct 2>&1); \
+		errmsg=$$($(CHIC) -o /dev/null -c $$f -w /tmp/chitest_construct 2>&1); \
 		if [ $$? -eq 0 ]; then \
 			echo "error: $$name should have been rejected but compiled successfully"; \
 			failed=1; \
@@ -139,7 +139,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for trait bounds test — also tests rejection cases
 21_trait_bounds.test: 21_trait_bounds.expect
 	echo Test: 21_trait_bounds...
-	@$(CHI) -o $(TMP).21_trait_bounds -c 21_trait_bounds.xs && $(TMP).21_trait_bounds 2>&1 >21_trait_bounds.output
+	@$(CHIC) -o $(TMP).21_trait_bounds -c 21_trait_bounds.xs && $(TMP).21_trait_bounds 2>&1 >21_trait_bounds.output
 	@if [ "x`diff -qbu 21_trait_bounds.expect 21_trait_bounds.output`" != "x" ]; \
 	then \
 		echo "error in test 21_trait_bounds (output mismatch)"; \
@@ -151,7 +151,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	@failed=0; \
 	for f in testdata/21_trait_bound_errors/*.xs; do \
 		name=$$(basename $$f); \
-		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_trait 2>&1); \
+		errmsg=$$($(CHIC) -o /dev/null -c $$f -w /tmp/chitest_trait 2>&1); \
 		if [ $$? -eq 0 ]; then \
 			echo "error: $$name should have been rejected but compiled successfully"; \
 			failed=1; \
@@ -170,7 +170,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Also tests error cases: each file in testdata/30_safe_errors/ must fail to compile.
 30_safe_lifetime.test: 30_safe_lifetime.expect
 	echo Test: 30_safe_lifetime...
-	@$(CHI) -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xs && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
+	@$(CHIC) -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xs && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
 	@if [ "x`diff -qbu 30_safe_lifetime.expect 30_safe_lifetime.output`" != "x" ]; \
 	then \
 		echo "error in test 30_safe_lifetime (output mismatch)"; \
@@ -182,7 +182,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	@failed=0; \
 	for f in testdata/30_safe_errors/*.xs testdata/30_safe_errors/*.x; do \
 		name=$$(basename $$f); \
-		errmsg=$$($(CHI) -o /dev/null -c $$f -w /tmp/chitest_safe 2>&1); \
+		errmsg=$$($(CHIC) -o /dev/null -c $$f -w /tmp/chitest_safe 2>&1); \
 		if [ $$? -eq 0 ]; then \
 			echo "error: $$name should have been rejected but compiled successfully"; \
 			failed=1; \
@@ -209,7 +209,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 			echo "error: missing expect file for $$name"; \
 			failed=1; continue; \
 		fi; \
-		$(CHI) -o $(TMP).48_stdlib_$$name -c $$f -w /tmp/chitest_stdlib_$$name 2>&1; \
+		$(CHIC) -o $(TMP).48_stdlib_$$name -c $$f -w /tmp/chitest_stdlib_$$name 2>&1; \
 		if [ $$? -ne 0 ]; then \
 			echo "error: $$name failed to compile"; \
 			failed=1; continue; \
@@ -236,7 +236,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 			echo "error: missing expect-panic comment in $$name"; \
 			failed=1; continue; \
 		fi; \
-		$(CHI) -o $(TMP).53_panic_$$name -c $$f -w /tmp/chitest_panic_$$name >/tmp/chitest_panic_compile_$$name.out 2>&1; \
+		$(CHIC) -o $(TMP).53_panic_$$name -c $$f -w /tmp/chitest_panic_$$name >/tmp/chitest_panic_compile_$$name.out 2>&1; \
 		if [ $$? -ne 0 ]; then \
 			echo "error: $$name failed to compile"; \
 			cat /tmp/chitest_panic_compile_$$name.out; \
@@ -261,7 +261,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # so sort destruction lines (everything after "Test completed") before comparing.
 18_gc_escape.test: 18_gc_escape.expect
 	echo Test: 18_gc_escape...
-	@$(CHI) -o $(TMP).18_gc_escape -c 18_gc_escape.x && $(TMP).18_gc_escape 2>&1 >18_gc_escape.output
+	@$(CHIC) -o $(TMP).18_gc_escape -c 18_gc_escape.x && $(TMP).18_gc_escape 2>&1 >18_gc_escape.output
 	@grep -v '^\[gc\]' 18_gc_escape.output > 18_gc_escape.out.tmp
 	@grep -v '^\[gc\]' 18_gc_escape.expect > 18_gc_escape.exp.tmp
 	@grep '^\[gc\]' 18_gc_escape.output | sort > 18_gc_escape.out_gc.tmp
@@ -283,7 +283,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for package tests
 15_package.test: 15_package.expect
 	echo Test: 15_package...
-	$(CHI) -p testdata/15_package -o $(TMP).15_package && $(TMP).15_package 2>&1 >15_package.output;
+	$(CHIC) -p testdata/15_package -o $(TMP).15_package && $(TMP).15_package 2>&1 >15_package.output;
 	@if [ "x`diff -qbu 15_package.expect 15_package.output`" != "x" ]; \
 	then \
         	echo "error in test 15_package"; \
@@ -305,7 +305,7 @@ formatter_test:
 	@fail=0; \
 	for t in $(FORMAT_TESTS); do \
 		src=$$t.xs; [ -f $$src ] || src=$$t.x; \
-		$(CHI) -f -c $$src > $(TMP).$$t.fmt 2>/dev/null; \
+		$(CHIC) -f -c $$src > $(TMP).$$t.fmt 2>/dev/null; \
 		if ! diff -q $$src $(TMP).$$t.fmt >/dev/null 2>&1; then \
 			echo "FAIL $$t (formatter output differs from source)"; \
 			diff -u $$src $(TMP).$$t.fmt | head -20; \
@@ -318,7 +318,7 @@ formatter_test:
 # Formatter collapse test: verify formatting collapses redundant syntax
 formatter_collapse_test:
 	@echo "Formatter collapse test..."
-	@$(CHI) -f -c formatter_collapse.xs > $(TMP).formatter_collapse.fmt 2>/dev/null; \
+	@$(CHIC) -f -c formatter_collapse.xs > $(TMP).formatter_collapse.fmt 2>/dev/null; \
 	if ! diff -q formatter_collapse.expected $(TMP).formatter_collapse.fmt >/dev/null 2>&1; then \
 		echo "FAIL formatter_collapse (output differs from expected)"; \
 		diff -u formatter_collapse.expected $(TMP).formatter_collapse.fmt; \
@@ -337,7 +337,7 @@ stress:
 	@for i in $$(seq 1 $(N)); do \
 		for t in $(STRESS_TESTS); do \
 			src=$$t.xs; [ -f $$src ] || src=$$t.x; \
-			$(CHI) -o $(TMP).$$t -c $$src && $(TMP).$$t >$(TMP).$$t.out 2>&1 || { echo "FAIL $$t at iteration $$i (compile/run)"; exit 1; }; \
+			$(CHIC) -o $(TMP).$$t -c $$src && $(TMP).$$t >$(TMP).$$t.out 2>&1 || { echo "FAIL $$t at iteration $$i (compile/run)"; exit 1; }; \
 			diff -qbu $$t.expect $(TMP).$$t.out >/dev/null || { echo "FAIL $$t at iteration $$i (output mismatch)"; diff -u $$t.expect $(TMP).$$t.out; exit 1; }; \
 		done; \
 		if [ $$((i % 100)) -eq 0 ]; then echo "  $$i/$(N) OK"; fi; \

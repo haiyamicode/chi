@@ -67,7 +67,7 @@ int main(int argc, char *argv[]) {
     Flag *flag = nullptr;
 
     auto print_help = [&]() {
-        print("usage: chi [flags]\n");
+        print("usage: chic [flags]\n");
         print("flags:\n");
         print("  -c --compile <file>: compile from entry source file\n");
         print("  -p --package <dir>: compile from a package directory\n");

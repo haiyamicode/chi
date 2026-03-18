@@ -2,7 +2,7 @@
 # Fuzz the analyzer with partial typing patterns to find crashes
 # Each test simulates what the user's editor sends mid-keystroke
 
-CHI=../build/src/bin/chi
+CHIC=../build/src/bin/chic
 TMPFILE=/tmp/chi_fuzz_test.xs
 PASSED=0
 FAILED=0
@@ -13,7 +13,7 @@ test_pattern() {
     local code="$2"
     printf "Testing %-55s ... " "$name"
     echo "$code" > "$TMPFILE"
-    output=$(timeout 5s env TIMES=1 $CHI --analyzer -c "$TMPFILE" 2>&1)
+    output=$(timeout 5s env TIMES=1 $CHIC --analyzer -c "$TMPFILE" 2>&1)
     exit_code=$?
     if [ $exit_code -eq 124 ]; then
         echo "TIMEOUT (infinite loop)"
