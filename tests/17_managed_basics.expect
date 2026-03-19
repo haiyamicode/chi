@@ -45,4 +45,7 @@ TestStruct(99) destroyed
 Simple lambda executed
 Lambda with capture result: 84
 
+=== Recursive This Lifetime Test ===
+child = child
+
 All basic features working in managed mode!

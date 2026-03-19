@@ -1615,6 +1615,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     fn_def.bump_edge_offset(lhs_decl);
                     add_borrow_source_edges(fn_def, data.op2, lhs_decl);
                     fn_def.add_terminal(lhs_decl);
+                    if (data.op1->type == NodeType::DotExpr) {
+                        auto *field_decl = data.op1->data.dot_expr.resolved_decl;
+                        if (field_decl && field_decl->type == NodeType::VarDecl &&
+                            field_decl->data.var_decl.is_field) {
+                            auto *root_type = node_get_type(lhs_decl);
+                            if (root_type) {
+                                auto *st = resolve_struct_type(root_type);
+                                if (st && st->this_lifetime) {
+                                    fn_def.flow.terminal_lifetimes[lhs_decl] = st->this_lifetime;
+                                }
+                            }
+                        }
+                    }
                 }
                 // Move tracking for assignments
                 if (lhs_decl) {
@@ -10592,6 +10605,37 @@ static string describe_exclusive_access_source(ast::Node *n) {
     return fmt::format("exclusive access originates from {}", node_label(n));
 }
 
+static ChiLifetime *get_terminal_required_lifetime(Resolver *resolver, ast::FnDef *fn_def,
+                                                   ast::FlowState &flow, ast::Node *terminal) {
+    if (auto *explicit_lt = flow.terminal_lifetimes.get(terminal)) {
+        return *explicit_lt;
+    }
+
+    if (terminal->type == ast::NodeType::ReturnStmt) {
+        // Return terminal: use the pre-calculated return type lifetime from elision
+        if (fn_def->fn_proto && fn_def->fn_proto->resolved_type &&
+            fn_def->fn_proto->resolved_type->kind == TypeKind::Fn) {
+            auto *ret_type = fn_def->fn_proto->resolved_type->data.fn.return_type;
+            if (ret_type && ret_type->is_reference() &&
+                ret_type->data.pointer.lifetimes.len > 0) {
+                return ret_type->data.pointer.lifetimes[0];
+            }
+        }
+        // Also check resolved_return_lifetime for borrowing value returns (func(), structs)
+        if (fn_def->fn_proto) {
+            auto *proto = fn_def->fn_proto->type == ast::NodeType::FnProto
+                              ? &fn_def->fn_proto->data.fn_proto
+                              : nullptr;
+            if (proto && proto->resolved_return_lifetime) {
+                return proto->resolved_return_lifetime;
+            }
+        }
+        return nullptr;
+    }
+
+    return nullptr;
+}
+
 // Check if a leaf node satisfies a lifetime constraint relative to a terminal.
 // Only called on base cases (VarDecl, ParamDecl) — graph construction
 // via copy_ref_edges already flattens intermediate nodes to leaves.
@@ -10693,40 +10737,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
     for (size_t t = 0; t < flow.terminals.len; t++) {
         auto *terminal = flow.terminals[t];
 
-        // Extract required lifetime from terminal's type.
-        ChiLifetime *required = nullptr;
-        // Check for explicitly-set lifetime constraint (e.g. 'static from func<'static>)
-        auto *explicit_lt = flow.terminal_lifetimes.get(terminal);
-        if (explicit_lt) {
-            required = *explicit_lt;
-        } else if (terminal->type == ast::NodeType::ReturnStmt) {
-            // Return terminal: use the pre-calculated return type lifetime from elision
-            if (fn_def->fn_proto && fn_def->fn_proto->resolved_type &&
-                fn_def->fn_proto->resolved_type->kind == TypeKind::Fn) {
-                auto *ret_type = fn_def->fn_proto->resolved_type->data.fn.return_type;
-                if (ret_type && ret_type->is_reference() &&
-                    ret_type->data.pointer.lifetimes.len > 0) {
-                    required = ret_type->data.pointer.lifetimes[0];
-                }
-            }
-            // Also check resolved_return_lifetime for borrowing value returns (func(), structs)
-            if (!required && fn_def->fn_proto) {
-                auto *proto = fn_def->fn_proto->type == ast::NodeType::FnProto
-                                  ? &fn_def->fn_proto->data.fn_proto
-                                  : nullptr;
-                if (proto && proto->resolved_return_lifetime) {
-                    required = proto->resolved_return_lifetime;
-                }
-            }
-        } else {
-            // Struct field assignment terminal: resolve to struct and get this_lifetime
-            auto *term_type = terminal->resolved_type;
-            if (term_type && term_type->kind != TypeKind::Struct) {
-                auto *st = resolve_struct_type(term_type);
-                if (st)
-                    required = st->this_lifetime;
-            }
-        }
+        auto *required = get_terminal_required_lifetime(this, fn_def, flow, terminal);
 
         if (verbose) {
             fmt::print("[lifetime] checking terminal: {} (required: {})\n", node_label(terminal),

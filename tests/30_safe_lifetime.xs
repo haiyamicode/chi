@@ -197,6 +197,53 @@ func test_mutex_array_ref_index() {
     printf("item = {}\n", r[0].read());
 }
 
+struct RecursiveCommand {
+    name: string = "";
+    commands: Array<RecursiveCommand> = [];
+
+    func plain() string {
+        return this.name;
+    }
+}
+
+func first_recursive_command(cmd: &RecursiveCommand) &RecursiveCommand {
+    let subcommand = &cmd.commands[0];
+    return subcommand;
+}
+
+func test_recursive_this_lifetime() {
+    printf("=== recursive this lifetime ===\n");
+    var root = RecursiveCommand{name: "root"};
+    var child = RecursiveCommand{name: "child"};
+    root.commands.push(move child);
+    let first = first_recursive_command(&root);
+    printf("child = {}\n", first.plain());
+}
+
+struct ThisLifetimeInner {
+    value: int = 0;
+
+    func plain() int {
+        return this.value;
+    }
+}
+
+struct ThisLifetimeHolder {
+    inner: ThisLifetimeInner = {};
+}
+
+func first_inner(h: &ThisLifetimeHolder) &ThisLifetimeInner {
+    let inner = &h.inner;
+    return inner;
+}
+
+func test_field_borrow_not_this() {
+    printf("=== field borrow not this ===\n");
+    let holder = ThisLifetimeHolder{inner: ThisLifetimeInner{value: 17}};
+    let inner = first_inner(&holder);
+    printf("inner = {}\n", inner.plain());
+}
+
 // --- Multiple stores to same field ---
 
 func test_reassign() {
@@ -768,6 +815,8 @@ func main() {
     test_mutex_field_method();
     test_named_mutex_ref();
     test_mutex_array_ref_index();
+    test_recursive_this_lifetime();
+    test_field_borrow_not_this();
     test_reassign();
     test_direct_init();
     test_local_order();

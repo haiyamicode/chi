@@ -17,6 +17,10 @@ call = 7
 after = 7
 === mutex array ref index ===
 item = 9
+=== recursive this lifetime ===
+child = child
+=== field borrow not this ===
+inner = 17
 === reassign ===
 first = 1
 second = 2

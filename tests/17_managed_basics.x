@@ -139,6 +139,31 @@ func test_lambdas() {
     printf("Lambda with capture result: {}\n", result);
 }
 
+struct ManagedRecursiveCommand {
+    name: string = "";
+    commands: Array<ManagedRecursiveCommand> = [];
+
+    func plain() string {
+        return this.name;
+    }
+}
+
+func first_managed_recursive_command(cmd: &ManagedRecursiveCommand) &ManagedRecursiveCommand {
+    let subcommand = &cmd.commands[0];
+    return subcommand;
+}
+
+func test_recursive_this_lifetime() {
+    println("\n=== Recursive This Lifetime Test ===");
+
+    var root = ManagedRecursiveCommand{name: "root"};
+    var child = ManagedRecursiveCommand{name: "child"};
+    root.commands.push(move child);
+
+    let first = first_managed_recursive_command(&root);
+    printf("child = {}\n", first.plain());
+}
+
 func main() {
     println("Testing basic language features in managed memory mode");
 
@@ -150,6 +175,7 @@ func main() {
     test_control_flow();
     test_functions();
     test_lambdas();
+    test_recursive_this_lifetime();
 
     println("\nAll basic features working in managed mode!");
 }
