@@ -171,6 +171,7 @@ bool Parser::is_declaration_start(TokenType type) {
     case TokenType::KW_PRIVATE:
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
+    case TokenType::KW_MUTEX:
     case TokenType::KW_ASYNC:
     case TokenType::KW_UNSAFE:
     case TokenType::AT:
@@ -297,7 +298,8 @@ void Parser::parse_top_level_decls(NodeList *decls) {
 
         // Skip unexpected tokens and recover to declaration boundary
         if (!is_declaration_start(token->type) && token->type != TokenType::KW_INLINE &&
-            token->type != TokenType::KW_STATIC) {
+            token->type != TokenType::KW_STATIC &&
+            token->type != TokenType::KW_MUTEX) {
             unexpected(token);
             recover_to_declaration_boundary();
             continue;
@@ -370,7 +372,20 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         }
         case TokenType::KW_MUT: {
             consume();
+            if (spec->has_flag(DECL_MUTEX)) {
+                error(token, "'mutex' already implies mutability; remove 'mut'");
+                break;
+            }
             spec->flags |= DECL_MUTABLE;
+            break;
+        }
+        case TokenType::KW_MUTEX: {
+            consume();
+            if (spec->has_flag(DECL_MUTABLE)) {
+                error(token, "'mutex' already implies mutability; use 'mutex' without 'mut'");
+                spec->flags &= ~DECL_MUTABLE;
+            }
+            spec->flags |= DECL_MUTEX;
             break;
         }
         case TokenType::KW_STATIC: {
@@ -423,6 +438,7 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::KW_PRIVATE:
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
+    case TokenType::KW_MUTEX:
     case TokenType::KW_ASYNC:
     case TokenType::KW_UNSAFE:
         return parse_top_level_decl(parse_decl_spec());
@@ -578,12 +594,15 @@ Node *Parser::parse_type_expr(bool type_only) {
             string lifetime;
             if (sigil_kind == SigilKind::Reference) {
                 if (next_is(TokenType::LPAREN)) {
-                    // &(mut, 'this) T  or  &(mut) T  or  &('this) T  or  &(move) T
+                    // &(mut, 'this) T  or  &(mutex) T  or  &('this) T  or  &(move) T
                     consume();
                     for (;;) {
                         if (next_is(TokenType::KW_MUT)) {
                             consume();
                             sigil_kind = SigilKind::MutRef;
+                        } else if (next_is(TokenType::KW_MUTEX)) {
+                            consume();
+                            sigil_kind = SigilKind::MutexRef;
                         } else if (next_is(TokenType::KW_MOVE)) {
                             consume();
                             sigil_kind = SigilKind::Move;
@@ -602,6 +621,10 @@ Node *Parser::parse_type_expr(bool type_only) {
                     // &mut T
                     consume();
                     sigil_kind = SigilKind::MutRef;
+                } else if (next_is(TokenType::KW_MUTEX)) {
+                    // &mutex T
+                    consume();
+                    sigil_kind = SigilKind::MutexRef;
                 } else if (next_is(TokenType::KW_MOVE)) {
                     // &move T
                     consume();
@@ -842,7 +865,9 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
     if (flags & FN_BODY_NONE) {
         expect(TokenType::SEMICOLON);
         if (decl_spec && decl_spec->is_mutable()) {
-            error(iden, "'mut' is only applicable for functions with a body");
+            error(iden, decl_spec->is_mutex()
+                            ? "'mutex' is only applicable for functions with a body"
+                            : "'mut' is only applicable for functions with a body");
         }
         add_to_scope(fn);
         return fn;
@@ -858,7 +883,9 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
             if (next_is(TokenType::SEMICOLON)) {
                 consume();
                 if (decl_spec && decl_spec->is_mutable()) {
-                    error(iden, "'mut' is not allowed on function declarations without a body");
+                    error(iden, decl_spec->is_mutex()
+                                    ? "'mutex' is not allowed on function declarations without a body"
+                                    : "'mut' is not allowed on function declarations without a body");
                 }
             } else {
                 if (next_is(TokenType::LBRACE)) {
@@ -989,6 +1016,9 @@ Node *Parser::parse_destructure_pattern(VarKind kind) {
             if (next_is(TokenType::KW_MUT)) {
                 consume();
                 sigil = SigilKind::MutRef;
+            } else if (next_is(TokenType::KW_MUTEX)) {
+                consume();
+                sigil = SigilKind::MutexRef;
             } else {
                 sigil = SigilKind::Reference;
             }
@@ -1066,6 +1096,9 @@ Node *Parser::parse_sequence_destructure_pattern(VarKind kind, TokenType start,
             if (next_is(TokenType::KW_MUT)) {
                 consume();
                 sigil = SigilKind::MutRef;
+            } else if (next_is(TokenType::KW_MUTEX)) {
+                consume();
+                sigil = SigilKind::MutexRef;
             } else {
                 sigil = SigilKind::Reference;
             }
@@ -1678,6 +1711,9 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
         if (token->type == TokenType::AND && get()->type == TokenType::KW_MUT) {
             consume();
             node->data.unary_op_expr.op_type = TokenType::MUTREF;
+        } else if (token->type == TokenType::AND && get()->type == TokenType::KW_MUTEX) {
+            consume();
+            node->data.unary_op_expr.op_type = TokenType::MUTEXREF;
         } else if (token->type == TokenType::AND && get()->type == TokenType::KW_MOVE) {
             consume();
             node->data.unary_op_expr.op_type = TokenType::MOVEREF;
@@ -2230,7 +2266,7 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         }
     }
 
-    // Handle reference sigil: &T, &mut T, &move T, &'a T, &(mut, 'a) T
+    // Handle reference sigil: &T, &mut T, &mutex T, &move T, &'a T, &(mut, 'a) T
     if (token->type == TokenType::AND) {
         pos++;
         token = lookahead(pos);
@@ -2238,11 +2274,12 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
             return false;
         }
         if (token->type == TokenType::LPAREN) {
-            // &(mut, 'a) T or &('a) T or &(move) T
+            // &(mut, 'a) T or &(mutex, 'a) T or &('a) T or &(move) T
             pos++;
             for (;;) {
                 token = lookahead(pos);
-                if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MOVE ||
+                if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
+                    token->type == TokenType::KW_MOVE ||
                     token->type == TokenType::LIFETIME) {
                     pos++;
                 } else {
@@ -2259,8 +2296,9 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
             token = lookahead(pos);
             if (token->type == TokenType::END)
                 return false;
-        } else if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MOVE) {
-            // &mut T, &move T
+        } else if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
+                   token->type == TokenType::KW_MOVE) {
+            // &mut T, &mutex T, &move T
             pos++;
             token = lookahead(pos);
             if (token->type == TokenType::END)
@@ -2452,6 +2490,9 @@ Node *Parser::parse_for_stmt() {
                 if (next_is(TokenType::KW_MUT)) {
                     consume();
                     node->data.for_stmt.bind_sigil = SigilKind::MutRef;
+                } else if (next_is(TokenType::KW_MUTEX)) {
+                    consume();
+                    node->data.for_stmt.bind_sigil = SigilKind::MutexRef;
                 }
 
                 is_range = true;

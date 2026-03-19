@@ -29,6 +29,128 @@ MAKE_ENUM(NodeType, Error, Root, FnProto, FnDef, ParamDecl, Block, ReturnStmt, V
           ExportDecl, FieldInitExpr, EnumDecl, GeneratedFn, ThrowStmt, ImplementBlock,
           PackExpansion, DestructureDecl, DestructureField, UnitExpr, TupleExpr);
 
+inline const char *node_type_display_name(NodeType type) {
+    switch (type) {
+    case NodeType::Error:
+        return "error";
+    case NodeType::Root:
+        return "root";
+    case NodeType::FnProto:
+        return "function prototype";
+    case NodeType::FnDef:
+        return "function";
+    case NodeType::ParamDecl:
+        return "parameter";
+    case NodeType::Block:
+        return "block";
+    case NodeType::ReturnStmt:
+        return "return statement";
+    case NodeType::VarDecl:
+        return "variable";
+    case NodeType::BinOpExpr:
+        return "binary expression";
+    case NodeType::UnaryOpExpr:
+        return "unary expression";
+    case NodeType::LiteralExpr:
+        return "literal";
+    case NodeType::IfExpr:
+        return "if expression";
+    case NodeType::FnCallExpr:
+        return "function call";
+    case NodeType::Primitive:
+        return "primitive";
+    case NodeType::Identifier:
+        return "identifier";
+    case NodeType::EmptyStmt:
+        return "empty statement";
+    case NodeType::ConstructExpr:
+        return "constructor expression";
+    case NodeType::ParenExpr:
+        return "parenthesized expression";
+    case NodeType::StructDecl:
+        return "struct";
+    case NodeType::DotExpr:
+        return "member access";
+    case NodeType::TypeInfoExpr:
+        return "type info expression";
+    case NodeType::SubtypeExpr:
+        return "subtype expression";
+    case NodeType::IndexExpr:
+        return "index expression";
+    case NodeType::SliceExpr:
+        return "slice expression";
+    case NodeType::RangeExpr:
+        return "range expression";
+    case NodeType::TypedefDecl:
+        return "typedef";
+    case NodeType::TypeSigil:
+        return "type sigil";
+    case NodeType::EnumVariant:
+        return "enum variant";
+    case NodeType::CastExpr:
+        return "cast expression";
+    case NodeType::ForStmt:
+        return "for statement";
+    case NodeType::WhileStmt:
+        return "while statement";
+    case NodeType::BranchStmt:
+        return "branch statement";
+    case NodeType::TypeParam:
+        return "type parameter";
+    case NodeType::LifetimeParam:
+        return "lifetime parameter";
+    case NodeType::PrefixExpr:
+        return "prefix expression";
+    case NodeType::ExternDecl:
+        return "extern block";
+    case NodeType::TryExpr:
+        return "try expression";
+    case NodeType::AwaitExpr:
+        return "await expression";
+    case NodeType::InferredType:
+        return "inferred type";
+    case NodeType::ImportDecl:
+        return "import";
+    case NodeType::SizeofExpr:
+        return "sizeof expression";
+    case NodeType::DeclAttribute:
+        return "attribute";
+    case NodeType::BindIdentifier:
+        return "binding";
+    case NodeType::SwitchExpr:
+        return "switch expression";
+    case NodeType::CaseExpr:
+        return "case expression";
+    case NodeType::ImportSymbol:
+        return "imported symbol";
+    case NodeType::ExportDecl:
+        return "export";
+    case NodeType::FieldInitExpr:
+        return "field initializer";
+    case NodeType::EnumDecl:
+        return "enum";
+    case NodeType::GeneratedFn:
+        return "generated function";
+    case NodeType::ThrowStmt:
+        return "throw statement";
+    case NodeType::ImplementBlock:
+        return "implement block";
+    case NodeType::PackExpansion:
+        return "pack expansion";
+    case NodeType::DestructureDecl:
+        return "destructure declaration";
+    case NodeType::DestructureField:
+        return "destructure field";
+    case NodeType::UnitExpr:
+        return "unit expression";
+    case NodeType::TupleExpr:
+        return "tuple expression";
+    case NodeType::__COUNT:
+        return "node";
+    }
+    return "node";
+}
+
 MAKE_ENUM(ModuleKind, XS, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
 
@@ -48,6 +170,7 @@ enum DeclFlag : uint32_t {
     DECL_ASYNC = 1 << 6,
     DECL_UNSAFE = 1 << 7,
     DECL_EXPORTED = 1 << 8,   // explicit `export` keyword on a declaration
+    DECL_MUTEX = 1 << 9,
 };
 
 struct Module {
@@ -137,12 +260,13 @@ struct DeclSpec {
     }
 
     bool is_exported() const { return (flags & DECL_EXPORTED) != 0; }
-    bool is_mutable() const { return has_flag(DECL_MUTABLE); }
+    bool is_mutable() const { return has_flag(DECL_MUTABLE) || has_flag(DECL_MUTEX); }
     bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
     bool is_extern() const { return has_flag(DECL_EXTERN); }
     bool is_static() const { return has_flag(DECL_STATIC); }
     bool is_async() const { return has_flag(DECL_ASYNC); }
     bool is_unsafe() const { return has_flag(DECL_UNSAFE); }
+    bool is_mutex() const { return has_flag(DECL_MUTEX); }
 };
 
 struct FnProto {
@@ -155,6 +279,8 @@ struct FnProto {
     bool is_type_expr = false;
     array<ChiLifetime *> resolved_param_lifetimes = {};
     ChiLifetime *resolved_return_lifetime = nullptr;
+    array<Node *> requires_exclusive_capture_roots = {};
+    array<Node *> requires_exclusive_capture_sources = {};
 };
 
 MAKE_ENUM(FnKind, TopLevel, Method, Constructor, Destructor, Lambda);
@@ -177,6 +303,7 @@ struct FnDef {
     bool has_try = false;
     bool has_cleanup = false;
     array<Node *> variants = {};
+    array<Node *> call_sites = {};
     FlowState flow = {};
     int32_t next_decl_order = 0;               // counter for assigning decl_order to locals
 
@@ -355,7 +482,7 @@ struct FieldInitExpr {
     void *compiled_field_address = nullptr;
 };
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move, FixedArray, Span)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, MutexRef, Move, FixedArray, Span)
 
 struct DestructureField {
     Token *field_name = nullptr;   // struct field to extract

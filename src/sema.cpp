@@ -96,11 +96,13 @@ bool ChiTypeStruct::is_generic(ChiType *type) {
 
 bool ChiTypeStruct::is_pointer_type(ChiType *type) {
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-           type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef;
+           type->kind == TypeKind::MutRef || type->kind == TypeKind::MutexRef ||
+           type->kind == TypeKind::MoveRef;
 }
 
 bool ChiTypeStruct::is_mutable_pointer(ChiType *type) {
     return type->kind == TypeKind::Pointer || type->kind == TypeKind::MutRef ||
+           type->kind == TypeKind::MutexRef ||
            type->kind == TypeKind::MoveRef;
 }
 
@@ -235,6 +237,7 @@ bool ChiType::has_unresolved_subtype() {
     case TypeKind::Optional:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Array:
     case TypeKind::Span:
@@ -272,6 +275,7 @@ int ChiType::subtype_depth() {
     case TypeKind::Optional:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Array:
     case TypeKind::Span:
@@ -306,6 +310,7 @@ ChiType *ChiType::get_elem() {
     case TypeKind::Optional:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Array:
         return data.array.elem;

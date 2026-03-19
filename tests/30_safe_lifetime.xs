@@ -146,6 +146,57 @@ func test_ref_to_param() {
     printf("ref = {}\n", *r);
 }
 
+struct MutexBuf {
+    value: int = 0;
+
+    mutex func grow() {
+        this.value += 1;
+    }
+}
+
+struct MutexHolder {
+    buf: MutexBuf = {};
+
+    mutex func grow_buf() int {
+        this.buf.grow();
+        return this.buf.value;
+    }
+}
+
+struct MutexElem {
+    value: int = 0;
+
+    func read() int {
+        return this.value;
+    }
+}
+
+func takes_mutex_elem(r: &mutex MutexElem) int {
+    return r.read();
+}
+
+func test_mutex_field_method() {
+    printf("=== mutex field method ===\n");
+    var holder = MutexHolder{};
+    printf("value = {}\n", holder.grow_buf());
+}
+
+func test_named_mutex_ref() {
+    printf("=== named mutex ref ===\n");
+    var elem = MutexElem{value: 7};
+    let r = &mutex elem;
+    printf("call = {}\n", takes_mutex_elem(r));
+    printf("after = {}\n", r.read());
+}
+
+func test_mutex_array_ref_index() {
+    printf("=== mutex array ref index ===\n");
+    var items: Array<MutexElem> = [];
+    items.push(MutexElem{value: 9});
+    let r = &mutex items;
+    printf("item = {}\n", r[0].read());
+}
+
 // --- Multiple stores to same field ---
 
 func test_reassign() {
@@ -687,6 +738,26 @@ func test_generic_lifetime_bound() {
     printf("r = {}\n", *r);
 }
 
+struct ArrayElem {
+    value: int = 0;
+
+    mut func bump() {
+        this.value += 1;
+    }
+
+    func read() int {
+        return this.value;
+    }
+}
+
+func test_array_elem_method_ok() {
+    printf("=== array elem method ok ===\n");
+    var items: Array<ArrayElem> = [];
+    items.push(ArrayElem{value: 1});
+    items[0].bump();
+    printf("item = {}\n", items[0].read());
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -694,6 +765,9 @@ func main() {
     test_chain();
     test_pair();
     test_ref_to_param();
+    test_mutex_field_method();
+    test_named_mutex_ref();
+    test_mutex_array_ref_index();
     test_reassign();
     test_direct_init();
     test_local_order();
@@ -722,6 +796,7 @@ func main() {
     test_move_in_loop();
     test_move_ptr_block();
     test_generic_lifetime_bound();
+    test_array_elem_method_ok();
     test_branch_maybe_move();
     test_branch_guard_clause();
     test_branch_both_move();

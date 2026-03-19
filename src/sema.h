@@ -26,7 +26,7 @@ struct ChiTypeEnum;
 struct ChiLifetime;
 
 MAKE_ENUM(TypeKind, TypeSymbol, Fn, Void, Int, Float, Bool, Byte, Rune, String, Struct, Pointer,
-          Reference, MutRef, MoveRef, Array, FixedArray, Span, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
+          Reference, MutRef, MutexRef, MoveRef, Array, FixedArray, Span, Enum, EnumValue, Any, Subtype, Placeholder, Optional,
           FnLambda, Promise, Infer, Module, This, ThisType, Unknown, Bytes,
           Undefined, ZeroInit, Never, Unit, Tuple, Null)
 
@@ -360,6 +360,7 @@ struct ChiType {
         case TypeKind::Optional:
         case TypeKind::Reference:
         case TypeKind::MutRef:
+        case TypeKind::MutexRef:
         case TypeKind::MoveRef:
         case TypeKind::This:
             new (&data.pointer) ChiTypePointer();
@@ -396,6 +397,7 @@ struct ChiType {
         case TypeKind::Optional:
         case TypeKind::Reference:
         case TypeKind::MutRef:
+        case TypeKind::MutexRef:
         case TypeKind::This:
             data.pointer.~ChiTypePointer();
             break;
@@ -438,6 +440,7 @@ struct ChiType {
         case TypeKind::Optional:
         case TypeKind::Reference:
         case TypeKind::MutRef:
+        case TypeKind::MutexRef:
         case TypeKind::This:
             b->data.pointer = data.pointer;
             break;
@@ -463,11 +466,12 @@ struct ChiType {
 
     bool is_pointer_like() {
         return kind == TypeKind::Reference || kind == TypeKind::Pointer || kind == TypeKind::MutRef ||
-               kind == TypeKind::MoveRef;
+               kind == TypeKind::MutexRef || kind == TypeKind::MoveRef;
     }
 
     bool is_reference() {
-        return kind == TypeKind::Reference || kind == TypeKind::MutRef || kind == TypeKind::MoveRef;
+        return kind == TypeKind::Reference || kind == TypeKind::MutRef ||
+               kind == TypeKind::MutexRef || kind == TypeKind::MoveRef;
     }
 
     bool is_int() {
@@ -491,7 +495,8 @@ struct ChiType {
             return data.pointer.elem ? get_elem() : this;
         }
         // Recursively evaluate pointer/reference types
-        if (kind == TypeKind::Pointer || kind == TypeKind::Reference || kind == TypeKind::MutRef) {
+        if (kind == TypeKind::Pointer || kind == TypeKind::Reference || kind == TypeKind::MutRef ||
+            kind == TypeKind::MutexRef) {
             auto elem = get_elem();
             if (elem && elem->kind == TypeKind::This) {
                 // Element needs evaluation - this pointer type wraps an unevaluated This
@@ -513,6 +518,7 @@ struct ChiType {
         case TypeKind::Pointer:
         case TypeKind::Reference:
         case TypeKind::MutRef:
+        case TypeKind::MutexRef:
         case TypeKind::Bool:
         case TypeKind::Byte:
         case TypeKind::Rune:

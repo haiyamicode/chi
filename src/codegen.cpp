@@ -881,6 +881,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef: {
         auto &data = type->data.pointer;
         auto elem_type = compile_di_type(data.elem);
@@ -1816,6 +1817,7 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
                                             llvm::Type::getInt64Ty(llvm_ctx))};
         typedata_l = llvm::ConstantArray::get(tidata_type_l, word_consts);
     } else if ((final_type->kind == TypeKind::Reference || final_type->kind == TypeKind::MutRef ||
+                final_type->kind == TypeKind::MutexRef ||
                 final_type->kind == TypeKind::MoveRef || final_type->kind == TypeKind::Pointer ||
                 final_type->kind == TypeKind::Optional) &&
                final_type->get_elem()) {
@@ -4475,6 +4477,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         case TypeKind::Pointer:
         case TypeKind::Reference:
         case TypeKind::MutRef:
+        case TypeKind::MutexRef:
         case TypeKind::MoveRef: {
             auto elem = from_type->get_elem();
             if (elem && ChiTypeStruct::is_interface(elem)) {
@@ -4574,6 +4577,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef: {
         if (from_type->kind == TypeKind::Null) {
             auto t = compile_type(to_type);
@@ -4868,6 +4872,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::AND:
         case TokenType::MUTREF:
+        case TokenType::MUTEXREF:
         case TokenType::MOVEREF: {
             auto ref = compile_expr_ref(fn, data.op1);
             if (!ref.address) {
@@ -6201,6 +6206,7 @@ llvm::Value *Compiler::compile_comparator(Function *fn, ast::Node *expr, ChiType
     switch (type->kind) {
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Pointer: {
         return compile_comparator(fn, expr, type->get_elem());
@@ -7315,6 +7321,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         }
         case TokenType::AND:
         case TokenType::MUTREF:
+        case TokenType::MUTEXREF:
         case TokenType::MOVEREF:
         case TokenType::KW_MOVE:
         case TokenType::SUB:
@@ -7329,18 +7336,22 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
         auto &data = expr->data.index_expr;
         auto type = get_chitype(data.expr);
+        auto base_type = type;
+        if (base_type && base_type->is_reference()) {
+            base_type = base_type->get_elem();
+        }
         auto subscript = compile_expr(fn, data.subscript);
-        switch (type->kind) {
+        switch (base_type->kind) {
         case TypeKind::Pointer: {
             auto ptr = compile_expr(fn, data.expr);
             auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), 0);
             return RefValue::from_address(
-                builder.CreateGEP(compile_type(type->get_elem()), ptr, {subscript}));
+                builder.CreateGEP(compile_type(base_type->get_elem()), ptr, {subscript}));
         }
         case TypeKind::FixedArray: {
-            auto ref = compile_expr_ref(fn, data.expr);
-            auto arr_type_l = compile_type(type);
-            auto fa_size = type->data.fixed_array.size;
+            auto ptr = compile_dot_ptr(fn, data.expr);
+            auto arr_type_l = compile_type(base_type);
+            auto fa_size = base_type->data.fixed_array.size;
             // Bounds check
             auto size_val =
                 llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), fa_size);
@@ -7351,23 +7362,23 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             emit_dbg_location(expr);
             auto zero = llvm::ConstantInt::get(llvm::IntegerType::getInt32Ty(llvm_ctx), 0);
             return RefValue::from_address(
-                builder.CreateGEP(arr_type_l, ref.address, {zero, subscript}));
+                builder.CreateGEP(arr_type_l, ptr, {zero, subscript}));
         }
         case TypeKind::Struct:
         case TypeKind::Subtype:
         case TypeKind::Array:
         case TypeKind::Span: {
-            auto ref = compile_expr_ref(fn, data.expr);
             auto method = data.resolved_method;
             auto variant_type_id = resolve_variant_type_id(fn, data.expr->resolved_type);
             auto method_node = get_variant_member_node(method, variant_type_id);
             auto index_fn = get_fn(method_node);
-            auto call = builder.CreateCall(index_fn->llvm_fn, {ref.address, subscript});
+            auto ctn_ptr = compile_dot_ptr(fn, data.expr);
+            auto call = builder.CreateCall(index_fn->llvm_fn, {ctn_ptr, subscript});
             emit_dbg_location(expr);
             return RefValue::from_address(call);
         }
         default:
-            panic("not implemented: {}", PRINT_ENUM(type->kind));
+            panic("not implemented: {}", PRINT_ENUM(base_type->kind));
         }
     }
     case ast::NodeType::FnCallExpr: {
@@ -7674,6 +7685,7 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         if (node && node->type == ast::NodeType::UnaryOpExpr) {
             auto &unary = node->data.unary_op_expr;
             if (unary.op_type == TokenType::AND || unary.op_type == TokenType::MUTREF ||
+                unary.op_type == TokenType::MUTEXREF ||
                 unary.op_type == TokenType::MOVEREF) {
                 node = unary.op1;
             }
@@ -8276,7 +8288,8 @@ std::optional<TypeId> Compiler::resolve_variant_type_id(Function *fn, ChiType *t
 
     // Unwrap pointer-like and optional types
     while (type && (type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-                    type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef ||
+                    type->kind == TypeKind::MutRef || type->kind == TypeKind::MutexRef ||
+                    type->kind == TypeKind::MoveRef ||
                     type->kind == TypeKind::Optional)) {
         type = type->get_elem();
     }
@@ -11047,7 +11060,8 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
     auto key = get_resolver()->format_type_id(type);
     // *Interface, &Interface, Mut<Interface>, and bare Interface are all the same fat pointer type
     if ((type->kind == TypeKind::Pointer || type->kind == TypeKind::Reference ||
-         type->kind == TypeKind::MutRef || type->kind == TypeKind::MoveRef) &&
+         type->kind == TypeKind::MutRef || type->kind == TypeKind::MutexRef ||
+         type->kind == TypeKind::MoveRef) &&
         type->data.pointer.elem && ChiTypeStruct::is_interface(type->data.pointer.elem)) {
         key = "FatIFacePointer<" + get_resolver()->format_type_id(type->data.pointer.elem) + ">";
     }
@@ -11155,6 +11169,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef: {
         auto &data = type->data.pointer;
         // Interface references are fat pointers {data_ptr, vtable_ptr}

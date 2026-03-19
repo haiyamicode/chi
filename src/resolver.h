@@ -334,6 +334,7 @@ class Resolver {
     bool is_ref_mutable(ast::Node *node, ResolveScope &scope);
 
     bool is_struct_access_mutable(ChiType *type, ResolveScope *scope = nullptr);
+    bool is_struct_access_mutex(ChiType *type, ResolveScope *scope = nullptr);
 
     void check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type);
 
@@ -579,6 +580,12 @@ class Resolver {
     void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target);
     void add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
                                  bool is_ref = false);
+    void compute_exclusive_access_summaries(array<ast::Node *> &top_level_decls);
+    void apply_exclusive_access_effects(array<ast::Node *> &top_level_decls);
+    void apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
+                                             ast::Node *call_node);
+    void check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowState &flow,
+                                         bool check_sinks, bool check_invalidations);
     void resolve_fn_lifetimes(ast::Node *fn_node);
 
     // Move tracking: record a sink edge if the expression transfers ownership

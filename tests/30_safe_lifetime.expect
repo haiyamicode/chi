@@ -10,6 +10,13 @@ chain = 99
 sum = 10
 === ref to param ===
 ref = 55
+=== mutex field method ===
+value = 1
+=== named mutex ref ===
+call = 7
+after = 7
+=== mutex array ref index ===
+item = 9
 === reassign ===
 first = 1
 second = 2
@@ -100,6 +107,8 @@ Resource.delete(rho)
 after block
 === generic lifetime bound ===
 r = 42
+=== array elem method ok ===
+item = 2
 === branch maybe move ===
 consumed: 100
 Heavy.delete(100)

@@ -22,7 +22,7 @@ struct FixedVec<T> {
     ...data: Array<T>;
     max_size: uint32;
 
-    func push(item: T) {
+    mutex func push(item: T) {
         if this.length < this.max_size {
             this.data.push(item);
         }

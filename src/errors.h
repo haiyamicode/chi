@@ -77,6 +77,22 @@ constexpr auto INVALID_MUT_TYPE = "Mut can only be used for reference type, got 
 constexpr auto ASYNC_MUST_RETURN_PROMISE = "async function must return Promise<T>";
 constexpr auto MUTATING_METHOD_ON_IMMUTABLE_REFERENCE =
     "cannot access mutating method '{}' on immutable reference {}";
+constexpr auto MUTEX_METHOD_WITHOUT_MUTEX_ACCESS =
+    "cannot access mutex method '{}' without mutex access to {}";
+constexpr auto MUTEX_FUNCTION_VALUE_NOT_ALLOWED =
+    "mutex function '{}' cannot be used as a function value; call it directly instead";
+constexpr auto MUTEX_METHOD_VALUE_NOT_ALLOWED =
+    "mutex method '{}' cannot be used as a function value; call it directly instead";
+constexpr auto EXCLUSIVE_ACCESS_CALL_CONFLICT =
+    "cannot call this function: it requires exclusive access to '{}', but the same call also passes a borrow from it";
+constexpr auto EXCLUSIVE_ACCESS_CALL_NOTE =
+    "this call also requires exclusive access to the same array here";
+constexpr auto EXCLUSIVE_ACCESS_BORROW_NOTE =
+    "this borrow from the same array is also passed here";
+constexpr auto EXCLUSIVE_ACCESS_INVALIDATED_NOTE = "invalidated here: {}";
+constexpr auto EXCLUSIVE_ACCESS_BORROW_USED_AFTER =
+    "borrow used after exclusive access call on '{}'";
+constexpr auto EXCLUSIVE_ACCESS_BORROW_REFERENCED = "borrow referenced here";
 constexpr auto INVALID_THIS = "'this' keyword can only be used in a method scope";
 constexpr auto BARE_INTERFACE_TYPE =
     "interface type '{}' cannot be used directly; use '&{}' instead";

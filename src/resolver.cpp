@@ -21,6 +21,8 @@ using namespace cx;
 
 using ast::NodeType;
 
+static ChiType *get_struct_access_root_type(ast::Node *expr);
+
 // Check if a name matches a pattern (supports * wildcard)
 static bool matches_pattern(const std::string &name, const std::string &pattern) {
     size_t name_idx = 0;
@@ -419,6 +421,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef: {
         // Allow null to any pointer type
         if (from_type->kind == TypeKind::Null) {
@@ -426,8 +429,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         }
 
         // Handle pointer/reference conversions
-        if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
-            from_type->kind == TypeKind::MutRef || from_type->kind == TypeKind::MoveRef) {
+        if (from_type->is_pointer_like()) {
 
             // Explicit cast: allow any reference/pointer → pointer conversion regardless of element types
             if (is_explicit && to_type->kind == TypeKind::Pointer) {
@@ -442,29 +444,42 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                 bool elem_same = is_same_type(from_elem, to_elem);
 
                 if (elem_same) {
-                    // Pointer <-> Reference/MutRef conversions are allowed
+                    // Pointer <-> Reference-like conversions are allowed
                     if (from_type->kind == TypeKind::Pointer ||
                         to_type->kind == TypeKind::Pointer) {
                         return true;
                     }
-                    // MoveRef → Ref, MutRef, MoveRef are all allowed (ownership subsumes borrow)
+                    // MoveRef → Ref, MutRef, MutexRef, MoveRef are all allowed.
                     if (from_type->kind == TypeKind::MoveRef) {
                         return true;
                     }
-                    // MutRef -> Ref is allowed
+                    // MutexRef -> MutRef/Ref is allowed.
+                    if (from_type->kind == TypeKind::MutexRef &&
+                        (to_type->kind == TypeKind::MutRef ||
+                         to_type->kind == TypeKind::Reference)) {
+                        return true;
+                    }
+                    // MutRef -> Ref is allowed.
                     if (from_type->kind == TypeKind::MutRef &&
                         to_type->kind == TypeKind::Reference) {
                         return true;
                     }
-                    // Ref -> MutRef is NOT allowed
+                    // Ref -> MutRef/MutexRef is NOT allowed.
                     if (from_type->kind == TypeKind::Reference &&
-                        to_type->kind == TypeKind::MutRef) {
+                        (to_type->kind == TypeKind::MutRef ||
+                         to_type->kind == TypeKind::MutexRef)) {
                         return false;
                     }
-                    // Ref/MutRef -> MoveRef is NOT allowed (can't create ownership from borrow)
+                    // MutRef -> MutexRef is NOT allowed.
+                    if (from_type->kind == TypeKind::MutRef &&
+                        to_type->kind == TypeKind::MutexRef) {
+                        return false;
+                    }
+                    // Ref/MutRef/MutexRef -> MoveRef is NOT allowed.
                     if (to_type->kind == TypeKind::MoveRef &&
                         (from_type->kind == TypeKind::Reference ||
-                         from_type->kind == TypeKind::MutRef)) {
+                         from_type->kind == TypeKind::MutRef ||
+                         from_type->kind == TypeKind::MutexRef)) {
                         return false;
                     }
                     // Same kind is allowed
@@ -494,8 +509,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         // &Concrete → &Interface conversion
         auto to_elem = to_type->get_elem();
         if (to_elem && ChiTypeStruct::is_interface(to_elem)) {
-            if (from_type->kind == TypeKind::Pointer || from_type->kind == TypeKind::Reference ||
-                from_type->kind == TypeKind::MutRef || from_type->kind == TypeKind::MoveRef) {
+            if (from_type->is_pointer_like()) {
                 auto from_elem = from_type->get_elem();
                 if (from_elem && from_elem->kind == TypeKind::Subtype)
                     from_elem = resolve_subtype(from_elem);
@@ -654,6 +668,16 @@ ChiType *Resolver::to_value_type(ChiType *type) {
 }
 
 static string build_narrowing_path(ast::Node *expr);
+static string node_label(ast::Node *n);
+static ast::FnProto *get_decl_fn_proto(ast::Node *decl);
+static ChiLifetime *get_first_ref_lifetime(ChiType *type);
+static bool type_has_lifetime_kind(ChiType *type, LifetimeKind kind);
+static bool is_value_borrowing_type(Resolver *resolver, ChiType *type);
+static ChiLifetime *get_param_effective_lifetime(ast::Node *param_node, ChiType *param_type);
+
+static bool is_exclusive_access_borrow_param(ChiType *type, ast::Node *param_node) {
+    return type && type->kind == TypeKind::MutexRef;
+}
 
 // Does lifetime 'a outlive 'b? True if a == b or 'a: 'b was declared (transitively).
 static bool lifetime_outlives(ChiLifetime *a, ChiLifetime *b) {
@@ -756,6 +780,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // sixth pass: resolve any new generic subtypes created during body resolution
         m_ctx->generics.resolve_pending(this);
+
+        // effect-summary pass: propagate exclusive-access requirements through the call graph
+        compute_exclusive_access_summaries(data.top_level_decls);
+        apply_exclusive_access_effects(data.top_level_decls);
 
         // final pass: finalize placeholder lambdas
         for (auto decl : data.top_level_decls) {
@@ -1031,7 +1059,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 fresh->data.pointer.lifetimes.add(lt);
                 param_type = fresh;
                 param->resolved_type = param_type;
-            } else if (param_type && !param_type->is_reference() && is_borrowing_type(param_type)) {
+            } else if (is_value_borrowing_type(this, param_type)) {
                 // Borrowing value params get lifetimes so borrows flow through calls.
                 ChiLifetime *lt = nullptr;
                 // Check for 'static lifetime on func types: func<'static>
@@ -1312,10 +1340,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (scope.parent_fn_node && node->token) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
             fn_def.flow.terminal_last_use[data.decl] = node->token->pos.offset;
+            fn_def.flow.terminal_last_use_node[data.decl] = node;
         }
 
         // Convert function to lambda when used as value (not in call context)
         if (data.decl->type == NodeType::FnDef && !scope.is_fn_call && type->kind == TypeKind::Fn) {
+            if (data.decl->declspec().is_mutex()) {
+                error(node, errors::MUTEX_FUNCTION_VALUE_NOT_ALLOWED, data.decl->name);
+                return type;
+            }
             type = get_lambda_for_fn(type);
         }
 
@@ -1805,7 +1838,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
-        if (data.op_type == TokenType::MUTREF) {
+        if (data.op_type == TokenType::MUTREF || data.op_type == TokenType::MUTEXREF) {
             scope = scope.set_is_lhs(true);
         }
         // For unary arithmetic operators, don't propagate value_type context to operand
@@ -1933,7 +1966,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             break;
         }
         case TokenType::AND:
-        case TokenType::MUTREF: {
+        case TokenType::MUTREF:
+        case TokenType::MUTEXREF: {
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
@@ -1955,9 +1989,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     decl->escape.escaped = decl->can_escape();
                 }
             }
-            return get_pointer_type(t->eval(), data.op_type == TokenType::MUTREF
-                                                   ? TypeKind::MutRef
-                                                   : TypeKind::Reference);
+            return get_pointer_type(t->eval(),
+                                    data.op_type == TokenType::MUTREF
+                                        ? TypeKind::MutRef
+                                    : data.op_type == TokenType::MUTEXREF
+                                        ? TypeKind::MutexRef
+                                        : TypeKind::Reference);
         }
         case TokenType::MOVEREF: {
             if (!is_addressable(data.op1)) {
@@ -2275,8 +2312,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto expr_type = resolve(data.expr, scope);
         if (expr_type) {
             // The thrown value must be a reference to a struct implementing Error
-            if (expr_type->kind != TypeKind::Reference && expr_type->kind != TypeKind::MutRef &&
-                expr_type->kind != TypeKind::MoveRef) {
+            if (!expr_type->is_reference()) {
                 error(data.expr, errors::THROW_NOT_REFERENCE);
             } else {
                 auto elem = expr_type->get_elem();
@@ -2578,9 +2614,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
-        auto member =
-            get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs, &scope,
-                                     expr_type);
+        auto access_check_type = get_struct_access_root_type(data.expr);
+        if (!access_check_type) {
+            access_check_type = expr_type;
+        }
+        auto member = get_struct_member_access(node, stype, field_name, is_internal, scope.is_lhs,
+                                               &scope, access_check_type);
         if (!member) {
             return nullptr;
         }
@@ -2623,6 +2662,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Only convert to lambda if we're NOT in a function reference context
         if (member->is_method() && member->resolved_type &&
             member->resolved_type->kind == TypeKind::Fn && !scope.is_fn_call) {
+            if (member->node && member->node->declspec().is_mutex()) {
+                error(node, errors::MUTEX_METHOD_VALUE_NOT_ALLOWED, member->get_name());
+                return member->resolved_type;
+            }
             // Mark this DotExpr as needing method-to-lambda conversion
             data.resolved_dot_kind = DotKind::MethodToLambda;
 
@@ -2795,6 +2838,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 bool is_heap_type = result_type->is_raw_pointer() ||
                                     result_type->kind == TypeKind::MutRef ||
+                                    result_type->kind == TypeKind::MutexRef ||
                                     result_type->kind == TypeKind::MoveRef;
                 if (data.is_new != is_heap_type) {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
@@ -3080,6 +3124,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::FnCallExpr: {
         auto &data = node->data.fn_call_expr;
+        if (scope.parent_fn_node && !scope.is_unsafe_block) {
+            scope.parent_fn_node->data.fn_def.call_sites.add(node);
+        }
         auto fn_ref_scope = scope.set_is_lhs(false).set_is_fn_call(true);
         auto fn_type = resolve(data.fn_ref_expr, fn_ref_scope);
         if (!fn_type) {
@@ -3121,14 +3168,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // 'static lifetime params: check callee's param borrow_lifetimes for 'static.
         // Void calls don't trigger add_call_borrow_edges, so we check here.
         if (scope.parent_fn_node && !scope.is_unsafe_block) {
-            ast::FnProto *callee_proto = nullptr;
-            if (data.generated_fn) {
-                callee_proto = &data.generated_fn->data.generated_fn.fn_proto->data.fn_proto;
-            } else if (fn_decl && fn_decl->type == NodeType::FnDef) {
-                callee_proto = &fn_decl->data.fn_def.fn_proto->data.fn_proto;
-            } else if (fn_decl && fn_decl->type == NodeType::GeneratedFn) {
-                callee_proto = &fn_decl->data.generated_fn.fn_proto->data.fn_proto;
-            }
+            ast::FnProto *callee_proto =
+                data.generated_fn ? get_decl_fn_proto(data.generated_fn) : get_decl_fn_proto(fn_decl);
             if (callee_proto) {
                 auto &fn_def = scope.parent_fn_node->data.fn_def;
                 for (size_t i = 0; i < callee_proto->params.len && i < data.args.len; i++) {
@@ -3157,16 +3198,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     for (size_t i = 0; i < callee_params.len && i < data.args.len; i++) {
                         auto *pt = callee_params[i]->resolved_type;
-                        if (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0) {
-                            // Only add edge if the param has a 'this lifetime
-                            bool has_this_lifetime = false;
-                            for (auto *lt : pt->data.pointer.lifetimes) {
-                                if (lt->kind == LifetimeKind::This) {
-                                    has_this_lifetime = true;
-                                    break;
-                                }
-                            }
-                            if (!has_this_lifetime) continue;
+                        if (type_has_lifetime_kind(pt, LifetimeKind::This)) {
                             auto *arg_decl = find_root_decl(data.args[i]);
                             if (arg_decl) {
                                 fn_def.add_ref_edge(receiver_decl, arg_decl);
@@ -4196,19 +4228,28 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         case TypeKind::FixedArray:
             expected_index_type = get_system_types()->uint32;
             break;
+        case TypeKind::Reference:
+        case TypeKind::MutRef:
+        case TypeKind::MutexRef:
+        case TypeKind::MoveRef:
         case TypeKind::This:
         case TypeKind::Struct:
         case TypeKind::Subtype:
         case TypeKind::Array:
         case TypeKind::Span: {
+            auto base_type = expr_type;
+            if (base_type && base_type->is_reference()) {
+                base_type = base_type->get_elem();
+            }
             // Block writes on immutable spans
-            if (scope.is_lhs && expr_type->kind == TypeKind::Span && !expr_type->data.span.is_mut) {
+            if (scope.is_lhs && base_type && base_type->kind == TypeKind::Span &&
+                !base_type->data.span.is_mut) {
                 error(node, errors::CANNOT_WRITE_IMMUTABLE_SPAN,
-                      format_type_display(expr_type),
-                      format_type_display(expr_type->data.span.elem));
+                      format_type_display(base_type),
+                      format_type_display(base_type->data.span.elem));
                 return nullptr;
             }
-            auto struct_ = resolve_struct_type(expr_type);
+            auto struct_ = resolve_struct_type(base_type);
             // LHS (write): require IndexMut
             // RHS (read): prefer Index, fall back to IndexMut
             const char *method_name = nullptr;
@@ -4455,6 +4496,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         case ast::SigilKind::MutRef:
                             value_type = get_pointer_type(value_type, TypeKind::MutRef);
                             break;
+                        case ast::SigilKind::MutexRef:
+                            value_type = get_pointer_type(value_type, TypeKind::MutexRef);
+                            break;
                         default:
                             break;
                         }
@@ -4491,6 +4535,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             break;
                         case ast::SigilKind::MutRef:
                             value_type = get_pointer_type(value_type, TypeKind::MutRef);
+                            break;
+                        case ast::SigilKind::MutexRef:
+                            value_type = get_pointer_type(value_type, TypeKind::MutexRef);
                             break;
                         default:
                             break;
@@ -5254,6 +5301,7 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
     case TypeKind::Reference:
     case TypeKind::Pointer:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
         return resolve_comparator(type->get_elem(), scope);
     default:
@@ -5543,6 +5591,8 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "&" + format_type(type->get_elem(), for_display);
     case TypeKind::MutRef:
         return "&mut " + format_type(type->get_elem(), for_display);
+    case TypeKind::MutexRef:
+        return "&mutex " + format_type(type->get_elem(), for_display);
     case TypeKind::MoveRef:
         return "&move " + format_type(type->get_elem(), for_display);
     case TypeKind::Optional:
@@ -5764,6 +5814,229 @@ string Resolver::resolve_term_string(ast::Node *term) {
         panic("unhandled term node: {}", PRINT_ENUM(term->type));
     }
     return "";
+}
+
+static void add_unique_node(array<ast::Node *> &nodes, ast::Node *node) {
+    if (!node) {
+        return;
+    }
+    for (auto *existing : nodes) {
+        if (existing == node) {
+            return;
+        }
+    }
+    nodes.add(node);
+}
+
+static void append_leaf_borrow_roots(ast::FlowState &flow, ast::Node *source,
+                                     array<ast::Node *> &out,
+                                     bool fallback_to_source = true) {
+    if (!source) {
+        return;
+    }
+    auto *deps = flow.ref_edges.get(source);
+    size_t offset = flow.current_edge_offset(source);
+    if (!deps || deps->len <= offset) {
+        if (fallback_to_source) {
+            add_unique_node(out, source);
+        }
+        return;
+    }
+
+    array<ast::Node *> stack;
+    map<ast::Node *, bool> visited;
+    for (size_t i = offset; i < deps->len; i++) {
+        stack.add(deps->items[i]);
+    }
+
+    while (stack.len > 0) {
+        auto *node = stack.last();
+        stack.len--;
+        if (visited.has_key(node)) {
+            continue;
+        }
+        visited[node] = true;
+        auto *next = flow.ref_edges.get(node);
+        size_t next_offset = flow.current_edge_offset(node);
+        if (next && next->len > next_offset) {
+            for (size_t i = next_offset; i < next->len; i++) {
+                stack.add(next->items[i]);
+            }
+        } else {
+            add_unique_node(out, node);
+        }
+    }
+}
+
+static void collect_expr_borrow_roots(Resolver *resolver, ast::FlowState &flow, ast::Node *expr,
+                                      array<ast::Node *> &out) {
+    if (!expr) {
+        return;
+    }
+    if (auto *root = resolver->find_root_decl(expr)) {
+        append_leaf_borrow_roots(flow, root, out);
+        return;
+    }
+    switch (expr->type) {
+    case ast::NodeType::ParenExpr:
+        collect_expr_borrow_roots(resolver, flow, expr->data.child_expr, out);
+        break;
+    case ast::NodeType::TryExpr:
+        collect_expr_borrow_roots(resolver, flow, expr->data.try_expr.expr, out);
+        break;
+    case ast::NodeType::CastExpr:
+        collect_expr_borrow_roots(resolver, flow, expr->data.cast_expr.expr, out);
+        break;
+    default:
+        append_leaf_borrow_roots(flow, expr, out, false);
+        break;
+    }
+}
+
+static string describe_exclusive_access_source(ast::Node *n);
+
+static ast::Node *get_call_decl(ast::FnCallExpr &call) {
+    if (call.generated_fn) {
+        return call.generated_fn;
+    }
+    if (!call.fn_ref_expr) {
+        return nullptr;
+    }
+    if (call.fn_ref_expr->type == ast::NodeType::Identifier) {
+        return call.fn_ref_expr->data.identifier.decl;
+    }
+    if (call.fn_ref_expr->type == ast::NodeType::DotExpr) {
+        return call.fn_ref_expr->data.dot_expr.resolved_decl;
+    }
+    return nullptr;
+}
+
+static ast::FnProto *get_decl_fn_proto(ast::Node *decl) {
+    if (!decl) {
+        return nullptr;
+    }
+    if (decl->type == ast::NodeType::FnDef) {
+        return &decl->data.fn_def.fn_proto->data.fn_proto;
+    }
+    if (decl->type == ast::NodeType::GeneratedFn) {
+        return &decl->data.generated_fn.fn_proto->data.fn_proto;
+    }
+    return nullptr;
+}
+
+static ChiLifetime *get_first_ref_lifetime(ChiType *type) {
+    if (!type || !type->is_reference() || type->data.pointer.lifetimes.len == 0) {
+        return nullptr;
+    }
+    return type->data.pointer.lifetimes[0];
+}
+
+static bool type_has_lifetime_kind(ChiType *type, LifetimeKind kind) {
+    if (!type || !type->is_reference()) {
+        return false;
+    }
+    for (auto *lt : type->data.pointer.lifetimes) {
+        if (lt && lt->kind == kind) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool is_value_borrowing_type(Resolver *resolver, ChiType *type) {
+    return resolver && type && !type->is_reference() && resolver->is_borrowing_type(type);
+}
+
+static ChiLifetime *get_param_effective_lifetime(ast::Node *param_node, ChiType *param_type) {
+    if (auto *lt = get_first_ref_lifetime(param_type)) {
+        return lt;
+    }
+    if (param_node && param_node->type == ast::NodeType::ParamDecl) {
+        return param_node->data.param_decl.borrow_lifetime;
+    }
+    return nullptr;
+}
+
+static ast::FnProto *get_call_effect_proto(ast::FnCallExpr &call) {
+    auto *decl = get_call_decl(call);
+    if (!decl) {
+        return nullptr;
+    }
+    if (decl->type == ast::NodeType::GeneratedFn) {
+        auto *original = decl->data.generated_fn.original_fn;
+        if (original && original->type == ast::NodeType::FnDef) {
+            return &original->data.fn_def.fn_proto->data.fn_proto;
+        }
+    }
+    if (decl->type == ast::NodeType::VarDecl) {
+        auto *expr = decl->data.var_decl.expr;
+        if (expr && expr->type == ast::NodeType::FnDef) {
+            return &expr->data.fn_def.fn_proto->data.fn_proto;
+        }
+    }
+    return get_decl_fn_proto(decl);
+}
+
+static bool call_has_instance_receiver(ast::FnCallExpr &call, ast::FnProto *proto) {
+    if (!proto || call.fn_ref_expr->type != ast::NodeType::DotExpr) {
+        return false;
+    }
+    auto *fn_type = call.fn_ref_expr->resolved_type;
+    if (!fn_type) {
+        return false;
+    }
+    fn_type = fn_type->eval();
+    if (!fn_type || fn_type->kind == TypeKind::FnLambda) {
+        fn_type = fn_type && fn_type->kind == TypeKind::FnLambda ? fn_type->data.fn_lambda.fn : fn_type;
+    }
+    return fn_type && fn_type->kind == TypeKind::Fn && fn_type->data.fn.container_ref &&
+           !fn_type->data.fn.is_static;
+}
+
+static void collect_fn_nodes_from_decl(ast::Node *decl, array<ast::Node *> &out) {
+    if (!decl) {
+        return;
+    }
+    if (decl->type == ast::NodeType::FnDef) {
+        add_unique_node(out, decl);
+        if (decl->data.fn_def.body) {
+            visit_async_children(decl->data.fn_def.body, true, [&](ast::Node *child) {
+                collect_fn_nodes_from_decl(child, out);
+                return false;
+            });
+        }
+        return;
+    }
+    if (decl->type == ast::NodeType::StructDecl) {
+        for (auto member : decl->data.struct_decl.members) {
+            collect_fn_nodes_from_decl(member, out);
+        }
+        return;
+    }
+    if (decl->type == ast::NodeType::ImplementBlock) {
+        for (auto impl_member : decl->data.implement_block.members) {
+            collect_fn_nodes_from_decl(impl_member, out);
+        }
+        return;
+    }
+    visit_async_children(decl, true, [&](ast::Node *child) {
+        collect_fn_nodes_from_decl(child, out);
+        return false;
+    });
+}
+
+static bool roots_overlap(array<ast::Node *> &a, array<ast::Node *> &b, ast::Node **shared = nullptr) {
+    for (auto *lhs : a) {
+        for (auto *rhs : b) {
+            if (lhs == rhs) {
+                if (shared) {
+                    *shared = lhs;
+                }
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 IntrinsicSymbol Resolver::resolve_intrinsic_symbol(ast::Node *node) {
@@ -6053,6 +6326,7 @@ bool Resolver::is_borrowing_type(ChiType *type) {
     switch (type->kind) {
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
         return true;
     case TypeKind::Optional:
@@ -6339,6 +6613,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Optional: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
@@ -6834,6 +7109,7 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Optional:
     case TypeKind::Array:
@@ -7050,6 +7326,7 @@ bool Resolver::is_struct_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
         return false;
     default:
@@ -7162,6 +7439,39 @@ bool Resolver::is_struct_access_mutable(ChiType *type, ResolveScope *scope) {
     return true;
 }
 
+bool Resolver::is_struct_access_mutex(ChiType *type, ResolveScope *scope) {
+    auto sty = type;
+    if (sty->kind == TypeKind::This) {
+        if (scope && scope->parent_fn_node)
+            return scope->parent_fn_node->declspec().is_mutex();
+        return false;
+    }
+    if (sty->is_pointer_like()) {
+        return sty->kind == TypeKind::MutexRef || sty->kind == TypeKind::MoveRef;
+    }
+    return true;
+}
+
+static ChiType *get_struct_access_root_type(ast::Node *expr) {
+    if (!expr) {
+        return nullptr;
+    }
+    switch (expr->type) {
+    case ast::NodeType::DotExpr: {
+        auto *member = expr->data.dot_expr.resolved_struct_member;
+        if (member && member->is_field()) {
+            return get_struct_access_root_type(expr->data.dot_expr.expr);
+        }
+        return expr->resolved_type;
+    }
+    case ast::NodeType::ParenExpr:
+    case ast::NodeType::PackExpansion:
+        return get_struct_access_root_type(expr->data.child_expr);
+    default:
+        return expr->resolved_type;
+    }
+}
+
 void Resolver::add_cleanup_var(ast::Block *block, ast::Node *var) {
     if (!block || !var) {
         return;
@@ -7183,10 +7493,10 @@ void Resolver::add_fn_body_param_cleanups(ast::Node *fn_node, ast::Node *body) {
     bool *has_cleanup = nullptr;
 
     if (fn_node->type == NodeType::FnDef) {
-        proto = &fn_node->data.fn_def.fn_proto->data.fn_proto;
+        proto = get_decl_fn_proto(fn_node);
         has_cleanup = &fn_node->data.fn_def.has_cleanup;
     } else if (fn_node->type == NodeType::GeneratedFn) {
-        proto = &fn_node->data.generated_fn.fn_proto->data.fn_proto;
+        proto = get_decl_fn_proto(fn_node);
     } else {
         return;
     }
@@ -7215,6 +7525,7 @@ ChiType *Resolver::get_enum_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
+    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Optional:
         return get_enum_type(current->get_elem());
@@ -7381,6 +7692,7 @@ void Resolver::record_specialized_fn_env(ast::Node *node,
         case TypeKind::Pointer:
         case TypeKind::Reference:
         case TypeKind::MutRef:
+        case TypeKind::MutexRef:
         case TypeKind::MoveRef:
         case TypeKind::Optional:
         case TypeKind::Array:
@@ -7670,9 +7982,16 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
     }
 
     if (field_member->is_method()) {
-        auto is_mutable = field_member->node->declspec_ref().is_mutable();
+        auto &member_spec = field_member->node->declspec_ref();
+        auto is_mutable = member_spec.has_flag(ast::DECL_MUTABLE);
+        auto is_mutex = member_spec.is_mutex();
         if (is_mutable && !is_struct_access_mutable(mut_check_type, scope)) {
             error(node, errors::MUTATING_METHOD_ON_IMMUTABLE_REFERENCE, field_name,
+                  format_type_display(struct_type));
+            return nullptr;
+        }
+        if (is_mutex && !is_struct_access_mutex(mut_check_type, scope)) {
+            error(node, errors::MUTEX_METHOD_WITHOUT_MUTEX_ACCESS, field_name,
                   format_type_display(struct_type));
             return nullptr;
         }
@@ -8281,6 +8600,8 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
             auto field_type = member->resolved_type;
             var->resolved_type = field_data.sigil == ast::SigilKind::MutRef
                                      ? get_pointer_type(field_type, TypeKind::MutRef)
+                                 : field_data.sigil == ast::SigilKind::MutexRef
+                                     ? get_pointer_type(field_type, TypeKind::MutexRef)
                                  : field_data.sigil == ast::SigilKind::Reference
                                      ? get_pointer_type(field_type, TypeKind::Reference)
                                      : field_type;
@@ -8371,6 +8692,8 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
                             ? get_array_type(elem_type)
                         : field_data.sigil == ast::SigilKind::MutRef
                             ? get_pointer_type(elem_type, TypeKind::MutRef)
+                        : field_data.sigil == ast::SigilKind::MutexRef
+                            ? get_pointer_type(elem_type, TypeKind::MutexRef)
                         : field_data.sigil == ast::SigilKind::Reference
                             ? get_pointer_type(elem_type, TypeKind::Reference)
                             : elem_type;
@@ -8501,6 +8824,8 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
         var->parent_fn = scope.parent_fn_node;
         auto var_type = field_data.sigil == ast::SigilKind::MutRef
                             ? get_pointer_type(elem_type, TypeKind::MutRef)
+                        : field_data.sigil == ast::SigilKind::MutexRef
+                            ? get_pointer_type(elem_type, TypeKind::MutexRef)
                         : field_data.sigil == ast::SigilKind::Reference
                             ? get_pointer_type(elem_type, TypeKind::Reference)
                             : elem_type;
@@ -9116,9 +9441,7 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
             return is_same_type(a_fn.return_type, b_fn.return_type);
         }
         // Structural comparison for pointer-like types
-        if (a->kind == TypeKind::Pointer || a->kind == TypeKind::Reference ||
-            a->kind == TypeKind::MutRef || a->kind == TypeKind::MoveRef ||
-            a->kind == TypeKind::Optional) {
+        if (a->is_pointer_like() || a->kind == TypeKind::Optional) {
             return is_same_type(a->get_elem(), b->get_elem());
         }
         // Structural comparison for fixed arrays
@@ -9766,6 +10089,8 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
         return TypeKind::Reference;
     case ast::SigilKind::MutRef:
         return TypeKind::MutRef;
+    case ast::SigilKind::MutexRef:
+        return TypeKind::MutexRef;
     case ast::SigilKind::Move:
         return TypeKind::MoveRef;
     case ast::SigilKind::Optional:
@@ -9813,12 +10138,7 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
         return;
     auto &fn = fn_type->data.fn;
 
-    ast::FnProto *proto = nullptr;
-    if (fn_node->type == NodeType::FnDef) {
-        proto = &fn_node->data.fn_def.fn_proto->data.fn_proto;
-    } else if (fn_node->type == NodeType::GeneratedFn) {
-        proto = &fn_node->data.generated_fn.fn_proto->data.fn_proto;
-    }
+    ast::FnProto *proto = get_decl_fn_proto(fn_node);
     if (!proto)
         return;
 
@@ -9826,14 +10146,11 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     for (size_t i = 0; i < fn.params.len; i++) {
         auto *pt = fn.params[i];
         ChiLifetime *lt = nullptr;
-        if (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0) {
-            lt = pt->data.pointer.lifetimes[0];
-        } else if (i < proto->params.len && proto->params[i]->data.param_decl.borrow_lifetime) {
-            // Reuse borrow_lifetime set during FnProto resolution
-            lt = proto->params[i]->data.param_decl.borrow_lifetime;
-        } else if (pt && !pt->is_reference() && is_borrowing_type(pt)) {
+        auto *param_node = (i < proto->params.len) ? proto->params[i] : nullptr;
+        if (auto *existing_lt = get_param_effective_lifetime(param_node, pt)) {
+            lt = existing_lt;
+        } else if (is_value_borrowing_type(this, pt)) {
             // Borrowing value params resolved after struct members (e.g. Holder with ref fields)
-            auto *param_node = (i < proto->params.len) ? proto->params[i] : nullptr;
             string name = param_node ? string(param_node->name) : "fn_param";
             lt = new ChiLifetime{name, LifetimeKind::Param, param_node, nullptr};
             if (param_node)
@@ -9844,8 +10161,8 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
 
     // Extract return lifetime
     auto *ret = fn.return_type;
-    if (ret && ret->is_reference() && ret->data.pointer.lifetimes.len > 0) {
-        proto->resolved_return_lifetime = ret->data.pointer.lifetimes[0];
+    if (auto *ret_lt = get_first_ref_lifetime(ret)) {
+        proto->resolved_return_lifetime = ret_lt;
     } else if (ret && is_borrowing_type(ret)) {
         // Struct/value return containing references: elide to min(all ref params)
         array<ChiLifetime *> all_ref_lts;
@@ -9873,24 +10190,227 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     }
 }
 
-void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target) {
-    // Find the callee's FnProto to read resolved lifetime data (direct calls only)
-    ast::FnProto *proto = nullptr;
-    if (call.generated_fn) {
-        proto = &call.generated_fn->data.generated_fn.fn_proto->data.fn_proto;
-    } else {
-        ast::Node *decl = nullptr;
-        if (call.fn_ref_expr->type == NodeType::Identifier) {
-            decl = call.fn_ref_expr->data.identifier.decl;
-        } else if (call.fn_ref_expr->type == NodeType::DotExpr) {
-            decl = call.fn_ref_expr->data.dot_expr.resolved_decl;
+void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_decls) {
+    array<ast::Node *> fns;
+    for (auto decl : top_level_decls) {
+        collect_fn_nodes_from_decl(decl, fns);
+    }
+
+    for (auto *fn_node : fns) {
+        if (fn_node->type != ast::NodeType::FnDef) {
+            continue;
         }
-        if (decl && decl->type == NodeType::FnDef) {
-            proto = &decl->data.fn_def.fn_proto->data.fn_proto;
-        } else if (decl && decl->type == NodeType::GeneratedFn) {
-            proto = &decl->data.generated_fn.fn_proto->data.fn_proto;
+        auto &fn_def = fn_node->data.fn_def;
+        auto *proto_node = fn_def.fn_proto;
+        if (!proto_node) {
+            continue;
+        }
+        auto &proto = proto_node->data.fn_proto;
+        proto.requires_exclusive_capture_roots = {};
+        proto.requires_exclusive_capture_sources = {};
+    }
+
+    for (int fi = (int)fns.len - 1; fi >= 0; fi--) {
+        auto *fn_node = fns[fi];
+        if (fn_node->type != ast::NodeType::FnDef) {
+            continue;
+        }
+        auto &fn_def = fn_node->data.fn_def;
+        auto *proto_node = fn_def.fn_proto;
+        if (!proto_node) {
+            continue;
+        }
+        auto &proto = proto_node->data.fn_proto;
+
+        auto add_capture_root = [&](ast::Node *root, ast::Node *source) {
+            if (!root) {
+                return;
+            }
+            if (!fn_def.capture_map.has_key(root)) {
+                return;
+            }
+            for (size_t i = 0; i < proto.requires_exclusive_capture_roots.len; i++) {
+                if (proto.requires_exclusive_capture_roots[i] == root) {
+                    return;
+                }
+            }
+            proto.requires_exclusive_capture_roots.add(root);
+            proto.requires_exclusive_capture_sources.add(source);
+        };
+
+        auto add_capture_roots_from_expr = [&](ast::Node *expr, ast::Node *source) {
+            array<ast::Node *> roots;
+            collect_expr_borrow_roots(this, fn_def.flow, expr, roots);
+            for (auto *root : roots) {
+                add_capture_root(root, source);
+            }
+        };
+
+        for (auto *call_node : fn_def.call_sites) {
+            auto &call = call_node->data.fn_call_expr;
+            auto *callee_proto = get_call_effect_proto(call);
+            if (!callee_proto) {
+                continue;
+            }
+            auto *callee_decl = get_call_decl(call);
+
+            auto explicit_exclusive_this =
+                call.fn_ref_expr->type == ast::NodeType::DotExpr && callee_decl &&
+                callee_decl->type == ast::NodeType::FnDef && callee_decl->data.fn_def.decl_spec &&
+                callee_decl->data.fn_def.decl_spec->is_mutex();
+
+            if (explicit_exclusive_this) {
+                add_capture_roots_from_expr(call.fn_ref_expr->data.dot_expr.expr, call_node);
+            }
+
+            auto *fn_type = call.fn_ref_expr->resolved_type;
+            if (fn_type && fn_type->kind == TypeKind::FnLambda) {
+                fn_type = fn_type->data.fn_lambda.fn;
+            }
+            for (size_t i = 0; i < call.args.len; i++) {
+                auto *param_type =
+                    (fn_type && fn_type->kind == TypeKind::Fn) ? fn_type->data.fn.get_param_at(i) : nullptr;
+                auto *param_node = i < callee_proto->params.len ? callee_proto->params[i] : nullptr;
+                if (is_exclusive_access_borrow_param(param_type, param_node)) {
+                    add_capture_roots_from_expr(call.args[i], call_node);
+                }
+            }
+
+            for (size_t i = 0; i < callee_proto->requires_exclusive_capture_roots.len; i++) {
+                add_capture_root(
+                    callee_proto->requires_exclusive_capture_roots[i],
+                    i < callee_proto->requires_exclusive_capture_sources.len &&
+                            callee_proto->requires_exclusive_capture_sources[i]
+                        ? callee_proto->requires_exclusive_capture_sources[i]
+                        : call_node);
+            }
         }
     }
+}
+
+void Resolver::apply_exclusive_access_effects(array<ast::Node *> &top_level_decls) {
+    array<ast::Node *> fns;
+    for (auto decl : top_level_decls) {
+        collect_fn_nodes_from_decl(decl, fns);
+    }
+
+    for (auto *fn_node : fns) {
+        if (fn_node->type != ast::NodeType::FnDef) {
+            continue;
+        }
+        auto &fn_def = fn_node->data.fn_def;
+        for (auto *call_node : fn_def.call_sites) {
+            apply_call_exclusive_access_effects(fn_def, call_node->data.fn_call_expr, call_node);
+        }
+        check_terminal_flow_constraints(&fn_def, fn_def.flow, false, true);
+    }
+}
+
+void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
+                                                   ast::Node *call_node) {
+    struct CallSlot {
+        ast::Node *expr = nullptr;
+        array<ast::Node *> roots = {};
+        bool is_borrow = false;
+        bool is_exclusive = false;
+        ast::Node *exclusive_source = nullptr;
+    };
+    auto *callee_proto = get_call_effect_proto(call);
+    if (!callee_proto) {
+        return;
+    }
+
+    array<CallSlot> slots;
+
+    if (call_has_instance_receiver(call, callee_proto)) {
+        CallSlot slot;
+        slot.expr = call.fn_ref_expr->data.dot_expr.expr;
+        collect_expr_borrow_roots(this, fn_def.flow, slot.expr, slot.roots);
+        slot.is_borrow = true;
+        auto *callee_decl = get_call_decl(call);
+        slot.is_exclusive = callee_decl && callee_decl->type == ast::NodeType::FnDef &&
+                            callee_decl->data.fn_def.decl_spec &&
+                            callee_decl->data.fn_def.decl_spec->is_mutex();
+        slot.exclusive_source = slot.is_exclusive ? callee_decl : nullptr;
+        slots.add(slot);
+    }
+
+    auto *fn_type = call.fn_ref_expr->resolved_type;
+    if (fn_type && fn_type->kind == TypeKind::FnLambda) {
+        fn_type = fn_type->data.fn_lambda.fn;
+    }
+
+    for (size_t i = 0; i < call.args.len; i++) {
+        CallSlot slot;
+        slot.expr = call.args[i];
+        collect_expr_borrow_roots(this, fn_def.flow, slot.expr, slot.roots);
+        auto *param_type =
+            (fn_type && fn_type->kind == TypeKind::Fn) ? fn_type->data.fn.get_param_at(i) : nullptr;
+        auto *param_node = i < callee_proto->params.len ? callee_proto->params[i] : nullptr;
+        slot.is_borrow = is_exclusive_access_borrow_param(param_type, param_node) ||
+                         (param_type && is_borrowing_type(param_type));
+        slot.is_exclusive = is_exclusive_access_borrow_param(param_type, param_node);
+        slot.exclusive_source = slot.is_exclusive ? param_node : nullptr;
+        slots.add(slot);
+    }
+
+    for (size_t i = 0; i < callee_proto->requires_exclusive_capture_roots.len; i++) {
+        CallSlot slot;
+        slot.expr = call_node;
+        slot.roots.add(callee_proto->requires_exclusive_capture_roots[i]);
+        slot.is_exclusive = true;
+        slot.exclusive_source =
+            i < callee_proto->requires_exclusive_capture_sources.len
+                ? callee_proto->requires_exclusive_capture_sources[i]
+                : nullptr;
+        slots.add(slot);
+    }
+
+    bool had_conflict = false;
+    for (size_t i = 0; i < slots.len; i++) {
+        if (!slots[i].is_exclusive) {
+            continue;
+        }
+        auto *exclusive_terminal = find_root_decl(slots[i].expr);
+        for (auto *root : slots[i].roots) {
+            fn_def.flow.add_invalidate_edge(root, call_node);
+            if (exclusive_terminal && slots[i].is_borrow) {
+                fn_def.flow.add_invalidate_exempt_terminal(root, exclusive_terminal);
+            }
+        }
+        for (size_t j = 0; j < slots.len; j++) {
+            if (i == j || !slots[j].is_borrow) {
+                continue;
+            }
+            ast::Node *shared_root = nullptr;
+            if (!roots_overlap(slots[i].roots, slots[j].roots, &shared_root)) {
+                continue;
+            }
+            array<Note> notes;
+            notes.add({errors::EXCLUSIVE_ACCESS_CALL_NOTE, call_node->token->pos});
+            if (slots[i].exclusive_source && slots[i].exclusive_source->token &&
+                slots[i].exclusive_source != call_node) {
+                notes.add({describe_exclusive_access_source(slots[i].exclusive_source),
+                           slots[i].exclusive_source->token->pos});
+            }
+            if (slots[j].expr && slots[j].expr->token) {
+                notes.add({errors::EXCLUSIVE_ACCESS_BORROW_NOTE, slots[j].expr->token->pos});
+            }
+            error_with_notes(call_node, std::move(notes), errors::EXCLUSIVE_ACCESS_CALL_CONFLICT,
+                             shared_root ? node_label(shared_root) : "<borrow>");
+            had_conflict = true;
+            break;
+        }
+        if (had_conflict) {
+            break;
+        }
+    }
+}
+
+void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target) {
+    // Find the callee's FnProto to read resolved lifetime data (direct calls only)
+    ast::FnProto *proto =
+        call.generated_fn ? get_decl_fn_proto(call.generated_fn) : get_decl_fn_proto(get_call_decl(call));
 
     // Extract return lifetime and per-param lifetimes.
     // Direct calls: read from proto (includes borrowing value params via borrow_lifetime).
@@ -9917,16 +10437,10 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
             return;
         auto &fn = ct->data.fn;
         auto *ret = fn.return_type;
-        if (ret && ret->is_reference() && ret->data.pointer.lifetimes.len > 0) {
-            ret_lt = ret->data.pointer.lifetimes[0];
-        }
+        ret_lt = get_first_ref_lifetime(ret);
         conservative = (!ret_lt && ret && is_borrowing_type(ret));
         for (size_t i = 0; i < fn.params.len; i++) {
-            auto *pt = fn.params[i];
-            ChiLifetime *lt = nullptr;
-            if (pt && pt->is_reference() && pt->data.pointer.lifetimes.len > 0)
-                lt = pt->data.pointer.lifetimes[0];
-            param_lts.add(lt);
+            param_lts.add(get_first_ref_lifetime(fn.params[i]));
         }
     }
 
@@ -10041,12 +10555,41 @@ void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiTy
 }
 
 static string node_label(ast::Node *n) {
-    std::ostringstream type_ss;
-    type_ss << n->type;
-    auto type_str = type_ss.str();
+    auto type_str = ast::node_type_display_name(n->type);
     if (n->name.empty())
         return type_str;
     return fmt::format("{} ({})", n->name, type_str);
+}
+
+static string describe_exclusive_access_source(ast::Node *n) {
+    if (!n) {
+        return "this mutex call";
+    }
+    if (n->type == ast::NodeType::FnCallExpr) {
+        auto &call = n->data.fn_call_expr;
+        auto *decl = get_call_decl(call);
+        if (decl && !decl->name.empty()) {
+            if (call.fn_ref_expr && call.fn_ref_expr->type == ast::NodeType::DotExpr) {
+                return fmt::format("call to mutex method '{}' requires exclusive access",
+                                   decl->name);
+            }
+            if (decl->type == ast::NodeType::FnDef || decl->type == ast::NodeType::GeneratedFn) {
+                return fmt::format("call to mutex function '{}' requires exclusive access",
+                                   decl->name);
+            }
+            if (decl->type == ast::NodeType::VarDecl && decl->data.var_decl.expr &&
+                decl->data.var_decl.expr->type == ast::NodeType::FnDef) {
+                return fmt::format(
+                    "call to lambda '{}' requires exclusive access because it captures a borrowed value",
+                    decl->name);
+            }
+        }
+        return "this mutex call requires exclusive access";
+    }
+    if (n->type == ast::NodeType::FnDef && !n->name.empty()) {
+        return fmt::format("function '{}' is declared mutex here", n->name);
+    }
+    return fmt::format("exclusive access originates from {}", node_label(n));
 }
 
 // Check if a leaf node satisfies a lifetime constraint relative to a terminal.
@@ -10059,13 +10602,8 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
         if (leaf->type == ast::NodeType::VarDecl)
             return false;
         if (leaf->type == ast::NodeType::ParamDecl) {
-            auto &pdata = leaf->data.param_decl;
             auto *leaf_type = leaf->resolved_type;
-            ChiLifetime *param_lt = nullptr;
-            if (leaf_type && leaf_type->is_reference() && leaf_type->data.pointer.lifetimes.len > 0)
-                param_lt = leaf_type->data.pointer.lifetimes[0];
-            else if (pdata.borrow_lifetime)
-                param_lt = pdata.borrow_lifetime;
+            ChiLifetime *param_lt = get_param_effective_lifetime(leaf, leaf_type);
             return param_lt && param_lt->kind == LifetimeKind::Static;
         }
         return false;
@@ -10082,15 +10620,8 @@ static bool satisfies_lifetime_constraint(ChiLifetime *required, ast::Node *term
 
     if (leaf->type == ast::NodeType::ParamDecl) {
         auto *leaf_type = leaf->resolved_type;
-        auto &pdata = leaf->data.param_decl;
-
         // Determine the param's lifetime: from the reference type or from borrow_lifetime
-        ChiLifetime *param_lt = nullptr;
-        if (leaf_type && leaf_type->is_reference() && leaf_type->data.pointer.lifetimes.len > 0) {
-            param_lt = leaf_type->data.pointer.lifetimes[0];
-        } else if (pdata.borrow_lifetime) {
-            param_lt = pdata.borrow_lifetime;
-        }
+        ChiLifetime *param_lt = get_param_effective_lifetime(leaf, leaf_type);
 
         // No lifetime → plain value param (int, bool, etc.) that was captured by-ref.
         // It dies at function exit — fail for returns, pass for intra-function.
@@ -10247,16 +10778,14 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
         }
     }
 
-    // Separate sink check: for each terminal, check if its CURRENT borrow sources
-    // have been sunk (deleted/moved). Uses current_edge_offset to skip stale edges
-    // from previous assignments (e.g. s was reassigned from c to r before delete c).
-    // Also uses terminal_last_use for NLL-like precision: if the terminal's last use
-    // is before the sink point, it's safe (the dangling ref is never dereferenced).
-    if (is_safe) {
+    check_terminal_flow_constraints(fn_def, flow, is_safe, true);
+}
+
+void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowState &flow,
+                                               bool check_sinks, bool check_invalidations) {
+    if (check_sinks) {
         for (size_t t = 0; t < flow.terminals.len; t++) {
             auto *terminal = flow.terminals[t];
-            // Skip terminals that were themselves sunk — the direct use-after-delete
-            // check at Identifier resolution handles that case
             if (flow.is_sunk(terminal))
                 continue;
             auto *deps = flow.ref_edges.get(terminal);
@@ -10268,11 +10797,8 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
                 auto *node = deps->items[i];
                 if (flow.is_sunk(node)) {
                     auto *sink_target = flow.sink_target(node);
-                    // Move ownership: if the sunk node was moved INTO this terminal, skip
-                    // (e.g. var b = move a; — b owns the data, a is sunk with dest=b)
                     if (sink_target == terminal)
                         continue;
-                    // NLL: if terminal's last use is before the sink point, skip
                     if (last_use && sink_target && sink_target->token) {
                         if (*last_use < sink_target->token->pos.offset)
                             continue;
@@ -10289,6 +10815,72 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
                     error_with_notes(terminal, std::move(notes), "'{}' used after {}",
                                      terminal->name, is_delete ? "delete" : "move");
                 }
+            }
+        }
+    }
+
+    if (check_invalidations) {
+        for (size_t t = 0; t < flow.terminals.len; t++) {
+            auto *terminal = flow.terminals[t];
+            if (flow.is_sunk(terminal)) {
+                continue;
+            }
+            auto *deps = flow.ref_edges.get(terminal);
+            if (!deps) {
+                continue;
+            }
+            size_t offset = flow.current_edge_offset(terminal);
+            auto *last_use = flow.terminal_last_use.get(terminal);
+            auto *last_use_node = flow.terminal_last_use_node.get(terminal);
+            auto *edge_offsets = flow.ref_edge_offsets.get(terminal);
+            for (size_t i = offset; i < deps->len; i++) {
+                auto *root = deps->items[i];
+                auto *invalid = flow.invalidate_edges.get(root);
+                if (!invalid) {
+                    continue;
+                }
+                if (auto *exempt = flow.invalidate_exempt_terminals.get(root)) {
+                    bool skip = false;
+                    for (auto *item : *exempt) {
+                        if (item == terminal) {
+                            skip = true;
+                            break;
+                        }
+                    }
+                    if (skip) {
+                        continue;
+                    }
+                }
+                auto *target = invalid->target;
+                long edge_created_at =
+                    edge_offsets && i < edge_offsets->len ? edge_offsets->items[i] : -1;
+                if (edge_created_at < 0 && terminal->token) {
+                    edge_created_at = terminal->token->pos.offset;
+                }
+                if (target && target->token && edge_created_at >= 0 &&
+                    edge_created_at > target->token->pos.offset) {
+                    continue;
+                }
+                if (last_use && target && target->token && *last_use < target->token->pos.offset) {
+                    continue;
+                }
+                array<Note> notes;
+                if (target && target->token) {
+                    notes.add({fmt::format(errors::EXCLUSIVE_ACCESS_INVALIDATED_NOTE,
+                                           describe_exclusive_access_source(target)),
+                               target->token->pos});
+                }
+                auto *error_node = last_use_node && *last_use_node && (*last_use_node)->token
+                                       ? *last_use_node
+                                       : terminal;
+                if (error_node && error_node->token) {
+                    notes.add({errors::EXCLUSIVE_ACCESS_BORROW_REFERENCED,
+                               error_node->token->pos});
+                }
+                error_with_notes(error_node ? error_node : terminal, std::move(notes),
+                                 errors::EXCLUSIVE_ACCESS_BORROW_USED_AFTER,
+                                 node_label(root));
+                break;
             }
         }
     }
@@ -10447,31 +11039,66 @@ ResolveScope ResolveScope::set_is_unsafe_block(bool is_unsafe) const {
 ChiType *Resolver::try_auto_deref(ast::Node *node, ChiType *stype, const string &field_name,
                                   ResolveScope &scope) {
     auto &struct_data = stype->data.struct_;
+    auto symbols = scope.is_lhs ? array<IntrinsicSymbol>{IntrinsicSymbol::DerefMut,
+                                                         IntrinsicSymbol::Deref}
+                                : array<IntrinsicSymbol>{IntrinsicSymbol::Deref,
+                                                         IntrinsicSymbol::DerefMut};
 
-    // Prefer DerefMut when available (gives &mut, works for both mut and non-mut access).
-    // Fall back to Deref (gives &) for read-only access.
-    auto symbol = IntrinsicSymbol::DerefMut;
-    auto member_p = struct_data.member_intrinsics.get(symbol);
-    if (!member_p) {
-        symbol = IntrinsicSymbol::Deref;
-        member_p = struct_data.member_intrinsics.get(symbol);
+    ChiStructMember *deref_member = nullptr;
+    ChiType *deref_return_type = nullptr;
+    ChiStructMember *target_member = nullptr;
+
+    auto candidate_is_usable = [&](ChiStructMember *member, ChiType *return_type) {
+        if (!member || !return_type || !return_type->is_reference()) {
+            return false;
+        }
+        auto *target = return_type->get_elem();
+        auto *resolved_member = get_struct_member(target, field_name);
+        if (!resolved_member) {
+            return false;
+        }
+        if (scope.is_lhs && !ChiTypeStruct::is_mutable_pointer(return_type)) {
+            return false;
+        }
+        if (resolved_member->is_method()) {
+            auto &spec = resolved_member->node->declspec_ref();
+            if (spec.is_mutable() && !ChiTypeStruct::is_mutable_pointer(return_type)) {
+                return false;
+            }
+            if (spec.is_mutex() &&
+                !(return_type->kind == TypeKind::MutexRef ||
+                  return_type->kind == TypeKind::MoveRef)) {
+                return false;
+            }
+        }
+        target_member = resolved_member;
+        return true;
+    };
+
+    for (auto symbol : symbols) {
+        auto member_p = struct_data.member_intrinsics.get(symbol);
+        if (!member_p) {
+            continue;
+        }
+        auto *candidate_member = *member_p;
+        auto *candidate_fn_type = candidate_member->resolved_type;
+        if (!candidate_fn_type || candidate_fn_type->kind != TypeKind::Fn) {
+            continue;
+        }
+        auto *candidate_return_type = candidate_fn_type->data.fn.return_type;
+        if (!candidate_return_type || !candidate_return_type->is_reference()) {
+            continue;
+        }
+        if (!candidate_is_usable(candidate_member, candidate_return_type)) {
+            continue;
+        }
+        deref_member = candidate_member;
+        deref_return_type = candidate_return_type;
+        break;
     }
-    if (!member_p)
+    if (!deref_member || !deref_return_type) {
         return nullptr;
-
-    auto deref_member = *member_p;
-    auto deref_fn_type = deref_member->resolved_type;
-    if (!deref_fn_type || deref_fn_type->kind != TypeKind::Fn)
-        return nullptr;
-
-    auto deref_return_type = deref_fn_type->data.fn.return_type;
-    if (!deref_return_type || !deref_return_type->is_reference())
-        return nullptr;
-
-    // Check that the deref'd target type actually has the member we're looking for
-    auto target_type = deref_return_type->get_elem();
-    if (!get_struct_member(target_type, field_name))
-        return nullptr;
+    }
 
     // Build synthetic call: expr.deref() or expr.deref_mut()
     auto &data = node->data.dot_expr;

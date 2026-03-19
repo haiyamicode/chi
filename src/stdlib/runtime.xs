@@ -110,7 +110,7 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    mut func delete() {
+    mutex func delete() {
         this.release();
     }
 
@@ -337,7 +337,7 @@ export struct Array<T> {
     protected length: uint32 = 0;
     protected capacity: uint32 = 0;
 
-    mut func new(...values: T) {
+    mutex func new(...values: T) {
         unsafe {
             cx_array_new(&this);
         }
@@ -351,7 +351,7 @@ export struct Array<T> {
         }
     }
 
-    mut func delete() {
+    mutex func delete() {
         if !this.data {
             return;
         }
@@ -363,20 +363,20 @@ export struct Array<T> {
         }
     }
 
-    mut func push(item: T) {
+    mutex func push(item: T) {
         unsafe {
             var ptr = cx_array_add(&this, sizeof T) as *T;
             mem.write(ptr, move item);
         }
     }
 
-    mut func reserve(n: uint32) {
+    mutex func reserve(n: uint32) {
         unsafe {
             cx_array_reserve(&this, sizeof T, this.length + n);
         }
     }
 
-    mut func clear() {
+    mutex func clear() {
         unsafe {
             if this.data {
                 cx_free(this.data as *void);
@@ -387,7 +387,7 @@ export struct Array<T> {
 
     impl where T: ops.Int {
         // Resize to exactly n elements, zero-filling any new space.
-        mut func resize_fill(n: uint32) {
+        mutex func resize_fill(n: uint32) {
             this.reserve(n);
             unsafe {
                 cx_memset(this.data as *void, 0, n * sizeof T);
@@ -396,7 +396,7 @@ export struct Array<T> {
         }
 
         // Shrink length to n without freeing memory.
-        mut func truncate(n: uint32) {
+        mutex func truncate(n: uint32) {
             if n < this.length {
                 this.length = n;
             }
@@ -445,7 +445,7 @@ export struct Array<T> {
     }
 
     impl ops.Copy {
-        mut func copy(source: &This) {
+        mutex func copy(source: &This) {
             for item in source {
                 this.push(item);
             }
@@ -950,7 +950,7 @@ export struct Buffer {
         return buf;
     }
 
-    mut func write_string(str: string) {
+    mutex func write_string(str: string) {
         unsafe {
             cx_array_write_str(&this.bytes, &str);
         }
@@ -965,7 +965,7 @@ export struct Buffer {
     }
 
     impl Write {
-        mut func write(data: []byte) {
+        mutex func write(data: []byte) {
             for b in data {
                 this.bytes.push(b);
             }
@@ -989,7 +989,7 @@ export struct Buffer {
         }
     }
 
-    mut func truncate(n: uint32) {
+    mutex func truncate(n: uint32) {
         this.bytes.truncate(n);
     }
 }
@@ -1156,7 +1156,7 @@ export struct Promise<T = Unit> {
     }
 
     impl ops.Copy {
-        func copy(source: &This) {
+        mut func copy(source: &This) {
             this.data.copy(&source.data);
         }
     }
@@ -1307,7 +1307,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    mut func remove(key: K) {
+    mutex func remove(key: K) {
         if this.buckets == null {
             return;
         }
