@@ -279,6 +279,10 @@ struct FnProto {
     bool is_type_expr = false;
     array<ChiLifetime *> resolved_param_lifetimes = {};
     ChiLifetime *resolved_return_lifetime = nullptr;
+    array<int32_t> this_copy_edge_param_indices = {};
+    array<int32_t> return_copy_edge_param_indices = {};
+    bool return_copy_edge_from_this = false;
+    bool copy_edge_summary_valid = false;
     array<Node *> requires_exclusive_capture_roots = {};
     array<Node *> requires_exclusive_capture_sources = {};
     array<Node *> moved_capture_roots = {};
@@ -308,6 +312,7 @@ struct FnDef {
     array<Node *> variants = {};
     array<Node *> call_sites = {};
     FlowState flow = {};
+    size_t applied_receiver_copy_effect_call_count = 0;
     int32_t next_decl_order = 0;               // counter for assigning decl_order to locals
 
     // Delegation to flow state

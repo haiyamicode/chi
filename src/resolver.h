@@ -580,6 +580,11 @@ class Resolver {
     void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target);
     void add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
                                  bool is_ref = false);
+    void compute_receiver_copy_edge_summary(ast::FnDef &fn_def);
+    void finalize_lifetime_flow(ast::FnDef &fn_def);
+    bool apply_receiver_copy_edge_effects(ast::FnDef &fn_def);
+    bool apply_call_receiver_copy_edge_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
+                                               ast::Node *call_node);
     void compute_lambda_capture_move_summary(ast::Node *fn_node);
     void apply_call_capture_move_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
                                          ast::Node *call_node);

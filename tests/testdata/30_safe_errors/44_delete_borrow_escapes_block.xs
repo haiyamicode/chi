@@ -6,8 +6,8 @@ struct Data {
 }
 
 func main() {
-    var r: &Data;
     var x = new Data{value: 42};
+    var r: &Data;
     {
         r = x;
     }

@@ -22,6 +22,7 @@ struct SinkEdge {
 struct FlowState {
     map<Node *, array<Node *>> ref_edges = {}; // escape analysis: dependency graph
     map<Node *, array<long>> ref_edge_offsets = {}; // creation offset for each ref edge
+    map<Node *, array<Node *>> copy_edges = {}; // by-value copy graph: A copies borrow deps from B
     map<Node *, SinkEdge> sink_edges = {};     // move: a → {target, kind}
     map<Node *, SinkEdge> invalidate_edges = {}; // exclusive-access invalidation: a → {target, kind}
     map<Node *, array<Node *>> invalidate_exempt_terminals = {}; // roots whose invalidation does not kill specific borrow values
@@ -48,6 +49,17 @@ struct FlowState {
             return;
         ref_edges[from].add(to);
         ref_edge_offsets[from].add(edge_offset);
+    }
+
+    void add_copy_edge(Node *from, Node *to) {
+        if (!from || !to || from == to)
+            return;
+        auto &edges = copy_edges[from];
+        for (auto *existing : edges) {
+            if (existing == to)
+                return;
+        }
+        edges.add(to);
     }
 
     // Move/sink: A's ownership was transferred to B (A is dead after this)
@@ -205,6 +217,27 @@ struct FlowState {
             }
         }
 
+        // Merge copy edges: union of edge lists
+        for (auto &[key, edges] : other.copy_edges.data) {
+            auto *existing = copy_edges.get(key);
+            if (!existing) {
+                copy_edges[key] = edges;
+            } else {
+                for (size_t i = 0; i < edges.len; i++) {
+                    bool found = false;
+                    for (size_t j = 0; j < existing->len; j++) {
+                        if (existing->items[j] == edges.items[i]) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        existing->add(edges.items[i]);
+                    }
+                }
+            }
+        }
+
         // Merge edge offsets: take the max
         for (auto &[key, val] : other.edge_offsets.data) {
             auto *existing = edge_offsets.get(key);
@@ -246,6 +279,16 @@ struct FlowState {
     // fallback_to_source: if true (default), treat `from` itself as a leaf when it
     //   has no edges. If false, do nothing when `from` has no edges.
     void copy_ref_edges(Node *to, Node *from, bool fallback_to_source = true, long edge_offset = -1) {
+        if (!to || !from || to == from)
+            return;
+        add_copy_edge(to, from);
+        copy_existing_ref_edges(to, from, fallback_to_source, edge_offset);
+    }
+
+    // Copy only the current leaf borrow dependencies of `from` into `to`.
+    // Unlike copy_ref_edges(), this does not record an abstract copy-edge relation.
+    void copy_existing_ref_edges(Node *to, Node *from, bool fallback_to_source = true,
+                                 long edge_offset = -1) {
         if (!to || !from || to == from)
             return;
         auto *deps = ref_edges.get(from);

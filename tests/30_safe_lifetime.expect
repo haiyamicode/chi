@@ -113,6 +113,9 @@ after block
 r = 42
 === array elem method ok ===
 item = 2
+=== generic receiver copy edge value ===
+value = 21
+get = 21
 === lambda capture maybe move (false) ===
 lambda kept
 after lambda call

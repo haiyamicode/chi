@@ -672,6 +672,7 @@ static string node_label(ast::Node *n);
 static ast::FnProto *get_decl_fn_proto(ast::Node *decl);
 static ChiLifetime *get_first_ref_lifetime(ChiType *type);
 static bool type_has_lifetime_kind(ChiType *type, LifetimeKind kind);
+static bool type_may_propagate_borrow_deps(Resolver *resolver, ChiType *type);
 static bool is_value_borrowing_type(Resolver *resolver, ChiType *type);
 static ChiLifetime *get_param_effective_lifetime(ast::Node *param_node, ChiType *param_type);
 
@@ -716,6 +717,8 @@ ChiType *Resolver::resolve_value(ast::Node *node, ResolveScope &scope) {
     }
     return value_type;
 }
+
+static void collect_fn_nodes_from_decl(ast::Node *decl, array<ast::Node *> &out);
 
 ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags) {
     switch (node->type) {
@@ -781,6 +784,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // sixth pass: resolve any new generic subtypes created during body resolution
         m_ctx->generics.resolve_pending(this);
 
+        array<ast::Node *> fns = {};
+        for (auto decl : data.top_level_decls) {
+            collect_fn_nodes_from_decl(decl, fns);
+        }
+        for (auto *fn_node : fns) {
+            if (fn_node->type == NodeType::FnDef) {
+                compute_receiver_copy_edge_summary(fn_node->data.fn_def);
+            }
+        }
+        for (auto *fn_node : fns) {
+            if (fn_node->type == NodeType::FnDef) {
+                finalize_lifetime_flow(fn_node->data.fn_def);
+                check_lifetime_constraints(&fn_node->data.fn_def, fn_node->data.fn_def.flow);
+            }
+        }
+
         // effect-summary pass: propagate exclusive-access requirements through the call graph
         compute_exclusive_access_summaries(data.top_level_decls);
         apply_exclusive_access_effects(data.top_level_decls);
@@ -807,7 +826,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto local_fn_scope = fn_scope.set_parent_fn(lambda_fn_type);
             if (data.body) {
                 resolve(data.body, local_fn_scope);
-                check_lifetime_constraints(&data);
+                compute_receiver_copy_edge_summary(data);
                 add_fn_body_param_cleanups(node, data.body);
             }
 
@@ -840,9 +859,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     if (cap.mode == ast::CaptureMode::ByRef) {
                         parent_fn_def.add_ref_edge(node, cap.decl);
                     } else {
-                        // By-value capture: copy borrow edges from the captured
-                        // variable. If it has no edges (plain value), no-op.
-                        parent_fn_def.copy_ref_edges(node, cap.decl, false);
+                        // By-value capture:
+                        // - params need an abstract copy-edge so generic borrow-carrying
+                        //   values still propagate through lambda summaries
+                        // - locals only contribute their current leaf borrow deps; the
+                        //   closure must not depend on the local variable itself
+                        if (cap.decl->type == NodeType::ParamDecl) {
+                            parent_fn_def.copy_ref_edges(node, cap.decl, false);
+                        } else {
+                            parent_fn_def.flow.copy_existing_ref_edges(node, cap.decl, false);
+                        }
                     }
                 }
             }
@@ -927,9 +953,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 fn_scope = fn_scope.set_is_unsafe_block(true);
             }
             resolve(data.body, fn_scope);
-
-
-            check_lifetime_constraints(&data);
+            compute_receiver_copy_edge_summary(data);
             add_fn_body_param_cleanups(node, data.body);
         }
         return proto;
@@ -1495,9 +1519,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!expr_type) {
                 return var_type;
             }
-            // Escape analysis: track borrow sources for borrowing types
-            if (scope.parent_fn_node && !scope.is_unsafe_block && expr_type &&
-                is_borrowing_type(expr_type)) {
+            // Copy-edge propagation for local initialization.
+            // If the initializer carries borrow dependencies, they flow into the local;
+            // otherwise add_borrow_source_edges is a no-op.
+            auto *target_type_for_borrows = var_type ? var_type : expr_type;
+            if (scope.parent_fn_node && !scope.is_unsafe_block &&
+                type_may_propagate_borrow_deps(this, target_type_for_borrows)) {
                 add_borrow_source_edges(scope.parent_fn_node->data.fn_def, data.expr, node);
             }
             // Move tracking: &move x sinks source into this variable
@@ -1618,21 +1645,23 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 // skip borrow edges so args inside `new` aren't treated as borrowed by the LHS.
                 bool is_new_expr = data.op2->type == NodeType::ConstructExpr &&
                                    data.op2->data.construct_expr.is_new;
-                if (lhs_decl && !scope.is_unsafe_block && t2 && is_borrowing_type(t2) &&
-                    !is_new_expr) {
+                if (lhs_decl && !scope.is_unsafe_block && !is_new_expr &&
+                    type_may_propagate_borrow_deps(this, t1)) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     fn_def.bump_edge_offset(lhs_decl);
                     add_borrow_source_edges(fn_def, data.op2, lhs_decl);
-                    fn_def.add_terminal(lhs_decl);
-                    if (data.op1->type == NodeType::DotExpr) {
-                        auto *field_decl = data.op1->data.dot_expr.resolved_decl;
-                        if (field_decl && field_decl->type == NodeType::VarDecl &&
-                            field_decl->data.var_decl.is_field) {
-                            auto *root_type = node_get_type(lhs_decl);
-                            if (root_type) {
-                                auto *st = resolve_struct_type(root_type);
-                                if (st && st->this_lifetime) {
-                                    fn_def.flow.terminal_lifetimes[lhs_decl] = st->this_lifetime;
+                    if (fn_def.flow.ref_edges.has_key(lhs_decl)) {
+                        fn_def.add_terminal(lhs_decl);
+                        if (data.op1->type == NodeType::DotExpr) {
+                            auto *field_decl = data.op1->data.dot_expr.resolved_decl;
+                            if (field_decl && field_decl->type == NodeType::VarDecl &&
+                                field_decl->data.var_decl.is_field) {
+                                auto *root_type = node_get_type(lhs_decl);
+                                if (root_type) {
+                                    auto *st = resolve_struct_type(root_type);
+                                    if (st && st->this_lifetime) {
+                                        fn_def.flow.terminal_lifetimes[lhs_decl] = st->this_lifetime;
+                                    }
                                 }
                             }
                         }
@@ -2319,12 +2348,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        if (data.expr && scope.parent_fn_node && expr_type && is_borrowing_type(expr_type) &&
-            !scope.is_unsafe_block) {
+        if (data.expr && scope.parent_fn_node && expr_type && !scope.is_unsafe_block) {
             auto &fn_def = scope.parent_fn_node->data.fn_def;
             bool is_ref = expr_type->is_reference();
             add_borrow_source_edges(fn_def, data.expr, node, is_ref);
-            fn_def.add_terminal(node);
+            if (fn_def.flow.ref_edges.has_key(node) || fn_def.flow.copy_edges.has_key(node)) {
+                fn_def.add_terminal(node);
+            }
         }
 
         return return_type;
@@ -3024,8 +3054,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.resolved_field = field_member;
             check_assignment(data.value, init_value_type, field_member->resolved_type);
 
-            if (scope.parent_fn_node && !scope.is_unsafe_block && init_value_type &&
-                is_borrowing_type(init_value_type)) {
+            if (scope.parent_fn_node && !scope.is_unsafe_block &&
+                type_may_propagate_borrow_deps(this, field_member->resolved_type)) {
                 auto outlet = scope.move_outlet ? scope.move_outlet : node;
                 auto &fn_def = scope.parent_fn_node->data.fn_def;
                 fn_def.add_ref_edge(outlet, field_init);
@@ -3201,30 +3231,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         if (fn_def.flow.ref_edges.has_key(arg)) {
                             fn_def.add_terminal(arg);
                             fn_def.flow.terminal_lifetimes[arg] = lt;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Annotation-driven edge creation: for method calls where a param has
-        // 'this lifetime, create edge from receiver to that arg in the caller's graph.
-        if (scope.parent_fn_node && data.fn_ref_expr->type == NodeType::DotExpr && fn_decl &&
-            fn_decl->type == NodeType::FnDef) {
-            auto *callee_proto = fn_decl->data.fn_def.fn_proto;
-            if (callee_proto) {
-                auto &callee_params = callee_proto->data.fn_proto.params;
-                auto *receiver_expr = data.fn_ref_expr->data.dot_expr.expr;
-                auto *receiver_decl = find_root_decl(receiver_expr);
-                if (receiver_decl && !scope.is_unsafe_block) {
-                    auto &fn_def = scope.parent_fn_node->data.fn_def;
-                    for (size_t i = 0; i < callee_params.len && i < data.args.len; i++) {
-                        auto *pt = callee_params[i]->resolved_type;
-                        if (type_has_lifetime_kind(pt, LifetimeKind::This)) {
-                            auto *arg_decl = find_root_decl(data.args[i]);
-                            if (arg_decl) {
-                                fn_def.add_ref_edge(receiver_decl, arg_decl);
-                            }
                         }
                     }
                 }
@@ -3937,7 +3943,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 if (auto body = fn_member->data.fn_def.body) {
                     resolve(body, fn_scope);
-                    check_lifetime_constraints(&fn_member->data.fn_def);
+                    compute_receiver_copy_edge_summary(fn_member->data.fn_def);
                     add_fn_body_param_cleanups(fn_member, body);
                 }
             };
@@ -5969,6 +5975,33 @@ static bool is_value_borrowing_type(Resolver *resolver, ChiType *type) {
     return resolver && type && !type->is_reference() && resolver->is_borrowing_type(type);
 }
 
+static bool type_may_propagate_borrow_deps(Resolver *resolver, ChiType *type) {
+    if (!resolver || !type) {
+        return false;
+    }
+    if (resolver->is_borrowing_type(type)) {
+        return true;
+    }
+    type = resolver->to_value_type(type);
+    if (!type) {
+        return false;
+    }
+    switch (type->kind) {
+    case TypeKind::Subtype: {
+        auto *final_type = type->data.subtype.final_type;
+        if (final_type) {
+            return type_may_propagate_borrow_deps(resolver, final_type);
+        }
+        auto *generic = type->data.subtype.generic;
+        return generic && type_may_propagate_borrow_deps(resolver, generic);
+    }
+    case TypeKind::Placeholder:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static ChiLifetime *get_param_effective_lifetime(ast::Node *param_node, ChiType *param_type) {
     if (auto *lt = get_first_ref_lifetime(param_type)) {
         return lt;
@@ -5979,24 +6012,108 @@ static ChiLifetime *get_param_effective_lifetime(ast::Node *param_node, ChiType 
     return nullptr;
 }
 
-static ast::FnProto *get_call_effect_proto(ast::FnCallExpr &call) {
+static bool node_is_direct_borrow_source(ast::Node *node) {
+    if (!node) {
+        return false;
+    }
+    auto *type = node->resolved_type;
+    if (type && type->is_reference()) {
+        return true;
+    }
+    if (node->type == ast::NodeType::ParamDecl) {
+        return get_param_effective_lifetime(node, type) != nullptr;
+    }
+    return false;
+}
+
+static bool is_this_identifier_node(ast::Node *node) {
+    return node && node->type == ast::NodeType::Identifier &&
+           node->data.identifier.kind == ast::IdentifierKind::This;
+}
+
+static void add_unique_int32(array<int32_t> &out, int32_t value) {
+    size_t insert_at = out.len;
+    for (size_t i = 0; i < out.len; i++) {
+        auto existing = out[i];
+        if (existing == value) {
+            return;
+        }
+        if (value < existing) {
+            insert_at = i;
+            break;
+        }
+    }
+    out.add({});
+    for (size_t i = out.len - 1; i > insert_at; i--) {
+        out[i] = out[i - 1];
+    }
+    out[insert_at] = value;
+}
+
+static void collect_copy_edge_reachable_params(ast::FlowState &flow, array<ast::Node *> &params,
+                                               ast::Node *start, array<int32_t> *out_params,
+                                               bool *out_reaches_this) {
+    array<ast::Node *> stack = {};
+    map<ast::Node *, bool> visited = {};
+    stack.add(start);
+    while (stack.len > 0) {
+        auto *node = stack.last();
+        stack.len--;
+        if (!node || visited.has_key(node)) {
+            continue;
+        }
+        visited[node] = true;
+
+        if (out_reaches_this && is_this_identifier_node(node)) {
+            *out_reaches_this = true;
+        }
+        if (out_params) {
+            for (size_t i = 0; i < params.len; i++) {
+                if (params[i] == node) {
+                    add_unique_int32(*out_params, static_cast<int32_t>(i));
+                    break;
+                }
+            }
+        }
+
+        if (auto *next = flow.copy_edges.get(node)) {
+            for (size_t i = 0; i < next->len; i++) {
+                stack.add(next->items[i]);
+            }
+        }
+    }
+}
+
+static ast::Node *get_call_summary_decl(ast::FnCallExpr &call) {
     auto *decl = get_call_decl(call);
     if (!decl) {
         return nullptr;
     }
     if (decl->type == ast::NodeType::GeneratedFn) {
         auto *original = decl->data.generated_fn.original_fn;
-        if (original && original->type == ast::NodeType::FnDef) {
-            return &original->data.fn_def.fn_proto->data.fn_proto;
+        decl = original ? original : decl;
+    }
+    if (decl->type == ast::NodeType::FnDef && decl->data.fn_def.is_generated) {
+        auto *root = decl->get_root_node();
+        if (root && root->type == ast::NodeType::FnDef) {
+            return root;
         }
     }
     if (decl->type == ast::NodeType::VarDecl) {
         auto *expr = decl->data.var_decl.expr;
         if (expr && expr->type == ast::NodeType::FnDef) {
-            return &expr->data.fn_def.fn_proto->data.fn_proto;
+            return expr;
         }
     }
-    return get_decl_fn_proto(decl);
+    return decl;
+}
+
+static ast::FnProto *get_call_effect_proto(ast::FnCallExpr &call) {
+    return get_decl_fn_proto(get_call_summary_decl(call));
+}
+
+static ast::FnProto *get_call_signature_proto(ast::FnCallExpr &call) {
+    return get_decl_fn_proto(get_call_decl(call));
 }
 
 static bool call_has_instance_receiver(ast::FnCallExpr &call, ast::FnProto *proto) {
@@ -6032,6 +6149,15 @@ static void collect_fn_nodes_from_decl(ast::Node *decl, array<ast::Node *> &out)
     if (decl->type == ast::NodeType::StructDecl) {
         for (auto member : decl->data.struct_decl.members) {
             collect_fn_nodes_from_decl(member, out);
+        }
+        return;
+    }
+    if (decl->type == ast::NodeType::EnumDecl) {
+        for (auto variant : decl->data.enum_decl.variants) {
+            collect_fn_nodes_from_decl(variant, out);
+        }
+        if (decl->data.enum_decl.base_struct) {
+            collect_fn_nodes_from_decl(decl->data.enum_decl.base_struct, out);
         }
         return;
     }
@@ -10262,6 +10388,35 @@ void Resolver::compute_lambda_capture_move_summary(ast::Node *fn_node) {
     }
 }
 
+void Resolver::compute_receiver_copy_edge_summary(ast::FnDef &fn_def) {
+    if (!fn_def.fn_proto) {
+        return;
+    }
+    auto &proto = fn_def.fn_proto->data.fn_proto;
+    proto.this_copy_edge_param_indices = {};
+    proto.return_copy_edge_param_indices = {};
+    proto.return_copy_edge_from_this = false;
+    if (fn_def.flow.copy_edges.size() > 0) {
+        for (auto &[node, _] : fn_def.flow.copy_edges.data) {
+            if (is_this_identifier_node(node)) {
+                collect_copy_edge_reachable_params(fn_def.flow, proto.params, node,
+                                                   &proto.this_copy_edge_param_indices, nullptr);
+            }
+        }
+
+        for (auto *terminal : fn_def.flow.terminals) {
+            if (!terminal || terminal->type != ast::NodeType::ReturnStmt) {
+                continue;
+            }
+            collect_copy_edge_reachable_params(fn_def.flow, proto.params, terminal,
+                                               &proto.return_copy_edge_param_indices,
+                                               &proto.return_copy_edge_from_this);
+        }
+    }
+
+    proto.copy_edge_summary_valid = true;
+}
+
 void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_decls) {
     array<ast::Node *> fns;
     for (auto decl : top_level_decls) {
@@ -10324,7 +10479,7 @@ void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_
             if (!callee_proto) {
                 continue;
             }
-            auto *callee_decl = get_call_decl(call);
+            auto *callee_decl = get_call_summary_decl(call);
 
             auto explicit_exclusive_this =
                 call.fn_ref_expr->type == ast::NodeType::DotExpr && callee_decl &&
@@ -10378,6 +10533,67 @@ void Resolver::apply_exclusive_access_effects(array<ast::Node *> &top_level_decl
     }
 }
 
+bool Resolver::apply_call_receiver_copy_edge_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
+                                                     ast::Node *call_node) {
+    (void)call_node;
+    auto *summary_decl = get_call_summary_decl(call);
+    auto *callee_proto = get_call_effect_proto(call);
+    if (callee_proto && !callee_proto->copy_edge_summary_valid) {
+        if (summary_decl && summary_decl->type == ast::NodeType::FnDef &&
+            summary_decl->data.fn_def.body) {
+            assert(false && "call summary must be finalized before applying receiver copy effects");
+        }
+        return false;
+    }
+    auto has_receiver = callee_proto && call_has_instance_receiver(call, callee_proto);
+    if (!callee_proto || callee_proto->this_copy_edge_param_indices.len == 0 || !has_receiver ||
+        call.fn_ref_expr->type != ast::NodeType::DotExpr) {
+        return false;
+    }
+
+    auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
+    if (!receiver_decl) {
+        return false;
+    }
+
+    bool changed = false;
+    for (auto idx : callee_proto->this_copy_edge_param_indices) {
+        if (idx < 0 || idx >= (int32_t)call.args.len) {
+            continue;
+        }
+        auto *before = fn_def.flow.ref_edges.get(receiver_decl);
+        size_t before_len = before ? before->len : 0;
+        add_borrow_source_edges(fn_def, call.args[static_cast<uint32_t>(idx)], receiver_decl,
+                                false);
+        auto *after = fn_def.flow.ref_edges.get(receiver_decl);
+        size_t after_len = after ? after->len : 0;
+        if (after_len != before_len) {
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
+bool Resolver::apply_receiver_copy_edge_effects(ast::FnDef &fn_def) {
+    bool changed = false;
+    for (size_t i = fn_def.applied_receiver_copy_effect_call_count; i < fn_def.call_sites.len; i++) {
+        auto *call_node = fn_def.call_sites[i];
+        changed |=
+            apply_call_receiver_copy_edge_effects(fn_def, call_node->data.fn_call_expr, call_node);
+    }
+    fn_def.applied_receiver_copy_effect_call_count = fn_def.call_sites.len;
+    return changed;
+}
+
+void Resolver::finalize_lifetime_flow(ast::FnDef &fn_def) {
+    if (fn_def.fn_proto && (fn_def.applied_receiver_copy_effect_call_count < fn_def.call_sites.len ||
+                            !fn_def.fn_proto->data.fn_proto.copy_edge_summary_valid)) {
+        apply_receiver_copy_edge_effects(fn_def);
+        compute_receiver_copy_edge_summary(fn_def);
+    }
+}
+
 void Resolver::apply_call_capture_move_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
                                                ast::Node *call_node) {
     auto *callee_proto = get_call_effect_proto(call);
@@ -10414,7 +10630,7 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
         slot.expr = call.fn_ref_expr->data.dot_expr.expr;
         collect_expr_borrow_roots(this, fn_def.flow, slot.expr, slot.roots);
         slot.is_borrow = true;
-        auto *callee_decl = get_call_decl(call);
+        auto *callee_decl = get_call_summary_decl(call);
         slot.is_exclusive = callee_decl && callee_decl->type == ast::NodeType::FnDef &&
                             callee_decl->data.fn_def.decl_spec &&
                             callee_decl->data.fn_def.decl_spec->is_mutex();
@@ -10495,9 +10711,10 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
 }
 
 void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target) {
-    // Find the callee's FnProto to read resolved lifetime data (direct calls only)
-    ast::FnProto *proto =
-        call.generated_fn ? get_decl_fn_proto(call.generated_fn) : get_decl_fn_proto(get_call_decl(call));
+    // Signature data comes from the actual resolved callee (including generated specializations).
+    ast::FnProto *proto = get_call_signature_proto(call);
+    // Body-derived summaries come from the root/original function body.
+    ast::FnProto *summary_proto = get_call_effect_proto(call);
 
     // Extract return lifetime and per-param lifetimes.
     // Direct calls: read from proto (includes borrowing value params via borrow_lifetime).
@@ -10514,6 +10731,21 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
         if (ret_lt && ret_lt->kind == LifetimeKind::This &&
             call.fn_ref_expr->type == NodeType::DotExpr) {
             add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.expr, target, true);
+        }
+        // By-value return copy summary: result inherits borrow dependencies from `this`
+        // and/or parameters through assignments/temps in the callee body.
+        if (summary_proto && summary_proto->copy_edge_summary_valid &&
+            summary_proto->return_copy_edge_from_this &&
+            call.fn_ref_expr->type == NodeType::DotExpr) {
+            add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.expr, target, false);
+        }
+        if (summary_proto && summary_proto->copy_edge_summary_valid) {
+            for (auto idx : summary_proto->return_copy_edge_param_indices) {
+                if (idx >= 0 && idx < (int32_t)call.args.len) {
+                    add_borrow_source_edges(fn_def, call.args[static_cast<uint32_t>(idx)], target,
+                                            false);
+                }
+            }
         }
     } else {
         // Indirect call — extract lifetimes from the callee's function type
@@ -10570,7 +10802,7 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
         if (is_ref) {
             fn_def.add_ref_edge(target, root);
         } else {
-            fn_def.copy_ref_edges(target, root);
+            fn_def.copy_ref_edges(target, root, node_is_direct_borrow_source(expr));
         }
         return;
     }
@@ -10582,7 +10814,9 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
     case NodeType::ConstructExpr:
         // Field inits already set up edges on the ConstructExpr node during resolution.
         // Transitively copy those leaf edges to the target.
-        fn_def.copy_ref_edges(target, expr);
+        // A value construction is not itself a direct borrow source, so if the
+        // construct carries no borrow deps this must remain a no-op.
+        fn_def.copy_ref_edges(target, expr, false);
         break;
     case NodeType::TryExpr:
         add_borrow_source_edges(fn_def, expr->data.try_expr.expr, target, is_ref);
@@ -10600,7 +10834,9 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
     case NodeType::FnDef:
         // Lambda with by-ref captures: capture edges were added during resolution.
         // Transitively copy them to the target.
-        fn_def.copy_ref_edges(target, expr);
+        // A lambda value is not itself a direct borrow source; only its captured
+        // borrow deps should propagate.
+        fn_def.copy_ref_edges(target, expr, false);
         break;
     default:
         break;
@@ -10788,20 +11024,30 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
             flow.add_terminal(from);
         }
     }
+    for (auto &[from, _] : flow.copy_edges.data) {
+        if (from->decl_order >= 0) {
+            flow.add_terminal(from);
+        }
+    }
 
-    if (flow.terminals.len == 0 && flow.ref_edges.data.size() == 0)
+    if (flow.terminals.len == 0 && flow.ref_edges.data.size() == 0 && flow.copy_edges.data.size() == 0)
         return;
     bool is_safe = has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE);
     bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE);
 
     auto fn_name = fn_def->fn_proto ? fn_def->fn_proto->name : "<lambda>";
 
-    if (verbose && flow.ref_edges.data.size() > 0) {
+    if (verbose && (flow.ref_edges.data.size() > 0 || flow.copy_edges.data.size() > 0)) {
         fmt::print("[lifetime] === {} ===\n", fn_name);
         fmt::print("[lifetime] edges:\n");
         for (auto &[from, tos] : flow.ref_edges.data) {
             for (auto *to : tos) {
-                fmt::print("[lifetime]   {} -> {}\n", node_label(from), node_label(to));
+                fmt::print("[lifetime]   borrow {} -> {}\n", node_label(from), node_label(to));
+            }
+        }
+        for (auto &[from, tos] : flow.copy_edges.data) {
+            for (auto *to : tos) {
+                fmt::print("[lifetime]   copy {} -> {}\n", node_label(from), node_label(to));
             }
         }
         fmt::print("[lifetime] terminals ({}):\n", flow.terminals.len);
@@ -10847,6 +11093,11 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
                 }
 
                 if (!satisfied) {
+                    // If this leaf is explicitly moved/deleted later, let the sink checker
+                    // produce the more precise diagnostic based on actual last use.
+                    if (flow.is_sunk(node)) {
+                        continue;
+                    }
                     if (is_safe) {
                         array<Note> notes;
                         notes.add({"referenced here", terminal->token->pos});

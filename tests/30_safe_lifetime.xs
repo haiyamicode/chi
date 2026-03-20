@@ -805,6 +805,26 @@ func test_array_elem_method_ok() {
     printf("item = {}\n", items[0].read());
 }
 
+struct GenericValueHolder<T> {
+    value: T;
+
+    mutex func set(value: T) {
+        this.value = value;
+    }
+
+    func get() T {
+        return this.value;
+    }
+}
+
+func test_generic_receiver_copy_edge_value() {
+    printf("=== generic receiver copy edge value ===\n");
+    var holder = GenericValueHolder<int>{};
+    holder.set(21);
+    printf("value = {}\n", holder.value);
+    printf("get = {}\n", holder.get());
+}
+
 func test_lambda_capture_maybe_move(flag: bool) {
     printf("=== lambda capture maybe move ({}) ===\n", flag);
     var h = Heavy{value: if flag => 1501 else => 1500};
@@ -861,6 +881,7 @@ func main() {
     test_move_ptr_block();
     test_generic_lifetime_bound();
     test_array_elem_method_ok();
+    test_generic_receiver_copy_edge_value();
     test_lambda_capture_maybe_move(false);
     test_lambda_capture_maybe_move(true);
     test_branch_maybe_move();
