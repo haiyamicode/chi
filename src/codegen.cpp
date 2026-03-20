@@ -2008,7 +2008,7 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     // For lambdas with captures, set the data field
     if (captures && captures->len) {
         auto bstruct = lambda_type->data.fn_lambda.bind_struct;
-        auto bstruct_l = compile_type(bstruct);
+        auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
 
         // Create bind_struct on stack to hold captures
         auto bind_var = builder.CreateAlloca(bstruct_l, nullptr, "bind_struct");
@@ -2024,9 +2024,11 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
             auto &cap = (*captures)[i];
             auto capture = cap.decl;
             auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
+            auto capture_flag_gep = builder.CreateStructGEP(bstruct_l, bind_var, captures->len + i);
 
             // Get source address of the captured variable
             llvm::Value *src_addr = nullptr;
+            llvm::Value *src_move_flag = nullptr;
             auto &current_captures = fn->node->data.fn_def.captures;
             for (int j = 0; j < current_captures.len; j++) {
                 if (current_captures[j].decl == capture && fn->bind_ptr) {
@@ -2041,6 +2043,11 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
                         } else {
                             src_addr =
                                 builder.CreateLoad(current_bstruct_l->elements()[j], nested_gep);
+                            auto nested_flag_gep = builder.CreateStructGEP(
+                                current_bstruct_l, fn->bind_ptr, current_captures.len + j);
+                            src_move_flag = builder.CreateLoad(
+                                current_bstruct_l->elements()[current_captures.len + j],
+                                nested_flag_gep);
                         }
                         break;
                     }
@@ -2070,6 +2077,16 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
                 }
                 builder.CreateStore(src_addr, capture_gep);
             }
+
+            if (!src_move_flag && cap.mode == ast::CaptureMode::ByRef &&
+                m_ctx->drop_flags.has_key(capture)) {
+                src_move_flag = m_ctx->drop_flags[capture];
+            }
+            auto *flag_field_type = bstruct_l->getElementType(captures->len + i);
+            if (!src_move_flag) {
+                src_move_flag = llvm::Constant::getNullValue(flag_field_type);
+            }
+            builder.CreateStore(src_move_flag, capture_flag_gep);
         }
 
         // Generate destructor for CxCapture cleanup
@@ -4877,10 +4894,22 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto *src_decl = data.op1->type == ast::NodeType::Identifier
                                  ? data.op1->data.identifier.decl
                                  : nullptr;
-            if (src_decl && m_ctx->drop_flags.has_key(src_decl)) {
-                builder.CreateStore(
-                    llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx),
-                    m_ctx->drop_flags[src_decl]);
+            if (src_decl && data.op1->type == ast::NodeType::Identifier) {
+                if (auto *flag_ptr = load_capture_move_flag_ptr(fn, data.op1)) {
+                    auto *is_null = builder.CreateIsNull(flag_ptr);
+                    auto *set_flag_block =
+                        llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "move.capture.flag", fn->llvm_fn);
+                    auto *cont_block =
+                        llvm::BasicBlock::Create(*m_ctx->llvm_ctx, "move.capture.cont", fn->llvm_fn);
+                    builder.CreateCondBr(is_null, cont_block, set_flag_block);
+                    builder.SetInsertPoint(set_flag_block);
+                    builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), flag_ptr);
+                    builder.CreateBr(cont_block);
+                    builder.SetInsertPoint(cont_block);
+                } else if (m_ctx->drop_flags.has_key(src_decl)) {
+                    builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx),
+                                        m_ctx->drop_flags[src_decl]);
+                }
             }
             return value;
         }
@@ -7398,6 +7427,34 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         panic("compile_expr_ref not implemented: {}", PRINT_ENUM(expr->type));
     }
     return {};
+}
+
+llvm::Value *Compiler::load_capture_move_flag_ptr(Function *fn, ast::Node *iden) {
+    if (!fn || !fn->bind_ptr || !iden || !iden->escape.is_capture() ||
+        iden->escape.capture_path.len == 0) {
+        return nullptr;
+    }
+    auto &immediate_capture = iden->escape.capture_path[0];
+    auto capture_idx = immediate_capture.capture_index;
+    if (capture_idx < 0) {
+        return nullptr;
+    }
+
+    auto fn_type = get_chitype(fn->node);
+    if (!fn_type || fn_type->kind != TypeKind::FnLambda) {
+        return nullptr;
+    }
+    auto &captures = fn->node->data.fn_def.captures;
+    if (capture_idx >= captures.len || captures[capture_idx].mode != ast::CaptureMode::ByRef) {
+        return nullptr;
+    }
+
+    auto bstruct = fn_type->data.fn_lambda.bind_struct;
+    auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto flag_gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, captures.len + capture_idx);
+    return builder.CreateLoad(bstruct_l->elements()[captures.len + capture_idx], flag_gep,
+                              "capture_move_flag");
 }
 
 RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {

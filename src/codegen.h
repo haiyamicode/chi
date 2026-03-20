@@ -443,6 +443,7 @@ class Compiler {
     llvm::Value *compile_comparator(Function *fn, ast::Node *expr, ChiType *type = nullptr);
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
+    llvm::Value *load_capture_move_flag_ptr(Function *fn, ast::Node *iden);
 
     llvm::Type *get_llvm_ptr_type();
 

@@ -51,10 +51,20 @@ struct FlowState {
     }
 
     // Move/sink: A's ownership was transferred to B (A is dead after this)
-    void add_sink_edge(Node *from, Node *to) {
+    void add_sink_edge(Node *from, Node *to, SinkKind kind = SinkKind::Definite) {
         if (!from || !to)
             return;
-        sink_edges[from] = {to, SinkKind::Definite};
+        auto *existing = sink_edges.get(from);
+        if (existing) {
+            existing->target = to;
+            if (existing->kind == SinkKind::Maybe || kind == SinkKind::Maybe) {
+                existing->kind = SinkKind::Maybe;
+            } else {
+                existing->kind = kind;
+            }
+            return;
+        }
+        sink_edges[from] = {to, kind};
     }
 
     void add_invalidate_edge(Node *from, Node *to) {

@@ -811,6 +811,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 add_fn_body_param_cleanups(node, data.body);
             }
 
+            compute_lambda_capture_move_summary(node);
+
             // After body resolution, sync the FnLambda's is_placeholder with the inner Fn type
             // This is needed when return type was inferred from the body (placeholder -> concrete)
             if (proto->kind == TypeKind::FnLambda && !lambda_fn_type->is_placeholder) {
@@ -873,6 +875,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             : get_pointer_type(cap.decl->resolved_type, TypeKind::Reference);
                     bstruct_data.add_member(get_allocator(), cap.decl->name, get_dummy_var(name),
                                             field_type);
+                }
+                // Hidden per-capture drop-flag pointers. These let a lambda move clear the
+                // caller's maybe-move flag when a captured by-ref value is actually moved.
+                for (int i = 0; i < data.captures.len; i++) {
+                    auto name = fmt::format("capture_flag_{}", i);
+                    bstruct_data.add_member(get_allocator(), name, get_dummy_var(name),
+                                            get_pointer_type(get_system_types()->bool_, TypeKind::Pointer));
                 }
                 // Mark bind struct as placeholder if any field has placeholder types
                 for (auto field : bstruct_data.fields) {
@@ -8347,6 +8356,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 error(arg, errors::TYPE_NOT_COPYABLE, format_type_display(arg_type));
             }
         }
+        if (scope.parent_fn_node && node->type == NodeType::FnCallExpr) {
+            apply_call_capture_move_effects(scope.parent_fn_node->data.fn_def,
+                                            node->data.fn_call_expr, node);
+        }
     }
 
     scope.value_type = nullptr;
@@ -10203,6 +10216,52 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     }
 }
 
+void Resolver::compute_lambda_capture_move_summary(ast::Node *fn_node) {
+    if (!fn_node || fn_node->type != ast::NodeType::FnDef) {
+        return;
+    }
+    auto &fn_def = fn_node->data.fn_def;
+    if (fn_def.fn_kind != ast::FnKind::Lambda || !fn_def.fn_proto) {
+        return;
+    }
+    auto &proto = fn_def.fn_proto->data.fn_proto;
+    proto.moved_capture_roots = {};
+    proto.moved_capture_sources = {};
+    proto.moved_capture_kinds = {};
+
+    auto add_capture_move = [&](ast::Node *root, ast::Node *source, ast::SinkKind kind) {
+        if (!root) {
+            return;
+        }
+        auto *capture_idx = fn_def.capture_map.get(root);
+        if (!capture_idx || *capture_idx < 0 || *capture_idx >= fn_def.captures.len) {
+            return;
+        }
+        if (fn_def.captures[*capture_idx].mode != ast::CaptureMode::ByRef) {
+            return;
+        }
+        for (size_t i = 0; i < proto.moved_capture_roots.len; i++) {
+            if (proto.moved_capture_roots[i] == root) {
+                if (proto.moved_capture_kinds[i] == ast::SinkKind::Maybe ||
+                    kind == ast::SinkKind::Maybe) {
+                    proto.moved_capture_kinds[i] = ast::SinkKind::Maybe;
+                }
+                if (source) {
+                    proto.moved_capture_sources[i] = source;
+                }
+                return;
+            }
+        }
+        proto.moved_capture_roots.add(root);
+        proto.moved_capture_sources.add(source);
+        proto.moved_capture_kinds.add(kind);
+    };
+
+    for (auto &[root, edge] : fn_def.flow.sink_edges.data) {
+        add_capture_move(root, edge.target, edge.kind);
+    }
+}
+
 void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_decls) {
     array<ast::Node *> fns;
     for (auto decl : top_level_decls) {
@@ -10316,6 +10375,21 @@ void Resolver::apply_exclusive_access_effects(array<ast::Node *> &top_level_decl
             apply_call_exclusive_access_effects(fn_def, call_node->data.fn_call_expr, call_node);
         }
         check_terminal_flow_constraints(&fn_def, fn_def.flow, false, true);
+    }
+}
+
+void Resolver::apply_call_capture_move_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
+                                               ast::Node *call_node) {
+    auto *callee_proto = get_call_effect_proto(call);
+    if (!callee_proto) {
+        return;
+    }
+    for (size_t i = 0; i < callee_proto->moved_capture_roots.len; i++) {
+        auto *root = callee_proto->moved_capture_roots[i];
+        auto kind = i < callee_proto->moved_capture_kinds.len
+                        ? callee_proto->moved_capture_kinds[i]
+                        : ast::SinkKind::Definite;
+        fn_def.add_sink_edge(root, call_node, kind);
     }
 }
 
@@ -10563,7 +10637,9 @@ void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiTy
 
     if (moved_src) {
         fn_def.add_sink_edge(moved_src, dest);
-        fn_def.copy_ref_edges(dest, moved_src);
+        // A value move transfers the moved value's existing borrow dependencies,
+        // but it does not make the destination borrow from the source variable itself.
+        fn_def.copy_ref_edges(dest, moved_src, false);
     }
 }
 
@@ -10804,14 +10880,18 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                 continue;
             size_t offset = flow.current_edge_offset(terminal);
             auto *last_use = flow.terminal_last_use.get(terminal);
+            auto *last_use_node = flow.terminal_last_use_node.get(terminal);
             for (size_t i = offset; i < deps->len; i++) {
                 auto *node = deps->items[i];
                 if (flow.is_sunk(node)) {
                     auto *sink_target = flow.sink_target(node);
                     if (sink_target == terminal)
                         continue;
+                    if (last_use_node && *last_use_node == sink_target) {
+                        continue;
+                    }
                     if (last_use && sink_target && sink_target->token) {
-                        if (*last_use < sink_target->token->pos.offset)
+                        if (*last_use <= sink_target->token->pos.offset)
                             continue;
                     }
                     bool is_delete =
@@ -10822,7 +10902,10 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                         notes.add(
                             {is_delete ? "deleted here" : "moved here", sink_target->token->pos});
                     }
-                    notes.add({"referenced here", terminal->token->pos});
+                    notes.add({"referenced here",
+                               last_use_node && (*last_use_node)->token
+                                   ? (*last_use_node)->token->pos
+                                   : terminal->token->pos});
                     error_with_notes(terminal, std::move(notes), "'{}' used after {}",
                                      terminal->name, is_delete ? "delete" : "move");
                 }

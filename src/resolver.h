@@ -580,6 +580,9 @@ class Resolver {
     void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target);
     void add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
                                  bool is_ref = false);
+    void compute_lambda_capture_move_summary(ast::Node *fn_node);
+    void apply_call_capture_move_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,
+                                         ast::Node *call_node);
     void compute_exclusive_access_summaries(array<ast::Node *> &top_level_decls);
     void apply_exclusive_access_effects(array<ast::Node *> &top_level_decls);
     void apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCallExpr &call,

@@ -281,6 +281,9 @@ struct FnProto {
     ChiLifetime *resolved_return_lifetime = nullptr;
     array<Node *> requires_exclusive_capture_roots = {};
     array<Node *> requires_exclusive_capture_sources = {};
+    array<Node *> moved_capture_roots = {};
+    array<Node *> moved_capture_sources = {};
+    array<SinkKind> moved_capture_kinds = {};
 };
 
 MAKE_ENUM(FnKind, TopLevel, Method, Constructor, Destructor, Lambda);
@@ -310,7 +313,9 @@ struct FnDef {
     // Delegation to flow state
     void add_terminal(Node *terminal) { flow.add_terminal(terminal); }
     void add_ref_edge(Node *from, Node *to) { flow.add_ref_edge(from, to); }
-    void add_sink_edge(Node *from, Node *to) { flow.add_sink_edge(from, to); }
+    void add_sink_edge(Node *from, Node *to, SinkKind kind = SinkKind::Definite) {
+        flow.add_sink_edge(from, to, kind);
+    }
     bool is_sunk(Node *node) { return flow.is_sunk(node); }
     bool is_maybe_sunk(Node *node) { return flow.is_maybe_sunk(node); }
     Node *sink_target(Node *node) { return flow.sink_target(node); }

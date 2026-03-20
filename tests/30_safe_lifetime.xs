@@ -805,6 +805,21 @@ func test_array_elem_method_ok() {
     printf("item = {}\n", items[0].read());
 }
 
+func test_lambda_capture_maybe_move(flag: bool) {
+    printf("=== lambda capture maybe move ({}) ===\n", flag);
+    var h = Heavy{value: if flag => 1501 else => 1500};
+    let f = func() {
+        if flag {
+            consume_heavy(move h);
+            println("lambda moved");
+        } else {
+            println("lambda kept");
+        }
+    };
+    f();
+    println("after lambda call");
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -846,6 +861,8 @@ func main() {
     test_move_ptr_block();
     test_generic_lifetime_bound();
     test_array_elem_method_ok();
+    test_lambda_capture_maybe_move(false);
+    test_lambda_capture_maybe_move(true);
     test_branch_maybe_move();
     test_branch_guard_clause();
     test_branch_both_move();

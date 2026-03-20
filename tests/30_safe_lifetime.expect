@@ -113,6 +113,15 @@ after block
 r = 42
 === array elem method ok ===
 item = 2
+=== lambda capture maybe move (false) ===
+lambda kept
+after lambda call
+Heavy.delete(1500)
+=== lambda capture maybe move (true) ===
+consumed: 1501
+Heavy.delete(1501)
+lambda moved
+after lambda call
 === branch maybe move ===
 consumed: 100
 Heavy.delete(100)
