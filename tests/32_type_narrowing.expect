@@ -64,11 +64,13 @@ narrow_string("World","Hello")=Hello World
 narrow_string(null,"Hello")=???
 narrow_string("World",null)=???
 
--- Truthiness operators --
+-- Presence operators --
 truthiness_and(1,2)=true
+truthiness_and(0,2)=true
 truthiness_and(null,2)=false
 truthiness_and(1,null)=false
 truthiness_or(1,2)=true
+truthiness_or(0,null)=true
 truthiness_or(null,2)=true
 truthiness_or(null,null)=false
 

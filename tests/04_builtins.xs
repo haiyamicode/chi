@@ -273,10 +273,47 @@ struct DisplayOuter {
     private secret: int = 42;
 }
 
+struct TracedStringField {
+    value: string = "";
+
+    mut func delete() {
+        if !this.value.is_empty() {
+            printf("  TracedStringField.delete({})\n", this.value);
+        }
+    }
+
+    impl ops.Copy {
+        mut func copy(source: &This) {
+            this.value = source.value;
+            printf("  TracedStringField.copy({})\n", source.value);
+        }
+    }
+}
+
+struct NamedStringFields {
+    first: TracedStringField = {};
+    second: TracedStringField = {};
+}
+
+func make_named_string_fields(first: TracedStringField, second: TracedStringField) NamedStringFields {
+    return {first: first, second: second};
+}
+
 func test_struct_display() {
     println("testing struct display:");
     println(DisplayInner{});
     println(DisplayOuter{});
+}
+
+func test_named_field_construct() {
+    println("testing named field construct:");
+    var first = TracedStringField{value: "left"};
+    var second = TracedStringField{value: "right"};
+    let fields = make_named_string_fields(first, second);
+    printf("fields.first={}\n", fields.first.value);
+    printf("fields.second={}\n", fields.second.value);
+    println("before scope exit:");
+    println("");
 }
 
 func main() {
@@ -290,5 +327,6 @@ func main() {
     test_nested_shared();
     test_string();
     test_box();
+    test_named_field_construct();
     test_struct_display();
 }

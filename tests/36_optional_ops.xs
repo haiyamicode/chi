@@ -134,8 +134,8 @@ func check_int(name: string, opt: ?int) {
     }
 }
 
-func test_optional_truthiness() {
-    println("test_optional_truthiness:");
+func test_optional_presence() {
+    println("test_optional_presence:");
 
     check_bool("null", null);
     check_bool("?false", false);
@@ -145,7 +145,7 @@ func test_optional_truthiness() {
     check_int("?0", 0);
     check_int("?42", 42);
 
-    // ?Struct: has_value only (struct is not boolish)
+    // Optionals convert to bool by presence only.
     var p: ?Point = Point{x: 0, y: 0};
     var q: ?Point = null;
     if p {
@@ -259,13 +259,30 @@ func test_if_let_enum_pattern() {
     println("");
 }
 
+func test_if_let_zero() {
+    println("test_if_let_zero:");
+
+    var zero: ?int = 0;
+    if let value = zero {
+        printf("let zero={}\n", value);
+    } else {
+        println("unexpected zero else");
+    }
+
+    var computed = if let value = zero => value + 10 else => -1;
+    printf("if let zero expr={}\n", computed);
+
+    println("");
+}
+
 func main() {
     test_null_coalescing();
     test_optional_chain_field();
     test_optional_chain_method();
     test_chaining();
     test_null_comparison();
-    test_optional_truthiness();
+    test_optional_presence();
     test_if_let();
+    test_if_let_zero();
     test_if_let_enum_pattern();
 }

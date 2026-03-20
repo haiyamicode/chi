@@ -4441,37 +4441,6 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
         switch (from_type->kind) {
         case TypeKind::Optional: {
             auto has_value = builder.CreateExtractValue(value, {0}, "has_value");
-            auto elem_type = from_type->get_elem();
-            // If inner type is boolish, check both has_value and truthiness of inner value
-            if (elem_type->kind == TypeKind::Bool) {
-                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
-                return builder.CreateAnd(has_value, inner);
-            }
-            if (elem_type->is_int_like() || elem_type->kind == TypeKind::Byte ||
-                elem_type->kind == TypeKind::Rune) {
-                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
-                auto zero = llvm::Constant::getNullValue(compile_type(elem_type));
-                auto nonzero = builder.CreateICmpNE(inner, zero, "nonzero");
-                return builder.CreateAnd(has_value, nonzero);
-            }
-            if (elem_type->kind == TypeKind::Float) {
-                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
-                auto zero = llvm::ConstantFP::get(compile_type(elem_type), 0.0);
-                auto nonzero = builder.CreateFCmpONE(inner, zero, "nonzero");
-                return builder.CreateAnd(has_value, nonzero);
-            }
-            if (elem_type->is_pointer_like()) {
-                auto inner = builder.CreateExtractValue(value, {1}, "opt_inner");
-                auto elem_elem = elem_type->get_elem();
-                if (elem_elem && ChiTypeStruct::is_interface(elem_elem)) {
-                    // Fat pointer {data_ptr, vtable_ptr} — check data_ptr
-                    auto data_ptr = builder.CreateExtractValue(inner, {0}, "data_ptr");
-                    auto nonnull = builder.CreateICmpNE(data_ptr, get_null_ptr(), "nonnull");
-                    return builder.CreateAnd(has_value, nonnull);
-                }
-                auto nonnull = builder.CreateICmpNE(inner, get_null_ptr(), "nonnull");
-                return builder.CreateAnd(has_value, nonnull);
-            }
             return has_value;
         }
         case TypeKind::Pointer:
@@ -6028,6 +5997,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                                                      get_chitype(data.binding_clause),
                                                      comparator_type);
             cond = builder.CreateICmpEQ(expr_value, cond_value);
+        } else if (data.binding_decl) {
+            auto opt_value = compile_expr(fn, data.condition);
+            auto opt_type = get_chitype(data.condition);
+            assert(opt_type && opt_type->kind == TypeKind::Optional);
+            cond = builder.CreateExtractValue(opt_value, {0}, "if_let_has_value");
         } else {
             cond = compile_assignment_to_type(fn, data.condition, get_system_types()->bool_);
         }
@@ -6781,9 +6755,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto field_gep =
                 builder.CreateStructGEP(compile_type(type), dest, data.resolved_field->field_index);
             data.compiled_field_address = field_gep;
-            auto value =
-                compile_assignment_to_type(fn, data.value, data.resolved_field->resolved_type);
-            builder.CreateStore(value, field_gep);
+            compile_assignment_to_ptr(fn, data.value, field_gep, data.resolved_field->resolved_type);
         }
         break;
     }

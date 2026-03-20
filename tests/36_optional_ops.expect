@@ -22,12 +22,12 @@ null != a: true
 p != null: true
 q == null: true
 
-test_optional_truthiness:
+test_optional_presence:
 null: falsy
-?false: falsy
+?false: truthy
 ?true: truthy
 null: falsy
-?0: falsy
+?0: truthy
 ?42: truthy
 ?Point(0,0): truthy
 ?null Point: falsy
@@ -46,6 +46,10 @@ maybe_point(true)
 if let destructure expr=16
 field binding mutated=(31, 32)
 field destructure=(31, 32)
+
+test_if_let_zero:
+let zero=0
+if let zero expr=10
 
 test_if_let_enum_pattern:
 enum tuple=42

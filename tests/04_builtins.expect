@@ -79,6 +79,21 @@ before scope exit:
   Traced.delete(1)
 after helper returned
 
+testing named field construct:
+  TracedStringField.copy(left)
+  TracedStringField.copy(right)
+  TracedStringField.copy(left)
+  TracedStringField.copy(right)
+  TracedStringField.delete(right)
+  TracedStringField.delete(left)
+fields.first=left
+fields.second=right
+before scope exit:
+
+  TracedStringField.delete(right)
+  TracedStringField.delete(left)
+  TracedStringField.delete(right)
+  TracedStringField.delete(left)
 testing struct display:
 DisplayInner{value: 5}
 DisplayOuter{name: chi, inner: DisplayInner{value: 5}}

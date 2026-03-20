@@ -155,7 +155,7 @@ func narrow_string(name: ?string, greeting: ?string) string {
     return "???";
 }
 
-// === && truthiness (Optional as bool in &&) ===
+// === && presence semantics (Optional as bool in &&) ===
 
 func truthiness_and(a: ?int, b: ?int) bool {
     return a && b;
@@ -423,11 +423,13 @@ func main() {
     printf("narrow_string(null,\"Hello\")={}\n", narrow_string(null, "Hello"));
     printf("narrow_string(\"World\",null)={}\n", narrow_string("World", null));
 
-    println("\n-- Truthiness operators --");
+    println("\n-- Presence operators --");
     printf("truthiness_and(1,2)={}\n", truthiness_and(1, 2));
+    printf("truthiness_and(0,2)={}\n", truthiness_and(0, 2));
     printf("truthiness_and(null,2)={}\n", truthiness_and(null, 2));
     printf("truthiness_and(1,null)={}\n", truthiness_and(1, null));
     printf("truthiness_or(1,2)={}\n", truthiness_or(1, 2));
+    printf("truthiness_or(0,null)={}\n", truthiness_or(0, null));
     printf("truthiness_or(null,2)={}\n", truthiness_or(null, 2));
     printf("truthiness_or(null,null)={}\n", truthiness_or(null, null));
 
