@@ -13,6 +13,96 @@ namespace codegen {
 
 typedef llvm::ArrayRef<llvm::Type *> TypeArray;
 
+static ast::Node *find_imported_module_member(ast::Module *module, const string &module_id,
+                                              const string &member_name) {
+    auto module_matches = [&](ast::Module *candidate) {
+        if (!candidate)
+            return false;
+        auto gid = candidate->global_id();
+        if (gid == module_id)
+            return true;
+        auto dotted = "." + module_id;
+        return gid.size() > dotted.size() &&
+               gid.compare(gid.size() - dotted.size(), dotted.size(), dotted) == 0;
+    };
+
+    if (!module)
+        return nullptr;
+    if (module_matches(module) && module->scope) {
+        return module->scope->find_one(member_name);
+    }
+    for (auto *imported : module->imports) {
+        if (!imported || !imported->scope)
+            continue;
+        if (module_matches(imported)) {
+            return imported->scope->find_one(member_name);
+        }
+    }
+    return nullptr;
+}
+
+static ast::Node *find_gc_allocator_decl(ast::Module *module) {
+    return find_imported_module_member(module, "mem", "GC_ALLOCATOR");
+}
+
+void Compiler::emit_alloc_init(Function *fn, llvm::Value *dest, ChiType *struct_type) {
+    auto *alloc_init_member_p =
+        struct_type->data.struct_.member_intrinsics.get(IntrinsicSymbol::AllocInit);
+    if (!alloc_init_member_p) {
+        return;
+    }
+
+    auto managed_module = fn ? fn->module : nullptr;
+    if (!managed_module && fn && fn->node) {
+        managed_module = fn->node->module;
+    }
+    if (!managed_module || !has_lang_flag(managed_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
+        return;
+    }
+
+    auto allocator_module = struct_type->data.struct_.node ? struct_type->data.struct_.node->module
+                                                           : nullptr;
+    if (!allocator_module) {
+        allocator_module = managed_module;
+    }
+
+    auto allocator_node = find_gc_allocator_decl(allocator_module);
+    assert(allocator_node && "GC_ALLOCATOR not found");
+
+    auto alloc_init_node = get_variant_member_node(*alloc_init_member_p, std::nullopt);
+    auto alloc_init_type = get_chitype(alloc_init_node);
+    auto alloc_init_id = get_resolver()->resolve_global_id(alloc_init_node);
+    auto alloc_init_entry = m_ctx->function_table.get(alloc_init_id);
+    assert(alloc_init_entry && "alloc_init method not compiled");
+
+    auto alloc_init_fn = *alloc_init_entry;
+    auto alloc_init_type_l = (llvm::FunctionType *)compile_type(alloc_init_type);
+    auto allocator_ref = compile_expr_ref(fn, allocator_node);
+    auto allocator_param_type = alloc_init_type->data.fn.get_param_at(0);
+    assert(allocator_param_type && "alloc_init allocator param type missing");
+    auto concrete_ref_type =
+        get_resolver()->get_pointer_type(get_chitype(allocator_node), TypeKind::Reference);
+    auto allocator_arg = compile_conversion(fn, allocator_ref.address, concrete_ref_type,
+                                            allocator_param_type);
+    m_ctx->llvm_builder->CreateCall(alloc_init_type_l, alloc_init_fn->llvm_fn,
+                                    {dest, allocator_arg});
+}
+
+void Compiler::emit_construct_init(Function *fn, llvm::Value *dest, ChiType *type,
+                                   ast::Module *context_module) {
+    auto struct_type = get_resolver()->eval_struct_type(type);
+    if (!struct_type || struct_type->kind != TypeKind::Struct) {
+        return;
+    }
+
+    auto generated_ctor = generate_constructor(struct_type, nullptr);
+    if (generated_ctor) {
+        m_ctx->llvm_builder->CreateCall(generated_ctor->llvm_fn, {dest});
+    }
+
+    emit_alloc_init(fn, dest, struct_type);
+}
+
 CodegenContext::~CodegenContext() {}
 CodegenContext::CodegenContext(CompilationContext *compilation_ctx)
     : compilation_ctx(compilation_ctx), resolver(&compilation_ctx->resolve_ctx) {
@@ -6708,11 +6798,8 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         return compile_construction(fn, dest, struct_type, expr);
     }
     case TypeKind::Struct: {
-        // Call __new to initialize fields with default values
-        auto generated_ctor = generate_constructor(type, nullptr);
-        if (generated_ctor) {
-            builder.CreateCall(generated_ctor->llvm_fn, {dest});
-        }
+        emit_construct_init(fn, dest, type,
+                            type->data.struct_.node ? type->data.struct_.node->module : nullptr);
 
         auto *list_init_member = type->data.struct_.member_intrinsics.get(IntrinsicSymbol::ListInit)
                                      ? *type->data.struct_.member_intrinsics.get(
@@ -7595,8 +7682,7 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
         va_type = array_type->get_elem();
         va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
         emit_dbg_location(fn_call);
-        auto init_fn = get_system_fn("cx_array_new");
-        builder.CreateCall(init_fn->llvm_fn, {va_ptr});
+        emit_construct_init(fn, va_ptr, array_type);
     }
 
     for (int i = 0; i < args.len; i++) {
@@ -8133,8 +8219,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         va_type = array_type->get_elem();
         va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
         emit_dbg_location(data.fn_ref_expr);
-        auto init_fn = get_system_fn("cx_array_new");
-        builder.CreateCall(init_fn->llvm_fn, {va_ptr});
+        emit_construct_init(fn, va_ptr, array_type);
     }
 
     llvm::FunctionCallee callee;

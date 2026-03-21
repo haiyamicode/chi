@@ -20,6 +20,7 @@ extern "C" {
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
     unsafe func __move(dest: *void, src: *void, size: uint32);
+    unsafe func __destroy(ptr: *void);
     unsafe func __lifetime_copy_into(dest: *void, src: *void);
     unsafe func cx_runtime_start(stack: *void);
     unsafe func cx_set_program_args(argc: int32, argv: *void);
@@ -337,8 +338,26 @@ export struct Array<T> {
     private data: *T = null;
     protected length: uint32 = 0;
     protected capacity: uint32 = 0;
+    protected allocator: &'static mem.Allocator = &mem.SYSTEM_ALLOCATOR;
 
     mutex func new() {}
+
+    impl ops.ListInit<T> {
+        mutex func list_init(...items: T) {
+            if items.length > 0 {
+                this.reserve(items.length);
+                for item in items {
+                    this.push(move item);
+                }
+            }
+        }
+    }
+
+    impl mem.AllocInit {
+        mutex func alloc_init(allocator: &'static mem.Allocator) {
+            this.allocator = allocator;
+        }
+    }
 
     mutex func delete() {
         if !this.data {
@@ -348,7 +367,7 @@ export struct Array<T> {
             for var i: uint32 = 0; i < this.length; i++ {
                 mem.destroy((&mut this.data[i]) as *void);
             }
-            cx_free(this.data as *void);
+            this.allocator.free(this.data as *void);
         }
     }
 
@@ -376,7 +395,7 @@ export struct Array<T> {
         }
 
         unsafe {
-            let new_data = cx_malloc(better_cap * sizeof T, null) as *T;
+            let new_data = this.allocator.alloc(better_cap * sizeof T) as *T;
             var i: uint32 = 0;
             while i < this.length {
                 let ptr = (&mut new_data[i]) as *T;
@@ -384,7 +403,7 @@ export struct Array<T> {
                 i += 1;
             }
             if this.data {
-                cx_free(this.data as *void);
+                this.allocator.free(this.data as *void);
             }
             this.data = new_data;
             this.capacity = better_cap;
@@ -398,7 +417,7 @@ export struct Array<T> {
                     let ptr = (&mut this.data[i]) as *T;
                     mem.destroy(ptr as *void);
                 }
-                cx_free(this.data as *void);
+                this.allocator.free(this.data as *void);
             }
         }
         this.data = null;
@@ -451,17 +470,6 @@ export struct Array<T> {
         return result;
     }
 
-    impl ops.ListInit<T> {
-        mutex func list_init(...items: T) {
-            if items.length > 0 {
-                this.reserve(items.length);
-                for item in items {
-                    this.push(move item);
-                }
-            }
-        }
-    }
-
     impl ops.IndexMut<uint32, T>, ops.IndexMutIterable<uint32, T> {
         mut func index_mut(index: uint32) &mut T {
             assert(index < this.length, "index out of bounds");
@@ -483,6 +491,7 @@ export struct Array<T> {
 
     impl ops.Copy {
         mutex func copy(source: &This) {
+            this.allocator = source.allocator;
             for item in source {
                 this.push(item);
             }
@@ -1247,12 +1256,26 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
     private buckets: **MapNode<K, V> = null;
     private capacity: uint32 = 0;
     private count: uint32 = 0;
+    protected allocator: &'static mem.Allocator = &mem.SYSTEM_ALLOCATOR;
+
+    private mut func destroy_node(node: *MapNode<K, V>) {
+        unsafe {
+            __destroy(node);
+            this.allocator.free(node as *void);
+        }
+    }
+
+    impl mem.AllocInit {
+        mutex func alloc_init(allocator: &'static mem.Allocator) {
+            this.allocator = allocator;
+        }
+    }
 
     mut func new() {
         this.capacity = 16;
         unsafe {
             var size = 8 * (this.capacity as uint32);
-            this.buckets = cx_malloc(size, null) as **MapNode<K, V>;
+            this.buckets = this.allocator.alloc(size) as **MapNode<K, V>;
             cx_memset(this.buckets as *void, 0, size);
         }
     }
@@ -1267,14 +1290,14 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
                 var node = this.buckets[i];
                 while node != null {
                     var next = node.next;
-                    delete node;
+                    this.destroy_node(node);
                     node = next;
                 }
             }
             i += 1;
         }
         unsafe {
-            cx_free(this.buckets as *void);
+            this.allocator.free(this.buckets as *void);
         }
     }
 
@@ -1297,6 +1320,9 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
     }
 
     mut func set(key: K, value: V) {
+        unsafe {
+            __lifetime_copy_into(&this as *void, &value as *void);
+        }
         var h = key.hash();
         var idx = (h % (this.capacity as uint64)) as uint32;
         unsafe {
@@ -1308,12 +1334,13 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
                 }
                 node = node.next;
             }
-            this.buckets[idx] = new MapNode<K, V>{
-                :key,
-                :value,
-                hash: h,
-                next: this.buckets[idx]
-            };
+            let node_ptr = this.allocator.alloc(sizeof MapNode<K, V>) as *MapNode<K, V>;
+            let node_ref = node_ptr as &mut MapNode<K, V>;
+            mem.write((&mut node_ref.key) as *K, move key);
+            mem.write((&mut node_ref.value) as *V, move value);
+            node_ref.hash = h;
+            node_ref.next = this.buckets[idx];
+            this.buckets[idx] = node_ptr;
         }
         this.count += 1;
         if this.count > this.capacity * 2 {
@@ -1324,7 +1351,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
     private mut func resize(new_capacity: uint32) {
         unsafe {
             var new_size = 8 * new_capacity;
-            var new_buckets = cx_malloc(new_size, null) as **MapNode<K, V>;
+            var new_buckets = this.allocator.alloc(new_size) as **MapNode<K, V>;
             cx_memset(new_buckets as *void, 0, new_size);
             var i: uint32 = 0;
             while i < this.capacity {
@@ -1338,7 +1365,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
                 }
                 i += 1;
             }
-            cx_free(this.buckets as *void);
+            this.allocator.free(this.buckets as *void);
             this.buckets = new_buckets;
             this.capacity = new_capacity;
         }
@@ -1363,7 +1390,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
                     }
                     var to_delete = node;
                     node = null;
-                    delete to_delete;
+                    this.destroy_node(to_delete);
                     this.count -= 1;
                     return;
                 }
@@ -1403,6 +1430,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
 
     impl ops.Copy {
         mut func copy(source: &This) {
+            this.allocator = source.allocator;
             this.new();
             var ks = source.keys();
             for k in ks {

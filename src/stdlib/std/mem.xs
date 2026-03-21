@@ -1,7 +1,11 @@
 import "std/ops" as ops;
 
 extern "C" {
+    unsafe func cx_gc_alloc(size: uint32, destructor: *void) *void;
+    unsafe func cx_gc_realloc(address: *void, size: uint32, ignored: *void) *void;
+    unsafe func cx_gc_free(address: *void);
     unsafe func cx_malloc(size: uint32, ignored: *void) *void;
+    unsafe func cx_realloc(address: *void, size: uint32, ignored: *void) *void;
     unsafe func cx_free(address: *void);
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
@@ -14,8 +18,58 @@ export extern "C" {
     func memcmp(s1: *void, s2: *void, n: uint32) int;
 }
 
+export interface Allocator {
+    unsafe func alloc(size: uint32) *void;
+    unsafe func realloc(address: *void, size: uint32) *void;
+    unsafe func free(address: *void);
+}
+
+export interface AllocInit {
+    func alloc_init(allocator: &'static Allocator);
+}
+
+export struct SystemAllocator {
+    impl Allocator {
+        unsafe func alloc(size: uint32) *void {
+            return cx_malloc(size, null);
+        }
+
+        unsafe func realloc(address: *void, size: uint32) *void {
+            return cx_realloc(address, size, null);
+        }
+
+        unsafe func free(address: *void) {
+            cx_free(address);
+        }
+    }
+}
+
+export let SYSTEM_ALLOCATOR = SystemAllocator{};
+
+export struct GCAllocator {
+    impl Allocator {
+        unsafe func alloc(size: uint32) *void {
+            return cx_gc_alloc(size, null);
+        }
+
+        unsafe func realloc(address: *void, size: uint32) *void {
+            return cx_gc_realloc(address, size, null);
+        }
+
+        unsafe func free(address: *void) {
+            cx_gc_free(address);
+        }
+    }
+}
+
+export let GC_ALLOCATOR = GCAllocator{};
+
 export unsafe func malloc(size: uint32) *void {
     return cx_malloc(size, null);
+}
+
+export unsafe func realloc(address: *void, size: uint32) *void {
+    return cx_realloc(address, size, null);
 }
 
 export unsafe func alloc<T>() &move T {

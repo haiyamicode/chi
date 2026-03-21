@@ -43,8 +43,6 @@ m[(1,2)] after overwrite = replaced
 m.get((3,4)) after remove = null
 
 testing map lifecycle:
-  TracedValue.delete(10)
-  TracedValue.delete(20)
 m["a"].id=10
 m["b"].id=20
 after return: m["a"].id=10

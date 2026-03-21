@@ -207,6 +207,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
     m_ctx->intrinsic_symbols["std.ops.ListInit"] = IntrinsicSymbol::ListInit;
+    m_ctx->intrinsic_symbols["std.mem.AllocInit"] = IntrinsicSymbol::AllocInit;
     m_ctx->intrinsic_symbols["std.ops.Copy"] = IntrinsicSymbol::Copy;
     m_ctx->intrinsic_symbols["std.ops.NoCopy"] = IntrinsicSymbol::NoCopy;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
@@ -1409,7 +1410,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (!data.lifetime.empty()) {
             // Lifetime-annotated ref: create fresh type (not cached) with resolved lifetime
             final_type = create_pointer_type(type, kind);
-            if (data.lifetime == "this" && scope.parent_struct) {
+            if (data.lifetime == "static") {
+                final_type->data.pointer.lifetimes.add(m_ctx->static_lifetime);
+            } else if (data.lifetime == "this" && scope.parent_struct) {
                 auto *struct_type = scope.parent_struct;
                 auto &st = struct_type->data.struct_;
                 if (!st.this_lifetime) {
@@ -2814,6 +2817,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
         data.use_list_init = false;
+        data.use_alloc_init = false;
         auto dest_type = scope.value_type; // Save before resolve calls modify scope
         if (scope.move_outlet && !data.is_new) {
             node->resolved_outlet = scope.move_outlet;
@@ -2941,10 +2945,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto struct_type = resolve_struct_type(value_type);
         auto *list_init_member_p =
             struct_type ? struct_type->member_intrinsics.get(IntrinsicSymbol::ListInit) : nullptr;
+        auto *alloc_init_member_p =
+            struct_type ? struct_type->member_intrinsics.get(IntrinsicSymbol::AllocInit) : nullptr;
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
         bool use_list_init = list_init_member_p && data.items.len > 0 && !data.field_inits.len &&
                              !data.spread_expr;
+        bool use_alloc_init =
+            has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED) && alloc_init_member_p;
         data.use_list_init = use_list_init;
+        data.use_alloc_init = use_alloc_init;
         if (use_list_init) {
             auto *list_init_member = *list_init_member_p;
             assert(list_init_member && "ListInit member missing");

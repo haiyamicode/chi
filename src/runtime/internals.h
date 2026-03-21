@@ -135,7 +135,10 @@ CHI_RT_EXPORT uint32_t cx_get_error_type_id();
 CHI_RT_EXPORT void *cx_refc_alloc(CxRefc *dest, uint32_t size);
 
 CHI_RT_EXPORT void *cx_gc_alloc(uint32_t size, void (*dtor)(void *) = NULL);
+CHI_RT_EXPORT void *cx_gc_realloc(void *address, uint32_t size, void *ignored = NULL);
+CHI_RT_EXPORT void cx_gc_free(void *address);
 CHI_RT_EXPORT void *cx_malloc(uint32_t size, void *ignored = NULL);
+CHI_RT_EXPORT void *cx_realloc(void *address, uint32_t size, void *ignored = NULL);
 CHI_RT_EXPORT void cx_free(void *address);
 CHI_RT_EXPORT void cx_memset(void *dest, uint8_t value, uint32_t size);
 

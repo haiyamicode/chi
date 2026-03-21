@@ -507,6 +507,9 @@ class Compiler {
     bool compile_implicit_owning_conversion_to_ptr(Function *fn, ast::Node *expr,
                                                    llvm::Value *dest, ChiType *dest_type,
                                                    bool destruct_old = false);
+    void emit_alloc_init(Function *fn, llvm::Value *dest, ChiType *struct_type);
+    void emit_construct_init(Function *fn, llvm::Value *dest, ChiType *type,
+                             ast::Module *context_module = nullptr);
     void compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                 ChiType *dest_type, bool destruct_old = false);
     void compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,

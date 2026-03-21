@@ -993,7 +993,15 @@ void *cx_gc_alloc(uint32_t size, void (*dtor)(void *)) {
     return p;
 }
 
+void *cx_gc_realloc(void *address, uint32_t size, void *_ignored) {
+    return tgc_realloc(&gc, address, size);
+}
+
+void cx_gc_free(void *address) { tgc_free(&gc, address); }
+
 void *cx_malloc(uint32_t size, void *_ignored) { return malloc(size); }
+
+void *cx_realloc(void *address, uint32_t size, void *_ignored) { return realloc(address, size); }
 
 void cx_free(void *address) { return free(address); }
 
