@@ -20,6 +20,7 @@ extern "C" {
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
     unsafe func __move(dest: *void, src: *void, size: uint32);
+    unsafe func __lifetime_copy_into(dest: *void, src: *void);
     unsafe func cx_runtime_start(stack: *void);
     unsafe func cx_set_program_args(argc: int32, argv: *void);
     unsafe func cx_set_program_vtable(ptr: *void);
@@ -338,13 +339,8 @@ export struct Array<T> {
     protected capacity: uint32 = 0;
 
     mutex func new(...values: T) {
-        unsafe {
-            cx_array_new(&this);
-        }
         if values.length > 0 {
-            unsafe {
-                cx_array_reserve(&this, sizeof T, values.length);
-            }
+            this.reserve(values.length);
             for value in values {
                 this.push(move value);
             }
@@ -357,7 +353,7 @@ export struct Array<T> {
         }
         unsafe {
             for var i: uint32 = 0; i < this.length; i++ {
-                delete this.data[i];
+                mem.destroy((&mut this.data[i]) as *void);
             }
             cx_free(this.data as *void);
         }
@@ -365,24 +361,56 @@ export struct Array<T> {
 
     mutex func push(item: T) {
         unsafe {
-            var ptr = cx_array_add(&this, sizeof T) as *T;
+            __lifetime_copy_into(&this as *void, &item as *void);
+        }
+        this.reserve(1);
+        unsafe {
+            let ptr = (&mut this.data[this.length]) as *T;
             mem.write(ptr, move item);
         }
+        this.length += 1;
     }
 
     mutex func reserve(n: uint32) {
+        let needed = this.length + n;
+        if this.capacity >= needed {
+            return;
+        }
+
+        var better_cap = this.capacity;
+        while better_cap < needed {
+            better_cap = better_cap * 5 / 2 + 8;
+        }
+
         unsafe {
-            cx_array_reserve(&this, sizeof T, this.length + n);
+            let new_data = cx_malloc(better_cap * sizeof T, null) as *T;
+            var i: uint32 = 0;
+            while i < this.length {
+                let ptr = (&mut new_data[i]) as *T;
+                mem.write(ptr, move this.data[i]);
+                i += 1;
+            }
+            if this.data {
+                cx_free(this.data as *void);
+            }
+            this.data = new_data;
+            this.capacity = better_cap;
         }
     }
 
     mutex func clear() {
         unsafe {
             if this.data {
+                for var i: uint32 = 0; i < this.length; i++ {
+                    let ptr = (&mut this.data[i]) as *T;
+                    mem.destroy(ptr as *void);
+                }
                 cx_free(this.data as *void);
             }
-            cx_array_new(&this);
         }
+        this.data = null;
+        this.length = 0;
+        this.capacity = 0;
     }
 
     impl where T: ops.Int {
@@ -398,6 +426,11 @@ export struct Array<T> {
         // Shrink length to n without freeing memory.
         mutex func truncate(n: uint32) {
             if n < this.length {
+                unsafe {
+                    for var i = n; i < this.length; i++ {
+                        mem.destroy((&mut this.data[i]) as *void);
+                    }
+                }
                 this.length = n;
             }
         }

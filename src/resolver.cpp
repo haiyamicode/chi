@@ -25,6 +25,7 @@ static ChiType *get_struct_access_root_type(ast::Node *expr);
 static bool expr_is_direct_borrow_value(ast::Node *expr);
 static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiType *from_type,
                                        ChiType *to_type, const ResolveScope *scope);
+static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr);
 
 // Check if a name matches a pattern (supports * wildcard)
 static bool matches_pattern(const std::string &name, const std::string &pattern) {
@@ -3228,6 +3229,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
+        // __lifetime_copy_into(&owner as *void, &value as *void): compiler-only marker that the
+        // owner copies the borrow dependencies of value into itself. No runtime effect.
+        if (fn_decl && fn_decl->name == "__lifetime_copy_into" && data.args.len == 2 &&
+            scope.parent_fn_node) {
+            auto *owner_expr = unwrap_lifetime_copy_intrinsic_arg(data.args[0]);
+            auto *value_expr = unwrap_lifetime_copy_intrinsic_arg(data.args[1]);
+            auto *owner_root = owner_expr ? find_root_decl(owner_expr) : nullptr;
+            if (owner_root && value_expr) {
+                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, value_expr, owner_root,
+                                        false);
+            }
+        }
+
         // 'static lifetime params: check callee's param borrow_lifetimes for 'static.
         // Void calls don't trigger add_call_borrow_edges, so we check here.
         if (scope.parent_fn_node && !scope.is_unsafe_block) {
@@ -5823,6 +5837,34 @@ static bool expr_can_fallback_to_borrow_source(ast::Node *expr) {
         return get_param_effective_lifetime(expr, type) != nullptr;
     }
     return false;
+}
+
+static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr) {
+    while (expr) {
+        switch (expr->type) {
+        case ast::NodeType::ParenExpr:
+            expr = expr->data.child_expr;
+            continue;
+        case ast::NodeType::TryExpr:
+            expr = expr->data.try_expr.expr;
+            continue;
+        case ast::NodeType::CastExpr:
+            expr = expr->data.cast_expr.expr;
+            continue;
+        case ast::NodeType::UnaryOpExpr: {
+            auto op = expr->data.unary_op_expr.op_type;
+            if (op == TokenType::AND || op == TokenType::MUTREF ||
+                op == TokenType::MUTEXREF || op == TokenType::MOVEREF) {
+                expr = expr->data.unary_op_expr.op1;
+                continue;
+            }
+            return expr;
+        }
+        default:
+            return expr;
+        }
+    }
+    return nullptr;
 }
 
 static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiType *from_type,
@@ -10689,7 +10731,17 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
     if (call_has_instance_receiver(call, callee_proto)) {
         CallSlot slot;
         slot.expr = call.fn_ref_expr->data.dot_expr.expr;
-        collect_expr_borrow_roots(this, fn_def.flow, slot.expr, slot.roots);
+        auto *receiver_type = node_get_type(slot.expr);
+        if (receiver_type && !receiver_type->is_borrow_reference() &&
+            receiver_type->kind != TypeKind::MoveRef) {
+            if (auto *receiver_root = find_root_decl(slot.expr)) {
+                slot.roots.add(receiver_root);
+            } else {
+                collect_expr_borrow_roots(this, fn_def.flow, slot.expr, slot.roots);
+            }
+        } else {
+            collect_expr_borrow_roots(this, fn_def.flow, slot.expr, slot.roots);
+        }
         slot.is_borrow = true;
         auto *callee_decl = get_call_summary_decl(call);
         slot.is_exclusive = callee_decl && callee_decl->type == ast::NodeType::FnDef &&

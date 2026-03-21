@@ -6698,8 +6698,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         for (uint32_t i = 0; i < items.len; i++) {
             auto idx = llvm::ConstantInt::get(i32_ty, i);
             auto elem_ptr = builder.CreateGEP(arr_type_l, dest, {zero, idx});
-            auto value = compile_assignment_to_type(fn, items[i], elem_type);
-            builder.CreateStore(value, elem_ptr);
+            compile_assignment_to_ptr(fn, items[i], elem_ptr, elem_type, false);
         }
         break;
     }
@@ -7577,12 +7576,11 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
         if (is_variadic && !is_extern && i >= va_start) {
             emit_dbg_location(args[i]);
             auto add_fn = get_system_fn("cx_array_add");
-            auto arg = compile_assignment_to_type(fn, args[i], va_type);
             auto tsize =
                 m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
             auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
             auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
-            builder.CreateStore(arg, ptr);
+            compile_assignment_to_ptr(fn, args[i], ptr, va_type, false);
             continue;
         }
         // For extern variadic functions, pass variadic args directly
@@ -7800,6 +7798,26 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
                                   nullptr, destruct_old);
         }
         // Intrinsics can't throw — no invoke needed, just continue linearly
+        return nullptr;
+    }
+
+    // __lifetime_copy_into(dest, src) — compiler-only lifetime marker, no runtime effect
+    if (callee_decl->name == "__lifetime_copy_into" && data.args.len == 2) {
+        if (handled) {
+            *handled = true;
+        }
+        return nullptr;
+    }
+
+    // __destroy(ptr) — compiler-only destruction intrinsic for element cleanup
+    if (callee_decl->name == "__destroy" && data.args.len == 1) {
+        if (handled) {
+            *handled = true;
+        }
+        auto dest_ptr = compile_expr(fn, data.args[0]);
+        auto elem_type = atomic_element_type_from_arg(data.args[0]);
+        assert(elem_type && "first arg of destroy must be a typed pointer");
+        compile_destruction_for_type(fn, dest_ptr, elem_type);
         return nullptr;
     }
 
