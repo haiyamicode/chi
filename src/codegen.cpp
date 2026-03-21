@@ -6714,7 +6714,12 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             builder.CreateCall(generated_ctor->llvm_fn, {dest});
         }
 
+        auto *list_init_member = type->data.struct_.member_intrinsics.get(IntrinsicSymbol::ListInit)
+                                     ? *type->data.struct_.member_intrinsics.get(
+                                           IntrinsicSymbol::ListInit)
+                                     : nullptr;
         auto constructor = ChiTypeStruct::get_constructor(type);
+        bool use_list_init = expr->data.construct_expr.use_list_init;
         if (constructor) {
             auto variant_type_id = resolve_variant_type_id(m_fn, expr->resolved_type);
             auto constructor_node = get_variant_member_node(constructor, variant_type_id);
@@ -6726,14 +6731,17 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto constructor_fn = *entry;
             auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
             auto args = std::vector<llvm::Value *>{dest};
-            auto remaining_args =
-                compile_fn_args(fn, constructor_fn, expr->data.construct_expr.items, expr);
+            NodeList ctor_items = {};
+            if (!use_list_init) {
+                ctor_items = expr->data.construct_expr.items;
+            }
+            auto remaining_args = compile_fn_args(fn, constructor_fn, ctor_items, expr);
             args.insert(args.end(), remaining_args.begin(), remaining_args.end());
 
             // Compile default args for missing params (e.g. = {} on generic field)
             if (constructor_node->type == ast::NodeType::FnDef) {
                 auto &proto = constructor_node->data.fn_def.fn_proto->data.fn_proto;
-                for (size_t i = expr->data.construct_expr.items.len; i < proto.params.len; i++) {
+                for (size_t i = ctor_items.len; i < proto.params.len; i++) {
                     auto default_val = proto.params[i]->data.param_decl.default_value;
                     if (!default_val)
                         break;
@@ -6743,6 +6751,25 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             }
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
             emit_dbg_location(expr);
+        }
+
+        if (use_list_init) {
+            auto variant_type_id = resolve_variant_type_id(m_fn, expr->resolved_type);
+            assert(list_init_member && "ListInit member missing");
+            auto list_init_node = get_variant_member_node(list_init_member, variant_type_id);
+            auto list_init_type = get_chitype(list_init_node);
+            auto list_init_id = get_resolver()->resolve_global_id(list_init_node);
+            auto list_init_entry = m_ctx->function_table.get(list_init_id);
+            assert(list_init_entry && "list init method not compiled");
+            auto list_init_fn = *list_init_entry;
+            auto list_init_type_l = (llvm::FunctionType *)compile_type(list_init_type);
+            auto args = std::vector<llvm::Value *>{dest};
+            auto remaining_args =
+                compile_fn_args(fn, list_init_fn, expr->data.construct_expr.items, expr);
+            args.insert(args.end(), remaining_args.begin(), remaining_args.end());
+            builder.CreateCall(list_init_type_l, list_init_fn->llvm_fn, args);
+            emit_dbg_location(expr);
+            return;
         }
 
         if (expr->data.construct_expr.spread_expr) {

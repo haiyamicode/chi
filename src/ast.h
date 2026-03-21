@@ -525,6 +525,7 @@ struct ConstructExpr {
     array<Node *> field_inits = {};
     Node *type = nullptr;
     Node *spread_expr = nullptr; // ...expr spread source
+    bool use_list_init = false;
 };
 
 struct TupleExpr {

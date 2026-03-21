@@ -338,14 +338,7 @@ export struct Array<T> {
     protected length: uint32 = 0;
     protected capacity: uint32 = 0;
 
-    mutex func new(...values: T) {
-        if values.length > 0 {
-            this.reserve(values.length);
-            for value in values {
-                this.push(move value);
-            }
-        }
-    }
+    mutex func new() {}
 
     mutex func delete() {
         if !this.data {
@@ -456,6 +449,17 @@ export struct Array<T> {
             result.push(transform(item, i));
         }
         return result;
+    }
+
+    impl ops.ListInit<T> {
+        mutex func list_init(...items: T) {
+            if items.length > 0 {
+                this.reserve(items.length);
+                for item in items {
+                    this.push(move item);
+                }
+            }
+        }
     }
 
     impl ops.IndexMut<uint32, T>, ops.IndexMutIterable<uint32, T> {

@@ -23,6 +23,10 @@ export interface IndexMutIterable<K, V> {
     func next(index: K) K;
 }
 
+export interface ListInit<T> {
+    func list_init(...items: T);
+}
+
 export interface Add {
     func add(rhs: &This) This;
 }

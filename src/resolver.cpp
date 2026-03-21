@@ -206,6 +206,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.Index"] = IntrinsicSymbol::Index;
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
+    m_ctx->intrinsic_symbols["std.ops.ListInit"] = IntrinsicSymbol::ListInit;
     m_ctx->intrinsic_symbols["std.ops.Copy"] = IntrinsicSymbol::Copy;
     m_ctx->intrinsic_symbols["std.ops.NoCopy"] = IntrinsicSymbol::NoCopy;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
@@ -2812,6 +2813,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ConstructExpr: {
         auto &data = node->data.construct_expr;
+        data.use_list_init = false;
         auto dest_type = scope.value_type; // Save before resolve calls modify scope
         if (scope.move_outlet && !data.is_new) {
             node->resolved_outlet = scope.move_outlet;
@@ -2937,7 +2939,39 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         auto struct_type = resolve_struct_type(value_type);
+        auto *list_init_member_p =
+            struct_type ? struct_type->member_intrinsics.get(IntrinsicSymbol::ListInit) : nullptr;
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
+        bool use_list_init = list_init_member_p && data.items.len > 0 && !data.field_inits.len &&
+                             !data.spread_expr;
+        data.use_list_init = use_list_init;
+        if (use_list_init) {
+            auto *list_init_member = *list_init_member_p;
+            assert(list_init_member && "ListInit member missing");
+            if (constructor) {
+                auto is_internal =
+                    scope.parent_struct && is_friend_struct(scope.parent_struct, value_type);
+                if (!constructor->check_access(is_internal, false)) {
+                    error(node, errors::PRIVATE_MEMBER_NOT_ACCESSIBLE, "new",
+                          format_type_display(value_type));
+                    return nullptr;
+                }
+                auto &fn_type = constructor->resolved_type->data.fn;
+                NodeList empty_args = {};
+                resolve_fn_call(node, scope, &fn_type, &empty_args, constructor->node);
+            }
+
+            auto &list_init_fn = list_init_member->resolved_type->data.fn;
+            resolve_fn_call(node, scope, &list_init_fn, &data.items, list_init_member->node);
+
+            if (scope.parent_fn_node && !scope.is_unsafe_block) {
+                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                for (auto item : data.items) {
+                    add_borrow_source_edges(fn_def, item, node, false);
+                }
+            }
+            return result_type;
+        }
         if (constructor) {
             // Check visibility of the constructor
             auto is_internal =
@@ -7631,7 +7665,9 @@ ChiType *Resolver::eval_struct_type(ChiType *type, ast::Node *origin) {
     if (sty->kind == TypeKind::Array) {
         if (!sty->data.array.internal) {
             auto rt_array = m_ctx->rt_array_type;
-            assert(rt_array);
+            if (!rt_array) {
+                return nullptr;
+            }
             array<ChiType *> args;
             args.add(sty->data.array.elem);
             auto astype = get_subtype(to_value_type(rt_array), &args);
@@ -7643,7 +7679,9 @@ ChiType *Resolver::eval_struct_type(ChiType *type, ast::Node *origin) {
     } else if (sty->kind == TypeKind::Span) {
         if (!sty->data.span.internal) {
             auto rt_span = m_ctx->rt_span_type;
-            assert(rt_span);
+            if (!rt_span) {
+                return nullptr;
+            }
             array<ChiType *> args;
             args.add(sty->data.span.elem);
             auto sstype = get_subtype(to_value_type(rt_span), &args);
