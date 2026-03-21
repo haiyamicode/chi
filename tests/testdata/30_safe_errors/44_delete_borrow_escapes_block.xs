@@ -1,4 +1,4 @@
-// Borrow escapes inner block, source deleted in outer scope.
+// Borrow escapes inner block; explicit cast creates the borrow.
 // expect-error: used after delete
 
 struct Data {
@@ -9,7 +9,7 @@ func main() {
     var x = new Data{value: 42};
     var r: &Data;
     {
-        r = x;
+        r = x as &Data;
     }
     unsafe {
         delete x;

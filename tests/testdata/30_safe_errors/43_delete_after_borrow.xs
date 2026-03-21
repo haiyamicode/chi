@@ -1,4 +1,4 @@
-// Delete while borrow is still live in the same scope.
+// Explicit cast creates the borrow; using it after delete is invalid.
 // expect-error: used after delete
 
 struct Data {
@@ -7,7 +7,7 @@ struct Data {
 
 func main() {
     var x = new Data{value: 42};
-    var r: &Data = x;
+    var r = x as &Data;
     unsafe {
         delete x;
     }

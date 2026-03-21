@@ -8,7 +8,8 @@ struct Holder<T> {
     value: T;
 
     func get() T {
-        return this.value;
+        let tmp = this.value;
+        return tmp;
     }
 }
 

@@ -34,10 +34,15 @@ Resource.delete(alpha)
 === move to var ===
 b.name = beta
 Resource.delete(beta)
-=== borrow from move ===
-r.name = gamma
+=== move owner access ===
 a.name = gamma
 Resource.delete(gamma)
+=== explicit move borrow cast ===
+r.name = gamma_cast
+Resource.delete(gamma_cast)
+=== unsafe owner borrow ===
+r.name = gamma_ref
+Resource.delete(gamma_ref)
 === raii ===
 a.name = delta
 Resource.delete(delta)
@@ -116,6 +121,10 @@ item = 2
 === generic receiver copy edge value ===
 value = 21
 get = 21
+=== generic receiver copy edge ref ===
+ref = 34
+=== generic constructor copy edge ref ===
+ref = 55
 === lambda capture maybe move (false) ===
 lambda kept
 after lambda call

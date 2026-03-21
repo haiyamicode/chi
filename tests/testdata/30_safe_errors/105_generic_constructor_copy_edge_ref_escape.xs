@@ -7,19 +7,15 @@ struct EscapeProbeBox {
 struct Holder<T> {
     value: T;
 
-    mut func set(value: T) {
+    mut func new(value: T) {
         let tmp = value;
         this.value = tmp;
     }
 }
 
 func collect() Holder<&EscapeProbeBox> {
-    var holder = Holder<&EscapeProbeBox>{};
-    for i in 0..2 {
-        var obj = EscapeProbeBox{id: i + 1};
-        holder.set(&obj);
-    }
-    return holder;
+    var obj = EscapeProbeBox{id: 1};
+    return Holder<&EscapeProbeBox>{&obj};
 }
 
 func main() {

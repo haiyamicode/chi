@@ -315,14 +315,37 @@ func test_move_to_var() {
     // b is auto-destroyed at scope exit (RAII)
 }
 
-// &move T borrowed as & — no move, source still valid, RAII on source
-func test_borrow_from_move() {
-    printf("=== borrow from move ===\n");
+// Owning references are not implicit borrows; use the owner directly.
+func test_move_owner_access() {
+    printf("=== move owner access ===\n");
     var a = new Resource{"gamma"};
-    var r: &Resource = a;
-    printf("r.name = {}\n", r.name);
     printf("a.name = {}\n", a.name);
     // a is auto-destroyed at scope exit (RAII)
+}
+
+// Explicit cast from owner to borrow is allowed.
+func test_explicit_move_borrow_cast() {
+    printf("=== explicit move borrow cast ===\n");
+    var a = new Resource{"gamma_cast"};
+    var r = a as &Resource;
+    printf("r.name = {}\n", r.name);
+    unsafe {
+        delete a;
+    }
+}
+
+// In safe low-level mode, owner-to-borrow is only allowed explicitly in unsafe.
+func test_unsafe_owner_borrow() {
+    printf("=== unsafe owner borrow ===\n");
+    var a = new Resource{"gamma_ref"};
+    var r: &Resource;
+    unsafe {
+        r = a;
+    }
+    printf("r.name = {}\n", r.name);
+    unsafe {
+        delete a;
+    }
 }
 
 // RAII: no explicit delete needed, auto-destroyed at scope exit
@@ -483,17 +506,13 @@ func test_ref_alias_return() {
 
 // --- Block-based destruction ---
 
-// Borrow scoped in block, delete after block is safe
+// Borrow scoped in block from a plain local value
 func test_block_scoped_borrow() {
     printf("=== block scoped borrow ===\n");
-    var x = new Resource{"block_res"};
+    var x = Resource{"block_res"};
     {
-        var r: &Resource = x;
+        var r = &x;
         printf("r.name = {}\n", r.name);
-    }
-    // r is out of scope, safe to delete
-    unsafe {
-        delete x;
     }
 }
 
@@ -808,12 +827,40 @@ func test_array_elem_method_ok() {
 struct GenericValueHolder<T> {
     value: T;
 
-    mutex func set(value: T) {
+    mut func set(value: T) {
         this.value = value;
     }
 
     func get() T {
         return this.value;
+    }
+}
+
+struct GenericTempValueHolder<T> {
+    value: T;
+
+    mut func set(value: T) {
+        let tmp = value;
+        this.value = tmp;
+    }
+
+    func get() T {
+        let tmp = this.value;
+        return tmp;
+    }
+}
+
+struct GenericCtorHolder<T> {
+    value: T;
+
+    mut func new(value: T) {
+        let tmp = value;
+        this.value = tmp;
+    }
+
+    func get() T {
+        let tmp = this.value;
+        return tmp;
     }
 }
 
@@ -823,6 +870,23 @@ func test_generic_receiver_copy_edge_value() {
     holder.set(21);
     printf("value = {}\n", holder.value);
     printf("get = {}\n", holder.get());
+}
+
+func test_generic_receiver_copy_edge_ref() {
+    printf("=== generic receiver copy edge ref ===\n");
+    var value = 34;
+    var holder = GenericTempValueHolder<&int>{};
+    holder.set(&value);
+    let r = holder.get();
+    printf("ref = {}\n", *r);
+}
+
+func test_generic_constructor_copy_edge_ref() {
+    printf("=== generic constructor copy edge ref ===\n");
+    var value = 55;
+    let holder = GenericCtorHolder<&int>{&value};
+    let r = holder.get();
+    printf("ref = {}\n", *r);
 }
 
 func test_lambda_capture_maybe_move(flag: bool) {
@@ -857,7 +921,9 @@ func main() {
     test_local_order();
     test_move_to_fn();
     test_move_to_var();
-    test_borrow_from_move();
+    test_move_owner_access();
+    test_explicit_move_borrow_cast();
+    test_unsafe_owner_borrow();
     test_raii();
     test_early_delete();
     test_value_move();
@@ -882,6 +948,8 @@ func main() {
     test_generic_lifetime_bound();
     test_array_elem_method_ok();
     test_generic_receiver_copy_edge_value();
+    test_generic_receiver_copy_edge_ref();
+    test_generic_constructor_copy_edge_ref();
     test_lambda_capture_maybe_move(false);
     test_lambda_capture_maybe_move(true);
     test_branch_maybe_move();

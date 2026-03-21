@@ -324,7 +324,7 @@ class Resolver {
     TypeKind get_sigil_type_kind(ast::SigilKind sigil);
 
     void check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type,
-                          bool is_explicit = false);
+                          const ResolveScope *scope = nullptr, bool is_explicit = false);
 
     void check_binary_op(ast::Node *node, TokenType op_type, ChiType *type);
     bool builtin_satisfies_intrinsic(ChiType *type, IntrinsicSymbol symbol);

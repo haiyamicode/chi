@@ -474,6 +474,11 @@ struct ChiType {
                kind == TypeKind::MutexRef || kind == TypeKind::MoveRef;
     }
 
+    bool is_borrow_reference() {
+        return kind == TypeKind::Reference || kind == TypeKind::MutRef ||
+               kind == TypeKind::MutexRef;
+    }
+
     bool is_int() {
         return kind == TypeKind::Int || kind == TypeKind::Byte || kind == TypeKind::Rune;
     }
