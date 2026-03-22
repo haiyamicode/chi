@@ -13,5 +13,5 @@ func collect() Map<int, &Boxed> {
 
 func main() {
     var m = collect();
-    printf("map = [{}, {}, {}]\n", (**m.get(0)!).id, (**m.get(1)!).id, (**m.get(2)!).id);
+    printf("map = [{}, {}, {}]\n", m[0].id, m[1].id, m[2].id);
 }

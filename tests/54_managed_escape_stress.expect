@@ -1,0 +1,38 @@
+=== Managed Escape Stress ===
+=== Returned lambda ===
+callback value = 10
+
+=== Nested returned lambda ===
+nested callback value = 21
+
+=== Nested holder ===
+nested slot = 300
+
+=== Optional ref slot ===
+present slot = 400
+absent slot = null
+
+=== Callback holder ===
+holder callback = 500
+
+=== Branch pair ===
+pair(true) = [600, 601]
+pair(false) = [601, 600]
+
+=== Generic temp holder ===
+holder ref = 800
+
+=== Generic ctor holder ===
+holder ref = 900
+
+=== Deep collections ===
+refs = [1000, 1001, 1002]
+map = [1000, 1001, 1002]
+
+=== Generic array holder ===
+holder refs = [1100, 1101, 1102]
+
+=== Generic map holder ===
+holder map = [1200, 1201, 1202]
+
+Managed escape stress complete

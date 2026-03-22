@@ -54,6 +54,7 @@ TESTS_LIST = 00_fib.test \
 		52_async_lifecycle_stress.test \
 		53_panic.test \
 		54_managed_array_escape.test \
+		54_managed_escape_stress.test \
 		55_managed_map_escape.test \
 		56_managed_lowlevel_wrapper_array_escape.test \
 		57_managed_lowlevel_custom_ctor_array_escape.test \

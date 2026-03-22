@@ -12,7 +12,7 @@ func collect() Holder {
 func main() {
     var h = collect();
     printf("refs = [{}, {}, {}]\n",
-           (**h.inner.refs.get(0)!).id,
-           (**h.inner.refs.get(1)!).id,
-           (**h.inner.refs.get(2)!).id);
+           h.inner.refs[0].id,
+           h.inner.refs[1].id,
+           h.inner.refs[2].id);
 }
