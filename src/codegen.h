@@ -219,6 +219,20 @@ struct CompilationSettings {
     uint32_t lang_flags = LANG_FLAG_NONE;
 };
 
+class Compiler;
+
+struct ScopedCodegenState {
+    Compiler *compiler = nullptr;
+    Function *saved_fn = nullptr;
+    ChiType *saved_fn_eval_subtype = nullptr;
+    llvm::BasicBlock *saved_block = nullptr;
+    llvm::BasicBlock::iterator saved_point;
+    llvm::DebugLoc saved_dbg;
+
+    ScopedCodegenState(Compiler *compiler);
+    ~ScopedCodegenState();
+};
+
 struct InvokeInfo {
     label_t *normal = nullptr;
     label_t *landing = nullptr;
@@ -323,7 +337,10 @@ struct CodegenContext {
     map<string, llvm::DICompileUnit *> module_cu_table = {};
     map<ChiType *, Function *> destructor_table = {};  // Generated __delete functions
     map<ChiType *, Function *> copier_table = {};      // Generated __copy functions
-    map<ChiType *, Function *> constructor_table = {}; // Generated __new functions
+    map<ChiType *, Function *> constructor_table = {}; // Generated low-level __new functions
+    map<ChiType *, Function *> managed_constructor_table = {}; // Generated managed __new functions
+    map<ChiType *, bool> managed_constructor_needed_table = {};
+    map<Function *, Function *> managed_function_table = {}; // Managed variants of concrete functions
 
     // Module-level let vars that need runtime initialization
     // Collected during compile_module, initialized at start of main
@@ -369,6 +386,7 @@ struct CompiledVtable {
 };
 
 class Compiler {
+    friend struct ScopedCodegenState;
     CodegenContext *m_ctx = nullptr;
     Function *m_fn = nullptr;
     ChiType *m_fn_eval_subtype = nullptr;
@@ -416,7 +434,16 @@ class Compiler {
     Function *generate_destructor_continuation(llvm::StructType *capture_struct_type,
                                                ChiType *promise_type,
                                                const std::vector<ast::Node *> &captured_vars);
-    Function *generate_constructor(ChiType *struct_type, ChiType *container_type = nullptr);
+    Function *generate_constructor(ChiType *struct_type, ChiType *container_type = nullptr,
+                                   bool managed_variant = false,
+                                   ast::Module *context_module = nullptr);
+    bool type_needs_managed_constructor(ChiType *type);
+    bool struct_needs_managed_constructor(ChiType *struct_type, std::set<ChiType *> &visiting);
+    ast::Module *get_codegen_context_module(Function *fn, ast::Module *fallback = nullptr);
+    bool should_use_managed_constructor_variant(Function *fn, ast::Module *context_module,
+                                                ChiType *type);
+    void emit_default_field_initializer(Function *fn, llvm::Value *dest, ChiType *container_type,
+                                        ChiStructMember *field);
 
     void compile_construction(Function *fn, llvm::Value *dest, ChiType *type, ast::Node *expr);
 
@@ -426,6 +453,7 @@ class Compiler {
 
     Function *get_fn(ast::Node *node);
     Function *get_fn(ast::Node *node, ChiType *struct_type);
+    Function *get_managed_fn(Function *base_fn, ast::Module *context_module);
 
     Function *add_fn(llvm::Function *llvm_fn, ast::Node *node, ChiType *fn_type = nullptr);
 
@@ -572,7 +600,9 @@ class Compiler {
     void finalize_pending_typeinfos();
 
     Function *compile_fn_proto(ast::Node *node, ast::Node *fn, string name = "",
-                              ChiType *fn_type_override = nullptr);
+                              ChiType *fn_type_override = nullptr,
+                              bool register_global = true,
+                              ast::Module *module_override = nullptr);
     Function *compile_fn_def(ast::Node *node, Function *fn = nullptr);
 
     Function *get_system_fn(const string &name);

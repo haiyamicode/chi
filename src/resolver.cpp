@@ -3859,10 +3859,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         struct_type = type_sym->data.type_symbol.underlying_type;
         struct_ = &struct_type->data.struct_;
 
-        auto struct_scope =
-            scope.parent_struct
-                ? scope
-                : scope.set_parent_struct(struct_type).set_parent_type_symbol(type_sym);
+        auto struct_scope = scope;
+        struct_scope.parent_fn_node = nullptr;
+        struct_scope.parent_fn = nullptr;
+        struct_scope.value_type = nullptr;
+        struct_scope.parent_loop = nullptr;
+        struct_scope.is_escaping = false;
+        struct_scope.move_outlet = nullptr;
+        struct_scope.block = nullptr;
+        struct_scope.is_lhs = false;
+        struct_scope.is_fn_call = false;
+        if (!struct_scope.parent_struct) {
+            struct_scope = struct_scope.set_parent_struct(struct_type).set_parent_type_symbol(type_sym);
+        }
 
         // Make struct lifetime params available for field type resolution (&'a T)
         map<string, ChiLifetime *> struct_lifetime_map;

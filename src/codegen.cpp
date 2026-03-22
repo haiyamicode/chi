@@ -45,6 +45,83 @@ static ast::Node *find_gc_allocator_decl(ast::Module *module) {
     return find_imported_module_member(module, "mem", "GC_ALLOCATOR");
 }
 
+void Compiler::emit_default_field_initializer(Function *fn, llvm::Value *dest,
+                                              ChiType *container_type,
+                                              ChiStructMember *field) {
+    if (!field || !field->node) {
+        return;
+    }
+    auto default_expr = field->node->data.var_decl.expr;
+    if (!default_expr) {
+        return;
+    }
+
+    auto field_gep = compile_dot_access(fn, dest, container_type, field);
+    compile_assignment_to_ptr(fn, default_expr, field_gep, field->resolved_type);
+}
+
+bool Compiler::struct_needs_managed_constructor(ChiType *struct_type,
+                                                std::set<ChiType *> &visiting) {
+    auto resolved_type = get_resolver()->eval_struct_type(struct_type);
+    if (!resolved_type || resolved_type->kind != TypeKind::Struct) {
+        return false;
+    }
+
+    if (auto cached = m_ctx->managed_constructor_needed_table.get(resolved_type)) {
+        return *cached;
+    }
+    if (visiting.count(resolved_type)) {
+        return false;
+    }
+
+    visiting.insert(resolved_type);
+    bool needs_managed_ctor = false;
+    for (auto field : resolved_type->data.struct_.fields) {
+        if (!field->node) {
+            continue;
+        }
+        auto *default_expr = field->node->data.var_decl.expr;
+        if (!default_expr || default_expr->type != ast::NodeType::ConstructExpr) {
+            continue;
+        }
+
+        auto nested_type = get_resolver()->eval_struct_type(default_expr->resolved_type);
+        if (!nested_type || nested_type->kind != TypeKind::Struct) {
+            continue;
+        }
+
+        if (nested_type->data.struct_.member_intrinsics.get(IntrinsicSymbol::AllocInit) ||
+            struct_needs_managed_constructor(nested_type, visiting)) {
+            needs_managed_ctor = true;
+            break;
+        }
+    }
+
+    visiting.erase(resolved_type);
+    m_ctx->managed_constructor_needed_table[resolved_type] = needs_managed_ctor;
+    return needs_managed_ctor;
+}
+
+bool Compiler::type_needs_managed_constructor(ChiType *type) {
+    std::set<ChiType *> visiting;
+    return struct_needs_managed_constructor(type, visiting);
+}
+
+ast::Module *Compiler::get_codegen_context_module(Function *fn, ast::Module *fallback) {
+    auto *module = fn ? fn->module : fallback;
+    if (!module && fn && fn->node) {
+        module = fn->node->module;
+    }
+    return module;
+}
+
+bool Compiler::should_use_managed_constructor_variant(Function *fn, ast::Module *context_module,
+                                                      ChiType *type) {
+    auto managed_module = get_codegen_context_module(fn, context_module);
+    return managed_module && has_lang_flag(managed_module->get_lang_flags(), LANG_FLAG_MANAGED) &&
+           type_needs_managed_constructor(type);
+}
+
 void Compiler::emit_alloc_init(Function *fn, llvm::Value *dest, ChiType *struct_type) {
     auto *alloc_init_member_p =
         struct_type->data.struct_.member_intrinsics.get(IntrinsicSymbol::AllocInit);
@@ -52,10 +129,7 @@ void Compiler::emit_alloc_init(Function *fn, llvm::Value *dest, ChiType *struct_
         return;
     }
 
-    auto managed_module = fn ? fn->module : nullptr;
-    if (!managed_module && fn && fn->node) {
-        managed_module = fn->node->module;
-    }
+    auto managed_module = get_codegen_context_module(fn);
     if (!managed_module || !has_lang_flag(managed_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
         return;
     }
@@ -95,7 +169,12 @@ void Compiler::emit_construct_init(Function *fn, llvm::Value *dest, ChiType *typ
         return;
     }
 
-    auto generated_ctor = generate_constructor(struct_type, nullptr);
+    auto managed_module = get_codegen_context_module(fn, context_module);
+    bool use_managed_ctor =
+        should_use_managed_constructor_variant(fn, context_module, struct_type);
+
+    auto generated_ctor = generate_constructor(struct_type, nullptr, use_managed_ctor,
+                                               managed_module);
     if (generated_ctor) {
         m_ctx->llvm_builder->CreateCall(generated_ctor->llvm_fn, {dest});
     }
@@ -107,6 +186,31 @@ CodegenContext::~CodegenContext() {}
 CodegenContext::CodegenContext(CompilationContext *compilation_ctx)
     : compilation_ctx(compilation_ctx), resolver(&compilation_ctx->resolve_ctx) {
     init_llvm();
+}
+
+ScopedCodegenState::ScopedCodegenState(Compiler *compiler) : compiler(compiler) {
+    assert(compiler && "scoped codegen state requires compiler");
+    saved_fn = compiler->m_fn;
+    saved_fn_eval_subtype = compiler->m_fn_eval_subtype;
+    auto &builder = *compiler->m_ctx->llvm_builder.get();
+    saved_block = builder.GetInsertBlock();
+    if (saved_block) {
+        saved_point = builder.GetInsertPoint();
+    }
+    saved_dbg = builder.getCurrentDebugLocation();
+}
+
+ScopedCodegenState::~ScopedCodegenState() {
+    if (!compiler) {
+        return;
+    }
+    compiler->m_fn = saved_fn;
+    compiler->m_fn_eval_subtype = saved_fn_eval_subtype;
+    auto &builder = *compiler->m_ctx->llvm_builder.get();
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    builder.SetCurrentDebugLocation(saved_dbg);
 }
 
 Function *CodegenContext::add_fn(ast::Node *node, Function *fn) {
@@ -1063,6 +1167,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         dctx, name, llvm::StringRef(), file, 0, compile_di_fn_type(fn), line_no,
         llvm::DINode::FlagPrototyped, llvm::DISubprogram::SPFlagDefinition);
     fn->llvm_fn->setSubprogram(sp);
+    auto saved_dbg_scope_len = m_ctx->dbg_scopes.len;
     m_ctx->dbg_scopes.add(sp);
     emit_dbg_location(nullptr); // unset the location for the prologue emission
 
@@ -1226,6 +1331,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     }
 
     llvm::verifyFunction(*fn->llvm_fn);
+    m_ctx->dbg_scopes.resize(saved_dbg_scope_len);
     return fn;
 }
 
@@ -6748,7 +6854,28 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         builder.CreateMemSet(dest, zero, full_size, {});
         builder.CreateMemCpy(dest, {}, enum_var, {}, copy_size);
 
+        std::set<int> initialized_fields;
         auto payload_fields = get_resolver()->get_enum_payload_fields(type);
+        for (uint32_t i = 0; i < expr->data.construct_expr.items.len && i < payload_fields.len; i++) {
+            initialized_fields.insert(payload_fields[i]->field_index);
+        }
+        for (auto field_init : expr->data.construct_expr.field_inits) {
+            auto &field_init_data = field_init->data.field_init_expr;
+            if (field_init_data.resolved_field) {
+                initialized_fields.insert(field_init_data.resolved_field->field_index);
+            }
+        }
+
+        if (auto resolved_struct = type_data.resolved_struct) {
+            for (auto field : resolved_struct->data.struct_.fields) {
+                auto promoted_field = get_resolver()->get_struct_member(type, field->get_name());
+                if (!promoted_field || initialized_fields.count(promoted_field->field_index)) {
+                    continue;
+                }
+                emit_default_field_initializer(fn, dest, type, promoted_field);
+            }
+        }
+
         for (uint32_t i = 0; i < expr->data.construct_expr.items.len && i < payload_fields.len; i++) {
             auto field = payload_fields[i];
             auto item = expr->data.construct_expr.items[i];
@@ -6811,12 +6938,14 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto variant_type_id = resolve_variant_type_id(m_fn, expr->resolved_type);
             auto constructor_node = get_variant_member_node(constructor, variant_type_id);
 
-            auto constructor_type = get_chitype(constructor_node);
-            auto id = get_resolver()->resolve_global_id(constructor_node);
-            auto entry = m_ctx->function_table.get(id);
-            assert(entry && "constructor not compiled");
-            auto constructor_fn = *entry;
-            auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_type);
+            auto managed_module = get_codegen_context_module(fn);
+            auto use_managed_ctor =
+                managed_module && has_lang_flag(managed_module->get_lang_flags(), LANG_FLAG_MANAGED);
+            auto base_constructor_fn = get_fn(constructor_node);
+            auto constructor_fn =
+                use_managed_ctor ? get_managed_fn(base_constructor_fn, managed_module)
+                                 : base_constructor_fn;
+            auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_fn->fn_type);
             auto args = std::vector<llvm::Value *>{dest};
             NodeList ctor_items = {};
             if (!use_list_init) {
@@ -10761,9 +10890,11 @@ Compiler::generate_destructor_continuation(llvm::StructType *capture_struct_type
     return fn;
 }
 
-Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *container_type) {
+Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *container_type,
+                                         bool managed_variant, ast::Module *context_module) {
     // Check if already generated
-    auto existing = m_ctx->constructor_table.get(struct_type);
+    auto &ctor_table = managed_variant ? m_ctx->managed_constructor_table : m_ctx->constructor_table;
+    auto existing = ctor_table.get(struct_type);
     if (existing) {
         return *existing;
     }
@@ -10801,7 +10932,7 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
 
     if (!has_defaults) {
         // No defaults - no need for __new
-        m_ctx->constructor_table[struct_type] = nullptr;
+        ctor_table[struct_type] = nullptr;
         return nullptr;
     }
 
@@ -10815,7 +10946,8 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
         struct_type,
         resolved_type->data.struct_.node ? resolved_type->data.struct_.node->module->global_id()
                                          : "");
-    auto fn_name = fmt::format("{}.__new", type_name);
+    auto fn_name =
+        managed_variant ? fmt::format("{}.__new.managed", type_name) : fmt::format("{}.__new", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
                                           m_ctx->llvm_module.get());
@@ -10823,10 +10955,13 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
     // Create Function object
     auto fn = new Function(m_ctx, llvm_fn, nullptr);
     fn->qualified_name = fn_name;
-    if (resolved_type->data.struct_.node)
+    if (managed_variant) {
+        fn->module = context_module;
+    } else if (resolved_type->data.struct_.node) {
         fn->module = resolved_type->data.struct_.node->module;
+    }
     m_ctx->functions.emplace(fn);
-    m_ctx->constructor_table[struct_type] = fn;
+    ctor_table[struct_type] = fn;
 
     // Save current insert point
     auto saved_block = builder.GetInsertBlock();
@@ -10837,33 +10972,10 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
     builder.SetInsertPoint(entry_bb);
 
     auto this_ptr = llvm_fn->getArg(0);
-    auto llvm_struct_type = compile_type(resolved_type);
 
     // Initialize all fields with default values
     for (auto field : struct_data.fields) {
-        if (!field->node)
-            continue;
-        auto default_expr = field->node->data.var_decl.expr;
-        if (!default_expr)
-            continue;
-
-        auto field_gep = builder.CreateStructGEP(llvm_struct_type, this_ptr, field->field_index);
-
-        // Clear resolved_outlet on ConstructExpr to avoid using stale outlets
-        if (default_expr->type == ast::NodeType::ConstructExpr) {
-            std::function<void(ast::Node *)> clear_outlets = [&](ast::Node *node) {
-                if (!node)
-                    return;
-                if (node->type == ast::NodeType::ConstructExpr) {
-                    node->resolved_outlet = nullptr;
-                    for (auto item : node->data.construct_expr.items) {
-                        clear_outlets(item);
-                    }
-                }
-            };
-            clear_outlets(default_expr);
-        }
-        compile_assignment_to_ptr(fn, default_expr, field_gep, field->resolved_type);
+        emit_default_field_initializer(fn, this_ptr, resolved_type, field);
     }
 
     builder.CreateRetVoid();
@@ -11028,8 +11140,35 @@ Function *Compiler::get_fn(ast::Node *node, ChiType *struct_type) {
     return get_fn(node);
 }
 
+Function *Compiler::get_managed_fn(Function *base_fn, ast::Module *context_module) {
+    assert(base_fn && "managed base function required");
+    assert(context_module && "managed function variant requires context module");
+
+    auto entry = m_ctx->managed_function_table.get(base_fn);
+    if (entry) {
+        return *entry;
+    }
+
+    auto *node = base_fn->node;
+    assert(node && "managed function node required");
+    auto name = get_resolver()->resolve_qualified_name(node) + ".managed";
+    auto proto_node = node->type == ast::NodeType::GeneratedFn ? node->data.generated_fn.fn_proto
+                                                               : node->data.fn_def.fn_proto;
+    ScopedCodegenState saved_state(this);
+    auto fn = compile_fn_proto(proto_node, node, name, base_fn->fn_type, false, context_module);
+    fn->type_env = base_fn->type_env;
+    fn->container_type = base_fn->container_type;
+    fn->container_subtype = base_fn->container_subtype;
+    fn->default_method_struct = base_fn->default_method_struct;
+    fn->specialized_subtype = base_fn->specialized_subtype;
+    m_ctx->managed_function_table[base_fn] = fn;
+    m_fn = fn;
+    return compile_fn_def(node, fn);
+}
+
 Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, string name,
-                                     ChiType *fn_type_override) {
+                                     ChiType *fn_type_override, bool register_global,
+                                     ast::Module *module_override) {
     auto declspec = fn->declspec_ref();
     auto subtype =
         fn->type == ast::NodeType::GeneratedFn ? fn->data.generated_fn.fn_subtype : nullptr;
@@ -11110,7 +11249,14 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
                               llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
 
-    auto new_fn = add_fn(fn_l, fn, ftype);
+    Function *new_fn = nullptr;
+    if (register_global) {
+        new_fn = add_fn(fn_l, fn, ftype);
+    } else {
+        new_fn = new Function(get_context(), fn_l, fn);
+        new_fn->fn_type = ftype;
+        m_ctx->functions.emplace(new_fn);
+    }
 
     auto fn_id = get_resolver()->resolve_global_id(fn);
     if (subtype) {
@@ -11183,10 +11329,17 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
         new_fn->qualified_name = name;
         new_fn->specialized_subtype = subtype;
     }
+    else if (!register_global && !name.empty()) {
+        new_fn->qualified_name = name;
+    }
     // For lambda functions, use the passed name instead of the empty qualified_name
     else if (fn && fn->type == ast::NodeType::FnDef &&
              fn->data.fn_def.fn_kind == ast::FnKind::Lambda && !name.empty()) {
         new_fn->qualified_name = name;
+    }
+
+    if (module_override) {
+        new_fn->module = module_override;
     }
 
     new_fn->llvm_fn->setName(new_fn->get_llvm_name());

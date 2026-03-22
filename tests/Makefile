@@ -54,7 +54,10 @@ TESTS_LIST = 00_fib.test \
 		52_async_lifecycle_stress.test \
 		53_panic.test \
 		54_managed_array_escape.test \
-		55_managed_map_escape.test
+		55_managed_map_escape.test \
+		56_managed_lowlevel_wrapper_array_escape.test \
+		57_managed_lowlevel_custom_ctor_array_escape.test \
+		58_managed_lowlevel_custom_ctor_map_escape.test
 TESTS ?= $(TESTS_LIST)
 CHIC = $(BUILD_DIR)/src/bin/chic
 TMP = /tmp/chitests
