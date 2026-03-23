@@ -19,6 +19,20 @@ struct Holder {
     }
 }
 
+struct GenericTempHolder<T> {
+    value: T;
+
+    mut func set(value: T) {
+        let tmp = value;
+        this.value = tmp;
+    }
+
+    func get() T {
+        let tmp = this.value;
+        return tmp;
+    }
+}
+
 func get_escaped_ref() &GCBox {
     var obj = GCBox{100};
     return &obj;
@@ -72,6 +86,13 @@ func get_via_chain() &GCBox {
     var b = a;
     var c = b;
     return c;
+}
+
+func get_via_generic_temp_holder() GenericTempHolder<&GCBox> {
+    var obj = GCBox{700};
+    var holder = GenericTempHolder<&GCBox>{};
+    holder.set(&obj);
+    return holder;
 }
 
 func main() {
@@ -157,6 +178,10 @@ func main() {
     println("\nTest 9: Transitive escape via deep chain");
     var chained = get_via_chain();
     printf("CRITICAL TEST: chained.id = {}\n", chained.id);
+
+    println("\nTest 10: Transitive escape via generic temp holder");
+    var generic_holder = get_via_generic_temp_holder();
+    printf("CRITICAL TEST: generic holder ref.id = {}\n", generic_holder.get().id);
 
     println("\n=== Cleanup Phase ===");
 

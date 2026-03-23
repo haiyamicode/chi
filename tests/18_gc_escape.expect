@@ -63,6 +63,10 @@ Test 9: Transitive escape via deep chain
 [gc] GCBox(600) created
 CRITICAL TEST: chained.id = 600
 
+Test 10: Transitive escape via generic temp holder
+[gc] GCBox(700) created
+CRITICAL TEST: generic holder ref.id = 700
+
 === Cleanup Phase ===
 Final gc objects...
 [gc] GCBox(1000) created
@@ -76,5 +80,6 @@ Final gc objects...
 [gc] GCBox(1004) created
 [gc] GCBox(1004) destroyed
 Test completed
+[gc] GCBox(700) destroyed
 [gc] GCBox(600) destroyed
 [gc] GCBox(500) destroyed

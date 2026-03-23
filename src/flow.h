@@ -318,6 +318,72 @@ struct FlowState {
             }
         }
     }
+
+    // Follow both borrow and copy edges from `start` and collect only the leaf nodes that are
+    // reached through at least one borrow edge. Pure value-copy chains with no borrow relation
+    // produce no leaves.
+    void collect_borrow_leaves(Node *start, array<Node *> &leaves) {
+        struct TraverseState {
+            Node *node = nullptr;
+            bool has_borrow = false;
+        };
+
+        if (!start)
+            return;
+
+        array<TraverseState> stack;
+        map<Node *, uint8_t> visited;
+
+        if (auto *deps = ref_edges.get(start)) {
+            for (size_t i = 0; i < deps->len; i++) {
+                stack.add({deps->items[i], true});
+            }
+        }
+        if (auto *deps = copy_edges.get(start)) {
+            for (size_t i = 0; i < deps->len; i++) {
+                stack.add({deps->items[i], false});
+            }
+        }
+
+        while (stack.len > 0) {
+            auto state = stack.last();
+            stack.len--;
+
+            uint8_t mask = state.has_borrow ? 0x2 : 0x1;
+            auto *seen = visited.get(state.node);
+            if (seen && ((*seen & mask) == mask)) {
+                continue;
+            }
+            visited[state.node] = seen ? static_cast<uint8_t>(*seen | mask) : mask;
+
+            if (auto *next = ref_edges.get(state.node); next && next->len > 0) {
+                for (size_t i = 0; i < next->len; i++) {
+                    stack.add({next->items[i], true});
+                }
+                continue;
+            }
+
+            if (state.has_borrow) {
+                bool found = false;
+                for (auto *leaf : leaves) {
+                    if (leaf == state.node) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    leaves.add(state.node);
+                }
+                continue;
+            }
+
+            if (auto *next = copy_edges.get(state.node)) {
+                for (size_t i = 0; i < next->len; i++) {
+                    stack.add({next->items[i], false});
+                }
+            }
+        }
+    }
 };
 
 } // namespace ast

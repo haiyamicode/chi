@@ -11392,52 +11392,29 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
                        required ? "'" + required->name : "'fn");
         }
 
-        auto *deps = flow.ref_edges.get(terminal);
-        if (!deps)
-            continue;
-
-        array<ast::Node *> stack;
-        map<ast::Node *, bool> visited;
-        for (size_t i = 0; i < deps->len; i++)
-            stack.add(deps->items[i]);
-
-        while (stack.len > 0) {
-            auto *node = stack.last();
-            stack.len--;
-            if (visited.has_key(node))
-                continue;
-            visited[node] = true;
-
-            auto *next = flow.ref_edges.get(node);
-            bool is_leaf = !next || next->len == 0;
-
-            if (is_leaf) {
-                bool satisfied = satisfies_lifetime_constraint(fn_def, required, terminal, node);
-                if (verbose) {
-                    fmt::print("[lifetime]   leaf {} -> {}\n", node_label(node),
-                               satisfied ? "OK" : "VIOLATION");
-                }
-
-                if (!satisfied) {
-                    // If this leaf is explicitly moved/deleted later, let the sink checker
-                    // produce the more precise diagnostic based on actual last use.
-                    if (flow.is_sunk(node)) {
-                        continue;
-                    }
-                    if (is_safe) {
-                        array<Note> notes;
-                        notes.add({"referenced here", terminal->token->pos});
-                        error_with_notes(node, std::move(notes),
-                                         "'{}' does not live long enough", node->name);
-                    } else {
-                        node->escape.escaped = true;
-                    }
-                }
+        array<ast::Node *> leaves;
+        flow.collect_borrow_leaves(terminal, leaves);
+        for (auto *node : leaves) {
+            bool satisfied = satisfies_lifetime_constraint(fn_def, required, terminal, node);
+            if (verbose) {
+                fmt::print("[lifetime]   leaf {} -> {}\n", node_label(node),
+                           satisfied ? "OK" : "VIOLATION");
             }
 
-            if (next) {
-                for (size_t i = 0; i < next->len; i++)
-                    stack.add(next->items[i]);
+            if (!satisfied) {
+                // If this leaf is explicitly moved/deleted later, let the sink checker
+                // produce the more precise diagnostic based on actual last use.
+                if (flow.is_sunk(node)) {
+                    continue;
+                }
+                if (is_safe) {
+                    array<Note> notes;
+                    notes.add({"referenced here", terminal->token->pos});
+                    error_with_notes(node, std::move(notes), "'{}' does not live long enough",
+                                     node->name);
+                } else {
+                    node->escape.escaped = true;
+                }
             }
         }
     }
