@@ -15,7 +15,8 @@ export interface Read {
     func read_all() Buffer {
         var result = Buffer{};
         var chunk_size: uint32 = 32;
-        var chunk = Buffer.alloc(chunk_size);
+        var chunk = Buffer{};
+        chunk.resize_fill(chunk_size);
         while true {
             var n = this.read(chunk.span_mut());
             if n == 0 {
@@ -27,7 +28,7 @@ export interface Read {
                 if chunk_size > DEFAULT_BUF_SIZE {
                     chunk_size = DEFAULT_BUF_SIZE;
                 }
-                chunk = Buffer.alloc(chunk_size);
+                chunk.resize_fill(chunk_size);
             }
         }
         return result;
@@ -51,7 +52,8 @@ export interface ReadAsync {
     async func read_all() Promise<Buffer> {
         var result = Buffer{};
         var chunk_size: uint32 = 32;
-        var chunk = Buffer.alloc(chunk_size);
+        var chunk = Buffer{};
+        chunk.resize_fill(chunk_size);
         while true {
             var n = await this.read(chunk.span_mut());
             if n == 0 {
@@ -63,7 +65,7 @@ export interface ReadAsync {
                 if chunk_size > DEFAULT_BUF_SIZE {
                     chunk_size = DEFAULT_BUF_SIZE;
                 }
-                chunk = Buffer.alloc(chunk_size);
+                chunk.resize_fill(chunk_size);
             }
         }
         return result;
