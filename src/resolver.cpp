@@ -3822,7 +3822,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             struct_->resolve_status = ResolveStatus::None;
             type_sym = create_type_symbol(node->name, struct_type);
-            if (scope.module->package->kind == ast::PackageKind::BUILTIN) {
+            auto package_kind = scope.module->package->kind;
+            if (package_kind == ast::PackageKind::BUILTIN) {
                 if (node->name == "Array") {
                     m_ctx->rt_array_type = struct_type;
                 } else if (node->name == "Shared") {
@@ -3841,7 +3842,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     m_ctx->rt_enum_base = node;
                 } else if (node->name == "Error") {
                     m_ctx->rt_error_type = struct_type;
-                } else if (node->name == "Sized") {
+                }
+            }
+            if (package_kind == ast::PackageKind::BUILTIN ||
+                package_kind == ast::PackageKind::STDLIB) {
+                if (node->name == "Sized") {
                     m_ctx->rt_sized_interface = struct_type;
                 } else if (node->name == "Unsized") {
                     m_ctx->rt_allow_unsized_interface = struct_type;
@@ -4916,7 +4921,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (cached_mod) {
                 module = *cached_mod;
             } else {
-                // When the BUILTIN (runtime) module imports/exports a sub-module,
+                // When the runtime module imports/exports a sub-module,
                 // make all currently-resolved runtime exports available as builtins
                 // so the sub-module can reference types like Array, panic, etc.
                 if (scope.module->package->kind == ast::PackageKind::BUILTIN) {

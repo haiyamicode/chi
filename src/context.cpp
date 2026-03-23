@@ -104,7 +104,7 @@ optional<ModulePathInfo> CompilationContext::find_module_at_path(const string &p
 string CompilationContext::init_rt_stdlib() {
     // initialize std package
     auto std = add_package("std");
-    std->kind = PackageKind::BUILTIN;
+    std->kind = PackageKind::STDLIB;
     std->src_path = get_stdlib_path("std");
     stdlib_package = std;
 

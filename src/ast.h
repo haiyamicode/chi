@@ -227,7 +227,7 @@ struct Module {
     }
 };
 
-enum class PackageKind { BUILTIN, DEFAULT };
+enum class PackageKind { BUILTIN, STDLIB, DEFAULT };
 
 struct Package {
     array<box<Module>> modules = {};
