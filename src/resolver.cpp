@@ -1092,20 +1092,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 is_variadic = true;
             }
             // Each reference-like param gets its own distinct lifetime.
-            auto *param_lifetimes = param_type ? param_type->get_lifetimes() : nullptr;
-            if (param_type && (param_type->is_reference() || param_type->kind == TypeKind::Span) &&
-                param_lifetimes && param_lifetimes->len == 0) {
+            if (type_needs_first_ref_lifetime(param_type)) {
                 auto *lt =
                     new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
                 all_ref_lifetimes.add(lt);
-                ChiType *fresh = nullptr;
-                if (param_type->kind == TypeKind::Span) {
-                    fresh = get_span_type(param_type->data.span.elem, param_type->data.span.is_mut,
-                                          lt);
-                } else {
-                    fresh = create_pointer_type(param_type->data.pointer.elem, param_type->kind);
-                    fresh->data.pointer.lifetimes.add(lt);
-                }
+                auto *fresh = with_first_ref_lifetime(param_type, lt);
                 param_type = fresh;
                 param->resolved_type = param_type;
             } else if (is_value_borrowing_type(this, param_type)) {
@@ -1163,9 +1154,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         // Return type lifetime elision: return borrows from min(all reference-like params)
-        auto *return_lifetimes = return_type ? return_type->get_lifetimes() : nullptr;
-        if (return_type && (return_type->is_reference() || return_type->kind == TypeKind::Span) &&
-            return_lifetimes && return_lifetimes->len == 0) {
+        if (type_needs_first_ref_lifetime(return_type)) {
             // Include 'this for methods
             if (container) {
                 auto &st = container->data.struct_;
@@ -1187,17 +1176,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         all_ref_lifetimes[i]->outlives.add(elided_lt);
                     }
                 }
-                ChiType *fresh = nullptr;
-                if (return_type->kind == TypeKind::Span) {
-                    fresh =
-                        get_span_type(return_type->data.span.elem, return_type->data.span.is_mut,
-                                      elided_lt);
-                } else {
-                    fresh =
-                        create_pointer_type(return_type->data.pointer.elem, return_type->kind);
-                    fresh->data.pointer.lifetimes.add(elided_lt);
-                }
-                return_type = fresh;
+                return_type = with_first_ref_lifetime(return_type, elided_lt);
             }
         }
 
@@ -6159,16 +6138,89 @@ static ast::FnProto *get_decl_fn_proto(ast::Node *decl) {
 }
 
 static ChiLifetime *get_first_ref_lifetime(ChiType *type) {
-    auto *lifetimes = type ? type->get_lifetimes() : nullptr;
-    if (!type || !type->is_lifetime_reference() || !lifetimes || lifetimes->len == 0) {
+    if (!type) {
+        return nullptr;
+    }
+    if (type->kind == TypeKind::Subtype) {
+        auto *final_type = type->data.subtype.final_type;
+        if (final_type && final_type != type) {
+            if (auto *lt = get_first_ref_lifetime(final_type)) {
+                return lt;
+            }
+        }
+    }
+    if (type->kind == TypeKind::Optional) {
+        return get_first_ref_lifetime(type->get_elem());
+    }
+    auto *lifetimes = type->get_lifetimes();
+    if (!type->is_lifetime_reference() || !lifetimes || lifetimes->len == 0) {
         return nullptr;
     }
     return (*lifetimes)[0];
 }
 
+bool Resolver::type_needs_first_ref_lifetime(ChiType *type) {
+    if (!type) {
+        return false;
+    }
+    if (type->kind == TypeKind::Subtype) {
+        auto *final_type = type->data.subtype.final_type;
+        if (final_type && final_type != type) {
+            return type_needs_first_ref_lifetime(final_type);
+        }
+    }
+    if (type->kind == TypeKind::Optional) {
+        return type_needs_first_ref_lifetime(type->get_elem());
+    }
+    auto *lifetimes = type->get_lifetimes();
+    return type->is_lifetime_reference() && lifetimes && lifetimes->len == 0;
+}
+
+ChiType *Resolver::with_first_ref_lifetime(ChiType *type, ChiLifetime *lt) {
+    if (!type || !lt) {
+        return type;
+    }
+    if (type->kind == TypeKind::Subtype) {
+        auto *final_type = type->data.subtype.final_type;
+        if (final_type && final_type != type) {
+            return with_first_ref_lifetime(final_type, lt);
+        }
+        return type;
+    }
+    if (type->kind == TypeKind::Optional) {
+        auto *elem_type = type->get_elem();
+        auto *fresh_elem = with_first_ref_lifetime(elem_type, lt);
+        if (fresh_elem == elem_type) {
+            return type;
+        }
+        return get_wrapped_type(fresh_elem, TypeKind::Optional);
+    }
+    if (type->kind == TypeKind::Span) {
+        return get_span_type(type->data.span.elem, type->data.span.is_mut, lt);
+    }
+    if (type->is_reference()) {
+        auto *fresh = create_pointer_type(type->data.pointer.elem, type->kind);
+        fresh->data.pointer.lifetimes.add(lt);
+        return fresh;
+    }
+    return type;
+}
+
 static bool type_has_lifetime_kind(ChiType *type, LifetimeKind kind) {
-    auto *lifetimes = type ? type->get_lifetimes() : nullptr;
-    if (!type || !type->is_lifetime_reference() || !lifetimes) {
+    if (!type) {
+        return false;
+    }
+    if (type->kind == TypeKind::Subtype) {
+        auto *final_type = type->data.subtype.final_type;
+        if (final_type && final_type != type && type_has_lifetime_kind(final_type, kind)) {
+            return true;
+        }
+    }
+    if (type->kind == TypeKind::Optional) {
+        return type_has_lifetime_kind(type->get_elem(), kind);
+    }
+    auto *lifetimes = type->get_lifetimes();
+    if (!type->is_lifetime_reference() || !lifetimes) {
         return false;
     }
     for (auto *lt : *lifetimes) {

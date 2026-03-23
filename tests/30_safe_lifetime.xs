@@ -526,6 +526,32 @@ func test_method_ref_return() {
     printf("method ref = {}\n", *r);
 }
 
+struct OptionalHolder {
+    value: int = 0;
+    children: Array<OptionalHolder> = [];
+
+    func maybe_first_ref() ?(&OptionalHolder) {
+        if this.children.length == 0 {
+            return null;
+        }
+        return &this.children[0];
+    }
+}
+
+func identity_optional_ref(x: ?(&OptionalHolder)) ?(&OptionalHolder) {
+    return x;
+}
+
+func test_optional_method_ref_return() {
+    printf("=== optional method ref ===\n");
+    var h = OptionalHolder{};
+    h.children.push(OptionalHolder{value: 88});
+    let child = h.maybe_first_ref()!;
+    printf("optional method ref = {}\n", child.value);
+    let same = identity_optional_ref(child)!;
+    printf("optional identity ref = {}\n", same.value);
+}
+
 struct PointRef {
     x: int;
 }
@@ -977,6 +1003,7 @@ func main() {
     test_cross_fn_ref();
     test_bigger_ref();
     test_method_ref_return();
+    test_optional_method_ref_return();
     test_ref_alias_return();
     test_block_scoped_borrow();
     test_block_destruction_order();

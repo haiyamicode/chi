@@ -322,6 +322,8 @@ class Resolver {
     bool is_same_type(ChiType *a, ChiType *b);
 
     TypeKind get_sigil_type_kind(ast::SigilKind sigil);
+    bool type_needs_first_ref_lifetime(ChiType *type);
+    ChiType *with_first_ref_lifetime(ChiType *type, ChiLifetime *lt);
 
     void check_assignment(ast::Node *value, ChiType *from_type, ChiType *to_type,
                           const ResolveScope *scope = nullptr, bool is_explicit = false);
