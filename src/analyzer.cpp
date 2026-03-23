@@ -211,6 +211,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
     ScanResult result;
     result.module = module;
     result.pos = cursor_pos;
+    result.scope = module ? module->scope : nullptr;
     if (!module || !module->root) return result;
     auto resolver = m_ctx.create_resolver();
     ScopeResolver scope_resolver(&resolver);
@@ -231,7 +232,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
     }
 
     // get info from token
-    if (result.token && result.scope) {
+    if (result.token) {
         if (result.token->is_identifier()) {
             auto token_node = result.token->node;
             // get associated decl from identifier
@@ -293,7 +294,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
             }
 
             // resort to symbol lookup
-            if (!result.decl) {
+            if (!result.decl && result.scope) {
                 auto name = result.token->str;
                 auto decl = scope_resolver.find_symbol(name, result.scope);
                 if (decl) {
