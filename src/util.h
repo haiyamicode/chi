@@ -69,6 +69,19 @@ static inline std::string string_replace(std::string subject, const std::string 
     return subject;
 }
 
+static inline std::string format_span_prefix(bool is_mut, const std::string &lifetime_name = "") {
+    if (!lifetime_name.empty() && is_mut) {
+        return fmt::format("&(mut, '{}) ", lifetime_name);
+    }
+    if (!lifetime_name.empty()) {
+        return fmt::format("&'{} ", lifetime_name);
+    }
+    if (is_mut) {
+        return "&mut ";
+    }
+    return "&";
+}
+
 template <typename T> struct array {
     size_t len = 0;
     size_t capacity = 0;

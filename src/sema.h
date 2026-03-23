@@ -204,6 +204,7 @@ struct ChiTypeFixedArray {
 struct ChiTypeSpan {
     ChiType *elem = nullptr;
     ChiType *internal = nullptr; // lazily set to __CxSpan<elem>
+    array<ChiLifetime *> lifetimes;
     bool is_mut = false;
 };
 
@@ -393,6 +394,7 @@ struct ChiType {
             CHITYPE_CASE_DESTROY_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_DESTROY_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_DESTROY_FIELD(fixed_array, FixedArray, ChiTypeFixedArray)
+            CHITYPE_CASE_DESTROY_FIELD(span, Span, ChiTypeSpan)
             CHITYPE_CASE_DESTROY_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
         case TypeKind::Reference:
@@ -436,6 +438,7 @@ struct ChiType {
             CHITYPE_CASE_CLONE_FIELD(subtype, Subtype, ChiTypeSubtype)
             CHITYPE_CASE_CLONE_FIELD(array, Array, ChiTypeArray)
             CHITYPE_CASE_CLONE_FIELD(fixed_array, FixedArray, ChiTypeFixedArray)
+            CHITYPE_CASE_CLONE_FIELD(span, Span, ChiTypeSpan)
             CHITYPE_CASE_CLONE_FIELD(pointer, Pointer, ChiTypePointer)
         case TypeKind::Optional:
         case TypeKind::Reference:
@@ -477,6 +480,23 @@ struct ChiType {
     bool is_borrow_reference() {
         return kind == TypeKind::Reference || kind == TypeKind::MutRef ||
                kind == TypeKind::MutexRef;
+    }
+
+    bool is_lifetime_reference() {
+        return is_borrow_reference() || kind == TypeKind::Span;
+    }
+
+    array<ChiLifetime *> *get_lifetimes() {
+        switch (kind) {
+        case TypeKind::Reference:
+        case TypeKind::MutRef:
+        case TypeKind::MutexRef:
+            return &data.pointer.lifetimes;
+        case TypeKind::Span:
+            return &data.span.lifetimes;
+        default:
+            return nullptr;
+        }
     }
 
     bool is_int() {

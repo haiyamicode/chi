@@ -3,7 +3,7 @@
 export const DEFAULT_BUF_SIZE: uint32 = 8192;
 
 export interface Read {
-    func read(buf: []mut byte) uint32;
+    func read(buf: &mut [byte]) uint32;
 
     func read_bytes(n: uint32) Buffer {
         var buf = Buffer.alloc(n);
@@ -39,7 +39,7 @@ export interface Read {
 }
 
 export interface ReadAsync {
-    func read(buf: []mut byte) Promise<uint32>;
+    func read(buf: &mut [byte]) Promise<uint32>;
 
     async func read_bytes(n: uint32) Promise<Buffer> {
         var buf = Buffer.alloc(n);
@@ -76,7 +76,7 @@ export interface ReadAsync {
 }
 
 export interface Write {
-    func write(data: []byte);
+    func write(data: &[byte]);
 
     func write_string(text: string) {
         this.write(text.byte_span());
@@ -84,7 +84,7 @@ export interface Write {
 }
 
 export interface WriteAsync {
-    func write(data: []byte) Promise;
+    func write(data: &[byte]) Promise;
 
     func write_string(text: string) Promise {
         return this.write(text.byte_span());

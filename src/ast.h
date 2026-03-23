@@ -638,9 +638,9 @@ struct TypeSigil {
     Node *type = nullptr;
     SigilKind sigil = SigilKind::None;
     Node *etype = nullptr;
-    string lifetime;            // e.g. "this" from &'this int
+    string lifetime;            // e.g. "this" from &'this int or &'this [int]
     uint32_t fixed_size = 0;    // for SigilKind::FixedArray
-    bool is_mut = false;        // for SigilKind::Span — []mut T
+    bool is_mut = false;        // for SigilKind::Span — &mut [T]
 };
 
 struct EnumVariant {

@@ -538,7 +538,7 @@ export struct Array<T> {
         }
     }
 
-    private static func make_span(data: *T, length: uint32, start: ?uint32, end: ?uint32) []mut T {
+    private static func make_span(data: *T, length: uint32, start: ?uint32, end: ?uint32) &mut [T] {
         var s = start ?? 0;
         var e = end ?? length;
         assert(s <= e, "span start must be <= end");
@@ -548,11 +548,11 @@ export struct Array<T> {
         }
     }
 
-    func span(start: ?uint32, end: ?uint32) []T {
+    func span(start: ?uint32, end: ?uint32) &[T] {
         return Array.make_span(this.data, this.length, start, end);
     }
 
-    mut func span_mut(start: ?uint32, end: ?uint32) []mut T {
+    mut func span_mut(start: ?uint32, end: ?uint32) &mut [T] {
         return Array.make_span(this.data, this.length, start, end);
     }
 }
@@ -617,7 +617,7 @@ struct __CxString {
         return result;
     }
 
-    func byte_span() []byte {
+    func byte_span() &[byte] {
         unsafe {
             return {this.data, this.length};
         }
@@ -943,8 +943,8 @@ struct __CxSpan<T> {
         }
     }
 
-    impl ops.Slice<[]T> {
-        func slice(start: ?uint32, end: ?uint32) []T {
+    impl ops.Slice<&[T]> {
+        func slice(start: ?uint32, end: ?uint32) &[T] {
             var s: uint32 = 0;
             var e: uint32 = this.length;
             if start {
@@ -963,11 +963,11 @@ struct __CxSpan<T> {
 }
 
 interface Read {
-    func read(buf: []mut byte) uint32;
+    func read(buf: &mut [byte]) uint32;
 }
 
 interface Write {
-    func write(data: []byte);
+    func write(data: &[byte]);
 }
 
 export struct Buffer {
@@ -1011,7 +1011,7 @@ export struct Buffer {
     }
 
     impl Write {
-        mutex func write(data: []byte) {
+        mutex func write(data: &[byte]) {
             for b in data {
                 this.bytes.push(b);
             }
@@ -1019,7 +1019,7 @@ export struct Buffer {
     }
 
     impl Read {
-        mut func read(buf: []mut byte) uint32 {
+        mut func read(buf: &mut [byte]) uint32 {
             if this.read_pos >= this.length {
                 return 0;
             }

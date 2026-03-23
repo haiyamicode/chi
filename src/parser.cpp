@@ -554,12 +554,103 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
     }
 }
 
+void Parser::parse_reference_type_prefix(SigilKind &sigil_kind, string &lifetime) {
+    if (next_is(TokenType::LPAREN)) {
+        // &(mut, 'this) T  or  &(mutex) T  or  &('this) T  or  &(move) T
+        consume();
+        for (;;) {
+            if (next_is(TokenType::KW_MUT)) {
+                consume();
+                sigil_kind = SigilKind::MutRef;
+            } else if (next_is(TokenType::KW_MUTEX)) {
+                consume();
+                sigil_kind = SigilKind::MutexRef;
+            } else if (next_is(TokenType::KW_MOVE)) {
+                consume();
+                sigil_kind = SigilKind::Move;
+            } else if (next_is(TokenType::LIFETIME)) {
+                lifetime = get()->str;
+                consume();
+            } else {
+                break;
+            }
+            if (!next_is(TokenType::COMMA))
+                break;
+            consume();
+        }
+        expect(TokenType::RPAREN);
+    } else if (next_is(TokenType::KW_MUT)) {
+        consume();
+        sigil_kind = SigilKind::MutRef;
+    } else if (next_is(TokenType::KW_MUTEX)) {
+        consume();
+        sigil_kind = SigilKind::MutexRef;
+    } else if (next_is(TokenType::KW_MOVE)) {
+        consume();
+        sigil_kind = SigilKind::Move;
+    } else if (next_is(TokenType::LIFETIME)) {
+        lifetime = get()->str;
+        consume();
+    }
+}
+
+bool Parser::try_parse_reference_type_prefix_lookahead(int &pos, SigilKind &sigil_kind) {
+    auto token = lookahead(pos);
+    if (token->type == TokenType::LPAREN) {
+        pos++;
+        for (;;) {
+            token = lookahead(pos);
+            if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
+                token->type == TokenType::KW_MOVE || token->type == TokenType::LIFETIME) {
+                if (token->type == TokenType::KW_MUT) {
+                    sigil_kind = SigilKind::MutRef;
+                } else if (token->type == TokenType::KW_MUTEX) {
+                    sigil_kind = SigilKind::MutexRef;
+                } else if (token->type == TokenType::KW_MOVE) {
+                    sigil_kind = SigilKind::Move;
+                }
+                pos++;
+            } else {
+                break;
+            }
+            token = lookahead(pos);
+            if (token->type != TokenType::COMMA)
+                break;
+            pos++;
+        }
+        if (lookahead(pos)->type != TokenType::RPAREN)
+            return false;
+        pos++;
+    } else if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
+               token->type == TokenType::KW_MOVE) {
+        if (token->type == TokenType::KW_MUT) {
+            sigil_kind = SigilKind::MutRef;
+        } else if (token->type == TokenType::KW_MUTEX) {
+            sigil_kind = SigilKind::MutexRef;
+        } else if (token->type == TokenType::KW_MOVE) {
+            sigil_kind = SigilKind::Move;
+        }
+        pos++;
+    } else if (token->type == TokenType::LIFETIME) {
+        pos++;
+    }
+    return lookahead(pos)->type != TokenType::END;
+}
+
 Node *Parser::parse_type_expr(bool type_only) {
     if (!type_only) {
         expect(TokenType::COLON);
     }
 
     array<Node *> sigil_nodes;
+    auto wrap_sigil_nodes = [&](Node *node) {
+        for (int i = int(sigil_nodes.len) - 1; i >= 0; --i) {
+            auto parent = sigil_nodes[i];
+            parent->data.sigil_type.type = node;
+            node = parent;
+        }
+        return node;
+    };
     for (;;) {
         auto token = get();
         // [N]T fixed-size array type
@@ -575,65 +666,24 @@ Node *Parser::parse_type_expr(bool type_only) {
             sigil_nodes.add(node);
             continue;
         }
-        // []T or []mut T span type
-        if (token->type == TokenType::LBRACK && lookahead(1)->type == TokenType::RBRACK) {
-            consume(); // [
-            consume(); // ]
-            auto node = create_node(NodeType::TypeSigil, token);
-            node->data.sigil_type.sigil = SigilKind::Span;
-            if (next_is(TokenType::KW_MUT)) {
-                consume(); // mut
-                node->data.sigil_type.is_mut = true;
-            }
-            sigil_nodes.add(node);
-            continue;
-        }
         if (auto sigil_kind = get_sigil_kind(token->type)) {
             consume();
 
             string lifetime;
             if (sigil_kind == SigilKind::Reference) {
-                if (next_is(TokenType::LPAREN)) {
-                    // &(mut, 'this) T  or  &(mutex) T  or  &('this) T  or  &(move) T
-                    consume();
-                    for (;;) {
-                        if (next_is(TokenType::KW_MUT)) {
-                            consume();
-                            sigil_kind = SigilKind::MutRef;
-                        } else if (next_is(TokenType::KW_MUTEX)) {
-                            consume();
-                            sigil_kind = SigilKind::MutexRef;
-                        } else if (next_is(TokenType::KW_MOVE)) {
-                            consume();
-                            sigil_kind = SigilKind::Move;
-                        } else if (next_is(TokenType::LIFETIME)) {
-                            lifetime = get()->str;
-                            consume();
-                        } else {
-                            break;
-                        }
-                        if (!next_is(TokenType::COMMA))
-                            break;
-                        consume();
-                    }
-                    expect(TokenType::RPAREN);
-                } else if (next_is(TokenType::KW_MUT)) {
-                    // &mut T
-                    consume();
-                    sigil_kind = SigilKind::MutRef;
-                } else if (next_is(TokenType::KW_MUTEX)) {
-                    // &mutex T
-                    consume();
-                    sigil_kind = SigilKind::MutexRef;
-                } else if (next_is(TokenType::KW_MOVE)) {
-                    // &move T
-                    consume();
-                    sigil_kind = SigilKind::Move;
-                } else if (next_is(TokenType::LIFETIME)) {
-                    // &'this T
-                    lifetime = get()->str;
-                    consume();
-                }
+                parse_reference_type_prefix(*sigil_kind, lifetime);
+            }
+
+            if ((sigil_kind == SigilKind::Reference || sigil_kind == SigilKind::MutRef) &&
+                next_is(TokenType::LBRACK) && lookahead(1)->type != TokenType::INT) {
+                consume(); // [
+                auto node = create_node(NodeType::TypeSigil, token);
+                node->data.sigil_type.sigil = SigilKind::Span;
+                node->data.sigil_type.lifetime = lifetime;
+                node->data.sigil_type.is_mut = sigil_kind == SigilKind::MutRef;
+                node->data.sigil_type.type = parse_type_expr(true);
+                expect(TokenType::RBRACK);
+                return wrap_sigil_nodes(node);
             }
 
             auto node = create_node(NodeType::TypeSigil, token);
@@ -713,13 +763,7 @@ Node *Parser::parse_type_expr(bool type_only) {
         }
     }
 
-    for (int i = int(sigil_nodes.len) - 1; i >= 0; --i) {
-        auto parent = sigil_nodes[i];
-        parent->data.sigil_type.type = node;
-        node = parent;
-    }
-
-    return node;
+    return wrap_sigil_nodes(node);
 }
 
 // Lookahead to check if current '(' starts an arrow lambda: (params) [ret_type] =>
@@ -2237,16 +2281,8 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         return false;
     }
 
-    // Handle [N]T fixed-size array type or []T / []mut T span type
+    // Handle [N]T fixed-size array type
     if (token->type == TokenType::LBRACK) {
-        if (lookahead(pos + 1)->type == TokenType::RBRACK) {
-            // []T or []mut T span
-            pos += 2;
-            if (lookahead(pos)->type == TokenType::KW_MUT) {
-                pos++; // skip mut
-            }
-            return try_parse_type_expr_lookahead(pos, struct_only);
-        }
         pos++;
         if (lookahead(pos)->type != TokenType::INT)
             return false;
@@ -2266,49 +2302,23 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         }
     }
 
-    // Handle reference sigil: &T, &mut T, &mutex T, &move T, &'a T, &(mut, 'a) T
+    // Handle reference sigil: &T, &mut T, &mutex T, &move T, &'a T, &(mut, 'a) T, &[T]
     if (token->type == TokenType::AND) {
+        auto span_sigil_kind = SigilKind::Reference;
         pos++;
-        token = lookahead(pos);
-        if (token->type == TokenType::END) {
+        if (!try_parse_reference_type_prefix_lookahead(pos, span_sigil_kind)) {
             return false;
         }
-        if (token->type == TokenType::LPAREN) {
-            // &(mut, 'a) T or &(mutex, 'a) T or &('a) T or &(move) T
+        token = lookahead(pos);
+        if ((span_sigil_kind == SigilKind::Reference || span_sigil_kind == SigilKind::MutRef) &&
+            token->type == TokenType::LBRACK && lookahead(pos + 1)->type != TokenType::INT) {
             pos++;
-            for (;;) {
-                token = lookahead(pos);
-                if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
-                    token->type == TokenType::KW_MOVE ||
-                    token->type == TokenType::LIFETIME) {
-                    pos++;
-                } else {
-                    break;
-                }
-                token = lookahead(pos);
-                if (token->type != TokenType::COMMA)
-                    break;
-                pos++;
-            }
-            if (lookahead(pos)->type != TokenType::RPAREN)
+            if (!try_parse_type_expr_lookahead(pos, struct_only))
+                return false;
+            if (lookahead(pos)->type != TokenType::RBRACK)
                 return false;
             pos++;
-            token = lookahead(pos);
-            if (token->type == TokenType::END)
-                return false;
-        } else if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
-                   token->type == TokenType::KW_MOVE) {
-            // &mut T, &mutex T, &move T
-            pos++;
-            token = lookahead(pos);
-            if (token->type == TokenType::END)
-                return false;
-        } else if (token->type == TokenType::LIFETIME) {
-            // &'a T
-            pos++;
-            token = lookahead(pos);
-            if (token->type == TokenType::END)
-                return false;
+            return true;
         }
     }
 

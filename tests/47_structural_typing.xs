@@ -3,18 +3,18 @@
 // interface with the same required method signatures.
 
 private interface Sink {
-    func write(data: []byte);
+    func write(data: &[byte]);
 }
 
 interface Logger {
-    func write(data: []byte);
+    func write(data: &[byte]);
 }
 
 struct ByteCounter {
     count: uint32 = 0;
 
     impl Sink {
-        mut func write(data: []byte) {
+        mut func write(data: &[byte]) {
             this.count = this.count + data.length;
         }
     }

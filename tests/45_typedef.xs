@@ -18,7 +18,7 @@ struct Pair<A: ops.Construct, B: ops.Construct> {
 typedef IntArray = Array<int>;
 typedef Str = string;
 // --- Single-param generic typedef ---
-typedef Span<T> = []T;
+typedef Span<T> = &[T];
 // --- Multi-param: full application ---
 typedef IntPair = Pair<int, int>;
 // --- Multi-param: partial application (pin first) ---
@@ -75,8 +75,8 @@ func main() {
     var iv: IntSpan = arr.span();
     printf("iv: {}\n", iv);
 
-    // Interchangeable: IntSpan == Span<int> == []int
-    var v2: []int = iv;
+    // Interchangeable: IntSpan == Span<int> == &[int]
+    var v2: &[int] = iv;
     var v3: Span<int> = v2;
     printf("v3: {}\n", v3);
 

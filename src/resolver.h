@@ -471,8 +471,9 @@ class Resolver {
     ChiType *get_pointer_type(ChiType *elem, TypeKind kind = TypeKind::Pointer);
 
     ChiType *get_array_type(ChiType *elem);
-    ChiType *get_span_type(ChiType *elem, bool is_mut = false);
+    ChiType *get_span_type(ChiType *elem, bool is_mut = false, ChiLifetime *lifetime = nullptr);
     ChiType *get_fixed_array_type(ChiType *elem, uint32_t size);
+    ChiLifetime *resolve_named_lifetime(ast::Node *node, ResolveScope &scope, const string &name);
 
     ChiType *get_promise_type(ChiType *value);
     ChiType *get_shared_type(ChiType *value);

@@ -134,7 +134,7 @@ struct FileHandle {
         }
     }
 
-    func read(buf: []mut byte) uint32 {
+    func read(buf: &mut [byte]) uint32 {
         unsafe {
             let n = __cx_fs_read(this.fd, buf.as_ptr(), buf.length);
             if n < 0 {
@@ -144,7 +144,7 @@ struct FileHandle {
         }
     }
 
-    func write(data: []byte) int32 {
+    func write(data: &[byte]) int32 {
         unsafe {
             return __cx_fs_write(this.fd, data.as_ptr(), data.length);
         }
@@ -188,13 +188,13 @@ export struct File {
     }
 
     impl io.Read {
-        mut func read(buf: []mut byte) uint32 {
+        mut func read(buf: &mut [byte]) uint32 {
             return this.handle.read(buf);
         }
     }
 
     impl io.Write {
-        func write(data: []byte) {
+        func write(data: &[byte]) {
             this.handle.write(data);
         }
     }
@@ -218,7 +218,7 @@ export struct FileAsync {
     }
 
     impl io.ReadAsync {
-        func read(buf: []mut byte) Promise<uint32> {
+        func read(buf: &mut [byte]) Promise<uint32> {
             var promise = Promise<uint32>{};
             var path = this.handle.file_path();
             var resolve = func [promise] (num_bytes: uint32) {
@@ -249,7 +249,7 @@ export struct FileAsync {
     }
 
     impl io.WriteAsync {
-        func write(data: []byte) Promise {
+        func write(data: &[byte]) Promise {
             var promise = Promise{};
             var path = this.handle.file_path();
             var resolve = func [promise] () {

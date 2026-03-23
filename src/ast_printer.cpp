@@ -994,8 +994,10 @@ void AstPrinter::print_node(Node *node) {
             break;
         }
         if (data.sigil == SigilKind::Span) {
-            emit(data.is_mut ? "[]mut " : "[]");
+            emit("{}", format_span_prefix(data.is_mut, data.lifetime));
+            emit("[");
             print_node(data.type);
+            emit("]");
             break;
         }
         bool has_lifetime = !data.lifetime.empty();

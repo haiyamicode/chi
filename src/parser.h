@@ -158,6 +158,8 @@ class Parser {
     Node *parse_var_identifier();
 
     optional<SigilKind> get_sigil_kind(TokenType token_type);
+    void parse_reference_type_prefix(SigilKind &sigil_kind, string &lifetime);
+    bool try_parse_reference_type_prefix_lookahead(int &pos, SigilKind &sigil_kind);
 
     Node *parse_var_decl(bool as_field, DeclSpec *decl_spec = nullptr);
 

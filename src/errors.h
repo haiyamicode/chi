@@ -34,7 +34,7 @@ constexpr auto PROTECTED_MEMBER_NOT_WRITABLE = "protected member '{}' is not wri
 constexpr auto CONSTRUCT_CANNOT_INFER_TYPE = "cannot infer type for construct expression";
 constexpr auto CANNOT_SUBSCRIPT = "cannot perform array subscript on type {}";
 constexpr auto CANNOT_WRITE_IMMUTABLE_SPAN =
-    "cannot write to immutable span {}; use []mut {} for a mutable span";
+    "cannot write to immutable span {}; use &mut [{}] for a mutable span";
 constexpr auto INVALID_OPERATOR = "invalid operator '{}' on type {}";
 constexpr auto CANNOT_MODIFY_IMMUTABLE_REFERENCE = "immutable reference {} cannot be modified";
 constexpr auto STMT_NOT_WITHIN_LOOP = "{} statement not within a loop";

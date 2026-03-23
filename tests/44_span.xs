@@ -1,16 +1,24 @@
-func print_span(s: []int) {
+func print_span(s: &[int]) {
     for item in s {
         printf("{} ", item);
     }
     println("");
 }
 
-func sum(s: []int) int {
+func sum(s: &[int]) int {
     var total = 0;
     for item in s {
         total = total + item;
     }
     return total;
+}
+
+func sum_lt<'a>(s: &'a [int]) int {
+    return sum(s);
+}
+
+func bump_lt<'a>(s: &(mut, 'a) [int]) {
+    s[1] = s[1] + 10;
 }
 
 func main() {
@@ -53,7 +61,7 @@ func main() {
     var v3 = arr.span(2, null);
     printf("span(2,null): {}\n", v3);
 
-    // slice on span (produces another []T)
+    // slice on span (produces another &[T])
     var sub = s.slice(1, 4);
     printf("slice(1,4): {}\n", sub);
 
@@ -67,8 +75,9 @@ func main() {
     var sub4 = s[1..4];
     printf("s[1..4]: {}\n", sub4);
 
-    // pass to function — []mut T coerces to []T
+    // pass to function — &mut [T] coerces to &[T]
     printf("sum: {}\n", sum(ms));
+    printf("sum_lt: {}\n", sum_lt(s));
 
     // empty span
     var empty_arr: Array<int> = [];
@@ -76,6 +85,10 @@ func main() {
     printf("empty len: {}\n", ev.length);
     printf("empty is_empty: {}\n", ev.is_empty());
     printf("empty: {}\n", ev);
+
+    var arr2: Array<int> = [10, 20, 30];
+    bump_lt(arr2.span_mut());
+    printf("bump_lt: {}\n", arr2);
 
     // mutable span reflects underlying array mutation
     ms[0] = 100;

@@ -421,7 +421,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Span:
         if (from_type->kind != TypeKind::Span) return false;
         if (!can_assign(from_type->get_elem(), to_type->get_elem(), is_explicit)) return false;
-        // []mut T -> []T is allowed (downgrade), []T -> []mut T is not
+        // &mut [T] -> &[T] is allowed (downgrade), &[T] -> &mut [T] is not
         if (to_type->data.span.is_mut && !from_type->data.span.is_mut) return false;
         return true;
     case TypeKind::Pointer:
@@ -1091,14 +1091,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 param->resolved_type = param_type;
                 is_variadic = true;
             }
-            // Each ref param gets its own distinct lifetime.
-            if (param_type && param_type->is_reference() &&
-                param_type->data.pointer.lifetimes.len == 0) {
+            // Each reference-like param gets its own distinct lifetime.
+            auto *param_lifetimes = param_type ? param_type->get_lifetimes() : nullptr;
+            if (param_type && (param_type->is_reference() || param_type->kind == TypeKind::Span) &&
+                param_lifetimes && param_lifetimes->len == 0) {
                 auto *lt =
                     new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
                 all_ref_lifetimes.add(lt);
-                auto *fresh = create_pointer_type(param_type->data.pointer.elem, param_type->kind);
-                fresh->data.pointer.lifetimes.add(lt);
+                ChiType *fresh = nullptr;
+                if (param_type->kind == TypeKind::Span) {
+                    fresh = get_span_type(param_type->data.span.elem, param_type->data.span.is_mut,
+                                          lt);
+                } else {
+                    fresh = create_pointer_type(param_type->data.pointer.elem, param_type->kind);
+                    fresh->data.pointer.lifetimes.add(lt);
+                }
                 param_type = fresh;
                 param->resolved_type = param_type;
             } else if (is_value_borrowing_type(this, param_type)) {
@@ -1155,9 +1162,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             pdata.default_value = null_node;
         }
 
-        // Return type lifetime elision: return borrows from min(all ref params)
-        if (return_type && return_type->is_reference() &&
-            return_type->data.pointer.lifetimes.len == 0) {
+        // Return type lifetime elision: return borrows from min(all reference-like params)
+        auto *return_lifetimes = return_type ? return_type->get_lifetimes() : nullptr;
+        if (return_type && (return_type->is_reference() || return_type->kind == TypeKind::Span) &&
+            return_lifetimes && return_lifetimes->len == 0) {
             // Include 'this for methods
             if (container) {
                 auto &st = container->data.struct_;
@@ -1179,9 +1187,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         all_ref_lifetimes[i]->outlives.add(elided_lt);
                     }
                 }
-                auto *fresh =
-                    create_pointer_type(return_type->data.pointer.elem, return_type->kind);
-                fresh->data.pointer.lifetimes.add(elided_lt);
+                ChiType *fresh = nullptr;
+                if (return_type->kind == TypeKind::Span) {
+                    fresh =
+                        get_span_type(return_type->data.span.elem, return_type->data.span.is_mut,
+                                      elided_lt);
+                } else {
+                    fresh =
+                        create_pointer_type(return_type->data.pointer.elem, return_type->kind);
+                    fresh->data.pointer.lifetimes.add(elided_lt);
+                }
                 return_type = fresh;
             }
         }
@@ -1403,35 +1418,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_fixed_array_type(type, data.fixed_size);
         }
         if (data.sigil == ast::SigilKind::Span) {
-            return get_span_type(type, data.is_mut);
+            if (data.lifetime.empty()) {
+                return get_span_type(type, data.is_mut);
+            }
+            auto *lifetime = resolve_named_lifetime(node, scope, data.lifetime);
+            if (!lifetime) {
+                return create_type(TypeKind::Unknown);
+            }
+            return get_span_type(type, data.is_mut, lifetime);
         }
         auto kind = get_sigil_type_kind(data.sigil);
         ChiType *final_type;
         if (!data.lifetime.empty()) {
             // Lifetime-annotated ref: create fresh type (not cached) with resolved lifetime
             final_type = create_pointer_type(type, kind);
-            if (data.lifetime == "static") {
-                final_type->data.pointer.lifetimes.add(m_ctx->static_lifetime);
-            } else if (data.lifetime == "this" && scope.parent_struct) {
-                auto *struct_type = scope.parent_struct;
-                auto &st = struct_type->data.struct_;
-                if (!st.this_lifetime) {
-                    st.this_lifetime =
-                        new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
-                }
-                final_type->data.pointer.lifetimes.add(st.this_lifetime);
-            } else if (scope.fn_lifetime_params) {
-                auto *lt = scope.fn_lifetime_params->get(data.lifetime);
-                if (lt) {
-                    final_type->data.pointer.lifetimes.add(*lt);
-                } else {
-                    error(node, "unknown lifetime '{}'", data.lifetime);
-                    return create_type(TypeKind::Unknown);
-                }
-            } else {
-                error(node, "unknown lifetime '{}'", data.lifetime);
+            auto *lifetime = resolve_named_lifetime(node, scope, data.lifetime);
+            if (!lifetime) {
                 return create_type(TypeKind::Unknown);
             }
+            final_type->data.pointer.lifetimes.add(lifetime);
         } else {
             final_type = get_pointer_type(type, kind);
         }
@@ -3131,10 +3136,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto &fi = field_init->data.field_init_expr;
                     if (!fi.resolved_field) continue;
                     auto field_type = to_value_type(fi.resolved_field->resolved_type);
-                    if (!field_type || !field_type->is_pointer_like()) continue;
+                    if (!field_type || !field_type->is_lifetime_reference()) continue;
                     auto *src = find_root_decl(fi.value);
                     if (!src) continue;
-                    for (auto *lt : field_type->data.pointer.lifetimes) {
+                    auto *lifetimes = field_type->get_lifetimes();
+                    if (!lifetimes) continue;
+                    for (auto *lt : *lifetimes) {
                         lt_to_sources[lt].add(src);
                     }
                 }
@@ -5704,10 +5711,14 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "?" + format_type(type->get_elem(), for_display);
     case TypeKind::Array:
         return fmt::format("Array<{}>", format_type(type->get_elem(), for_display));
-    case TypeKind::Span:
-        return fmt::format("{}{}",
-            type->data.span.is_mut ? "[]mut " : "[]",
-            format_type(type->data.span.elem, for_display));
+    case TypeKind::Span: {
+        string lt_name =
+            type->data.span.lifetimes.len > 0 && type->data.span.lifetimes[0]
+                ? type->data.span.lifetimes[0]->name
+                : "";
+        string prefix = format_span_prefix(type->data.span.is_mut, lt_name);
+        return fmt::format("{}[{}]", prefix, format_type(type->data.span.elem, for_display));
+    }
     case TypeKind::FixedArray:
         return fmt::format("[{}]{}", type->data.fixed_array.size,
                            format_type(type->data.fixed_array.elem, for_display));
@@ -6144,17 +6155,19 @@ static ast::FnProto *get_decl_fn_proto(ast::Node *decl) {
 }
 
 static ChiLifetime *get_first_ref_lifetime(ChiType *type) {
-    if (!type || !type->is_borrow_reference() || type->data.pointer.lifetimes.len == 0) {
+    auto *lifetimes = type ? type->get_lifetimes() : nullptr;
+    if (!type || !type->is_lifetime_reference() || !lifetimes || lifetimes->len == 0) {
         return nullptr;
     }
-    return type->data.pointer.lifetimes[0];
+    return (*lifetimes)[0];
 }
 
 static bool type_has_lifetime_kind(ChiType *type, LifetimeKind kind) {
-    if (!type || !type->is_borrow_reference()) {
+    auto *lifetimes = type ? type->get_lifetimes() : nullptr;
+    if (!type || !type->is_lifetime_reference() || !lifetimes) {
         return false;
     }
-    for (auto *lt : type->data.pointer.lifetimes) {
+    for (auto *lt : *lifetimes) {
         if (lt && lt->kind == kind) {
             return true;
         }
@@ -6163,7 +6176,8 @@ static bool type_has_lifetime_kind(ChiType *type, LifetimeKind kind) {
 }
 
 static bool is_value_borrowing_type(Resolver *resolver, ChiType *type) {
-    return resolver && type && !type->is_reference() && resolver->is_borrowing_type(type);
+    return resolver && type && !type->is_reference() && type->kind != TypeKind::Span &&
+           resolver->is_borrowing_type(type);
 }
 
 static bool type_may_propagate_borrow_deps(Resolver *resolver, ChiType *type) {
@@ -6956,7 +6970,8 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     }
     case TypeKind::Span: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
-        return get_span_type(elem_type, type->data.span.is_mut);
+        auto *lt = type->data.span.lifetimes.len > 0 ? type->data.span.lifetimes[0] : nullptr;
+        return get_span_type(elem_type, type->data.span.is_mut, lt);
     }
 
     case TypeKind::Subtype: {
@@ -8721,7 +8736,24 @@ ChiType *Resolver::get_array_type(ChiType *elem) {
     return type;
 }
 
-ChiType *Resolver::get_span_type(ChiType *elem, bool is_mut) {
+ChiType *Resolver::get_span_type(ChiType *elem, bool is_mut, ChiLifetime *lifetime) {
+    if (lifetime) {
+        auto type = create_type(TypeKind::Span);
+        type->data.span.elem = elem;
+        type->data.span.is_mut = is_mut;
+        type->data.span.lifetimes.add(lifetime);
+        type->is_placeholder = elem->is_placeholder;
+        auto elem_str = elem->global_id.empty() ? format_type_id(elem) : elem->global_id;
+        type->global_id = fmt::format("runtime.__CxSpan<{}>", elem_str);
+        if (m_ctx->rt_span_type && !type->is_placeholder) {
+            array<ChiType *> args;
+            args.add(elem);
+            type->data.span.internal = get_subtype(to_value_type(m_ctx->rt_span_type), &args);
+        } else {
+            type->data.span.internal = nullptr;
+        }
+        return type;
+    }
     auto &cache = is_mut ? m_ctx->mut_span_of : m_ctx->span_of;
     if (auto cached = cache.get(elem))
         return *cached;
@@ -8741,6 +8773,29 @@ ChiType *Resolver::get_span_type(ChiType *elem, bool is_mut) {
         type->data.span.internal = nullptr;
     }
     return type;
+}
+
+ChiLifetime *Resolver::resolve_named_lifetime(ast::Node *node, ResolveScope &scope,
+                                              const string &name) {
+    if (name == "static") {
+        return m_ctx->static_lifetime;
+    }
+    if (name == "this" && scope.parent_struct) {
+        auto *struct_type = scope.parent_struct;
+        auto &st = struct_type->data.struct_;
+        if (!st.this_lifetime) {
+            st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
+        }
+        return st.this_lifetime;
+    }
+    if (scope.fn_lifetime_params) {
+        auto *lt = scope.fn_lifetime_params->get(name);
+        if (lt) {
+            return *lt;
+        }
+    }
+    error(node, "unknown lifetime '{}'", name);
+    return nullptr;
 }
 
 ChiType *Resolver::get_fixed_array_type(ChiType *elem, uint32_t size) {
@@ -11097,9 +11152,10 @@ static ChiLifetime *get_terminal_required_lifetime(Resolver *resolver, ast::FnDe
         if (fn_def->fn_proto && fn_def->fn_proto->resolved_type &&
             fn_def->fn_proto->resolved_type->kind == TypeKind::Fn) {
             auto *ret_type = fn_def->fn_proto->resolved_type->data.fn.return_type;
-            if (ret_type && ret_type->is_reference() &&
-                ret_type->data.pointer.lifetimes.len > 0) {
-                return ret_type->data.pointer.lifetimes[0];
+            auto *ret_lifetimes = ret_type ? ret_type->get_lifetimes() : nullptr;
+            if (ret_type && (ret_type->is_reference() || ret_type->kind == TypeKind::Span) &&
+                ret_lifetimes && ret_lifetimes->len > 0) {
+                return (*ret_lifetimes)[0];
             }
         }
         // Also check resolved_return_lifetime for borrowing value returns (func(), structs)
