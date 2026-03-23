@@ -23,6 +23,21 @@ static ast::Node *resolve_scanned_decl(ast::Node *decl, cx::Scope *scope) {
     return replacement;
 }
 
+static ast::Node *resolve_dot_expr_decl(ast::Node *node) {
+    if (!node || node->type != ast::NodeType::DotExpr) {
+        return nullptr;
+    }
+
+    auto &dot = node->data.dot_expr;
+    if (dot.resolved_decl) {
+        return dot.resolved_decl;
+    }
+    if (dot.resolved_struct_member && dot.resolved_struct_member->node) {
+        return dot.resolved_struct_member->node;
+    }
+    return nullptr;
+}
+
 static bool cursor_in_node(ast::Node *node, Pos cursor_pos) {
     if (!node || !node->start_token || !node->end_token) {
         return false;
@@ -234,7 +249,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
     // get info from token
     if (result.token) {
         if (result.token->is_identifier()) {
-            auto token_node = result.token->node;
+            auto token_node = result.token->node ? result.token->node : result.token->semantic_node;
             // get associated decl from identifier
             if (token_node) {
                 if (token_node->type == ast::NodeType::ConstructExpr) {
@@ -262,6 +277,8 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
                         result.decl = token_node->data.identifier.decl;
                     }
                     // else: leave decl null so scope fallback can resolve it
+                } else if (token_node->type == ast::NodeType::DotExpr) {
+                    result.decl = resolve_dot_expr_decl(token_node);
                 } else {
                     result.decl = token_node;
                 }
@@ -285,12 +302,7 @@ ScanResult Analyzer::scan(ast::Module *module, Pos cursor_pos) {
             // This must come before scope lookup to avoid resolving to a
             // same-named symbol in an outer scope (e.g. stdio.printf vs builtin printf)
             if (!result.decl && result.dot_expr) {
-                auto &dot = result.dot_expr->data.dot_expr;
-                if (dot.resolved_decl) {
-                    result.decl = dot.resolved_decl;
-                } else if (dot.resolved_struct_member && dot.resolved_struct_member->node) {
-                    result.decl = dot.resolved_struct_member->node;
-                }
+                result.decl = resolve_dot_expr_decl(result.dot_expr);
             }
 
             // resort to symbol lookup
