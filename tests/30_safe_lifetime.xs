@@ -552,6 +552,33 @@ func test_optional_method_ref_return() {
     printf("optional identity ref = {}\n", same.value);
 }
 
+struct NestedMatches {
+    command: string = "";
+    child_matches: Array<NestedMatches> = [];
+
+    func subcommand() ?(&'this NestedMatches) {
+        if this.child_matches.length == 0 {
+            return null;
+        }
+        return &this.child_matches[0];
+    }
+}
+
+struct NestedCommand {
+    name: string = "";
+    commands: Array<NestedCommand> = [];
+}
+
+func test_local_field_assign_does_not_leak_this() {
+    printf("=== local field assign no this leak ===\n");
+    var cmd = NestedCommand{name: "root"};
+    cmd.commands.push(NestedCommand{name: "child"});
+    let subcommand = &cmd.commands[0];
+    var child_matches = NestedMatches{};
+    child_matches.command = subcommand.name;
+    printf("child command = {}\n", child_matches.command);
+}
+
 struct PointRef {
     x: int;
 }
@@ -1004,6 +1031,7 @@ func main() {
     test_bigger_ref();
     test_method_ref_return();
     test_optional_method_ref_return();
+    test_local_field_assign_does_not_leak_this();
     test_ref_alias_return();
     test_block_scoped_borrow();
     test_block_destruction_order();

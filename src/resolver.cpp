@@ -1656,11 +1656,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             auto *field_decl = data.op1->data.dot_expr.resolved_decl;
                             if (field_decl && field_decl->type == NodeType::VarDecl &&
                                 field_decl->data.var_decl.is_field) {
-                                auto *root_type = node_get_type(lhs_decl);
-                                if (root_type) {
-                                    auto *st = resolve_struct_type(root_type);
-                                    if (st && st->this_lifetime) {
-                                        fn_def.flow.terminal_lifetimes[lhs_decl] = st->this_lifetime;
+                                auto *field_type = field_decl->resolved_type;
+                                if (field_type &&
+                                    type_may_propagate_borrow_deps(this, field_type)) {
+                                    auto *root_type = node_get_type(lhs_decl);
+                                    if (root_type) {
+                                        auto *st = resolve_struct_type(root_type);
+                                        if (st && st->this_lifetime) {
+                                            fn_def.flow.terminal_lifetimes[lhs_decl] =
+                                                st->this_lifetime;
+                                        }
                                     }
                                 }
                             }

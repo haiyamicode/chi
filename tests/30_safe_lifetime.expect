@@ -74,6 +74,8 @@ method ref = 42
 === optional method ref ===
 optional method ref = 88
 optional identity ref = 88
+=== local field assign no this leak ===
+child command = child
 === ref alias return ===
 field alias = 77
 destructure alias = 77
