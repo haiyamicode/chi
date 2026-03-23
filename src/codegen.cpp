@@ -1235,11 +1235,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         emit_dbg_location(fn_def.body);
         auto runtime_start = get_system_fn("cx_runtime_start");
         auto set_program_args = get_system_fn("cx_set_program_args");
-        auto stack_marker = fn->return_value;
-        if (!fn->return_value) {
-            stack_marker = builder.CreateAlloca(llvm::IntegerType::getInt1Ty(llvm_ctx), nullptr,
-                                                "_stack_marker");
-        }
+        auto stack_marker =
+            builder.CreateAlloca(llvm::IntegerType::getInt1Ty(llvm_ctx), nullptr, "_stack_marker");
         builder.CreateCall(runtime_start->llvm_fn, {stack_marker});
         if (fn->llvm_fn->arg_size() >= 2) {
             builder.CreateCall(set_program_args->llvm_fn,
@@ -1290,7 +1287,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
     }
-    if (return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
+    if (is_entry || return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
         fn->use_sret()) {
         builder.CreateRetVoid();
     } else {
@@ -11283,7 +11280,8 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     int llvm_index = 0;
 
     // Add sret parameter if needed
-    bool has_sret = ftype->data.fn.should_use_sret() && !declspec.is_extern();
+    bool has_sret = ftype->data.fn.should_use_sret() && !declspec.is_extern() &&
+                    !declspec.has_flag(ast::DECL_IS_ENTRY);
     if (has_sret) {
         param_info.emplace_back(ParameterKind::SRet, llvm_index++, -1, "sret");
         fn_l->getArg(llvm_index - 1)->setName("sret");
