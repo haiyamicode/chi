@@ -244,6 +244,49 @@ func test_field_borrow_not_this() {
     printf("inner = {}\n", inner.plain());
 }
 
+enum VariantRefValue {
+    Ref(&int),
+}
+
+enum GenericVariantRef<T> {
+    Item(T),
+}
+
+enum BaseRefValue {
+    A;
+
+    struct {
+        value: &int;
+    }
+}
+
+func make_variant_ref(x: &int) VariantRefValue {
+    return VariantRefValue.Ref{x};
+}
+
+func make_generic_variant_ref(x: &int) GenericVariantRef<&int> {
+    return GenericVariantRef<&int>.Item{x};
+}
+
+func make_base_ref_value(x: &int) BaseRefValue {
+    return BaseRefValue.A{value: x};
+}
+
+func test_enum_ref_payloads() {
+    printf("=== enum ref payloads ===\n");
+    var value = 23;
+    var variant = make_variant_ref(&value);
+    var generic = make_generic_variant_ref(&value);
+    var base = make_base_ref_value(&value);
+    switch variant {
+        VariantRefValue.Ref(r) => printf("variant = {}\n", *r)
+    }
+    switch generic {
+        GenericVariantRef<&int>.Item(r) => printf("generic = {}\n", *r)
+    }
+    printf("base = {}\n", *base.value);
+}
+
 // --- Multiple stores to same field ---
 
 func test_reassign() {
@@ -916,6 +959,7 @@ func main() {
     test_mutex_array_ref_index();
     test_recursive_this_lifetime();
     test_field_borrow_not_this();
+    test_enum_ref_payloads();
     test_reassign();
     test_direct_init();
     test_local_order();

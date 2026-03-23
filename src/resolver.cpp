@@ -3048,6 +3048,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto item_scope = scope.set_value_type(field->resolved_type);
                     auto item_type = resolve(item, item_scope, flags);
                     check_assignment(item, item_type, field->resolved_type, &scope);
+                    if (scope.parent_fn_node && !scope.is_unsafe_block) {
+                        auto &fn_def = scope.parent_fn_node->data.fn_def;
+                        add_borrow_source_edges(fn_def, item, node, false);
+                    }
                 }
             } else if (result_type->kind == TypeKind::Optional) {
                 if (data.items.len != 1) {

@@ -21,6 +21,10 @@ item = 9
 child = child
 === field borrow not this ===
 inner = 17
+=== enum ref payloads ===
+variant = 23
+generic = 23
+base = 23
 === reassign ===
 first = 1
 second = 2
