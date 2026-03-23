@@ -2675,14 +2675,13 @@ Node *Parser::parse_enum_decl(DeclSpec *decl_spec) {
         expect(TokenType::GT);
     }
 
-    if (next_is(TokenType::LPAREN)) {
+    if (next_is(TokenType::COLON)) {
         consume();
-        auto iden = expect(TokenType::IDEN);
-        node->data.enum_decl.discriminator_field = iden;
-        expect(TokenType::COLON);
-        auto type = parse_type_expr(true);
-        node->data.enum_decl.discriminator_type = type;
-        expect(TokenType::RPAREN);
+        node->data.enum_decl.discriminator_type = parse_type_expr(true);
+        if (next_is(TokenType::KW_AS)) {
+            consume();
+            node->data.enum_decl.discriminator_field = expect(TokenType::IDEN);
+        }
     }
 
     save_block_pos(node);

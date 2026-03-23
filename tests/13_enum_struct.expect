@@ -1,9 +1,9 @@
-node.type: 1
+node.discriminator value: 1
 node.discriminator: 1
 node.ret: int
 node.name: f
 greeting: hello, f
-discriminator value: 1
+tagged.tag: 11
 is_callable: true
 type_name: Node.FnDef
 === Test: Generic enum ===

@@ -1397,15 +1397,12 @@ void AstPrinter::print_node(Node *node) {
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
-        if (data.discriminator_field || data.discriminator_type) {
-            emit(" (");
+        if (data.discriminator_type) {
+            emit(": ");
+            print_node(data.discriminator_type);
             if (data.discriminator_field) {
-                emit("{}: ", data.discriminator_field->get_name());
+                emit(" as {}", data.discriminator_field->get_name());
             }
-            if (data.discriminator_type) {
-                print_node(data.discriminator_type);
-            }
-            emit(")");
         }
         emit(" {{\n");
         m_indent++;

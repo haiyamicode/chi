@@ -1,6 +1,6 @@
 import "std/ops" as ops;
 
-enum Node (type: uint64) {
+enum Node: uint64 {
     VarDecl,
     FnDef {
         params: Array<string>;
@@ -62,7 +62,7 @@ struct Traced {
 }
 
 
-enum TaggedValue (type: int) {
+enum TaggedValue: int {
     Empty,
     Named {
         label: string;
@@ -114,7 +114,7 @@ enum Either<L, R> {
 }
 
 // Generic enum: type params with discriminator
-enum Tagged<T> (tag: uint64) {
+enum Tagged<T>: uint64 as tag {
     First,
     Second {
         payload: T;
@@ -616,12 +616,13 @@ func main() {
         params: {},
         ret: "int"
     };
-    printf("node.type: {}\n", node.type);
+    printf("node.discriminator value: {}\n", node.discriminator());
     printf("node.discriminator: {}\n", node.discriminator());
     printf("node.ret: {}\n", node.ret);
     printf("node.name: {}\n", node.name);
     printf("greeting: {}\n", node.greeting());
-    printf("discriminator value: {}\n", node.discriminator());
+    var tagged = Tagged<int>.Second{payload: 123};
+    printf("tagged.tag: {}\n", tagged.tag);
     printf("is_callable: {}\n", node.is_callable());
     printf("type_name: {}\n", node.type_name());
     test_generic_enum();
