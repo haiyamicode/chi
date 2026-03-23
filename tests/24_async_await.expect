@@ -55,12 +55,37 @@ value: 198
 === Double chain ===
 value: 12
 === Branchy returns ===
+tt=1006
+tf=116
+ft=36
+ff=46
 === Condition await returns ===
+cond tt=1005
+cond tf=115
+cond ft=35
+cond ff=45
 === Else if await returns ===
+elif tt=15
+elif ft=25
+elif ff=90
 === While await ===
+while plain=3
+while awaited=3
+while return=102
+while try=110
 === While loop control ===
+while break=3
+while continue=8
 === For await ===
+for plain=10
+for control=14
+for try=110
 === Iterator for await ===
+iter mutate=11
+iter plain=100
+iter control=8
+iter indexed=16
+iter try=540
 === Switch await ===
 expr1t=100
 expr1f=101
@@ -79,10 +104,21 @@ type stmt circle=16
 type stmt rect=18
 type expr circle=16
 type expr rect=18
+type try circle=62
+type try rect=-200
 === Bare await ===
+bare ok
 === Unit fallthrough after await ===
+unit fallthrough body
+unit explicit body
+unit fallthrough resolved: 1
 === Bare then logic ===
+x = 15
+x still = 15
 === Multiple bare ===
+after first
+after second
+after third
 === reject ===
 is_resolved: false
 is_rejected: true
@@ -91,115 +127,28 @@ p rejected: true
 p2 rejected: true
 === settle ===
 === try await ===
-=== reject after resolve ===
-is_resolved: true
-is_rejected: false
-value: 10
-=== resolve after reject ===
-is_resolved: false
-is_rejected: true
-=== async throw immediate ===
-rejected: true
-caught: error 10
-=== async throw after delay ===
-immediate rejected: false
-=== async called throws ===
-=== async resolve after delay ===
-=== nested rejection immediate ===
-rejected: true
-nested caught: error 77
-=== nested rejection delayed ===
-=== nested rejection 3level ===
-=== timeout ===
-scheduled
-=== sleep ===
-scheduled
-=== sleep capture ===
-mutated: 999
-All tests passed!
-tt=1006
-iter mutate=11
-bare ok
-unit fallthrough body
-x = 15
-after first
-tf=116
-ft=36
-ff=46
-unit explicit body
-unit fallthrough resolved: 1
-x still = 15
-after second
-while plain=3
-after third
-for plain=10
-iter plain=100
-timeout fired
-sleep resolved
-captured: 42
-delayed caught: error 20
-called caught: error 42
-type try circle=62
 settle ok value: 55
 settle ok error null: true
 try await ok: 55
-try await catch ok: 57
-try await nested ok: 56
-resolved: 42
 settle err value null: true
 settle err message: error 66
 try await err: error 66
+try await catch ok: 57
 try await catch err: -7
-try await nested err: error 66
-try await nested catch err: -27
 try await typed err: error 67
+try await typed mismatch: other 77
 try await typed catch saw: error 67
 try await typed catch err: -17
-try await typed mismatch: other 77
 try await typed catch mismatch: other 77
-nested delayed caught: error 88
-TraceAsyncValue.copy(1)
-TraceAsyncValue.copy(1)
-TraceAsyncValue.copy(1)
-TraceAsyncValue.delete(1)
-TraceAsyncValue.got(1)
-TraceAsyncValue.delete(1)
-elif tt=15
-3level caught: error 33
-type try rect=-200
-cond tt=1005
-trace caught: trace 30
-trace lifecycle=1
-TraceAsyncValue.copy(2)
-TraceAsyncValue.copy(2)
-TraceAsyncValue.delete(1)
-TraceAsyncValue.copy(2)
-TraceAsyncValue.delete(2)
-TraceAsyncValue.got(2)
-trace loop=3
-TraceAsyncValue.delete(2)
-TraceAsyncValue.delete(2)
+try await nested ok: 56
+try await nested err: error 66
+try await nested catch err: -27
 try branch tt=1055
+try branch tf=56
 try branch ft=-300
 try branch ff=-400
-try branch tf=56
-cond tf=115
-elif ft=25
-while awaited=3
-while break=3
 path 1111=10060
-iter control=8
-iter indexed=16
-cond ft=35
-elif ff=90
-cond ff=45
-for control=14
-while return=102
 path 1110=1006
-while continue=8
-for try=110
-iter try=540
-while try=110
 path 1101=2072
 path 1100=2006
 path 1011=3035
@@ -214,3 +163,54 @@ path 0011=5072
 path 0010=93
 path 0001=5007
 path 0000=5042
+trace caught: trace 30
+trace lifecycle=1
+TraceAsyncValue.copy(1)
+TraceAsyncValue.copy(1)
+TraceAsyncValue.copy(1)
+TraceAsyncValue.delete(1)
+TraceAsyncValue.got(1)
+TraceAsyncValue.delete(1)
+TraceAsyncValue.copy(2)
+TraceAsyncValue.copy(2)
+TraceAsyncValue.delete(1)
+TraceAsyncValue.copy(2)
+TraceAsyncValue.delete(2)
+TraceAsyncValue.got(2)
+trace loop=3
+=== reject after resolve ===
+is_resolved: true
+is_rejected: false
+value: 10
+=== resolve after reject ===
+is_resolved: false
+is_rejected: true
+=== async throw immediate ===
+rejected: true
+caught: error 10
+=== async throw after delay ===
+immediate rejected: false
+TraceAsyncValue.delete(2)
+TraceAsyncValue.delete(2)
+delayed caught: error 20
+=== async called throws ===
+called caught: error 42
+=== async resolve after delay ===
+resolved: 42
+=== nested rejection immediate ===
+rejected: true
+nested caught: error 77
+=== nested rejection delayed ===
+nested delayed caught: error 88
+=== nested rejection 3level ===
+3level caught: error 33
+=== timeout ===
+scheduled
+timeout fired
+=== sleep ===
+scheduled
+sleep resolved
+=== sleep capture ===
+mutated: 999
+captured: 42
+All tests passed!

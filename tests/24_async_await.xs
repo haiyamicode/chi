@@ -1666,6 +1666,154 @@ func test_sleep_capture() {
     printf("mutated: {}\n", counter);
 }
 
+async func run_async_tail() Promise {
+    println("=== Branchy returns ===");
+    printf("tt={}\n", await do_branchy_returns(true, true, 5));
+    printf("tf={}\n", await do_branchy_returns(true, false, 5));
+    printf("ft={}\n", await do_branchy_returns(false, true, 5));
+    printf("ff={}\n", await do_branchy_returns(false, false, 5));
+
+    println("=== Condition await returns ===");
+    await run_condition_await_returns_cases();
+
+    println("=== Else if await returns ===");
+    await run_else_if_await_returns_cases();
+
+    println("=== While await ===");
+    await run_while_await_cases();
+
+    println("=== While loop control ===");
+    printf("while break={}\n", await do_while_break(5));
+    printf("while continue={}\n", await do_while_continue(4));
+
+    println("=== For await ===");
+    await run_for_await_cases();
+
+    println("=== Iterator for await ===");
+    await run_iter_for_await_cases();
+
+    println("=== Switch await ===");
+    await run_switch_await_cases();
+
+    println("=== Type switch await ===");
+    await run_type_switch_await_cases();
+
+    println("=== Bare await ===");
+    await do_bare_await();
+
+    println("=== Unit fallthrough after await ===");
+    printf("unit fallthrough resolved: {}\n", await probe_unit_fallthrough_after_await());
+
+    println("=== Bare then logic ===");
+    await do_bare_then_logic();
+
+    println("=== Multiple bare ===");
+    await do_multiple_bare();
+
+    test_reject();
+    test_reject_chain();
+    test_settle();
+
+    println("=== try await ===");
+    printf("try await ok: {}\n", (await try_await_result_ok()).value()!);
+    printf("try await err: {}\n", (await try_await_result_err()).error()!.message());
+    printf("try await catch ok: {}\n", await try_await_catch_ok());
+    printf("try await catch err: {}\n", await try_await_catch_err());
+    printf("try await typed err: {}\n", (await try_await_typed_result_err()).error()!.message());
+    let _typed_result_mismatch = await try_await_typed_result_mismatch().catch(
+        func (err: Shared<Error>) Result<int, Shared<Error>> {
+            printf("try await typed mismatch: {}\n", err.message());
+            return Result<int, Shared<Error>>.Ok{-1};
+        }
+    );
+    printf("try await typed catch err: {}\n", await try_await_typed_catch_err());
+    let _typed_catch_mismatch = await try_await_typed_catch_mismatch().catch(
+        func (err: Shared<Error>) int {
+            printf("try await typed catch mismatch: {}\n", err.message());
+            return -1;
+        }
+    );
+    printf("try await nested ok: {}\n", (await try_await_nested_result_ok()).value()!);
+    printf("try await nested err: {}\n", (await try_await_nested_result_err()).error()!.message());
+    printf("try await nested catch err: {}\n", await try_await_nested_catch_err());
+    printf("try branch tt={}\n", await try_await_branchy(true, true));
+    printf("try branch tf={}\n", await try_await_branchy(true, false));
+    printf("try branch ft={}\n", await try_await_branchy(false, true));
+    printf("try branch ff={}\n", await try_await_branchy(false, false));
+    await run_try_await_pathological_cases();
+    printf("trace lifecycle={}\n", await trace_async_lifecycle_probe());
+    printf("trace loop={}\n", await trace_async_value_loop());
+
+    test_reject_after_resolve();
+    test_resolve_after_reject();
+
+    test_async_throw_immediate();
+
+    println("=== async throw after delay ===");
+    var delayed_throw = async_throw_after_delay();
+    printf("immediate rejected: {}\n", delayed_throw.is_rejected());
+    let _delayed_throw = await delayed_throw.catch(
+        func (err: Shared<Error>) int {
+            printf("delayed caught: {}\n", err.message());
+            return -1;
+        }
+    );
+
+    println("=== async called throws ===");
+    let _called_throw = await async_called_throws_after_delay().catch(
+        func (err: Shared<Error>) int {
+            printf("called caught: {}\n", err.message());
+            return -1;
+        }
+    );
+
+    println("=== async resolve after delay ===");
+    printf("resolved: {}\n", await async_resolves_after_delay());
+
+    test_nested_rejection_immediate();
+
+    println("=== nested rejection delayed ===");
+    let _nested_delayed = await nested_outer_delayed().catch(
+        func (err: Shared<Error>) int {
+            printf("nested delayed caught: {}\n", err.message());
+            return -1;
+        }
+    );
+
+    println("=== nested rejection 3level ===");
+    let _nested_3level = await nested_3level_top().catch(
+        func (err: Shared<Error>) int {
+            printf("3level caught: {}\n", err.message());
+            return -1;
+        }
+    );
+
+    println("=== timeout ===");
+    var timeout_done = Promise{};
+    time.timeout(10, func [timeout_done] () {
+        println("timeout fired");
+        timeout_done.resolve({});
+    });
+    println("scheduled");
+    await timeout_done;
+
+    println("=== sleep ===");
+    println("scheduled");
+    await time.sleep(10);
+    println("sleep resolved");
+
+    println("=== sleep capture ===");
+    var counter = 42;
+    var sleep_capture_done = Promise{};
+    time.sleep(10).then(func [counter, sleep_capture_done] (u) {
+        printf("captured: {}\n", counter);
+        sleep_capture_done.resolve({});
+    });
+    counter = 999;
+    printf("mutated: {}\n", counter);
+    await sleep_capture_done;
+}
+
 func main() {
     // Promise API
     test_manual_promise();
@@ -1694,45 +1842,7 @@ func main() {
     test_string_concat();
     test_await_last();
     test_double_chain();
-    test_branchy_returns();
-    test_condition_await_returns();
-    test_else_if_await_returns();
-    test_while_await();
-    test_while_loop_control();
-    test_for_await();
-    test_iter_for_await();
-    test_switch_await();
-    test_type_switch_await();
-
-    // Await patterns (async-resolved via event loop)
-    test_bare_await();
-    test_unit_fallthrough_after_await();
-    test_bare_then_logic();
-    test_multiple_bare();
-
-    // Reject
-    test_reject();
-    test_reject_chain();
-    test_settle();
-    test_try_await();
-    test_reject_after_resolve();
-    test_resolve_after_reject();
-
-    // Async throw → rejection
-    test_async_throw_immediate();
-    test_async_throw_after_delay();
-    test_async_called_throws();
-    test_async_resolve_after_delay();
-
-    // Nested rejection propagation
-    test_nested_rejection_immediate();
-    test_nested_rejection_delayed();
-    test_nested_rejection_3level();
-
-    // Timer
-    test_timeout();
-    test_sleep();
-    test_sleep_capture();
-
-    println("All tests passed!");
+    run_async_tail().then(func () {
+        println("All tests passed!");
+    });
 }
