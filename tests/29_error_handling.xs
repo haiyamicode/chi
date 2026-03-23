@@ -185,6 +185,18 @@ func test_no_throw() {
     println("no throw ok");
 }
 
+func test_panic_tryable() {
+    println("=== panic tryable ===");
+
+    try panic("boom") catch PanicError as err {
+        printf("panic caught: {}\n", err.message());
+    };
+
+    try assert(false, "bad assert") catch PanicError as err {
+        printf("assert caught: {}\n", err.message());
+    };
+}
+
 // --- Result mode: try without catch block ---
 
 func test_result_mode() {
@@ -291,6 +303,7 @@ func main() {
     test_sequential();
     test_nested();
     test_no_throw();
+    test_panic_tryable();
     test_result_mode();
     test_typed_result();
     test_catch_block();

@@ -25,6 +25,9 @@ inner2 caught
 nested done
 === no throw ===
 no throw ok
+=== panic tryable ===
+panic caught: boom
+assert caught: assertion failed: bad assert
 === result mode ===
 value = 42
 got error: oops

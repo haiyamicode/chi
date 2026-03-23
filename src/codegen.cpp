@@ -4366,6 +4366,7 @@ void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing)
     auto error_data = builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {}, "error_data");
     auto error_vtable =
         builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {}, "error_vtable");
+    builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
     emit_async_promise_reject(fn, error_data, error_vtable);
 }
 
@@ -5618,7 +5619,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
 
         auto result_type = get_chitype(expr);
-        bool is_void = result_type->kind == TypeKind::Void;
+        bool is_void =
+            result_type->kind == TypeKind::Void || result_type->kind == TypeKind::Never;
         llvm::Type *result_type_l = nullptr;
         llvm::Value *result_var = nullptr;
 
@@ -5704,6 +5706,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto get_error_data_fn = get_system_fn("cx_get_error_data");
         auto get_error_vtable_fn = get_system_fn("cx_get_error_vtable");
         auto get_error_type_id_fn = get_system_fn("cx_get_error_type_id");
+        auto clear_loc_fn = get_system_fn("cx_clear_panic_location");
 
         auto error_data = builder.CreateCall(get_error_data_fn->llvm_fn, {}, "error_data");
         auto error_vtable = builder.CreateCall(get_error_vtable_fn->llvm_fn, {}, "error_vtable");
@@ -5750,6 +5753,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             // Take ownership of the error data pointer
             builder.CreateStore(error_data, error_data_var);
+            builder.CreateCall(clear_loc_fn->llvm_fn, {});
 
             // Set up error binding variable
             if (data.catch_err_var) {
@@ -5834,12 +5838,14 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto shared_error = make_shared_error_value();
                     builder.CreateStore(shared_error, payload_ptr);
                 });
+                builder.CreateCall(clear_loc_fn->llvm_fn, {});
             } else {
                 // Catch-all: populate Result.Err(Shared<Error>)
                 init_result_variant("Err", [&](ChiType *, llvm::Value *payload_ptr) {
                     auto shared_error = make_shared_error_value();
                     builder.CreateStore(shared_error, payload_ptr);
                 });
+                builder.CreateCall(clear_loc_fn->llvm_fn, {});
             }
             builder.CreateBr(continue_b);
         }
@@ -9178,6 +9184,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         if (fn->async_reject_promise_ptr) {
             // In async context: convert throw to promise.reject() instead of cx_throw
             emit_async_promise_reject(fn, error_ref, vtable);
+            llvm_builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
 
             if (fn->return_label) {
                 // Parent async function: store rejected promise and branch to return
@@ -9196,8 +9203,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             auto throw_fn = get_system_fn("cx_throw");
             auto type_id =
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
-            llvm_builder.CreateCall(throw_fn->llvm_fn,
-                                    {type_info, error_ref, vtable, type_id});
+            llvm_builder.CreateCall(throw_fn->llvm_fn, {type_info, error_ref, vtable, type_id});
             llvm_builder.CreateUnreachable();
         }
         scope->branched = true;

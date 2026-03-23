@@ -26,7 +26,6 @@ extern "C" {
     unsafe func cx_set_program_args(argc: int32, argv: *void);
     unsafe func cx_set_program_vtable(ptr: *void);
     unsafe func cx_runtime_stop();
-    unsafe func cx_panic(message: *string);
     unsafe func cx_set_panic_location(file: *string, line: uint32, col: uint32);
     unsafe func cx_clear_panic_location();
     unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
@@ -312,10 +311,18 @@ export func printf(format: string, ...values: any) {
     }
 }
 
-export func panic(message: string) never {
-    unsafe {
-        cx_panic(&message);
+export struct PanicError {
+    text: string = "";
+
+    impl Error {
+        func message() string {
+            return this.text;
+        }
     }
+}
+
+export func panic(message: string) never {
+    throw new PanicError{text: move message};
 }
 
 export func stringf(format: string, ...values: any) string {
@@ -328,9 +335,9 @@ export func stringf(format: string, ...values: any) string {
 
 export func assert(cond: bool, message: ?string) {
     if !cond => if message {
-        panic(stringf("assertion failed: {}", message));
+        throw new PanicError{text: stringf("assertion failed: {}", message)};
     } else {
-        panic("assertion failed");
+        throw new PanicError{text: "assertion failed"};
     }
 }
 

@@ -878,13 +878,43 @@ void cx_print_string(CxString *message) {
 
 void cx_debug_i(const char *prefix, int value) { fmt::print("{}: {}\n", prefix, value); }
 
-void cx_panic(CxString *message) {
-    st.message = {message->data, message->size};
+static void capture_unhandled_state(CxString *message) {
+    if (message && message->data) {
+        st.message = {message->data, message->size};
+    } else {
+        st.message.clear();
+    }
+    memset(st.trace, 0, sizeof(st.trace));
     auto bt_output_file = fmemopen(st.trace, sizeof(st.trace), "w");
     set_bt_output_file(bt_output_file);
     backtrace();
     fclose(bt_output_file);
-    throw (void *)NULL;
+}
+
+static void print_unhandled_state() {
+    auto message = st.message.empty() ? string("unhandled throw") : st.message;
+    print("panic: {}\n", message);
+    if (st.has_site) {
+        print("at {}:{}:{}\n", st.site_file, st.site_line, st.site_col);
+    }
+    print(st.trace);
+}
+
+static string get_error_message(void *data_ptr, void *vtable_ptr) {
+    if (!data_ptr || !vtable_ptr) {
+        return "";
+    }
+    auto vtable = (void **)vtable_ptr;
+    auto method_ptr = vtable[3];
+    if (!method_ptr) {
+        return "";
+    }
+    auto fn = (void (*)(CxString *, void *))method_ptr;
+    CxString s = {};
+    fn(&s, data_ptr);
+    auto message = string(s.data, s.size);
+    cx_string_delete(&s);
+    return message;
 }
 
 void cx_set_panic_location(CxString *file, uint32_t line, uint32_t col) {
@@ -909,6 +939,11 @@ void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_i
     st.error_data_ptr = data_ptr;
     st.error_vtable_ptr = vtable_ptr;
     st.error_type_id = type_id;
+    CxString message = {};
+    auto rendered = get_error_message(data_ptr, vtable_ptr);
+    message.data = (char *)rendered.data();
+    message.size = (uint32_t)rendered.size();
+    capture_unhandled_state(&message);
     throw data_ptr; // non-null, distinguishes from panic's NULL
 }
 
@@ -1018,11 +1053,7 @@ void cx_debug(void *ptr) {
 void cx_memset(void *dest, uint8_t value, uint32_t size) { memset(dest, value, size); }
 
 void signal_handler(int signal_num) {
-    print("panic: {}\n", st.message);
-    if (st.has_site) {
-        print("at {}:{}:{}\n", st.site_file, st.site_line, st.site_col);
-    }
-    print(st.trace);
+    print_unhandled_state();
     exit(1);
 }
 
@@ -1032,12 +1063,8 @@ static void terminate_handler() {
         try {
             std::rethrow_exception(current);
         } catch (void *ptr) {
-            if (ptr == nullptr && !st.message.empty()) {
-                print("panic: {}\n", st.message);
-                if (st.has_site) {
-                    print("at {}:{}:{}\n", st.site_file, st.site_line, st.site_col);
-                }
-                print(st.trace);
+            if (ptr == nullptr || !st.message.empty()) {
+                print_unhandled_state();
                 exit(1);
             }
         } catch (...) {

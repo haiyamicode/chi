@@ -122,7 +122,6 @@ CHI_RT_EXPORT void cx_print_string(CxString *message);
 
 CHI_RT_EXPORT void cx_debug_i(const char *prefix, int value);
 
-CHI_RT_EXPORT void cx_panic(CxString *message);
 CHI_RT_EXPORT void cx_set_panic_location(CxString *file, uint32_t line, uint32_t col);
 CHI_RT_EXPORT void cx_clear_panic_location();
 
