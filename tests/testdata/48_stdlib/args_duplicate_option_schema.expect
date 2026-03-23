@@ -1,4 +1,1 @@
 panic: duplicate option '--output' in command 'chi'
-<PROJECT_ROOT>/src/stdlib/runtime.xs:317 in function panic
-<PROJECT_ROOT>/src/stdlib/std/args.xs:0 in function Command.option
-<PROJECT_ROOT>/tests/testdata/48_stdlib/args_duplicate_option_schema.xs:6 in function main

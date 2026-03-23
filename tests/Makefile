@@ -223,7 +223,9 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 			failed=1; continue; \
 		fi; \
 		$(TMP).48_stdlib_$$name > $(TMP).48_stdlib_$$name.out 2>&1; \
-		sed "s|$(ROOT_DIR)|<PROJECT_ROOT>|g" $(TMP).48_stdlib_$$name.out > $(TMP).48_stdlib_$$name.norm; \
+		sed "s|$(ROOT_DIR)|<PROJECT_ROOT>|g" $(TMP).48_stdlib_$$name.out | \
+			sed -E 's#(<PROJECT_ROOT>/[^:]+\.xs):[0-9]+#\1:0#g' | \
+			sed -E '/^at /d; /^<PROJECT_ROOT>\/.* in function /d' > $(TMP).48_stdlib_$$name.norm; \
 		if ! diff -qbu $$expect $(TMP).48_stdlib_$$name.norm > /dev/null; then \
 			echo "error: $$name output mismatch"; \
 			diff -u $$expect $(TMP).48_stdlib_$$name.norm; \
