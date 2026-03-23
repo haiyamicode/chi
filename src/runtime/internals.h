@@ -187,6 +187,11 @@ CHI_RT_EXPORT int32_t __cx_mkdir(const char *path);
 CHI_RT_EXPORT int32_t __cx_get_errno();
 CHI_RT_EXPORT void __cx_uv_strerror(int32_t errnum, CxString *result);
 CHI_RT_EXPORT int32_t __cx_list_dir(const char *path, CxArray *result);
+CHI_RT_EXPORT const char *__cx_getenv(const char *key);
+CHI_RT_EXPORT void __cx_setenv(const char *key, const char *value);
+CHI_RT_EXPORT char *__cx_getcwd(void);
+CHI_RT_EXPORT int32_t __cx_system(const char *command);
+CHI_RT_EXPORT int32_t __cx_command(void *args);
 CHI_RT_EXPORT int32_t __cx_argc(void);
 CHI_RT_EXPORT const char *__cx_argv(int32_t index);
 

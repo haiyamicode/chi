@@ -54,4 +54,20 @@ else()
     target_link_libraries(chic ${LIBS})
 endif()
 
+set(CHI_BOOTSTRAP_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bin/chi)
+set(CHI_BOOTSTRAP_WORKDIR ${CMAKE_CURRENT_BINARY_DIR}/chi_bootstrap)
+
+add_custom_command(
+    OUTPUT ${CHI_BOOTSTRAP_OUTPUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/bin
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CHI_BOOTSTRAP_WORKDIR}
+    COMMAND ${CMAKE_COMMAND} -E env LIBRARY_PATH=${CMAKE_BINARY_DIR}
+            $<TARGET_FILE:chic> -o ${CHI_BOOTSTRAP_OUTPUT} -c ${CMAKE_CURRENT_SOURCE_DIR}/chi/main.xs -w ${CHI_BOOTSTRAP_WORKDIR}
+    DEPENDS chic ${CMAKE_CURRENT_SOURCE_DIR}/chi/main.xs
+    COMMENT "Bootstrapping chi command"
+    VERBATIM)
+
+add_custom_target(chi ALL DEPENDS ${CHI_BOOTSTRAP_OUTPUT})
+install(PROGRAMS ${CHI_BOOTSTRAP_OUTPUT} DESTINATION bin)
+
 add_subdirectory(support)

@@ -37,12 +37,20 @@ export struct Option {
 export struct Positional {
     name: string = "";
     help: string = "";
+    required: bool = true;
 }
 
 struct MatchValue {
     name: string = "";
     value: string = "";
 }
+
+const ERROR_DUPLICATE_SCHEMA = "duplicate {} '{}'";
+const ERROR_DUPLICATE_SCHEMA_IN_COMMAND = "duplicate {} '{}' in command '{}'";
+const ERROR_DUPLICATE_FLAG = "duplicate flag '--{}'";
+const ERROR_DUPLICATE_OPTION = "duplicate option '--{}'";
+const ERROR_REQUIRED_POSITIONAL_AFTER_OPTIONAL =
+    "required positional '{}' cannot follow optional positional in command '{}'";
 
 export struct Matches {
     command: string = "";
@@ -121,6 +129,7 @@ export struct Command {
     private long_names: Map<string, bool> = {};
     private short_names: Map<string, bool> = {};
     private command_names: Map<string, bool> = {};
+    private optional_positionals_started: bool = false;
 
     mutex func flag(spec: Flag) {
         if this.long_names.get(spec.name) {
@@ -151,6 +160,15 @@ export struct Command {
     }
 
     mutex func positional(spec: Positional) {
+        if spec.required {
+            if this.optional_positionals_started {
+                panic(stringf(ERROR_REQUIRED_POSITIONAL_AFTER_OPTIONAL,
+                              spec.name,
+                              this.name));
+            }
+        } else {
+            this.optional_positionals_started = true;
+        }
         this.positionals.push(move spec);
     }
 
@@ -247,11 +265,6 @@ struct TokenStep {
     text: string = "";
 }
 
-const ERROR_DUPLICATE_SCHEMA = "duplicate {} '{}'";
-const ERROR_DUPLICATE_SCHEMA_IN_COMMAND = "duplicate {} '{}' in command '{}'";
-const ERROR_DUPLICATE_FLAG = "duplicate flag '--{}'";
-const ERROR_DUPLICATE_OPTION = "duplicate option '--{}'";
-
 func find_byte(text: string, ch: byte) ?uint32 {
     for i in 0..text.byte_length() {
         if text.byte_at(i) == ch {
@@ -342,9 +355,17 @@ func usage_for(cmd: &Command, name: string) string {
         buf.write_string(" [options]");
     }
     for positional in cmd.positionals {
-        buf.write_string(" <");
+        if positional.required {
+            buf.write_string(" <");
+        } else {
+            buf.write_string(" [");
+        }
         buf.write_string(positional.name);
-        buf.write_string(">");
+        if positional.required {
+            buf.write_string(">");
+        } else {
+            buf.write_string("]");
+        }
     }
     return buf.to_string();
 }
@@ -672,10 +693,13 @@ struct CommandParser {
 
         if this.positional_index < this.cmd.positionals.length {
             let positional = &this.cmd.positionals[this.positional_index];
-            return ParseStep.Error{
-                parse_error_text(
-                    this.cmd, this.command_name, stringf("missing positional '{}'", positional.name))
-            };
+            if positional.required {
+                return ParseStep.Error{
+                    parse_error_text(this.cmd,
+                                     this.command_name,
+                                     stringf("missing positional '{}'", positional.name))
+                };
+            }
         }
 
         return ParseStep.Ok;

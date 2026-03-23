@@ -32,6 +32,13 @@ func main() {
     echo.positional({name: "message", help: "Message"});
     cli.command(move echo);
 
+    var show = args.Command{
+        name: "show",
+        summary: "Show target"
+    };
+    show.positional({name: "target", help: "Target", required: false});
+    cli.command(move show);
+
     println("=== parse() smoke ===");
     let parsed_cli = cli.parse();
     switch parsed_cli {
@@ -103,6 +110,20 @@ func main() {
             let sub = match.subcommand()!;
             printf("command = {}\n", sub.command_name());
             printf("message = {}\n", sub.positional_at(0)!);
+        },
+        else => {
+            println("unexpected non-ok result");
+        }
+    }
+
+    println("=== optional positional omitted ===");
+    let optional_positional_argv = ["show"];
+    let optional_positional_result = cli.parse_from(optional_positional_argv.span());
+    switch optional_positional_result {
+        args.Parse.Ok(match) => {
+            let sub = match.subcommand()!;
+            printf("command = {}\n", sub.command_name());
+            printf("target present = {}\n", sub.positional_at(0) != null);
         },
         else => {
             println("unexpected non-ok result");

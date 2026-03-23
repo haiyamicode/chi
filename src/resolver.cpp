@@ -12108,6 +12108,12 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
         return true;
     }
 
+    // Unsized bound is an opt-out of the implicit Sized bound, not a concrete requirement.
+    if (trait_type->kind == TypeKind::Struct && trait_type->data.struct_.node &&
+        resolve_intrinsic_symbol(trait_type->data.struct_.node) == IntrinsicSymbol::Unsized) {
+        return true;
+    }
+
     // Copy is structural: all types satisfy Copy by default, except types implementing NoCopy
     if (trait_type->kind == TypeKind::Struct && trait_type->data.struct_.node &&
         resolve_intrinsic_symbol(trait_type->data.struct_.node) == IntrinsicSymbol::Copy) {

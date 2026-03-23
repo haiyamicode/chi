@@ -5,6 +5,8 @@ extern "C" {
     unsafe func __cx_setenv(key: *byte, value: *byte);
     unsafe func __cx_exit(code: int);
     unsafe func __cx_getcwd() *byte;
+    unsafe func __cx_system(command: *byte) int32;
+    unsafe func __cx_command(args: *void) int32;
     unsafe func __cx_strlen(s: *byte) uint32;
 }
 
@@ -37,5 +39,18 @@ export func cwd() string {
     unsafe {
         var result = __cx_getcwd();
         return string.from_raw(result, __cx_strlen(result));
+    }
+}
+
+export func system(command: string) int32 {
+    var cs = command.to_cstring();
+    unsafe {
+        return __cx_system(cs.as_ptr());
+    }
+}
+
+export func command(args: &[string]) int32 {
+    unsafe {
+        return __cx_command(&args);
     }
 }

@@ -61,7 +61,8 @@ TESTS_LIST = 00_fib.test \
 		57_managed_lowlevel_custom_ctor_array_escape.test \
 		58_managed_lowlevel_custom_ctor_map_escape.test
 TESTS ?= $(TESTS_LIST)
-CHIC = $(BUILD_DIR)/src/bin/chic
+CHIC = $(abspath $(BUILD_DIR)/src/bin/chic)
+CHI = $(abspath $(BUILD_DIR)/src/bin/chi)
 TMP = /tmp/chitests
 OUTPUT_DIR = $(BUILD_DIR)/tests
 
@@ -298,7 +299,75 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
         	diff -u 15_package.expect 15_package.output; \
 		exit 1; \
 	fi; \
-       	rm -f 15_package.output
+	rm -f testdata/15_package/15_package; \
+	(cd testdata/15_package && $(CHI) build --output /tmp/chitest_chi_package_bin --cwd /tmp/chitest_chi_package_build >/tmp/chitest_chi_build.out 2>&1 && /tmp/chitest_chi_package_bin > /tmp/chitest_chi_package.output 2>&1); \
+	if [ $$? -ne 0 ]; then \
+		echo "error in test 15_package (chi build)"; \
+		cat /tmp/chitest_chi_build.out; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_package_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM; \
+		exit 1; \
+	fi; \
+	if ! diff -qbu 15_package.expect /tmp/chitest_chi_package.output >/dev/null; then \
+		echo "error in test 15_package (chi output mismatch)"; \
+		diff -u 15_package.expect /tmp/chitest_chi_package.output; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_package_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM; \
+		exit 1; \
+	fi; \
+	if [ -e testdata/15_package/15_package ]; then \
+		echo "error in test 15_package (chi spilled output into source dir)"; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_package_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM; \
+		rm -f testdata/15_package/15_package; \
+		exit 1; \
+	fi; \
+	$(CHI) build testdata/15_package --output /tmp/chitest_chi_package_path_bin --cwd /tmp/chitest_chi_package_path_build >/tmp/chitest_chi_build_path.out 2>&1 && /tmp/chitest_chi_package_path_bin > /tmp/chitest_chi_package_path.output 2>&1; \
+	if [ $$? -ne 0 ]; then \
+		echo "error in test 15_package (chi build explicit path)"; \
+		cat /tmp/chitest_chi_build_path.out; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_build_path.out /tmp/chitest_chi_package_path.output /tmp/chitest_chi_package_bin /tmp/chitest_chi_package_path_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM; \
+		exit 1; \
+	fi; \
+	if ! diff -qbu 15_package.expect /tmp/chitest_chi_package_path.output >/dev/null; then \
+		echo "error in test 15_package (chi explicit path output mismatch)"; \
+		diff -u 15_package.expect /tmp/chitest_chi_package_path.output; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_build_path.out /tmp/chitest_chi_package_path.output /tmp/chitest_chi_package_bin /tmp/chitest_chi_package_path_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM; \
+		exit 1; \
+	fi; \
+	if [ -e testdata/15_package/15_package ]; then \
+		echo "error in test 15_package (chi explicit path spilled output into source dir)"; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_build_path.out /tmp/chitest_chi_package_path.output /tmp/chitest_chi_package_bin /tmp/chitest_chi_package_path_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM; \
+		rm -f testdata/15_package/15_package; \
+		exit 1; \
+	fi; \
+	(cd testdata/15_package/src && $(CHI) build --output /tmp/chitest_chi_package_src_bin --cwd /tmp/chitest_chi_package_src_build >/tmp/chitest_chi_build_src.out 2>&1 && /tmp/chitest_chi_package_src_bin > /tmp/chitest_chi_package_src.output 2>&1); \
+	if [ $$? -ne 0 ]; then \
+		echo "error in test 15_package (chi build from src)"; \
+		cat /tmp/chitest_chi_build_src.out; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_build_path.out /tmp/chitest_chi_package_path.output /tmp/chitest_chi_build_src.out /tmp/chitest_chi_package_src.output /tmp/chitest_chi_package_bin /tmp/chitest_chi_package_path_bin /tmp/chitest_chi_package_src_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM /tmp/chitest_chi_package_src_build /tmp/chitest_chi_package_src_build.dSYM; \
+		exit 1; \
+	fi; \
+	if ! diff -qbu 15_package.expect /tmp/chitest_chi_package_src.output >/dev/null; then \
+		echo "error in test 15_package (chi src output mismatch)"; \
+		diff -u 15_package.expect /tmp/chitest_chi_package_src.output; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_build_path.out /tmp/chitest_chi_package_path.output /tmp/chitest_chi_build_src.out /tmp/chitest_chi_package_src.output /tmp/chitest_chi_package_bin /tmp/chitest_chi_package_path_bin /tmp/chitest_chi_package_src_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM /tmp/chitest_chi_package_src_build /tmp/chitest_chi_package_src_build.dSYM; \
+		exit 1; \
+	fi; \
+	if [ -e testdata/15_package/15_package ]; then \
+		echo "error in test 15_package (chi spilled output into source dir from src)"; \
+		rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_build_path.out /tmp/chitest_chi_package_path.output /tmp/chitest_chi_build_src.out /tmp/chitest_chi_package_src.output /tmp/chitest_chi_package_bin /tmp/chitest_chi_package_path_bin /tmp/chitest_chi_package_src_bin; \
+		rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM /tmp/chitest_chi_package_src_build /tmp/chitest_chi_package_src_build.dSYM; \
+		exit 1; \
+	fi; \
+	rm -f 15_package.output /tmp/chitest_chi_build.out /tmp/chitest_chi_package.output /tmp/chitest_chi_build_path.out /tmp/chitest_chi_package_path.output /tmp/chitest_chi_build_src.out /tmp/chitest_chi_package_src.output /tmp/chitest_chi_package_bin /tmp/chitest_chi_package_path_bin /tmp/chitest_chi_package_src_bin; \
+	rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM /tmp/chitest_chi_package_src_build /tmp/chitest_chi_package_src_build.dSYM; \
+	rm -f testdata/15_package/15_package
 
 all: test
 

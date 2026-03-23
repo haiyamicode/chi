@@ -20,6 +20,21 @@
 using namespace cx;
 namespace fs = std::filesystem;
 
+namespace {
+
+string runtime_library_search_flags(const CompilationContext &ctx) {
+    if (ctx.root_path.empty()) {
+        return "";
+    }
+    auto lib_dir = fs::path(ctx.root_path) / "lib";
+    if (!fs::exists(lib_dir)) {
+        return "";
+    }
+    return fmt::format("-L{} ", lib_dir.string());
+}
+
+} // namespace
+
 codegen::Compiler Builder::create_codegen_compiler() { return {m_codegen_ctx.get()}; }
 
 Builder::Builder() : m_ctx(), m_codegen_ctx(nullptr) {
@@ -72,8 +87,8 @@ void Builder::build_single_file(const string &file_name) {
     compiler.emit_output();
 
     // produce executable
-    auto cmd =
-        fmt::format("c++ {} -g -o {} -lchrt", settings->output_obj_to_file, output_file_name);
+    auto cmd = fmt::format("c++ {} -g -o {} {}-lchrt", settings->output_obj_to_file,
+                           output_file_name, runtime_library_search_flags(m_ctx));
 
     if (debug_mode) {
         print("running: {}\n", cmd);
@@ -341,7 +356,8 @@ void Builder::build_package(const string &package_dir) {
         library_flags += fmt::format("-l{} ", lib);
     }
 
-    auto cmd = fmt::format("c++ {} -g -o {} {}-lchrt {}", obj_files, output_file_name, library_path_flags, library_flags);
+    auto cmd = fmt::format("c++ {} -g -o {} {}{}-lchrt {}", obj_files, output_file_name,
+                           runtime_library_search_flags(m_ctx), library_path_flags, library_flags);
 
     if (debug_mode) {
         print("running: {}\n", cmd);

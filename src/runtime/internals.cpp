@@ -15,8 +15,10 @@
 #include <type_traits>
 #include <unistd.h>
 #include <sstream>
+#include <vector>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <dirent.h>
 #include <uv.h>
 #if __has_include(<ptrauth.h>)
@@ -1564,6 +1566,69 @@ char *__cx_getcwd(void) {
     static char buf[4096];
     if (getcwd(buf, sizeof(buf))) return buf;
     return (char *)"";
+}
+
+int32_t __cx_system(const char *command) {
+    auto status = system(command);
+    if (status == -1) {
+        return -1;
+    }
+#ifdef WIFEXITED
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+#endif
+    return status;
+}
+
+int32_t __cx_command(void *args_ptr) {
+    auto *args = (CxSlice *)args_ptr;
+    if (!args || args->size == 0) {
+        return -1;
+    }
+
+    auto *items = (CxString *)args->data;
+    std::vector<char *> argv;
+    argv.reserve(args->size + 1);
+    for (uint32_t i = 0; i < args->size; i++) {
+        argv.push_back(cx_string_to_cstring(&items[i]));
+    }
+    argv.push_back(nullptr);
+
+    auto pid = fork();
+    if (pid == -1) {
+        for (auto *arg : argv) {
+            if (arg) {
+                free(arg);
+            }
+        }
+        return -1;
+    }
+
+    if (pid == 0) {
+        execvp(argv[0], argv.data());
+        _exit(127);
+    }
+
+    for (auto *arg : argv) {
+        if (arg) {
+            free(arg);
+        }
+    }
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) == -1) {
+        if (errno != EINTR) {
+            return -1;
+        }
+    }
+
+#ifdef WIFEXITED
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+#endif
+    return status;
 }
 
 int32_t __cx_argc(void) { return program_argc; }
