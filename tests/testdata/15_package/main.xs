@@ -58,8 +58,8 @@ func main() {
 
     printf("strlen('Hello') = {}\n", strlen(hello));
     printf("strlen('World') = {}\n", strlen(world));
-    printf("strcmp('Hello', 'World') = {}\n", strcmp(hello, world));
-    printf("strcmp('Hello', 'Hello') = {}\n", strcmp(hello, hello2));
+    printf("strcmp('Hello', 'World') < 0 = {}\n", strcmp(hello, world) < 0);
+    printf("strcmp('Hello', 'Hello') == 0 = {}\n", strcmp(hello, hello2) == 0);
 
     // Test strcpy from imported header
     unsafe {

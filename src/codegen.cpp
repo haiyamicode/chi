@@ -6,6 +6,8 @@
 #include "resolver.h"
 #include "sema.h"
 #include "util.h"
+#include "llvm/IR/PassManager.h"
+#include "llvm/Passes/PassBuilder.h"
 #include <set>
 
 namespace cx {
@@ -1479,6 +1481,37 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
     }
 
     return arg_value;
+}
+
+llvm::Value *Compiler::compile_extern_variadic_arg(Function *fn, ast::Node *expr) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto src_type = get_chitype(expr);
+    auto arg_value = compile_expr(fn, expr);
+    if (!src_type) {
+        return arg_value;
+    }
+
+    switch (src_type->kind) {
+    case TypeKind::Float:
+        if (src_type->data.float_.bit_count == 32) {
+            return builder.CreateFPExt(arg_value, llvm::Type::getDoubleTy(*m_ctx->llvm_ctx));
+        }
+        return arg_value;
+    case TypeKind::Bool:
+        return builder.CreateZExt(arg_value, llvm::Type::getInt32Ty(*m_ctx->llvm_ctx));
+    case TypeKind::Byte:
+        return builder.CreateZExt(arg_value, llvm::Type::getInt32Ty(*m_ctx->llvm_ctx));
+    case TypeKind::Int:
+        if (src_type->data.int_.bit_count < 32) {
+            if (src_type->data.int_.is_unsigned) {
+                return builder.CreateZExt(arg_value, llvm::Type::getInt32Ty(*m_ctx->llvm_ctx));
+            }
+            return builder.CreateSExt(arg_value, llvm::Type::getInt32Ty(*m_ctx->llvm_ctx));
+        }
+        return arg_value;
+    default:
+        return arg_value;
+    }
 }
 
 llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type) {
@@ -7830,9 +7863,7 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
         }
         // For extern variadic functions, pass variadic args directly
         if (is_variadic && is_extern && i >= va_start) {
-            // Compile the argument without wrapping in array
-            auto arg = compile_expr(fn, args[i]);
-            call_args.push_back(arg);
+            call_args.push_back(compile_extern_variadic_arg(fn, args[i]));
             continue;
         }
         auto arg_node = args[i];
@@ -8486,9 +8517,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         }
         // For extern variadic functions, pass variadic args directly
         if (is_variadic && is_extern && i >= va_start) {
-            // Compile the argument without wrapping in array
-            auto arg = compile_expr(fn, data.args[i]);
-            args.push_back(arg);
+            args.push_back(compile_extern_variadic_arg(fn, data.args[i]));
             continue;
         }
         auto arg = data.args[i];
@@ -11778,8 +11807,13 @@ void Compiler::emit_output() {
     auto features = "";
 
     llvm::TargetOptions opt;
+    auto codegen_opt = llvm::CodeGenOpt::None;
+    if (get_settings()->profile == CompilationProfile::Release) {
+        codegen_opt = llvm::CodeGenOpt::Aggressive;
+    }
     auto target_machine =
-        target->createTargetMachine(target_triple, cpu, features, opt, llvm::Reloc::PIC_);
+        target->createTargetMachine(target_triple, cpu, features, opt, llvm::Reloc::PIC_,
+                                    std::nullopt, codegen_opt);
     auto module = m_ctx->llvm_module.get();
     module->setDataLayout(target_machine->createDataLayout());
     module->setTargetTriple(target_triple);
@@ -11800,6 +11834,23 @@ void Compiler::emit_output() {
     }
 
     llvm::legacy::PassManager pass;
+    if (settings->profile == CompilationProfile::Release) {
+        llvm::LoopAnalysisManager loop_am;
+        llvm::FunctionAnalysisManager function_am;
+        llvm::CGSCCAnalysisManager cgscc_am;
+        llvm::ModuleAnalysisManager module_am;
+        llvm::PassBuilder pass_builder(target_machine);
+        pass_builder.registerModuleAnalyses(module_am);
+        pass_builder.registerCGSCCAnalyses(cgscc_am);
+        pass_builder.registerFunctionAnalyses(function_am);
+        pass_builder.registerLoopAnalyses(loop_am);
+        pass_builder.crossRegisterProxies(loop_am, function_am, cgscc_am, module_am);
+
+        auto module_pass =
+            pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+        module_pass.run(*module, module_am);
+    }
+
     pass.add((llvm::Pass *)llvm::createVerifierPass());
     if (target_machine->addPassesToEmitFile(pass, dest_obj, nullptr,
                                             llvm::CodeGenFileType::CGFT_ObjectFile)) {

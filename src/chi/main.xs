@@ -51,6 +51,8 @@ func build_command() args.Command {
         help: "Working directory for intermediates"
     });
     build.flag({name: "debug", short: "d", help: "Enable debug compiler output"});
+    build.flag({name: "release", short: "r", help: "Build with release optimizations"});
+    build.flag({name: "strip", help: "Strip debug info from the final binary"});
     build.flag({name: "verbose", short: "v", help: "Enable verbose lifetime output"});
     build.positional({name: "package", help: "Package directory", required: false});
     return build;
@@ -71,6 +73,12 @@ func run_build(match: &args.Matches) int32 {
     var cmd = [chic, "-p", root, "-o", output, "-w", working_dir];
     if match.flag("debug") {
         cmd.push("-d");
+    }
+    if match.flag("release") {
+        cmd.push("-r");
+    }
+    if match.flag("strip") {
+        cmd.push("--strip");
     }
     if match.flag("verbose") {
         cmd.push("-v");

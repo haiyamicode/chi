@@ -26,7 +26,9 @@ class Builder {
     string working_dir;
     bool debug_mode = false;
     bool verbose = false;
+    bool strip_symbols = false;
     BuildMode build_mode = BuildMode::Run;
+    codegen::CompilationProfile profile = codegen::CompilationProfile::Debug;
 
     Builder();
     Builder(const Builder &) = delete;

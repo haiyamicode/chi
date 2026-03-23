@@ -33,6 +33,61 @@ string runtime_library_search_flags(const CompilationContext &ctx) {
     return fmt::format("-L{} ", lib_dir.string());
 }
 
+string c_compiler_mode_flags(codegen::CompilationProfile profile) {
+    switch (profile) {
+    case codegen::CompilationProfile::Debug:
+        return "-O0 -g";
+    case codegen::CompilationProfile::Release:
+        return "-O2 -g";
+    }
+    return "-O0 -g";
+}
+
+string linker_mode_flags(codegen::CompilationProfile profile) {
+    switch (profile) {
+    case codegen::CompilationProfile::Debug:
+        return "-g";
+    case codegen::CompilationProfile::Release:
+        return "-O2 -g";
+    }
+    return "-g";
+}
+
+void run_post_link_tools(const Builder &builder, const string &output_file_name) {
+#if __APPLE__
+    auto cmd = fmt::format("dsymutil {} -o {}.dSYM", output_file_name, output_file_name);
+    if (builder.debug_mode) {
+        print("running: {}\n", cmd);
+    }
+    auto result = system(cmd.c_str());
+    if (result != 0) {
+        print("error: failed to run dsymutil: {}\n", cmd);
+    }
+
+    if (builder.strip_symbols) {
+        cmd = fmt::format("strip -S {}", output_file_name);
+        if (builder.debug_mode) {
+            print("running: {}\n", cmd);
+        }
+        result = system(cmd.c_str());
+        if (result != 0) {
+            print("error: failed to strip executable: {}\n", cmd);
+        }
+    }
+#else
+    if (builder.strip_symbols) {
+        auto cmd = fmt::format("strip --strip-debug {}", output_file_name);
+        if (builder.debug_mode) {
+            print("running: {}\n", cmd);
+        }
+        auto result = system(cmd.c_str());
+        if (result != 0) {
+            print("error: failed to strip executable: {}\n", cmd);
+        }
+    }
+#endif
+}
+
 } // namespace
 
 codegen::Compiler Builder::create_codegen_compiler() { return {m_codegen_ctx.get()}; }
@@ -80,6 +135,7 @@ void Builder::build_single_file(const string &file_name) {
     settings->output_obj_to_file = get_tmp_file_path("main.o");
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
     settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
+    settings->profile = profile;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
@@ -87,8 +143,9 @@ void Builder::build_single_file(const string &file_name) {
     compiler.emit_output();
 
     // produce executable
-    auto cmd = fmt::format("c++ {} -g -o {} {}-lchrt", settings->output_obj_to_file,
-                           output_file_name, runtime_library_search_flags(m_ctx));
+    auto cmd = fmt::format("c++ {} {} -o {} {}-lchrt", settings->output_obj_to_file,
+                           linker_mode_flags(profile), output_file_name,
+                           runtime_library_search_flags(m_ctx));
 
     if (debug_mode) {
         print("running: {}\n", cmd);
@@ -98,16 +155,7 @@ void Builder::build_single_file(const string &file_name) {
         print("error: failed to run command: {}\n", cmd);
     }
 
-#if __APPLE__
-    cmd = fmt::format("dsymutil {} -o {}.dSYM", output_file_name, output_file_name);
-    if (debug_mode) {
-        print("running: {}\n", cmd);
-    }
-    result = system(cmd.c_str());
-    if (result != 0) {
-        print("error: failed to run command: {}\n", cmd);
-    }
-#endif
+    run_post_link_tools(*this, output_file_name);
 }
 
 void Builder::build_program(const string &entry_file_name) {
@@ -274,6 +322,7 @@ void Builder::build_package(const string &package_dir) {
     settings->output_obj_to_file = get_tmp_file_path("main.o");
     settings->output_ir_to_file = get_tmp_file_path("main.ll");
     settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
+    settings->profile = profile;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
@@ -311,7 +360,8 @@ void Builder::build_package(const string &package_dir) {
                 include_flags += fmt::format("-I{} ", inc_dir);
             }
 
-            auto cmd = fmt::format("gcc -c {} {} -o {}", include_flags, src_file, obj_file);
+            auto cmd = fmt::format("gcc {} -c {} {} -o {}", c_compiler_mode_flags(profile),
+                                   include_flags, src_file, obj_file);
 
             if (debug_mode) {
                 print("running: {}\n", cmd);
@@ -356,8 +406,9 @@ void Builder::build_package(const string &package_dir) {
         library_flags += fmt::format("-l{} ", lib);
     }
 
-    auto cmd = fmt::format("c++ {} -g -o {} {}{}-lchrt {}", obj_files, output_file_name,
-                           runtime_library_search_flags(m_ctx), library_path_flags, library_flags);
+    auto cmd = fmt::format("c++ {} {} -o {} {}{}-lchrt {}", obj_files, linker_mode_flags(profile),
+                           output_file_name, runtime_library_search_flags(m_ctx),
+                           library_path_flags, library_flags);
 
     if (debug_mode) {
         print("running: {}\n", cmd);
@@ -368,16 +419,7 @@ void Builder::build_package(const string &package_dir) {
         exit(1);
     }
 
-#if __APPLE__
-    cmd = fmt::format("dsymutil {} -o {}.dSYM", output_file_name, output_file_name);
-    if (debug_mode) {
-        print("running: {}\n", cmd);
-    }
-    result = system(cmd.c_str());
-    if (result != 0) {
-        print("error: failed to run dsymutil: {}\n", cmd);
-    }
-#endif
+    run_post_link_tools(*this, output_file_name);
 }
 
 string Builder::get_tmp_file_path(const string &filename) {

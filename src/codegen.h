@@ -28,6 +28,11 @@ struct CodegenContext;
 typedef void *unknown_t;
 typedef llvm::BasicBlock label_t;
 
+enum class CompilationProfile {
+    Debug,
+    Release,
+};
+
 struct LoopLabels {
     label_t *start = nullptr;
     label_t *end = nullptr;
@@ -217,6 +222,7 @@ struct CompilationSettings {
     string output_obj_to_file = "";
     string output_ir_to_file = "";
     uint32_t lang_flags = LANG_FLAG_NONE;
+    CompilationProfile profile = CompilationProfile::Debug;
 };
 
 class Compiler;
@@ -530,6 +536,7 @@ class Compiler {
 
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
     llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type);
+    llvm::Value *compile_extern_variadic_arg(Function *fn, ast::Node *expr);
     llvm::Value *compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type);
     bool needs_implicit_owning_conversion(ChiType *src_type, ChiType *dest_type);
     bool compile_implicit_owning_conversion_to_ptr(Function *fn, ast::Node *expr,

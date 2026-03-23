@@ -14,8 +14,8 @@
 using namespace cx;
 
 MAKE_ENUM(FlagType, String, Bool);
-MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Output, Ast, Format, WorkingDir, Analyzer,
-          Safe, Verbose, Help);
+MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Release, Strip, Output, Ast, Format,
+          WorkingDir, Analyzer, Safe, Verbose, Help);
 MAKE_ENUM(InputMode, File, Package)
 MAKE_ENUM(ProcessingMode, Build, Analyzer, Format)
 
@@ -35,6 +35,8 @@ void init_flags() {
     flags.add({FlagId::CompileEntry, "c", "compile", FlagType::String});
     flags.add({FlagId::CompilePackage, "p", "package", FlagType::String});
     flags.add({FlagId::Debug, "d", "debug", FlagType::Bool});
+    flags.add({FlagId::Release, "r", "release", FlagType::Bool});
+    flags.add({FlagId::Strip, "", "strip", FlagType::Bool});
     flags.add({FlagId::Output, "o", "output", FlagType::String});
     flags.add({FlagId::Ast, "a", "ast", FlagType::Bool});
     flags.add({FlagId::Format, "f", "format", FlagType::Bool});
@@ -72,6 +74,8 @@ int main(int argc, char *argv[]) {
         print("  -c --compile <file>: compile from entry source file\n");
         print("  -p --package <dir>: compile from a package directory\n");
         print("  -d --debug: debug mode\n");
+        print("  -r --release: release mode (optimized, with debug info)\n");
+        print("  --strip: strip debug info from the final binary\n");
         print("  -o --output: output file name\n");
         print("  -a --ast: build ast\n");
         print("  -f --format: format source code\n");
@@ -94,6 +98,14 @@ int main(int argc, char *argv[]) {
             break;
         case FlagId::Debug:
             bld.debug_mode = true;
+            bld.profile = codegen::CompilationProfile::Debug;
+            break;
+        case FlagId::Release:
+            bld.debug_mode = false;
+            bld.profile = codegen::CompilationProfile::Release;
+            break;
+        case FlagId::Strip:
+            bld.strip_symbols = true;
             break;
         case FlagId::Output:
             bld.output_file_name = flag->value;
