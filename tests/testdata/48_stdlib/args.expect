@@ -1,3 +1,87 @@
 argc = 1
 has exe = true
 exe contains test name = true
+=== parse() smoke ===
+command = chi
+has subcommand = false
+=== parse build ===
+root verbose = false
+command = build
+release = true
+output = out
+input = main.xs
+=== parse root flag and repeated options ===
+root verbose = true
+command = build
+defines = [ONE, TWO]
+output = bin/chi
+=== parse attached short option value ===
+define = THREE
+=== stop options ===
+command = echo
+message = --not-an-option
+=== help ===
+usage: chi build [options] <input>
+
+Build a package
+
+flags:
+  -h, --help - Show help
+  -r, --release - Release mode
+options:
+  -o <FILE>, --output <FILE> - Output path
+  -D <NAME>, --define <NAME> - Define a symbol
+positionals:
+  input - Input file
+=== root help ===
+usage: chi <command> [options]
+
+Chi command line
+
+commands:
+  build - Build a package
+  echo - Echo args
+flags:
+  -h, --help - Show help
+  -v, --verbose - Verbose output
+=== missing option value ===
+missing value for option '-o'
+
+usage: chi build [options] <input>
+=== unknown long option ===
+unknown option '--wat'
+
+usage: chi build [options] <input>
+=== unknown short option ===
+unknown option '-x'
+
+usage: chi build [options] <input>
+=== duplicate single option ===
+duplicate option '--output'
+
+usage: chi build [options] <input>
+=== duplicate flag ===
+duplicate flag '--verbose'
+
+usage: chi <command> [options]
+=== missing positional ===
+missing positional 'input'
+
+usage: chi build [options] <input>
+=== unexpected positional ===
+unexpected argument 'two'
+
+usage: chi echo <message>
+=== unknown command ===
+unknown command 'ship'
+
+usage: chi <command> [options]
+
+Chi command line
+
+commands:
+  build - Build a package
+  echo - Echo args
+flags:
+  -h, --help - Show help
+  -v, --verbose - Verbose output

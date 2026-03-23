@@ -1,5 +1,6 @@
 SHELL=/bin/bash 
 BASE=..
+ROOT_DIR=$(abspath $(BASE))
 BUILD_DIR=$(BASE)/build
 TESTS_LIST = 00_fib.test \
     01_fib_struct.test \
@@ -221,12 +222,13 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 			failed=1; continue; \
 		fi; \
 		$(TMP).48_stdlib_$$name > $(TMP).48_stdlib_$$name.out 2>&1; \
-		if ! diff -qbu $$expect $(TMP).48_stdlib_$$name.out > /dev/null; then \
+		sed "s|$(ROOT_DIR)|<PROJECT_ROOT>|g" $(TMP).48_stdlib_$$name.out > $(TMP).48_stdlib_$$name.norm; \
+		if ! diff -qbu $$expect $(TMP).48_stdlib_$$name.norm > /dev/null; then \
 			echo "error: $$name output mismatch"; \
-			diff -u $$expect $(TMP).48_stdlib_$$name.out; \
+			diff -u $$expect $(TMP).48_stdlib_$$name.norm; \
 			failed=1; \
 		fi; \
-		rm -f $(TMP).48_stdlib_$$name.out; \
+		rm -f $(TMP).48_stdlib_$$name.out $(TMP).48_stdlib_$$name.norm; \
 	done; \
 	if [ "$$failed" = "1" ]; then exit 1; fi
 
