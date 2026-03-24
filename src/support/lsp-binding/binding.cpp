@@ -663,6 +663,7 @@ static boost::json::array generate_semantic_tokens(cx::ast::Module *module) {
             // Storage modifiers get a distinct token type (blue in Dark+)
             auto st = ST_Keyword;
             if (tok->type == cx::TokenType::KW_MUT ||
+                tok->type == cx::TokenType::KW_MUTEX ||
                 tok->type == cx::TokenType::KW_STATIC ||
                 tok->type == cx::TokenType::KW_PRIVATE ||
                 tok->type == cx::TokenType::KW_PROTECTED ||
