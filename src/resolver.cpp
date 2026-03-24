@@ -26,6 +26,7 @@ static bool expr_is_direct_borrow_value(ast::Node *expr);
 static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiType *from_type,
                                        ChiType *to_type, const ResolveScope *scope);
 static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr);
+static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope);
 
 // Check if a name matches a pattern (supports * wildcard)
 static bool matches_pattern(const std::string &name, const std::string &pattern) {
@@ -1165,7 +1166,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             null_token->type = TokenType::NULLP;
             null_node->token = null_token;
             null_node->resolved_type = get_system_types()->null_;
-            pdata.default_value = null_node;
+            pdata.resolved_default_value = null_node;
         }
 
         // Return type lifetime elision: return borrows from min(all reference-like params)
@@ -2010,6 +2011,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
                 }
+                if (expr_is_narrowed_from_optional(data.op1, scope)) {
+                    return t;
+                }
                 // Check for ops.Unwrap / ops.UnwrapMut
                 {
                     auto symbol =
@@ -2685,8 +2689,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 stype = eval_struct_type(expr_type, node);
             }
         }
+        auto *access_expr = data.effective_expr();
         auto is_internal = scope.parent_struct && is_friend_struct(scope.parent_struct, stype);
-        auto access_check_type = get_struct_access_root_type(data.expr);
+        auto access_check_type = get_struct_access_root_type(access_expr);
         if (!access_check_type) {
             access_check_type = expr_type;
         }
@@ -4590,7 +4595,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto start_type = resolve(range.start, scope);
                 auto end_type = resolve(range.end, scope);
                 check_assignment(range.end, end_type, start_type, &scope);
-                data.kind = ast::ForLoopKind::IntRange;
+                data.resolved_kind = ast::ForLoopKind::IntRange;
                 if (data.bind) {
                     auto bind_scope = scope.set_value_type(start_type);
                     resolve(data.bind, bind_scope);
@@ -4671,7 +4676,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 } else if (sty->member_intrinsics.get(IntrinsicSymbol::MutIterable)) {
                     // Iterator-based iteration (MutIterable)
-                    data.kind = ast::ForLoopKind::Iter;
+                    data.resolved_kind = ast::ForLoopKind::Iter;
                     auto iter_fn = sty->member_table.get("to_iter_mut");
                     if (!iter_fn) {
                         error(node, errors::FOR_EXPR_NOT_ITERABLE, format_type_display(expr_type));
@@ -6046,7 +6051,7 @@ string Resolver::resolve_term_string(ast::Node *term) {
     case NodeType::Identifier:
         return term->name;
     case NodeType::DotExpr:
-        return resolve_term_string(term->data.dot_expr.expr) + "." +
+        return resolve_term_string(term->data.dot_expr.effective_expr()) + "." +
                term->data.dot_expr.field->get_name();
     default:
         panic("unhandled term node: {}", PRINT_ENUM(term->type));
@@ -6064,6 +6069,33 @@ static void add_unique_node(array<ast::Node *> &nodes, ast::Node *node) {
         }
     }
     nodes.add(node);
+}
+
+static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope) {
+    if (!node || !scope.block || !scope.block->scope) {
+        return false;
+    }
+    ast::Node *narrowed = nullptr;
+    if (node->type == NodeType::DotExpr) {
+        auto path = build_narrowing_path(node);
+        if (!path.empty()) {
+            narrowed = scope.block->scope->find_one(path);
+        }
+    } else if (node->type == NodeType::Identifier) {
+        string name = node->name;
+        if (name.empty() && node->data.identifier.kind == ast::IdentifierKind::This) {
+            name = "this";
+        }
+        if (!name.empty()) {
+            narrowed = scope.block->scope->find_one(name);
+        }
+    }
+    if (!narrowed || narrowed->type != NodeType::VarDecl) {
+        return false;
+    }
+    auto *source = narrowed->data.var_decl.narrowed_from;
+    auto *source_type = source ? source->resolved_type : nullptr;
+    return source_type && source_type->kind == TypeKind::Optional;
 }
 
 static void append_leaf_borrow_roots(ast::FlowState &flow, ast::Node *source,
@@ -6087,9 +6119,12 @@ static void append_leaf_borrow_roots(ast::FlowState &flow, ast::Node *source,
         stack.add(deps->items[i]);
     }
 
-    while (stack.len > 0) {
-        auto *node = stack.last();
-        stack.len--;
+    for (;;) {
+        if (stack.len == 0) {
+            break;
+        }
+        auto *node = stack[stack.len - 1];
+        stack.len -= 1;
         if (visited.has_key(node)) {
             continue;
         }
@@ -6328,10 +6363,15 @@ static void collect_copy_edge_reachable_params(ast::FlowState &flow, array<ast::
                                                bool *out_reaches_this) {
     array<ast::Node *> stack = {};
     map<ast::Node *, bool> visited = {};
-    stack.add(start);
-    while (stack.len > 0) {
-        auto *node = stack.last();
-        stack.len--;
+    if (start) {
+        stack.add(start);
+    }
+    for (;;) {
+        if (stack.len == 0) {
+            break;
+        }
+        auto *node = stack[stack.len - 1];
+        stack.len -= 1;
         if (!node || visited.has_key(node)) {
             continue;
         }
@@ -7892,7 +7932,7 @@ static ChiType *get_struct_access_root_type(ast::Node *expr) {
     case ast::NodeType::DotExpr: {
         auto *member = expr->data.dot_expr.resolved_struct_member;
         if (member && member->is_field()) {
-            return get_struct_access_root_type(expr->data.dot_expr.expr);
+            return get_struct_access_root_type(expr->data.dot_expr.effective_expr());
         }
         return expr->resolved_type;
     }
@@ -8461,7 +8501,8 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         params_required = 0;
         for (size_t i = 0; i < fn_proto.params.len; i++) {
             auto param = fn_proto.params[i];
-            if (!param->data.param_decl.default_value && !param->data.param_decl.is_variadic) {
+            if (!param->data.param_decl.effective_default_value() &&
+                !param->data.param_decl.is_variadic) {
                 params_required++;
             }
         }
@@ -10588,7 +10629,7 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
         return node->data.identifier.decl;
     }
     case NodeType::DotExpr:
-        return find_root_decl(node->data.dot_expr.expr);
+        return find_root_decl(node->data.dot_expr.effective_expr());
     case NodeType::ParenExpr:
         return find_root_decl(node->data.child_expr);
     case NodeType::IndexExpr:
@@ -10783,7 +10824,8 @@ void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_
                 callee_decl->data.fn_def.decl_spec->is_mutex();
 
             if (explicit_exclusive_this) {
-                add_capture_roots_from_expr(call.fn_ref_expr->data.dot_expr.expr, call_node);
+                add_capture_roots_from_expr(call.fn_ref_expr->data.dot_expr.effective_expr(),
+                                            call_node);
             }
 
             auto *fn_type = call.fn_ref_expr->resolved_type;
@@ -10847,7 +10889,7 @@ bool Resolver::apply_call_receiver_copy_edge_effects(ast::FnDef &fn_def, ast::Fn
         return false;
     }
 
-    auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.expr);
+    auto *receiver_decl = find_root_decl(call.fn_ref_expr->data.dot_expr.effective_expr());
     if (!receiver_decl) {
         return false;
     }
@@ -10923,7 +10965,7 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
 
     if (call_has_instance_receiver(call, callee_proto)) {
         CallSlot slot;
-        slot.expr = call.fn_ref_expr->data.dot_expr.expr;
+        slot.expr = call.fn_ref_expr->data.dot_expr.effective_expr();
         auto *receiver_type = node_get_type(slot.expr);
         if (receiver_type && !receiver_type->is_borrow_reference() &&
             receiver_type->kind != TypeKind::MoveRef) {
@@ -11036,14 +11078,16 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
         // Method return tied to 'this — borrow from the receiver
         if (ret_lt && ret_lt->kind == LifetimeKind::This &&
             call.fn_ref_expr->type == NodeType::DotExpr) {
-            add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.expr, target, true);
+            add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.effective_expr(),
+                                    target, true);
         }
         // By-value return copy summary: result inherits borrow dependencies from `this`
         // and/or parameters through assignments/temps in the callee body.
         if (summary_proto && summary_proto->copy_edge_summary_valid &&
             summary_proto->return_copy_edge_from_this &&
             call.fn_ref_expr->type == NodeType::DotExpr) {
-            add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.expr, target, false);
+            add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.effective_expr(),
+                                    target, false);
         }
         if (summary_proto && summary_proto->copy_edge_summary_valid) {
             for (auto idx : summary_proto->return_copy_edge_param_indices) {
@@ -11769,7 +11813,7 @@ ChiType *Resolver::try_auto_deref(ast::Node *node, ChiType *stype, const string 
 
     auto dot_node = create_node(ast::NodeType::DotExpr);
     dot_node->token = node->token;
-    dot_node->data.dot_expr.expr = data.expr;
+    dot_node->data.dot_expr.expr = data.effective_expr();
     dot_node->data.dot_expr.field = deref_member->node->token;
     dot_node->data.dot_expr.resolved_struct_member = deref_member;
     dot_node->data.dot_expr.resolved_decl = deref_member->node;
@@ -11780,9 +11824,8 @@ ChiType *Resolver::try_auto_deref(ast::Node *node, ChiType *stype, const string 
     call_node->data.fn_call_expr.args = {};
     resolve(call_node, scope);
 
-    // Replace the DotExpr's sub-expression with the deref call.
-    // Return the deref'd reference type so the caller can redo member lookup.
-    data.expr = call_node;
+    // Preserve the parsed AST and keep the synthetic deref call as resolved-only data.
+    data.resolved_expr = call_node;
     return deref_return_type;
 }
 
@@ -12014,7 +12057,7 @@ bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface
     // Count required ctor params (those without defaults)
     size_t required_ctor = 0;
     for (size_t i = 0; i < ctor_params.len; i++) {
-        if (!ctor_params[i]->data.param_decl.default_value &&
+        if (!ctor_params[i]->data.param_decl.effective_default_value() &&
             !ctor_params[i]->data.param_decl.is_variadic)
             required_ctor++;
     }

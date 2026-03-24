@@ -223,8 +223,18 @@ ChiType *ChiTypeFn::get_param_at(size_t index) {
     if (is_extern && is_variadic) {
         return nullptr;
     }
+    if (params.len == 0) {
+        return nullptr;
+    }
     // For Chi variadic functions, the last parameter is Array<T>, get its element type
-    return params.last()->get_elem();
+    auto *va_param = params.last();
+    if (!va_param) {
+        return nullptr;
+    }
+    if (va_param->kind == TypeKind::Array) {
+        return va_param->data.array.elem;
+    }
+    return nullptr;
 }
 
 int ChiTypeFn::get_va_start() { return params.len - (int)(is_variadic && !is_extern); }

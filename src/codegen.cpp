@@ -2435,7 +2435,7 @@ void Compiler::collect_async_frame_nodes(ast::Node *node, std::vector<ast::Node 
         }
     }
     if (node->type == ast::NodeType::ForStmt &&
-        node->data.for_stmt.kind == ast::ForLoopKind::IntRange &&
+        node->data.for_stmt.effective_kind() == ast::ForLoopKind::IntRange &&
         node->data.for_stmt.expr &&
         node->data.for_stmt.expr->type == ast::NodeType::RangeExpr) {
         auto &for_data = node->data.for_stmt;
@@ -2467,7 +2467,8 @@ void Compiler::collect_async_frame_nodes(ast::Node *node, std::vector<ast::Node 
             seen_vars.insert(for_data.index_bind);
             vars.push_back(for_data.index_bind);
         }
-        if ((for_data.kind == ast::ForLoopKind::Range || for_data.kind == ast::ForLoopKind::Iter ||
+        auto for_kind = for_data.effective_kind();
+        if ((for_kind == ast::ForLoopKind::Range || for_kind == ast::ForLoopKind::Iter ||
              fixed_array_loop) && !seen_vars.count(node)) {
             seen_vars.insert(node);
             vars.push_back(node);
@@ -2496,7 +2497,8 @@ ChiType *Compiler::get_async_frame_node_type(ast::Node *node) {
     }
 
     auto &data = node->data.for_stmt;
-    if (data.kind == ast::ForLoopKind::IntRange && data.expr &&
+    auto kind = data.effective_kind();
+    if (kind == ast::ForLoopKind::IntRange && data.expr &&
         data.expr->type == ast::NodeType::RangeExpr) {
         return data.bind ? get_chitype(data.bind) : get_chitype(data.expr->data.range_expr.start);
     }
@@ -2509,13 +2511,13 @@ ChiType *Compiler::get_async_frame_node_type(ast::Node *node) {
         return get_system_types()->uint32;
     }
 
-    if (data.kind == ast::ForLoopKind::Range && data.expr) {
+    if (kind == ast::ForLoopKind::Range && data.expr) {
         auto sty = get_resolver()->resolve_struct_type(expr_type);
         auto beginp = sty ? sty->member_table.get("begin") : nullptr;
         return beginp ? (*beginp)->resolved_type->data.fn.return_type : nullptr;
     }
 
-    if (data.kind == ast::ForLoopKind::Iter && data.expr) {
+    if (kind == ast::ForLoopKind::Iter && data.expr) {
         auto sty = get_resolver()->resolve_struct_type(expr_type);
         auto iter_fn = sty ? sty->member_table.get("to_iter_mut") : nullptr;
         return iter_fn ? (*iter_fn)->resolved_type->data.fn.return_type : nullptr;
@@ -3693,14 +3695,15 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
     ensure_loop_var(data.bind);
     ensure_loop_var(data.index_bind);
 
-    bool is_int_range = data.kind == ast::ForLoopKind::IntRange && data.expr &&
+    auto kind = data.effective_kind();
+    bool is_int_range = kind == ast::ForLoopKind::IntRange && data.expr &&
                         data.expr->type == ast::NodeType::RangeExpr;
     auto expr_type = !is_int_range && data.expr ? get_chitype(data.expr) : nullptr;
     auto fixed_array_loop = expr_type && ((expr_type->kind == TypeKind::FixedArray) ||
                                           (expr_type->is_reference() &&
                                            expr_type->get_elem()->kind == TypeKind::FixedArray));
-    bool is_index_range = fixed_array_loop || data.kind == ast::ForLoopKind::Range;
-    bool is_iter_loop = data.kind == ast::ForLoopKind::Iter;
+    bool is_index_range = fixed_array_loop || kind == ast::ForLoopKind::Range;
+    bool is_iter_loop = kind == ast::ForLoopKind::Iter;
 
     if (!is_int_range && !is_index_range && !is_iter_loop) {
         compile_stmt(fn, for_stmt);
@@ -3743,7 +3746,7 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
         } else if (fixed_array_loop) {
             builder.CreateStore(llvm::ConstantInt::get(compile_type(get_async_frame_node_type(iter_node)), 0),
                                 iter_ptr);
-        } else if (data.kind == ast::ForLoopKind::Range) {
+        } else if (kind == ast::ForLoopKind::Range) {
             auto ptr = compile_dot_ptr(fn, data.expr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
             auto begin = *sty->member_table.get("begin");
@@ -3753,7 +3756,7 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
             if (auto alive_ptr = get_async_frame_var_alive_ptr(fn, machine, iter_node)) {
                 builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
             }
-        } else if (data.kind == ast::ForLoopKind::Iter) {
+        } else if (kind == ast::ForLoopKind::Iter) {
             auto container_ptr = compile_dot_ptr(fn, data.expr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
             auto iter_fn = *sty->member_table.get("to_iter_mut");
@@ -3797,7 +3800,7 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
                 auto next_value =
                     post_builder.CreateAdd(cur, llvm::ConstantInt::get(iter_type_l, 1));
                 compile_store_or_copy(state_fn, next_value, iter_ptr, iter_type, iter_node);
-            } else if (data.kind == ast::ForLoopKind::Range) {
+            } else if (kind == ast::ForLoopKind::Range) {
                 auto ptr = compile_dot_ptr(state_fn, data.expr);
                 auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
                 auto next = *sty->member_table.get("next");
@@ -3805,7 +3808,7 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
                 auto iter_next =
                     post_builder.CreateCall(get_fn(next->node)->llvm_fn, {ptr, iter_value}, "_iter_next");
                 compile_store_or_copy(state_fn, iter_next, iter_ptr, iter_type, data.expr);
-            } else if (data.kind == ast::ForLoopKind::Iter && data.index_bind) {
+            } else if (kind == ast::ForLoopKind::Iter && data.index_bind) {
                 auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
                 auto cur = post_builder.CreateLoad(idx_type, get_var(data.index_bind));
                 post_builder.CreateStore(post_builder.CreateAdd(cur, llvm::ConstantInt::get(idx_type, 1)),
@@ -3825,13 +3828,13 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
         auto arr_type = expr_type->is_reference() ? expr_type->get_elem() : expr_type;
         auto size_val = llvm::ConstantInt::get(iter_value->getType(), arr_type->data.fixed_array.size);
         cond = builder.CreateICmpULT(iter_value, size_val);
-    } else if (data.kind == ast::ForLoopKind::Range) {
+    } else if (kind == ast::ForLoopKind::Range) {
         auto ptr = compile_dot_ptr(fn, data.expr);
         auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
         auto end = *sty->member_table.get("end");
         auto iter_end = builder.CreateCall(get_fn(end->node)->llvm_fn, {ptr}, "_iter_end");
         cond = builder.CreateICmpSLT(iter_value, iter_end);
-    } else if (data.kind == ast::ForLoopKind::Iter) {
+    } else if (kind == ast::ForLoopKind::Iter) {
         auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
         auto next_fn = *get_resolver()->resolve_struct_type(get_async_frame_node_type(iter_node))
                             ->member_table.get("next");
@@ -3863,7 +3866,7 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
 
     fn->use_label(body_b);
     auto body_locals = local_vars;
-    if (fixed_array_loop || data.kind == ast::ForLoopKind::Range) {
+    if (fixed_array_loop || kind == ast::ForLoopKind::Range) {
         if (data.index_bind) {
             auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
             auto idx_val = iter_value->getType() == idx_type
@@ -5068,7 +5071,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
-
+                if (data.op1->type == ast::NodeType::DotExpr &&
+                    data.op1->data.dot_expr.narrowed_var) {
+                    return compile_expr(fn, data.op1);
+                }
                 if (data.resolved_call) {
                     auto ref_ptr = compile_fn_call(fn, data.resolved_call);
                     auto elem = expr->resolved_type;
@@ -6994,7 +7000,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             if (constructor_node->type == ast::NodeType::FnDef) {
                 auto &proto = constructor_node->data.fn_def.fn_proto->data.fn_proto;
                 for (size_t i = ctor_items.len; i < proto.params.len; i++) {
-                    auto default_val = proto.params[i]->data.param_decl.default_value;
+                    auto default_val = proto.params[i]->data.param_decl.effective_default_value();
                     if (!default_val)
                         break;
                     auto param_type = constructor_fn->fn_type->data.fn.get_param_at(i);
@@ -7433,16 +7439,17 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
 
         auto &data = expr->data.dot_expr;
+        auto *base_expr = data.effective_expr();
 
         // Narrowing redirect: use the narrowed var's GEP alias
         if (data.narrowed_var) {
             return RefValue::from_address(get_var(data.narrowed_var));
         }
 
-        auto type = get_chitype(data.expr);
+        auto type = get_chitype(base_expr);
 
         if (data.resolved_dot_kind == DotKind::TupleField) {
-            auto ref = compile_expr_ref(fn, data.expr);
+            auto ref = compile_expr_ref(fn, base_expr);
             auto tuple_type = compile_type(type);
             auto gep = m_ctx->llvm_builder->CreateStructGEP(tuple_type, ref.address, (unsigned)data.resolved_value);
             return RefValue::from_address(gep);
@@ -7483,9 +7490,9 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             // Get the instance pointer
             llvm::Value *instance_ptr;
             if (type->is_pointer_like()) {
-                instance_ptr = compile_expr(fn, data.expr);
+                instance_ptr = compile_expr(fn, base_expr);
             } else {
-                auto ref = compile_expr_ref(fn, data.expr);
+                auto ref = compile_expr_ref(fn, base_expr);
                 instance_ptr = ref.address;
             }
 
@@ -7521,31 +7528,32 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             return RefValue::from_address(lambda_alloca);
         } else if (type->is_pointer_like()) {
             type = type->get_elem();
-            ptr = compile_expr(fn, data.expr);
+            ptr = compile_expr(fn, base_expr);
         } else {
             // Check if this is module member access (e.g., sdl.SDL_Init)
-            if (data.expr->type == ast::NodeType::Identifier && data.expr->data.identifier.decl &&
-                data.expr->data.identifier.decl->type == ast::NodeType::ImportDecl) {
+            if (base_expr->type == ast::NodeType::Identifier &&
+                base_expr->data.identifier.decl &&
+                base_expr->data.identifier.decl->type == ast::NodeType::ImportDecl) {
                 // Module member access - use resolved_decl if available
                 if (data.resolved_decl) {
                     // Resolver already found the declaration, compile it directly
                     return compile_expr_ref(fn, data.resolved_decl);
                 }
                 // Fallback: look up the member from the module directly
-                auto import_decl = data.expr->data.identifier.decl;
+                auto import_decl = base_expr->data.identifier.decl;
                 auto imported_module = import_decl->data.import_decl.resolved_module;
                 if (!imported_module || !imported_module->scope) {
-                    panic("ImportDecl for '{}' has no resolved module", data.expr->name);
+                    panic("ImportDecl for '{}' has no resolved module", base_expr->name);
                 }
                 auto member_name = data.field->str;
                 auto member_node = imported_module->scope->find_one(member_name);
                 if (!member_node) {
-                    panic("Module '{}' has no member '{}'", data.expr->name, member_name);
+                    panic("Module '{}' has no member '{}'", base_expr->name, member_name);
                 }
                 return compile_expr_ref(fn, member_node);
             }
 
-            auto ref = compile_expr_ref(fn, data.expr);
+            auto ref = compile_expr_ref(fn, base_expr);
             if (type->kind == TypeKind::Fn) {
                 ptr = ref.value;
             } else {
@@ -7589,6 +7597,10 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                     emit_runtime_assert(fn, has_value, msg, expr);
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return RefValue::from_address(value_p);
+                }
+                if (data.op1->type == ast::NodeType::DotExpr &&
+                    data.op1->data.dot_expr.narrowed_var) {
+                    return compile_expr_ref(fn, data.op1);
                 }
                 if (data.resolved_call) {
                     auto ref_ptr = compile_fn_call(fn, data.resolved_call);
@@ -7891,7 +7903,7 @@ llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
                                                    ast::FnCallExpr &fn_call_data) {
     auto &builder = *m_ctx->llvm_builder.get();
     auto &llvm_ctx = *m_ctx->llvm_ctx.get();
-    auto receiver_expr = fn_call_data.fn_ref_expr->data.dot_expr.expr;
+    auto receiver_expr = fn_call_data.fn_ref_expr->data.dot_expr.effective_expr();
     auto receiver = compile_expr(fn, receiver_expr);
 
     if (method_name == "hash") {
@@ -8390,14 +8402,14 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     if (fn_spec.container_ref && !fn_decl->declspec().is_static()) {
         auto dot_expr = data.fn_ref_expr->data.dot_expr;
         if (!ctn_type) {
-            ctn_type = get_chitype(dot_expr.expr);
+            ctn_type = get_chitype(dot_expr.effective_expr());
         }
         // Unwrap Optional for ?. method calls
         if (ctn_type->kind == TypeKind::Optional) {
             ctn_type = ctn_type->get_elem();
         }
         auto ctn_type_l = compile_type(ctn_type);
-        auto ptr = compile_dot_ptr(fn, dot_expr.expr);
+        auto ptr = compile_dot_ptr(fn, dot_expr.effective_expr());
 
         // Check if receiver is an interface reference (fat pointer dispatch)
         bool receiver_is_interface = false;
@@ -8413,8 +8425,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             // Only redirect when the receiver is actually 'this' — other locals
             // (e.g. Buffer) must dispatch to their own methods, not the concrete struct's.
             bool receiver_is_this =
-                dot_expr.expr->type == ast::NodeType::Identifier &&
-                dot_expr.expr->data.identifier.kind == ast::IdentifierKind::This;
+                dot_expr.effective_expr()->type == ast::NodeType::Identifier &&
+                dot_expr.effective_expr()->data.identifier.kind == ast::IdentifierKind::This;
             if (receiver_is_this) {
                 auto concrete_struct =
                     get_resolver()->resolve_struct_type(fn->default_method_struct);
@@ -8535,7 +8547,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     if (fn_decl->type == ast::NodeType::FnDef) {
         auto &proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
         for (size_t i = data.args.len; i < proto.params.len; i++) {
-            auto default_val = proto.params[i]->data.param_decl.default_value;
+            auto default_val = proto.params[i]->data.param_decl.effective_default_value();
             if (!default_val)
                 break;
             auto param_type = fn_spec.get_param_at(i);
@@ -9262,7 +9274,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     case ast::NodeType::ForStmt: {
         auto &builder = *m_ctx->llvm_builder.get();
         auto &data = stmt->data.for_stmt;
-        if (data.kind == ast::ForLoopKind::IntRange) {
+        auto kind = data.effective_kind();
+        if (kind == ast::ForLoopKind::IntRange) {
             auto &range = data.expr->data.range_expr;
             auto start_val = compile_expr(fn, range.start);
             auto end_val = compile_expr(fn, range.end);
@@ -9376,7 +9389,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop->end);
             fn->pop_loop();
 
-        } else if (data.kind == ast::ForLoopKind::Range) {
+        } else if (kind == ast::ForLoopKind::Range) {
             auto ptr = compile_dot_ptr(fn, data.expr);
             assert(ptr);
             auto sty = get_resolver()->resolve_struct_type(get_chitype(data.expr));
@@ -9456,7 +9469,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             fn->use_label(loop->end);
             fn->pop_loop();
 
-        } else if (data.kind == ast::ForLoopKind::Iter) {
+        } else if (kind == ast::ForLoopKind::Iter) {
             // Iterator-based loop: call to_iter_mut(), then loop calling next()
             auto container_ptr = compile_dot_ptr(fn, data.expr);
             assert(container_ptr);

@@ -352,7 +352,12 @@ struct ParamDecl {
     Node *type = nullptr;
     bool is_variadic = false;
     Node *default_value = nullptr;
+    Node *resolved_default_value = nullptr;
     ChiLifetime *borrow_lifetime = nullptr; // for borrowing value params (e.g. func() types)
+
+    Node *effective_default_value() const {
+        return resolved_default_value ? resolved_default_value : default_value;
+    }
 };
 
 struct TypeParam {
@@ -541,6 +546,7 @@ struct TypedefDecl {
 
 struct DotExpr {
     Node *expr = nullptr;
+    Node *resolved_expr = nullptr;
     Token *field = nullptr;
     ChiStructMember *resolved_struct_member = nullptr;
     int64_t resolved_value = 0;
@@ -550,6 +556,8 @@ struct DotExpr {
     DotKind resolved_dot_kind = DotKind::Field;
     int resolved_index = -1;
     Node *narrowed_var = nullptr;
+
+    Node *effective_expr() const { return resolved_expr ? resolved_expr : expr; }
 };
 
 struct TypeInfoExpr {
@@ -606,6 +614,7 @@ struct SigilExpr {
 
 struct ForStmt {
     ForLoopKind kind = ForLoopKind::Empty;
+    ForLoopKind resolved_kind = ForLoopKind::Empty;
     Node *init = nullptr;
     Node *condition = nullptr;
     Node *post = nullptr;
@@ -614,6 +623,10 @@ struct ForStmt {
     Node *index_bind = nullptr;
     Node *expr = nullptr;
     SigilKind bind_sigil = SigilKind::None;
+
+    ForLoopKind effective_kind() const {
+        return resolved_kind != ForLoopKind::Empty ? resolved_kind : kind;
+    }
 };
 
 struct WhileStmt {

@@ -217,27 +217,6 @@ int main(int argc, char *argv[]) {
         }
         return 0;
     }
-    bool format_mode = false;
-    for (int i = 1; i < argc; i++) {
-        string arg = argv[i];
-        if (arg == "-f" || arg == "--format") {
-            format_mode = true;
-            break;
-        }
-    }
-
-    if (format_mode) {
-        Analyzer analyzer;
-        analyzer.build_runtime();
-        auto pkg = analyzer.add_package(".");
-        auto module = analyzer.process_file(pkg, input_file);
-
-        if (module && module->root) {
-            cx::AstPrinter printer(module->root, &module->comments);
-            printer.print_ast();
-        }
-        return 0;
-    }
     if (bld.build_mode == BuildMode::Executable) {
         if (bld.output_file_name.empty()) {
             print("error: output file name is not specified\n");
