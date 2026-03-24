@@ -8998,23 +8998,24 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     case ast::NodeType::DestructureDecl: {
         auto &data = stmt->data.destructure_decl;
         auto &builder = *m_ctx->llvm_builder.get();
+        auto *expr_node = data.effective_expr();
 
         // Evaluate RHS and store in temp
-        auto source_type = get_chitype(data.expr);
+        auto source_type = get_chitype(expr_node);
         auto temp_ptr = compile_alloc(fn, data.temp_var);
         add_var(data.temp_var, temp_ptr);
         llvm::Value *borrow_source_ptr = nullptr;
-        if (get_resolver()->find_root_decl(data.expr)) {
-            auto source_ref = compile_expr_ref(fn, data.expr);
+        if (get_resolver()->find_root_decl(expr_node)) {
+            auto source_ref = compile_expr_ref(fn, expr_node);
             if (source_ref.address) {
                 borrow_source_ptr = source_ref.address;
-                compile_copy_with_ref(fn, source_ref, temp_ptr, source_type, data.expr);
+                compile_copy_with_ref(fn, source_ref, temp_ptr, source_type, expr_node);
             }
         }
         if (!borrow_source_ptr) {
-            auto rhs_value = compile_assignment_to_type(fn, data.expr, source_type);
+            auto rhs_value = compile_assignment_to_type(fn, expr_node, source_type);
             if (rhs_value) {
-                compile_store_or_copy(fn, rhs_value, temp_ptr, source_type, data.expr);
+                compile_store_or_copy(fn, rhs_value, temp_ptr, source_type, expr_node);
             }
             borrow_source_ptr = temp_ptr;
         }

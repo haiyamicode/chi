@@ -511,6 +511,7 @@ struct DestructureField {
 struct DestructureDecl {
     array<Node *> fields = {}; // DestructureField nodes
     Node *expr = nullptr;      // RHS expression
+    Node *resolved_expr = nullptr;
     VarKind kind = VarKind::Mutable;
     array<Node *> generated_vars = {};                // resolver creates VarDecl nodes here
     Node *temp_var = nullptr;                         // temp to hold RHS value
@@ -520,6 +521,8 @@ struct DestructureDecl {
     ChiStructMember *resolved_slice_method = nullptr; // slice for array rest destructure
     ChiStructMember *resolved_as_tuple = nullptr;     // as_tuple for AsTuple destructure
     ChiType *as_tuple_result_type = nullptr;           // Tuple type returned by as_tuple
+
+    Node *effective_expr() const { return resolved_expr ? resolved_expr : expr; }
 };
 
 // composite literal

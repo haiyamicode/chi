@@ -1459,10 +1459,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::DestructureDecl: {
         auto &data = node->data.destructure_decl;
+        auto *expr_node = data.effective_expr();
 
         // Create temp VarDecl BEFORE resolving — exactly like VarDecl sets move_outlet
         // so ConstructExpr can RVO directly into the temp
-        auto temp_var = get_dummy_var("__destructure_tmp", data.expr);
+        auto temp_var = get_dummy_var("__destructure_tmp", expr_node);
         temp_var->module = node->module;
         temp_var->parent_fn = scope.parent_fn_node;
         temp_var->data.var_decl.kind = ast::VarKind::Immutable;
@@ -1471,7 +1472,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Resolve RHS with move_outlet set to temp — same as VarDecl
         auto expr_scope = scope.set_move_outlet(temp_var);
-        auto expr_type = resolve(data.expr, expr_scope);
+        auto expr_type = resolve(expr_node, expr_scope);
         if (!expr_type)
             return nullptr;
 
@@ -1481,13 +1482,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             temp_var->decl_order = scope.parent_fn_def()->next_decl_order++;
             if (!scope.is_unsafe_block) {
                 bool is_ref =
-                    expr_creates_direct_borrow(this, data.expr, expr_type, expr_type, &scope);
-                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, data.expr, temp_var,
+                    expr_creates_direct_borrow(this, expr_node, expr_type, expr_type, &scope);
+                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, expr_node, temp_var,
                                         is_ref);
             }
         }
 
-        auto *borrow_source = find_root_decl(data.expr) ? data.expr : temp_var;
+        auto *borrow_source = find_root_decl(expr_node) ? expr_node : temp_var;
 
         // Resolve each field pattern
         resolve_destructure(node, expr_type, scope, borrow_source);
@@ -3398,8 +3399,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         ident->resolved_type = clause_type;
 
                         auto pattern = data.binding_decl;
-                        pattern->parent_fn = scope.parent_fn_node;
-                        pattern->data.destructure_decl.expr = ident;
+                        pattern->data.destructure_decl.resolved_expr = ident;
 
                         auto then_scope = scope.set_block(&block_data);
                         resolve(pattern, then_scope);
@@ -3432,7 +3432,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     unwrap_expr->data.unary_op_expr.op_type = TokenType::LNOT;
                     unwrap_expr->data.unary_op_expr.op1 = narrow_source;
                     unwrap_expr->resolved_type = cond_type->get_elem();
-                    pattern->data.destructure_decl.expr = unwrap_expr;
+                    pattern->data.destructure_decl.resolved_expr = unwrap_expr;
                     auto then_scope = scope.set_block(&block_data);
                     resolve(pattern, then_scope);
                     block_data.implicit_vars.add(pattern);
@@ -3448,7 +3448,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     if (binding->data.var_decl.identifier) {
                         binding->data.var_decl.identifier->node = binding;
                     }
-                    data.binding_decl = binding;
                     block_data.implicit_vars.add(binding);
                     block_data.scope->put(binding->name, binding);
                 }
@@ -5297,8 +5296,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                     ident->data.identifier.decl = var;
                                     ident->data.identifier.kind = ast::IdentifierKind::Value;
 
-                                    pattern->parent_fn = scope.parent_fn_node;
-                                    pattern->data.destructure_decl.expr = ident;
+                                    pattern->data.destructure_decl.resolved_expr = ident;
 
                                     auto body_scope = scope.set_block(&block_data);
                                     resolve(pattern, body_scope);
