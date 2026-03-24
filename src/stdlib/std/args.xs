@@ -197,12 +197,12 @@ export struct Command {
         };
         let step = parser.parse();
         switch step {
-            ParseStep.Ok => {},
-            ParseStep.Help(text) => {
-                return Parse.Help{text};
+            Ok => {},
+            Help(text) => {
+                return Help{text};
             },
-            ParseStep.Error(text) => {
-                return Parse.Error{text};
+            Error(text) => {
+                return Error{text};
             }
         }
         return Parse.Ok{move matches};

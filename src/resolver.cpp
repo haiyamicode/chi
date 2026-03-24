@@ -1293,18 +1293,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return scope.parent_type_symbol;
             }
         }
+        if (data.kind == ast::IdentifierKind::Value) {
+            auto variant = find_expected_enum_variant(node->name, scope.value_type);
+            if (variant && (!data.decl || data.decl->type == NodeType::EnumVariant)) {
+                data.decl = variant->node;
+                type_override = variant->resolved_type;
+            }
+        }
         if (!data.decl) {
-            if (data.kind == ast::IdentifierKind::Value) {
-                auto variant = find_expected_enum_variant(node->name, scope.value_type);
-                if (variant) {
-                    data.decl = variant->node;
-                    type_override = variant->resolved_type;
-                }
-            }
-            if (!data.decl) {
-                error(node, errors::UNDECLARED, node->name);
-                return create_type(TypeKind::Unknown);
-            }
+            error(node, errors::UNDECLARED, node->name);
+            return create_type(TypeKind::Unknown);
         }
         if (data.kind == ast::IdentifierKind::Value && scope.block) {
             auto replacement = scope.block->scope->find_one(data.decl->name);
@@ -2836,7 +2834,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         ChiType *value_type;
         ChiType *result_type;
         if (data.type) {
-            value_type = resolve_value(data.type, scope);
+            if (data.type->type == NodeType::Identifier) {
+                auto variant = find_expected_enum_variant(data.type->name, scope.value_type);
+                if (variant) {
+                    auto &ident = data.type->data.identifier;
+                    ident.decl = variant->node;
+                    ident.kind = ast::IdentifierKind::Value;
+                    value_type = variant->resolved_type;
+                } else {
+                    value_type = resolve_value(data.type, scope);
+                }
+            } else {
+                value_type = resolve_value(data.type, scope);
+            }
             if (data.items.len == 0 && value_type->kind == TypeKind::Placeholder) {
                 bool has_construct_bound = false;
                 for (auto t : get_placeholder_traits(value_type)) {
@@ -5255,6 +5265,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!scase->data.case_expr.is_else) {
                 for (auto clause : scase->data.case_expr.clauses) {
                     auto clause_scope = scope.set_value_type(expr_type);
+                    if (clause->type == NodeType::Identifier) {
+                        auto variant = find_expected_enum_variant(clause->name, expr_type);
+                        if (variant) {
+                            auto &ident = clause->data.identifier;
+                            ident.decl = variant->node;
+                            ident.kind = ast::IdentifierKind::Value;
+                        }
+                    }
                     auto clause_type = resolve(clause, clause_scope);
                     resolve_constant_value(clause);
                     auto clause_comparator = resolve_comparator(clause_type, scope);
