@@ -14,7 +14,7 @@ func main() {
     let s = S{};
     println(s.bar);
 
-    let f = func() int {
+    let f = func () int {
         return 3;
     };
     println(f);

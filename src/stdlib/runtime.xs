@@ -446,7 +446,7 @@ export struct Array<T> {
         mutex func truncate(n: uint32) {
             if n < this.length {
                 unsafe {
-                    for var i = n; i < this.length; i++ {
+                    for i in n..this.length {
                         mem.destroy((&mut this.data[i]) as *void);
                     }
                 }

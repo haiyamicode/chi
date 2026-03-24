@@ -86,10 +86,13 @@ format_example: build install
 format_all: build install
 	@echo "Formatting all .xs and .x files in src/stdlib and tests..."
 	@find src/stdlib tests -type f \( -name "*.xs" -o -name "*.x" \) -print0 | while IFS= read -r -d '' file; do \
-		if [ "$$file" = "tests/formatter_collapse.xs" ] || [ "$$file" = "tests/42_construct_expr.xs" ]; then \
-			echo "Skipping $$file (formatter test input)..."; \
-			continue; \
-		fi; \
+		case "$$file" in \
+			tests/formatter_collapse.xs|\
+			tests/42_construct_expr.xs) \
+				echo "Skipping $$file (formatter test input)..."; \
+				continue; \
+				;; \
+		esac; \
 		echo "Formatting $$file..."; \
 		$(CHIC) -f -c "$$file" > "$$file.tmp" && mv "$$file.tmp" "$$file"; \
 	done

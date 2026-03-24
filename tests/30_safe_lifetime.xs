@@ -245,11 +245,11 @@ func test_field_borrow_not_this() {
 }
 
 enum VariantRefValue {
-    Ref(&int),
+    Ref(&int)
 }
 
 enum GenericVariantRef<T> {
-    Item(T),
+    Item(T)
 }
 
 enum BaseRefValue {
@@ -988,7 +988,7 @@ func test_generic_constructor_copy_edge_ref() {
 func test_lambda_capture_maybe_move(flag: bool) {
     printf("=== lambda capture maybe move ({}) ===\n", flag);
     var h = Heavy{value: if flag => 1501 else => 1500};
-    let f = func() {
+    let f = func () {
         if flag {
             consume_heavy(move h);
             println("lambda moved");

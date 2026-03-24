@@ -6,7 +6,7 @@ struct Data {
 }
 
 enum Wrap<T> {
-    Item(T),
+    Item(T)
 }
 
 func make() Wrap<&Data> {

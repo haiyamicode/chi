@@ -1,7 +1,7 @@
 // expect-error: exclusive access
 
 func main() {
-    var m: Map<int, int> = {};
+    var m = Map<int, int>{};
     m.set(1, 10);
 
     let r = &m[1];

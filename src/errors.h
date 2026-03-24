@@ -48,6 +48,8 @@ constexpr auto INVALID_THIS_IN_STATIC =
     "'this' cannot be used in static methods; use 'This' for the type instead";
 constexpr auto STATIC_CONSTRUCTOR_NOT_ALLOWED =
     "static 'new' is not allowed; use 'func new' for constructors";
+constexpr auto MUTEX_REDUNDANT_MUT = "'mutex' already implies mutability; remove 'mut'";
+constexpr auto MUTABLE_FUNCTION_REQUIRES_BODY = "'{}' is only applicable for functions with a body";
 constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant expression";
 constexpr auto NON_INTERFACE_IMPL_TYPE =
     "cannot use non-interface type '{}' in struct implement list";

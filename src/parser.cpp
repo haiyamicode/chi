@@ -372,19 +372,11 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         }
         case TokenType::KW_MUT: {
             consume();
-            if (spec->has_flag(DECL_MUTEX)) {
-                error(token, "'mutex' already implies mutability; remove 'mut'");
-                break;
-            }
             spec->flags |= DECL_MUTABLE;
             break;
         }
         case TokenType::KW_MUTEX: {
             consume();
-            if (spec->has_flag(DECL_MUTABLE)) {
-                error(token, "'mutex' already implies mutability; use 'mutex' without 'mut'");
-                spec->flags &= ~DECL_MUTABLE;
-            }
             spec->flags |= DECL_MUTEX;
             break;
         }
@@ -892,9 +884,6 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
     decl_spec = parse_decl_spec(decl_spec);
     auto iden = expect(TokenType::KW_FUNC);
     auto kind = parse_fn_identifier(&iden);
-    if (kind == FnKind::Constructor && decl_spec && decl_spec->is_static()) {
-        error(iden, errors::STATIC_CONSTRUCTOR_NOT_ALLOWED);
-    }
 
     auto fn = create_node(NodeType::FnDef, iden);
     fn->start_token = iden;
@@ -908,11 +897,6 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
 
     if (flags & FN_BODY_NONE) {
         expect(TokenType::SEMICOLON);
-        if (decl_spec && decl_spec->is_mutable()) {
-            error(iden, decl_spec->is_mutex()
-                            ? "'mutex' is only applicable for functions with a body"
-                            : "'mut' is only applicable for functions with a body");
-        }
         add_to_scope(fn);
         return fn;
     }
@@ -926,11 +910,6 @@ Node *Parser::parse_fn_decl(uint32_t flags, DeclSpec *decl_spec) {
         } else {
             if (next_is(TokenType::SEMICOLON)) {
                 consume();
-                if (decl_spec && decl_spec->is_mutable()) {
-                    error(iden, decl_spec->is_mutex()
-                                    ? "'mutex' is not allowed on function declarations without a body"
-                                    : "'mut' is not allowed on function declarations without a body");
-                }
             } else {
                 if (next_is(TokenType::LBRACE)) {
                     parse_fn_block(fn);

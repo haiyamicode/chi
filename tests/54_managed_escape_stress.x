@@ -94,9 +94,7 @@ func make_nested_returned_lambda() (func () int) {
 
 func make_nested_holder() NestedHolder {
     var obj = GCThing{300};
-    return NestedHolder{
-        slot: RefSlot{&obj}
-    };
+    return {slot: RefSlot{&obj}};
 }
 
 func make_optional_slot(flag: bool) ?RefSlot {
@@ -109,20 +107,18 @@ func make_optional_slot(flag: bool) ?RefSlot {
 
 func make_callback_holder() CallbackHolder {
     var obj = GCThing{500};
-    return CallbackHolder{
-        func () int {
-            return obj.id;
-        }
-    };
+    return {func () int {
+        return obj.id;
+    }};
 }
 
 func make_branch_pair(flag: bool) RefPair {
     var left = GCThing{600};
     var right = GCThing{601};
     if flag {
-        return RefPair{&left, &right};
+        return {&left, &right};
     }
-    return RefPair{&right, &left};
+    return {&right, &left};
 }
 
 func make_generic_temp_holder() GenericTempHolder<&GCThing> {
@@ -134,7 +130,7 @@ func make_generic_temp_holder() GenericTempHolder<&GCThing> {
 
 func make_generic_ctor_holder() GenericCtorHolder<&GCThing> {
     var obj = GCThing{900};
-    return GenericCtorHolder<&GCThing>{&obj};
+    return {&obj};
 }
 
 func make_deep_collections() DeepCollections {
@@ -153,11 +149,11 @@ func make_generic_array_holder() GenericCtorHolder<Array<&GCThing>> {
         var obj = GCThing{1100 + i};
         refs.push(&obj);
     }
-    return GenericCtorHolder<Array<&GCThing>>{refs};
+    return {refs};
 }
 
 func make_generic_map_holder() GenericTempHolder<Map<int, &GCThing>> {
-    var refs: Map<int, &GCThing> = {};
+    var refs = Map<int, &GCThing>{};
     for i in 0..3 {
         var obj = GCThing{1200 + i};
         refs.set(i, &obj);
@@ -229,33 +225,36 @@ func test_generic_ctor_holder() {
 func test_deep_collections() {
     println("\n=== Deep collections ===");
     var nested = make_deep_collections();
-    printf("refs = [{}, {}, {}]\n",
-           nested.collections.refs[0].id,
-           nested.collections.refs[1].id,
-           nested.collections.refs[2].id);
-    printf("map = [{}, {}, {}]\n",
-           nested.collections.lookup[0].id,
-           nested.collections.lookup[1].id,
-           nested.collections.lookup[2].id);
+    printf(
+        "refs = [{}, {}, {}]\n",
+        nested.collections.refs[0].id,
+        nested.collections.refs[1].id,
+        nested.collections.refs[2].id
+    );
+    printf(
+        "map = [{}, {}, {}]\n",
+        nested.collections.lookup[0].id,
+        nested.collections.lookup[1].id,
+        nested.collections.lookup[2].id
+    );
 }
 
 func test_generic_array_holder() {
     println("\n=== Generic array holder ===");
     var holder = make_generic_array_holder();
-    printf("holder refs = [{}, {}, {}]\n",
-           holder.get()[0].id,
-           holder.get()[1].id,
-           holder.get()[2].id);
+    printf(
+        "holder refs = [{}, {}, {}]\n",
+        holder.get()[0].id,
+        holder.get()[1].id,
+        holder.get()[2].id
+    );
 }
 
 func test_generic_map_holder() {
     println("\n=== Generic map holder ===");
     var holder = make_generic_map_holder();
     var lookup = holder.get();
-    printf("holder map = [{}, {}, {}]\n",
-           lookup[0].id,
-           lookup[1].id,
-           lookup[2].id);
+    printf("holder map = [{}, {}, {}]\n", lookup[0].id, lookup[1].id, lookup[2].id);
 }
 
 func main() {

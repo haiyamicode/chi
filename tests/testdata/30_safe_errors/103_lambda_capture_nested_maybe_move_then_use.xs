@@ -5,7 +5,7 @@ func main() {
     var outer = true;
     var inner = false;
     var s = stringf("hello {}", "world");
-    let f = func() {
+    let f = func () {
         if outer {
             if inner {
                 println("kept");

@@ -6,7 +6,7 @@ struct Data {
 }
 
 enum RefValue {
-    Ref(&Data),
+    Ref(&Data)
 }
 
 func make() RefValue {

@@ -296,7 +296,7 @@ struct NamedStringFields {
 }
 
 func make_named_string_fields(first: TracedStringField, second: TracedStringField) NamedStringFields {
-    return {first: first, second: second};
+    return {:first, :second};
 }
 
 func test_struct_display() {

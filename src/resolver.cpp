@@ -824,6 +824,21 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::FnDef: {
         auto &data = node->data.fn_def;
+        if (data.decl_spec) {
+            if (data.decl_spec->has_flag(ast::DECL_MUTEX) &&
+                data.decl_spec->has_flag(ast::DECL_MUTABLE)) {
+                error(node, errors::MUTEX_REDUNDANT_MUT);
+            }
+
+            if (data.fn_kind == ast::FnKind::Constructor && data.decl_spec->is_static()) {
+                error(node, errors::STATIC_CONSTRUCTOR_NOT_ALLOWED);
+            }
+
+            if (!data.body && data.decl_spec->is_mutable()) {
+                error(node, errors::MUTABLE_FUNCTION_REQUIRES_BODY,
+                      data.decl_spec->is_mutex() ? "mutex" : "mut");
+            }
+        }
         if (data.fn_kind == ast::FnKind::Lambda) {
             auto &data = node->data.fn_def;
             auto fn_scope = scope.set_parent_fn_node(node);
@@ -6168,6 +6183,7 @@ static ChiLifetime *get_first_ref_lifetime(ChiType *type) {
     }
     return (*lifetimes)[0];
 }
+
 
 bool Resolver::type_needs_first_ref_lifetime(ChiType *type) {
     if (!type) {

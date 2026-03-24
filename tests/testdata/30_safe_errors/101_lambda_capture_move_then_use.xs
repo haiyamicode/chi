@@ -3,7 +3,7 @@
 
 func main() {
     var s = stringf("hello {}", "world");
-    let f = func() string {
+    let f = func () string {
         return move s;
     };
     println(f());

@@ -3,7 +3,7 @@ struct Boxed {
 }
 
 func collect() Map<int, &Boxed> {
-    var m: Map<int, &Boxed> = {};
+    var m = Map<int, &Boxed>{};
     for i in 0..3 {
         var obj = Boxed{id: 800 + i};
         m.set(i, &obj);

@@ -15,7 +15,7 @@ struct Holder<T> {
 
 func collect() Holder<&EscapeProbeBox> {
     var obj = EscapeProbeBox{id: 1};
-    return Holder<&EscapeProbeBox>{&obj};
+    return {&obj};
 }
 
 func main() {

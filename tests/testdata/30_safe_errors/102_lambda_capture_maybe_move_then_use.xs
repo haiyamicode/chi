@@ -4,7 +4,7 @@
 func main() {
     var flag = true;
     var s = stringf("hello {}", "world");
-    let f = func() {
+    let f = func () {
         if flag {
             let _ = move s;
         }

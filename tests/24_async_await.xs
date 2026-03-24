@@ -1790,10 +1790,13 @@ async func run_async_tail() Promise {
 
     println("=== timeout ===");
     var timeout_done = Promise{};
-    time.timeout(10, func [timeout_done] () {
-        println("timeout fired");
-        timeout_done.resolve({});
-    });
+    time.timeout(
+        10,
+        func [timeout_done] () {
+            println("timeout fired");
+            timeout_done.resolve({});
+        }
+    );
     println("scheduled");
     await timeout_done;
 
@@ -1805,10 +1808,12 @@ async func run_async_tail() Promise {
     println("=== sleep capture ===");
     var counter = 42;
     var sleep_capture_done = Promise{};
-    time.sleep(10).then(func [counter, sleep_capture_done] (u) {
-        printf("captured: {}\n", counter);
-        sleep_capture_done.resolve({});
-    });
+    time.sleep(10).then(
+        func [counter, sleep_capture_done] (u) {
+            printf("captured: {}\n", counter);
+            sleep_capture_done.resolve({});
+        }
+    );
     counter = 999;
     printf("mutated: {}\n", counter);
     await sleep_capture_done;

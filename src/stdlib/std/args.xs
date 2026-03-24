@@ -49,8 +49,8 @@ const ERROR_DUPLICATE_SCHEMA = "duplicate {} '{}'";
 const ERROR_DUPLICATE_SCHEMA_IN_COMMAND = "duplicate {} '{}' in command '{}'";
 const ERROR_DUPLICATE_FLAG = "duplicate flag '--{}'";
 const ERROR_DUPLICATE_OPTION = "duplicate option '--{}'";
-const ERROR_REQUIRED_POSITIONAL_AFTER_OPTIONAL =
-    "required positional '{}' cannot follow optional positional in command '{}'";
+const ERROR_REQUIRED_POSITIONAL_AFTER_OPTIONAL = "required positional '{}' cannot follow optional positional in command '{}'";
+
 
 export struct Matches {
     command: string = "";
@@ -162,9 +162,7 @@ export struct Command {
     mutex func positional(spec: Positional) {
         if spec.required {
             if this.optional_positionals_started {
-                panic(stringf(ERROR_REQUIRED_POSITIONAL_AFTER_OPTIONAL,
-                              spec.name,
-                              this.name));
+                panic(stringf(ERROR_REQUIRED_POSITIONAL_AFTER_OPTIONAL, spec.name, this.name));
             }
         } else {
             this.optional_positionals_started = true;
@@ -194,13 +192,12 @@ export struct Command {
         var parser = CommandParser{
             matches: &mutex matches,
             cmd: &this,
-            argv_values: argv_values,
+            :argv_values,
             command_name: this.name
         };
         let step = parser.parse();
         switch step {
-            ParseStep.Ok => {
-            },
+            ParseStep.Ok => {},
             ParseStep.Help(text) => {
                 return Parse.Help{text};
             },
@@ -390,9 +387,11 @@ func help_for(cmd: &Command, name: string) string {
     var flag_lines: Array<string> = [];
     flag_lines.push("-h, --help - Show help");
     for flag in cmd.flags {
-        let names = if flag.short.is_empty()
-            => stringf("--{}", flag.name)
-            else => stringf("-{}, --{}", flag.short, flag.name);
+        let names = if flag.short.is_empty() => stringf("--{}", flag.name) else => stringf(
+            "-{}, --{}",
+            flag.short,
+            flag.name
+        );
         if flag.help.is_empty() {
             flag_lines.push(names);
         } else {
@@ -402,10 +401,17 @@ func help_for(cmd: &Command, name: string) string {
 
     var option_lines: Array<string> = [];
     for option in cmd.options {
-        let names = if option.short.is_empty()
-            => stringf("--{} <{}>", option.name, option.value_name)
-            else => stringf("-{} <{}>, --{} <{}>", option.short, option.value_name, option.name,
-                            option.value_name);
+        let names = if option.short.is_empty() => stringf(
+            "--{} <{}>",
+            option.name,
+            option.value_name
+        ) else => stringf(
+            "-{} <{}>, --{} <{}>",
+            option.short,
+            option.value_name,
+            option.name,
+            option.value_name
+        );
         if option.help.is_empty() {
             option_lines.push(names);
         } else {
@@ -422,8 +428,7 @@ func help_for(cmd: &Command, name: string) string {
         }
     }
 
-    if command_lines.length > 0 || flag_lines.length > 0 || option_lines.length > 0 ||
-       positional_lines.length > 0 {
+    if command_lines.length > 0 || flag_lines.length > 0 || option_lines.length > 0 || positional_lines.length > 0 {
         buf.write_string("\n\n");
     }
     append_help_lines(&mutex buf, "commands", command_lines.span());
@@ -447,9 +452,11 @@ func scan_arg(arg: string, state: ScanState) ArgToken {
     if arg.starts_with("--") && arg.byte_length() > 2 {
         let body = arg.byte_slice(2, arg.byte_length());
         if let eq = find_byte(body, '=') {
-            return {kind: ArgTokenKind.LongNameValue,
-                    first: body.byte_slice(0, eq),
-                    second: body.byte_slice(eq + 1, body.byte_length())};
+            return {
+                kind: ArgTokenKind.LongNameValue,
+                first: body.byte_slice(0, eq),
+                second: body.byte_slice(eq + 1, body.byte_length())
+            };
         }
         return {kind: ArgTokenKind.LongName, first: body};
     }
@@ -480,7 +487,7 @@ struct CommandParser {
         if !option.multiple && this.matches.option(option.name) {
             return stringf(ERROR_DUPLICATE_OPTION, option.name);
         }
-        this.matches.options.push({name: option.name, value: value});
+        this.matches.options.push({name: option.name, :value});
         return null;
     }
 
@@ -500,8 +507,7 @@ struct CommandParser {
         };
         let child_step = child_parser.parse();
         switch child_step {
-            ParseStep.Ok => {
-            },
+            ParseStep.Ok => {},
             ParseStep.Help(text) => {
                 return ParseStep.Help{text};
             },
@@ -519,28 +525,41 @@ struct CommandParser {
         }
         if let flag_index = find_flag_long_index(this.cmd, name) {
             if let message = this.add_flag(&this.cmd.flags[flag_index]) {
-                return {kind: TokenStepKind.Error,
-                        text: parse_error_text(this.cmd, this.command_name, message)};
+                return {
+                    kind: TokenStepKind.Error,
+                    text: parse_error_text(this.cmd, this.command_name, message)
+                };
             }
             return {kind: TokenStepKind.Next, next_index: this.index + 1};
         }
         if let option_index = find_option_long_index(this.cmd, name) {
             let option = &this.cmd.options[option_index];
             if this.index + 1 >= this.argv_values.length {
-                return {kind: TokenStepKind.Error,
-                        text: parse_error_text(this.cmd, this.command_name,
-                                               stringf("missing value for option '--{}'",
-                                                       option.name))};
+                return {
+                    kind: TokenStepKind.Error,
+                    text: parse_error_text(
+                        this.cmd,
+                        this.command_name,
+                        stringf("missing value for option '--{}'", option.name)
+                    )
+                };
             }
             if let message = this.add_option(option, this.argv_values[this.index + 1]) {
-                return {kind: TokenStepKind.Error,
-                        text: parse_error_text(this.cmd, this.command_name, message)};
+                return {
+                    kind: TokenStepKind.Error,
+                    text: parse_error_text(this.cmd, this.command_name, message)
+                };
             }
             return {kind: TokenStepKind.Next, next_index: this.index + 2};
         }
-        return {kind: TokenStepKind.Error,
-                text: parse_error_text(this.cmd, this.command_name,
-                                       stringf("unknown option '--{}'", name))};
+        return {
+            kind: TokenStepKind.Error,
+            text: parse_error_text(
+                this.cmd,
+                this.command_name,
+                stringf("unknown option '--{}'", name)
+            )
+        };
     }
 
     mutex func parse_long_name_value(name: string, value: string) TokenStep {
@@ -549,21 +568,32 @@ struct CommandParser {
         }
         if let flag_index = find_flag_long_index(this.cmd, name) {
             let flag = &this.cmd.flags[flag_index];
-            return {kind: TokenStepKind.Error,
-                    text: parse_error_text(this.cmd, this.command_name,
-                                           stringf("flag '--{}' does not take a value",
-                                                   flag.name))};
+            return {
+                kind: TokenStepKind.Error,
+                text: parse_error_text(
+                    this.cmd,
+                    this.command_name,
+                    stringf("flag '--{}' does not take a value", flag.name)
+                )
+            };
         }
         if let option_index = find_option_long_index(this.cmd, name) {
             if let message = this.add_option(&this.cmd.options[option_index], value) {
-                return {kind: TokenStepKind.Error,
-                        text: parse_error_text(this.cmd, this.command_name, message)};
+                return {
+                    kind: TokenStepKind.Error,
+                    text: parse_error_text(this.cmd, this.command_name, message)
+                };
             }
             return {kind: TokenStepKind.Next, next_index: this.index + 1};
         }
-        return {kind: TokenStepKind.Error,
-                text: parse_error_text(this.cmd, this.command_name,
-                                       stringf("unknown option '--{}'", name))};
+        return {
+            kind: TokenStepKind.Error,
+            text: parse_error_text(
+                this.cmd,
+                this.command_name,
+                stringf("unknown option '--{}'", name)
+            )
+        };
     }
 
     mutex func parse_short_cluster(cluster: string) TokenStep {
@@ -576,8 +606,10 @@ struct CommandParser {
 
             if let flag_index = find_flag_short_index(this.cmd, short_name) {
                 if let message = this.add_flag(&this.cmd.flags[flag_index]) {
-                    return {kind: TokenStepKind.Error,
-                            text: parse_error_text(this.cmd, this.command_name, message)};
+                    return {
+                        kind: TokenStepKind.Error,
+                        text: parse_error_text(this.cmd, this.command_name, message)
+                    };
                 }
                 short_index += 1;
                 continue;
@@ -587,28 +619,43 @@ struct CommandParser {
                 let option = &this.cmd.options[option_index];
                 if short_index + 1 < cluster.byte_length() {
                     if let message = this.add_option(
-                        option, cluster.byte_slice(short_index + 1, cluster.byte_length())) {
-                        return {kind: TokenStepKind.Error,
-                                text: parse_error_text(this.cmd, this.command_name, message)};
+                        option,
+                        cluster.byte_slice(short_index + 1, cluster.byte_length())
+                    ) {
+                        return {
+                            kind: TokenStepKind.Error,
+                            text: parse_error_text(this.cmd, this.command_name, message)
+                        };
                     }
                     return {kind: TokenStepKind.Next, next_index: this.index + 1};
                 }
                 if this.index + 1 >= this.argv_values.length {
-                    return {kind: TokenStepKind.Error,
-                            text: parse_error_text(this.cmd, this.command_name,
-                                                   stringf("missing value for option '-{}'",
-                                                           option.short))};
+                    return {
+                        kind: TokenStepKind.Error,
+                        text: parse_error_text(
+                            this.cmd,
+                            this.command_name,
+                            stringf("missing value for option '-{}'", option.short)
+                        )
+                    };
                 }
                 if let message = this.add_option(option, this.argv_values[this.index + 1]) {
-                    return {kind: TokenStepKind.Error,
-                            text: parse_error_text(this.cmd, this.command_name, message)};
+                    return {
+                        kind: TokenStepKind.Error,
+                        text: parse_error_text(this.cmd, this.command_name, message)
+                    };
                 }
                 return {kind: TokenStepKind.Next, next_index: this.index + 2};
             }
 
-            return {kind: TokenStepKind.Error,
-                    text: parse_error_text(this.cmd, this.command_name,
-                                           stringf("unknown option '-{}'", short_name))};
+            return {
+                kind: TokenStepKind.Error,
+                text: parse_error_text(
+                    this.cmd,
+                    this.command_name,
+                    stringf("unknown option '-{}'", short_name)
+                )
+            };
         }
 
         return {kind: TokenStepKind.Next, next_index: this.index + 1};
@@ -620,13 +667,12 @@ struct CommandParser {
                 let subcommand = &this.cmd.commands[child_index];
                 let child_step = this.parse_subcommand(subcommand);
                 switch child_step {
-                    ParseStep.Ok => {
-                    },
+                    ParseStep.Ok => {},
                     ParseStep.Help(text) => {
-                        return {kind: TokenStepKind.Help, text: text};
+                        return {kind: TokenStepKind.Help, :text};
                     },
                     ParseStep.Error(text) => {
-                        return {kind: TokenStepKind.Error, text: text};
+                        return {kind: TokenStepKind.Error, :text};
                     }
                 }
                 return {kind: TokenStepKind.Done};
@@ -640,15 +686,24 @@ struct CommandParser {
         }
 
         if this.cmd.commands.length > 0 && this.at_first_positional() {
-            return {kind: TokenStepKind.Error,
-                    text: stringf("unknown command '{}'\n\n{}",
-                                  value,
-                                  help_for(this.cmd, this.command_name))};
+            return {
+                kind: TokenStepKind.Error,
+                text: stringf(
+                    "unknown command '{}'\n\n{}",
+                    value,
+                    help_for(this.cmd, this.command_name)
+                )
+            };
         }
 
-        return {kind: TokenStepKind.Error,
-                text: parse_error_text(this.cmd, this.command_name,
-                                       stringf("unexpected argument '{}'", value))};
+        return {
+            kind: TokenStepKind.Error,
+            text: parse_error_text(
+                this.cmd,
+                this.command_name,
+                stringf("unexpected argument '{}'", value)
+            )
+        };
     }
 
     mutex func parse() ParseStep {
@@ -695,9 +750,11 @@ struct CommandParser {
             let positional = &this.cmd.positionals[this.positional_index];
             if positional.required {
                 return ParseStep.Error{
-                    parse_error_text(this.cmd,
-                                     this.command_name,
-                                     stringf("missing positional '{}'", positional.name))
+                    parse_error_text(
+                        this.cmd,
+                        this.command_name,
+                        stringf("missing positional '{}'", positional.name)
+                    )
                 };
             }
         }

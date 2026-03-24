@@ -8,35 +8,49 @@ func main() {
         printf("exe contains test name = {}\n", argv[0].contains("48_stdlib_args"));
     }
 
-    var cli = args.Command{
-        name: "chi",
-        summary: "Chi command line"
-    };
-    cli.flag({name: "verbose", short: "v", help: "Verbose output"});
+    var cli = args.Command{name: "chi", summary: "Chi command line"};
+    cli.flag({
+        name: "verbose",
+        short: "v",
+        help: "Verbose output"
+    });
 
-    var build = args.Command{
-        name: "build",
-        summary: "Build a package"
-    };
-    build.option({name: "output", short: "o", value_name: "FILE", help: "Output path"});
-    build.option({name: "define", short: "D", value_name: "NAME", help: "Define a symbol",
-                  multiple: true});
-    build.flag({name: "release", short: "r", help: "Release mode"});
+    var build = args.Command{name: "build", summary: "Build a package"};
+    build.option(
+        {
+            name: "output",
+            short: "o",
+            value_name: "FILE",
+            help: "Output path"
+        }
+    );
+    build.option(
+        {
+            name: "define",
+            short: "D",
+            value_name: "NAME",
+            help: "Define a symbol",
+            multiple: true
+        }
+    );
+    build.flag({
+        name: "release",
+        short: "r",
+        help: "Release mode"
+    });
     build.positional({name: "input", help: "Input file"});
     cli.command(move build);
 
-    var echo = args.Command{
-        name: "echo",
-        summary: "Echo args"
-    };
+    var echo = args.Command{name: "echo", summary: "Echo args"};
     echo.positional({name: "message", help: "Message"});
     cli.command(move echo);
 
-    var show = args.Command{
-        name: "show",
-        summary: "Show target"
-    };
-    show.positional({name: "target", help: "Target", required: false});
+    var show = args.Command{name: "show", summary: "Show target"};
+    show.positional({
+        name: "target",
+        help: "Target",
+        required: false
+    });
     cli.command(move show);
 
     println("=== parse() smoke ===");
