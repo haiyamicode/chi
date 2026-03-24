@@ -1403,35 +1403,35 @@ func test_try_await() {
     try_await_result_ok().then(
         func (result) Unit {
             printf("try await ok: {}\n", result.value()!);
-            return {};
+            return ();
         }
     );
 
     try_await_result_err().then(
         func (result) Unit {
             printf("try await err: {}\n", result.error()!.message());
-            return {};
+            return ();
         }
     );
 
     try_await_catch_ok().then(
         func (value: int) Unit {
             printf("try await catch ok: {}\n", value);
-            return {};
+            return ();
         }
     );
 
     try_await_catch_err().then(
         func (value: int) Unit {
             printf("try await catch err: {}\n", value);
-            return {};
+            return ();
         }
     );
 
     try_await_typed_result_err().then(
         func (result) Unit {
             printf("try await typed err: {}\n", result.error()!.message());
-            return {};
+            return ();
         }
     );
 
@@ -1445,7 +1445,7 @@ func test_try_await() {
     try_await_typed_catch_err().then(
         func (value: int) Unit {
             printf("try await typed catch err: {}\n", value);
-            return {};
+            return ();
         }
     );
 
@@ -1459,49 +1459,49 @@ func test_try_await() {
     try_await_nested_result_ok().then(
         func (result) Unit {
             printf("try await nested ok: {}\n", result.value()!);
-            return {};
+            return ();
         }
     );
 
     try_await_nested_result_err().then(
         func (result) Unit {
             printf("try await nested err: {}\n", result.error()!.message());
-            return {};
+            return ();
         }
     );
 
     try_await_nested_catch_err().then(
         func (value: int) Unit {
             printf("try await nested catch err: {}\n", value);
-            return {};
+            return ();
         }
     );
 
     try_await_branchy(true, true).then(
         func (value: int) Unit {
             printf("try branch tt={}\n", value);
-            return {};
+            return ();
         }
     );
 
     try_await_branchy(true, false).then(
         func (value: int) Unit {
             printf("try branch tf={}\n", value);
-            return {};
+            return ();
         }
     );
 
     try_await_branchy(false, true).then(
         func (value: int) Unit {
             printf("try branch ft={}\n", value);
-            return {};
+            return ();
         }
     );
 
     try_await_branchy(false, false).then(
         func (value: int) Unit {
             printf("try branch ff={}\n", value);
-            return {};
+            return ();
         }
     );
 
@@ -1510,14 +1510,14 @@ func test_try_await() {
     trace_async_lifecycle_probe().then(
         func (value: int) Unit {
             printf("trace lifecycle={}\n", value);
-            return {};
+            return ();
         }
     );
 
     trace_async_value_loop().then(
         func (value: int) Unit {
             printf("trace loop={}\n", value);
-            return {};
+            return ();
         }
     );
 }
@@ -1794,7 +1794,7 @@ async func run_async_tail() Promise {
         10,
         func [timeout_done] () {
             println("timeout fired");
-            timeout_done.resolve({});
+            timeout_done.resolve(());
         }
     );
     println("scheduled");
@@ -1811,7 +1811,7 @@ async func run_async_tail() Promise {
     time.sleep(10).then(
         func [counter, sleep_capture_done] (u) {
             printf("captured: {}\n", counter);
-            sleep_capture_done.resolve({});
+            sleep_capture_done.resolve(());
         }
     );
     counter = 999;

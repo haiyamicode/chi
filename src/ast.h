@@ -525,6 +525,13 @@ struct DestructureDecl {
     Node *effective_expr() const { return resolved_expr ? resolved_expr : expr; }
 };
 
+enum class ResolvedTypeSourceKind {
+    None,
+    Explicit,
+    Contextual,
+    Inferred,
+};
+
 // composite literal
 struct ConstructExpr {
     bool is_new = false;
@@ -535,6 +542,8 @@ struct ConstructExpr {
     Node *spread_expr = nullptr; // ...expr spread source
     bool use_list_init = false;
     bool use_alloc_init = false;
+    ResolvedTypeSourceKind resolved_type_source = ResolvedTypeSourceKind::None;
+    bool resolved_type_is_ambiguous = false;
 };
 
 struct TupleExpr {
@@ -555,6 +564,8 @@ struct DotExpr {
     int64_t resolved_value = 0;
     Node *resolved_decl = nullptr;
     bool should_resolve_variant = false;
+    bool resolved_can_shorthand = false;
+    bool resolved_shorthand_is_ambiguous = false;
     bool is_optional_chain = false;
     DotKind resolved_dot_kind = DotKind::Field;
     int resolved_index = -1;
@@ -593,10 +604,14 @@ struct RangeExpr {
 };
 
 MAKE_ENUM(IdentifierKind, Value, TypeName, This, ThisType)
+MAKE_ENUM(ResolvedDeclSourceKind, None, Lexical, Contextual)
 
 struct Identifier {
     IdentifierKind kind = IdentifierKind::Value;
     Node *decl = nullptr;
+    bool decl_is_provisional = false;
+    ResolvedDeclSourceKind resolved_decl_source = ResolvedDeclSourceKind::None;
+    bool resolved_decl_is_ambiguous = false;
 };
 
 struct VarIdentifier {

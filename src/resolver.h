@@ -617,6 +617,13 @@ class Resolver {
     void record_specialized_fn_env(ast::Node *node, map<ChiType *, ChiType *> *base_subs = nullptr);
     void ensure_enum_subtype_final_type(ChiType *generic, ChiType *subtype);
     ChiEnumVariant *find_expected_enum_variant(const string &name, ChiType *expected_type);
+    ChiType *resolve_enum_member_type(ChiType *enum_owner_type, const string &field_name,
+                                      ChiEnumVariant **member_out = nullptr);
+    ChiType *resolve_expected_enum_variant_type(ChiEnumVariant *variant, ChiType *expected_type);
+    bool is_contextual_resolution_ambiguous(const string &name, ast::Node *resolved_decl,
+                                            ResolveScope &scope);
+    void resolve_contextual_identifier(ast::Node *node, ResolveScope &scope, ast::Identifier &data,
+                                       ChiType **type_override);
     ChiStructMember *get_struct_member(ChiType *struct_type, const string &field_name);
     array<ChiStructMember *> get_enum_payload_fields(ChiType *type);
     ChiStructMember *get_struct_member_access(ast::Node *node, ChiType *struct_type,

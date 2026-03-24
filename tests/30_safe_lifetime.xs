@@ -261,7 +261,7 @@ enum BaseRefValue {
 }
 
 func make_variant_ref(x: &int) VariantRefValue {
-    return VariantRefValue.Ref{x};
+    return Ref{x};
 }
 
 func make_generic_variant_ref(x: &int) GenericVariantRef<&int> {
@@ -269,7 +269,7 @@ func make_generic_variant_ref(x: &int) GenericVariantRef<&int> {
 }
 
 func make_base_ref_value(x: &int) BaseRefValue {
-    return BaseRefValue.A{value: x};
+    return A{value: x};
 }
 
 func test_enum_ref_payloads() {
@@ -279,10 +279,10 @@ func test_enum_ref_payloads() {
     var generic = make_generic_variant_ref(&value);
     var base = make_base_ref_value(&value);
     switch variant {
-        VariantRefValue.Ref(r) => printf("variant = {}\n", *r)
+        Ref(r) => printf("variant = {}\n", *r)
     }
     switch generic {
-        GenericVariantRef<&int>.Item(r) => printf("generic = {}\n", *r)
+        Item(r) => printf("generic = {}\n", *r)
     }
     printf("base = {}\n", *base.value);
 }

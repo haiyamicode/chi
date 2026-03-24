@@ -6,7 +6,6 @@
  */
 
 #include "ast_printer.h"
-
 using namespace cx;
 using namespace cx::ast;
 
@@ -543,8 +542,15 @@ void AstPrinter::print_node(Node *node) {
                     print_node(vtype);
                 }
                 emit(" = ");
-                if (etype)
-                    print_node(etype);
+                bool shorthand_variant =
+                    !cdata.is_new && should_semantically_shorthand_construct_type(expr);
+                if (etype) {
+                    if (shorthand_variant && etype->type == NodeType::DotExpr) {
+                        emit("{}", etype->data.dot_expr.field->str);
+                    } else {
+                        print_node(etype);
+                    }
+                }
                 // Use wrapping for long construct expressions
                 if (cdata.items.len && !cdata.field_inits.len && !cdata.spread_expr) {
                     emit_wrapped_list(&cdata.items, "{", "}", ", ");
@@ -747,8 +753,13 @@ void AstPrinter::print_node(Node *node) {
         if (data.is_new) {
             emit("new ");
         }
+        bool shorthand_variant = !suppress && should_semantically_shorthand_construct_type(node);
         if (data.type && !suppress) {
-            print_node(data.type);
+            if (shorthand_variant && data.type->type == NodeType::DotExpr) {
+                emit("{}", data.type->data.dot_expr.field->str);
+            } else {
+                print_node(data.type);
+            }
         }
         // For construct expressions, always try wrapping
         if (data.items.len || data.field_inits.len || data.spread_expr) {
@@ -1372,7 +1383,11 @@ void AstPrinter::print_node(Node *node) {
         } else {
             for (int i = 0; i < data.clauses.len; i++) {
                 auto clause = data.clauses.at(i);
-                print_node(clause);
+                if (should_semantically_collapse_case_clause(clause)) {
+                    emit("{}", clause->data.dot_expr.field->str);
+                } else {
+                    print_node(clause);
+                }
                 if (i == 0 && data.destructure_pattern) {
                     print_destructure_pattern(data.destructure_pattern);
                 }
@@ -1382,7 +1397,20 @@ void AstPrinter::print_node(Node *node) {
             }
         }
 
-        print_node(data.body);
+        auto *body = data.body;
+        if (body && body->type == NodeType::Block && body->data.block.is_arrow &&
+            !body->data.block.has_braces) {
+            emit(" => ");
+            if (body->data.block.statements.len == 1 && !body->data.block.return_expr) {
+                print_node(body->data.block.statements[0]);
+            } else if (body->data.block.statements.len == 0 && body->data.block.return_expr) {
+                print_node(body->data.block.return_expr);
+            } else {
+                print_node(body);
+            }
+        } else {
+            print_node(data.body);
+        }
         break;
     }
     case NodeType::EnumDecl: {
@@ -1602,7 +1630,7 @@ string AstPrinter::format_node_to_string(Node *node) {
     if (!node)
         return "";
     // Create a temporary printer to format this node to a string
-    AstPrinter temp_printer(node, nullptr);
+    AstPrinter temp_printer(node, nullptr, m_use_resolved_info);
     return temp_printer.format_to_string();
 }
 
@@ -1836,6 +1864,31 @@ bool AstPrinter::types_match(Node *a, Node *b) {
     default:
         return false;
     }
+}
+
+bool AstPrinter::should_semantically_shorthand_construct_type(Node *node) {
+    if (!node || !m_use_resolved_info || node->type != NodeType::ConstructExpr) {
+        return false;
+    }
+    auto &data = node->data.construct_expr;
+    if (data.resolved_type_source != ResolvedTypeSourceKind::Contextual || !data.type ||
+        data.type->type != NodeType::DotExpr || data.resolved_type_is_ambiguous) {
+        return false;
+    }
+    auto *resolved_decl = data.type->data.dot_expr.resolved_decl;
+    return resolved_decl && resolved_decl->type == NodeType::EnumVariant &&
+           resolved_decl->data.enum_variant.is_tuple_form && !data.field_inits.len &&
+           !data.spread_expr;
+}
+
+bool AstPrinter::should_semantically_collapse_case_clause(Node *node) {
+    if (!node || !m_use_resolved_info || node->type != NodeType::DotExpr) {
+        return false;
+    }
+    auto &data = node->data.dot_expr;
+    auto *resolved_decl = data.resolved_decl;
+    return data.resolved_can_shorthand && !data.resolved_shorthand_is_ambiguous &&
+           resolved_decl && resolved_decl->type == NodeType::EnumVariant;
 }
 
 void AstPrinter::flush_trailing_comment(Node *node) {

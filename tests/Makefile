@@ -59,7 +59,8 @@ TESTS_LIST = 00_fib.test \
 		55_managed_map_escape.test \
 		56_managed_lowlevel_wrapper_array_escape.test \
 		57_managed_lowlevel_custom_ctor_array_escape.test \
-		58_managed_lowlevel_custom_ctor_map_escape.test
+		58_managed_lowlevel_custom_ctor_map_escape.test \
+		59_contextual_variant_shorthand.test
 TESTS ?= $(TESTS_LIST)
 CHIC = $(abspath $(BUILD_DIR)/src/bin/chic)
 CHI = $(abspath $(BUILD_DIR)/src/bin/chi)

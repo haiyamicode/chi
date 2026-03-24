@@ -193,6 +193,19 @@ ast::Module *Analyzer::format_source(ast::Package *package, io::Buffer *src,
     return module;
 }
 
+ast::Module *Analyzer::resolve_module(ast::Module *module, bool collect_only) {
+    auto resolver = m_ctx.create_resolver();
+    auto saved_error_handler = m_ctx.resolve_ctx.error_handler;
+    optional<ErrorHandler> error_handler = std::nullopt;
+    if (collect_only && module) {
+        error_handler = [module](Error error) { module->errors.add(error); };
+    }
+    m_ctx.resolve_ctx.error_handler = error_handler;
+    resolver.resolve(module);
+    m_ctx.resolve_ctx.error_handler = saved_error_handler;
+    return module;
+}
+
 void Analyzer::build_runtime() {
     auto resolver = m_ctx.create_resolver();
     resolver.context_init_primitives();

@@ -105,11 +105,11 @@ export enum OpenMode {
     struct {
         func flags() int32 {
             return switch this {
-                OpenMode.Read => O_RDONLY,
-                OpenMode.Write => O_WRONLY | O_CREAT | O_TRUNC,
-                OpenMode.Append => O_WRONLY | O_CREAT | O_APPEND,
-                OpenMode.ReadWrite => O_RDWR,
-                OpenMode.WriteRead => O_RDWR | O_CREAT | O_TRUNC,
+                Read => O_RDONLY,
+                Write => O_WRONLY | O_CREAT | O_TRUNC,
+                Append => O_WRONLY | O_CREAT | O_APPEND,
+                ReadWrite => O_RDWR,
+                WriteRead => O_RDWR | O_CREAT | O_TRUNC,
                 else => O_RDONLY
             };
         }

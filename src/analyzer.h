@@ -40,6 +40,7 @@ class Analyzer {
     ast::Module *process_file(ast::Package *package, const string &file_name);
     ast::Module *format_file(ast::Package *package, const string &file_name);
     ast::Module *format_source(ast::Package *package, io::Buffer *src, const string &file_name);
+    ast::Module *resolve_module(ast::Module *module, bool collect_only = false);
 
     void build_runtime();
     ast::Module *build_runtime_from_source(io::Buffer *src);

@@ -40,14 +40,14 @@ export enum ValueKind {
         impl ops.Display {
             func display() string {
                 return switch this {
-                    ValueKind.Null => "null",
-                    ValueKind.Bool => "bool",
-                    ValueKind.Int64 => "int64",
-                    ValueKind.Uint64 => "uint64",
-                    ValueKind.Double => "double",
-                    ValueKind.String => "string",
-                    ValueKind.Array => "array",
-                    ValueKind.Object => "object",
+                    Null => "null",
+                    Bool => "bool",
+                    Int64 => "int64",
+                    Uint64 => "uint64",
+                    Double => "double",
+                    String => "string",
+                    Array => "array",
+                    Object => "object",
                     else => "unknown"
                 };
             }
@@ -365,9 +365,9 @@ unsafe func json_assign_optional(path: string, value: Value, ty: reflect.Type, d
 
 unsafe func json_assign(path: string, value: Value, ty: reflect.Type, dest: *void) {
     switch ty.kind() {
-        reflect.Kind.Array => json_assign_array(path, value, ty, dest),
-        reflect.Kind.Optional => json_assign_optional(path, value, ty, dest),
-        reflect.Kind.Struct => {
+        Array => json_assign_array(path, value, ty, dest),
+        Optional => json_assign_optional(path, value, ty, dest),
+        Struct => {
             if !value.is_object() {
                 json_type_error(path, ty, value);
             }
@@ -385,20 +385,20 @@ unsafe func json_assign(path: string, value: Value, ty: reflect.Type, dest: *voi
                 json_assign(field_path, field_value, field.type(), field.ptr_at(dest));
             }
         },
-        reflect.Kind.Bool => {
+        Bool => {
             if !value.is_bool() {
                 json_type_error(path, ty, value);
             }
             json_write_value(dest, value.to_bool());
         },
-        reflect.Kind.String => {
+        String => {
             if !value.is_string() {
                 json_type_error(path, ty, value);
             }
             *(dest as *string) = value.to_string();
         },
-        reflect.Kind.Int => json_assign_int(path, value, ty, dest),
-        reflect.Kind.Byte => {
+        Int => json_assign_int(path, value, ty, dest),
+        Byte => {
             if value.kind != ValueKind.Int64 && value.kind != ValueKind.Uint64 {
                 json_type_error(path, ty, value);
             }
@@ -410,7 +410,7 @@ unsafe func json_assign(path: string, value: Value, ty: reflect.Type, dest: *voi
             }
             json_write_value(dest, raw as byte);
         },
-        reflect.Kind.Rune => {
+        Rune => {
             if value.kind != ValueKind.Int64 && value.kind != ValueKind.Uint64 {
                 json_type_error(path, ty, value);
             }
@@ -422,7 +422,7 @@ unsafe func json_assign(path: string, value: Value, ty: reflect.Type, dest: *voi
             }
             json_write_value(dest, raw as rune);
         },
-        reflect.Kind.Float => json_assign_float(path, value, ty, dest),
+        Float => json_assign_float(path, value, ty, dest),
         else => panic(stringf("std/json.parse_into: unsupported type '{}'", ty.name()))
     }
 }

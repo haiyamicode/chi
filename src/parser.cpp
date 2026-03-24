@@ -267,6 +267,7 @@ Node *Parser::create_node(NodeType type, Token *token) {
 Node *Parser::create_identifier_node(Token *iden, Node *decl) {
     auto node = create_node(NodeType::Identifier, iden);
     node->data.identifier.decl = decl;
+    node->data.identifier.decl_is_provisional = decl != nullptr;
     if (decl) {
         node->data.identifier.kind = get_identifier_kind(decl);
     }

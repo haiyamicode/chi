@@ -10,6 +10,6 @@ export struct Holder {
     inner: Inner;
 
     mutex func new() {
-        this.inner = Inner{};
+        this.inner = {};
     }
 }

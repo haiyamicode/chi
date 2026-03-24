@@ -15,7 +15,7 @@ using namespace cx;
 
 MAKE_ENUM(FlagType, String, Bool);
 MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Release, Strip, Output, Ast, Format,
-          WorkingDir, Analyzer, Safe, Verbose, Help);
+          FormatterNoSemantic, WorkingDir, Analyzer, Safe, Verbose, Help);
 MAKE_ENUM(InputMode, File, Package)
 MAKE_ENUM(ProcessingMode, Build, Analyzer, Format)
 
@@ -40,6 +40,7 @@ void init_flags() {
     flags.add({FlagId::Output, "o", "output", FlagType::String});
     flags.add({FlagId::Ast, "a", "ast", FlagType::Bool});
     flags.add({FlagId::Format, "f", "format", FlagType::Bool});
+    flags.add({FlagId::FormatterNoSemantic, "", "formatter-no-semantic", FlagType::Bool});
     flags.add({FlagId::WorkingDir, "w", "working-dir", FlagType::String});
     flags.add({FlagId::Analyzer, "analyzer", "analyzer", FlagType::Bool});
     flags.add({FlagId::Safe, "s", "safe", FlagType::Bool});
@@ -66,6 +67,7 @@ int main(int argc, char *argv[]) {
     bld.build_mode = BuildMode::Executable;
     bld.working_dir = "build";
     ProcessingMode processing_mode = ProcessingMode::Build;
+    bool formatter_use_semantic = true;
     Flag *flag = nullptr;
 
     auto print_help = [&]() {
@@ -79,6 +81,7 @@ int main(int argc, char *argv[]) {
         print("  -o --output: output file name\n");
         print("  -a --ast: build ast\n");
         print("  -f --format: format source code\n");
+        print("  --formatter-no-semantic: disable semantic formatter stage\n");
         print("  -w --working-dir <dir>: working directory\n");
         print("  --analyzer: analyzer mode\n");
         print("  -s --safe: safe mode (enable managed memory for .xs files)\n");
@@ -115,6 +118,9 @@ int main(int argc, char *argv[]) {
             break;
         case FlagId::Format:
             processing_mode = ProcessingMode::Format;
+            break;
+        case FlagId::FormatterNoSemantic:
+            formatter_use_semantic = false;
             break;
         case FlagId::WorkingDir:
             bld.working_dir = flag->value;
@@ -200,6 +206,7 @@ int main(int argc, char *argv[]) {
 
     if (processing_mode == ProcessingMode::Format) {
         Analyzer analyzer;
+        analyzer.build_runtime();
         auto pkg = analyzer.add_package(".");
         auto module = analyzer.format_file(pkg, input_file);
 
@@ -211,8 +218,19 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
+        bool use_resolved_info = false;
+        if (formatter_use_semantic && module && module->root) {
+            auto syntax_error_count = module->errors.len;
+            analyzer.resolve_module(module, true);
+            if (module->errors.len == syntax_error_count) {
+                use_resolved_info = true;
+            } else {
+                module->errors.resize(syntax_error_count);
+            }
+        }
+
         if (module && module->root) {
-            cx::AstPrinter printer(module->root, &module->comments);
+            cx::AstPrinter printer(module->root, &module->comments, use_resolved_info);
             printer.print_ast();
         }
         return 0;

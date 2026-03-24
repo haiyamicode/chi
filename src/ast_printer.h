@@ -14,6 +14,7 @@ using namespace cx::ast;
 namespace cx {
 class AstPrinter {
     Node *m_root = nullptr;
+    bool m_use_resolved_info = false;
     int m_indent = 0;
     bool m_suppress_func_keyword = false;
     bool m_suppress_construct_type = false;
@@ -44,9 +45,10 @@ class AstPrinter {
     }
 
   public:
-    AstPrinter(Node *root, array<Comment> *comments = nullptr) {
+    AstPrinter(Node *root, array<Comment> *comments = nullptr, bool use_resolved_info = false) {
         m_root = root;
         m_comments = comments;
+        m_use_resolved_info = use_resolved_info;
     }
 
     void print_ast();
@@ -96,6 +98,9 @@ class AstPrinter {
 
     // Emit construct body (spread + items + field_inits) with wrapping support.
     void emit_construct_body(ConstructExpr &data);
+
+    bool should_semantically_shorthand_construct_type(Node *node);
+    bool should_semantically_collapse_case_clause(Node *node);
 };
 
 void print_ast(Node *root);

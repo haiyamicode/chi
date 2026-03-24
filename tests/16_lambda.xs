@@ -449,7 +449,7 @@ func test_lambda_value_param_lifecycle() {
     printf("initial ref={}\n", h.payload!.ref_count());
     h.callback = func (item: Shared<SharedTrackedBox>) Unit {
         printf("callback ref={} value={}\n", item.ref_count(), item.as_ref().value);
-        return {};
+        return ();
     };
     h.fire();
     printf("final ref={}\n", h.payload!.ref_count());

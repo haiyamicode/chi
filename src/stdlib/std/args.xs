@@ -205,7 +205,7 @@ export struct Command {
                 return Error{text};
             }
         }
-        return Parse.Ok{move matches};
+        return Ok{move matches};
     }
 
     func usage() string {
@@ -507,12 +507,12 @@ struct CommandParser {
         };
         let child_step = child_parser.parse();
         switch child_step {
-            ParseStep.Ok => {},
-            ParseStep.Help(text) => {
-                return ParseStep.Help{text};
+            Ok => {},
+            Help(text) => {
+                return Help{text};
             },
-            ParseStep.Error(text) => {
-                return ParseStep.Error{text};
+            Error(text) => {
+                return Error{text};
             }
         }
         this.matches.child_matches.push(move child_matches);
@@ -667,11 +667,11 @@ struct CommandParser {
                 let subcommand = &this.cmd.commands[child_index];
                 let child_step = this.parse_subcommand(subcommand);
                 switch child_step {
-                    ParseStep.Ok => {},
-                    ParseStep.Help(text) => {
+                    Ok => {},
+                    Help(text) => {
                         return {kind: TokenStepKind.Help, :text};
                     },
-                    ParseStep.Error(text) => {
+                    Error(text) => {
                         return {kind: TokenStepKind.Error, :text};
                     }
                 }
@@ -711,37 +711,37 @@ struct CommandParser {
             let token = scan_arg(this.argv_values[this.index], this.state);
             var step = TokenStep{};
             switch token.kind {
-                ArgTokenKind.StopOptions => {
+                StopOptions => {
                     this.state = ScanState.PositionalOnly;
                     this.index += 1;
                     continue;
                 },
-                ArgTokenKind.LongName => {
+                LongName => {
                     step = this.parse_long_name(token.first);
                 },
-                ArgTokenKind.LongNameValue => {
+                LongNameValue => {
                     step = this.parse_long_name_value(token.first, token.second);
                 },
-                ArgTokenKind.ShortCluster => {
+                ShortCluster => {
                     step = this.parse_short_cluster(token.first);
                 },
-                ArgTokenKind.Value => {
+                Value => {
                     step = this.parse_value_token(token.first);
                 }
             }
 
             switch step.kind {
-                TokenStepKind.Next => {
+                Next => {
                     this.index = step.next_index;
                 },
-                TokenStepKind.Done => {
+                Done => {
                     return ParseStep.Ok;
                 },
-                TokenStepKind.Help => {
-                    return ParseStep.Help{step.text};
+                Help => {
+                    return Help{step.text};
                 },
-                TokenStepKind.Error => {
-                    return ParseStep.Error{step.text};
+                Error => {
+                    return Error{step.text};
                 }
             }
         }
@@ -749,7 +749,7 @@ struct CommandParser {
         if this.positional_index < this.cmd.positionals.length {
             let positional = &this.cmd.positionals[this.positional_index];
             if positional.required {
-                return ParseStep.Error{
+                return Error{
                     parse_error_text(
                         this.cmd,
                         this.command_name,

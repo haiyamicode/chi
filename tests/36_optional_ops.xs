@@ -251,7 +251,7 @@ func test_if_let_enum_pattern() {
         printf("enum second struct=({}, {})\n", x, y);
     }
 
-    var holder = EnumHolder{value: MaybeValue.Coord{x: 7, y: 8}};
+    var holder = EnumHolder{value: Coord{x: 7, y: 8}};
     if let Coord{x, y} = holder.value {
         printf("enum field=({}, {})\n", x, y);
     }

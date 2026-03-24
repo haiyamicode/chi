@@ -96,7 +96,7 @@ enum Container<T> {
 
         func is_single() bool {
             return switch this {
-                Container.Single => true,
+                Single => true,
                 else => false
             };
         }
@@ -152,7 +152,7 @@ enum TracedResult<T, E> {
 }
 
 func make_empty_container<T>(label: string) Container<T> {
-    return Container<T>.Empty{:label};
+    return Empty{:label};
 }
 
 func accept_empty_container(value: Container<int>) {
@@ -246,20 +246,20 @@ func test_tuple_enum() {
     printf("add.0={}\n", add.0);
     printf("add.1={}\n", add.1);
     var ok_desc = switch ok {
-        TupleResult<int, string>.Ok => stringf("ok {}", ok.0),
-        TupleResult<int, string>.Err => stringf("err {}", ok.0)
+        Ok => stringf("ok {}", ok.0),
+        Err => stringf("err {}", ok.0)
     };
     println(ok_desc);
 
     var err_desc = switch err {
-        TupleResult<int, string>.Ok => stringf("ok {}", err.0),
-        TupleResult<int, string>.Err => stringf("err {}", err.0)
+        Ok => stringf("ok {}", err.0),
+        Err => stringf("err {}", err.0)
     };
     println(err_desc);
 
     var sum = switch add {
-        IntExpr.Value => add.0,
-        IntExpr.Add => add.0 + add.1
+        Value => add.0,
+        Add => add.0 + add.1
     };
     printf("sum={}\n", sum);
 }
@@ -451,9 +451,9 @@ enum Color {
         impl ops.Display {
             func display() string {
                 return switch this {
-                    Color.Red => "red",
-                    Color.Green => "green",
-                    Color.Blue => "blue"
+                    Red => "red",
+                    Green => "green",
+                    Blue => "blue"
                 };
             }
         }
@@ -474,8 +474,8 @@ enum Shape {
         impl ops.Display {
             func display() string {
                 return switch this {
-                    Shape.Circle => stringf("circle(r={})", this.radius),
-                    Shape.Rect => stringf("rect({}x{})", this.w, this.h)
+                    Circle => stringf("circle(r={})", this.radius),
+                    Rect => stringf("rect({}x{})", this.w, this.h)
                 };
             }
         }
@@ -591,21 +591,21 @@ func test_switch_statement() {
 
     // Statement switch: no semicolon, no else, non-exhaustive
     switch c {
-        Color.Green => println("green stmt")
+        Green => println("green stmt")
     }
 
     // Statement switch: exhaustive, no else
     switch c {
-        Color.Red => println("red"),
-        Color.Green => println("green"),
-        Color.Blue => println("blue")
+        Red => println("red"),
+        Green => println("green"),
+        Blue => println("blue")
     }
 
     // Expression switch: exhaustive, no else needed
     var name = switch c {
-        Color.Red => "red",
-        Color.Green => "green",
-        Color.Blue => "blue"
+        Red => "red",
+        Green => "green",
+        Blue => "blue"
     };
     printf("expr: {}\n", name);
 }

@@ -1293,12 +1293,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return scope.parent_type_symbol;
             }
         }
-        if (data.kind == ast::IdentifierKind::Value) {
-            auto variant = find_expected_enum_variant(node->name, scope.value_type);
-            if (variant && (!data.decl || data.decl->type == NodeType::EnumVariant)) {
-                data.decl = variant->node;
-                type_override = variant->resolved_type;
-            }
+        if (data.kind == ast::IdentifierKind::Value && (!data.decl || data.decl_is_provisional)) {
+            resolve_contextual_identifier(node, scope, data, &type_override);
         }
         if (!data.decl) {
             error(node, errors::UNDECLARED, node->name);
@@ -2504,7 +2500,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto underlying_type = expr_type->data.type_symbol.underlying_type;
             switch (underlying_type->kind) {
             case TypeKind::Enum: {
-                auto member = underlying_type->data.enum_.find_member(field_name);
+                ChiEnumVariant *member = nullptr;
+                auto result_type = resolve_enum_member_type(underlying_type, field_name, &member);
                 if (!member) {
                     error(node, errors::MEMBER_NOT_FOUND, field_name,
                           format_type_display(underlying_type));
@@ -2513,19 +2510,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.resolved_decl = member->node;
                 data.field->node = member->node;
                 data.resolved_dot_kind = DotKind::EnumVariant;
-                return member->resolved_type;
+                return result_type;
             }
             case TypeKind::Subtype: {
-                auto &subtype_data = underlying_type->data.subtype;
-                if (subtype_data.generic && subtype_data.generic->kind == TypeKind::Enum) {
-                    auto concrete_enum = subtype_data.final_type;
-                    if (!concrete_enum && !underlying_type->is_placeholder) {
-                        concrete_enum = resolve_subtype(underlying_type);
-                    }
-
-                    auto member = concrete_enum && concrete_enum->kind == TypeKind::Enum
-                                      ? concrete_enum->data.enum_.find_member(field_name)
-                                      : subtype_data.generic->data.enum_.find_member(field_name);
+                if (underlying_type->data.subtype.generic &&
+                    underlying_type->data.subtype.generic->kind == TypeKind::Enum) {
+                    ChiEnumVariant *member = nullptr;
+                    auto result_type =
+                        resolve_enum_member_type(underlying_type, field_name, &member);
                     if (!member) {
                         error(node, errors::MEMBER_NOT_FOUND, field_name,
                               format_type_display(underlying_type));
@@ -2534,15 +2526,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     data.resolved_decl = member->node;
                     data.field->node = member->node;
                     data.resolved_dot_kind = DotKind::EnumVariant;
-                    auto result_type = concrete_enum && concrete_enum->kind == TypeKind::Enum
-                                           ? member->resolved_type
-                                           : type_placeholders_sub(member->resolved_type, &subtype_data);
-                    if (result_type && result_type->kind == TypeKind::EnumValue) {
-                        result_type->data.enum_value.enum_type = concrete_enum && concrete_enum->kind == TypeKind::Enum
-                                                                      ? concrete_enum
-                                                                      : underlying_type;
-                        result_type->is_placeholder = result_type->is_placeholder || underlying_type->is_placeholder;
-                    }
                     return result_type;
                 }
                 auto resolved = resolve_subtype(underlying_type);
@@ -2826,6 +2809,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.construct_expr;
         data.use_list_init = false;
         data.use_alloc_init = false;
+        data.resolved_type_source = ast::ResolvedTypeSourceKind::None;
         auto dest_type = scope.value_type; // Save before resolve calls modify scope
         if (scope.move_outlet && !data.is_new) {
             node->resolved_outlet = scope.move_outlet;
@@ -2840,7 +2824,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto &ident = data.type->data.identifier;
                     ident.decl = variant->node;
                     ident.kind = ast::IdentifierKind::Value;
-                    value_type = variant->resolved_type;
+                    ident.decl_is_provisional = false;
+                    value_type = resolve_expected_enum_variant_type(variant, scope.value_type);
                 } else {
                     value_type = resolve_value(data.type, scope);
                 }
@@ -2870,6 +2855,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             result_type =
                 data.is_new ? get_pointer_type(value_type, TypeKind::MoveRef) : value_type;
+            bool is_contextual = false;
+            data.resolved_type_is_ambiguous = false;
+            if (dest_type) {
+                if (is_same_type(result_type, dest_type)) {
+                    is_contextual = true;
+                } else if (data.type->type == NodeType::DotExpr) {
+                    auto *resolved_decl = data.type->data.dot_expr.resolved_decl;
+                    if (resolved_decl && resolved_decl->type == NodeType::EnumVariant) {
+                        auto *expected_variant =
+                            find_expected_enum_variant(data.type->data.dot_expr.field->str, dest_type);
+                        if (expected_variant ==
+                            resolved_decl->data.enum_variant.resolved_enum_variant) {
+                            is_contextual = true;
+                            data.resolved_type_is_ambiguous = is_contextual_resolution_ambiguous(
+                                data.type->data.dot_expr.field->str, resolved_decl, scope);
+                        }
+                    }
+                }
+            }
+            data.resolved_type_source = is_contextual ? ast::ResolvedTypeSourceKind::Contextual
+                                                      : ast::ResolvedTypeSourceKind::Explicit;
         } else {
             if (!scope.value_type ||
                 (scope.value_type->kind == TypeKind::FixedArray && data.is_array_literal)) {
@@ -2887,12 +2893,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     args.add(elem_type);
                     result_type = get_subtype(m_ctx->rt_array_type, &args);
                     value_type = result_type;
+                    data.resolved_type_source = ast::ResolvedTypeSourceKind::Inferred;
                 } else {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
                     return nullptr;
                 }
             } else {
                 result_type = scope.value_type;
+                data.resolved_type_source = ast::ResolvedTypeSourceKind::Contextual;
                 {
                     // Empty construct on unresolved Infer type — cannot determine type
                     if (data.items.len == 0 && result_type->kind == TypeKind::Infer &&
@@ -5271,9 +5279,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             auto &ident = clause->data.identifier;
                             ident.decl = variant->node;
                             ident.kind = ast::IdentifierKind::Value;
+                            ident.decl_is_provisional = true;
                         }
                     }
                     auto clause_type = resolve(clause, clause_scope);
+                    if (clause->type == NodeType::DotExpr) {
+                        auto &dot = clause->data.dot_expr;
+                        auto *resolved_decl = dot.resolved_decl;
+                        if (resolved_decl && resolved_decl->type == NodeType::EnumVariant) {
+                            auto expected_variant =
+                                find_expected_enum_variant(dot.field->str, expr_type);
+                            if (expected_variant ==
+                                resolved_decl->data.enum_variant.resolved_enum_variant) {
+                                dot.resolved_can_shorthand = true;
+                                dot.resolved_shorthand_is_ambiguous =
+                                    is_contextual_resolution_ambiguous(dot.field->str,
+                                                                       resolved_decl, clause_scope);
+                            }
+                        }
+                    }
                     resolve_constant_value(clause);
                     auto clause_comparator = resolve_comparator(clause_type, scope);
 
@@ -5313,6 +5337,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                                     ident->name = var->name;
                                     ident->data.identifier.decl = var;
                                     ident->data.identifier.kind = ast::IdentifierKind::Value;
+                                    ident->data.identifier.decl_is_provisional = false;
 
                                     pattern->data.destructure_decl.resolved_expr = ident;
 
@@ -8413,6 +8438,128 @@ ChiEnumVariant *Resolver::find_expected_enum_variant(const string &name, ChiType
         return nullptr;
     }
     return enum_type->data.enum_.find_member(name);
+}
+
+bool Resolver::is_contextual_resolution_ambiguous(const string &name, ast::Node *resolved_decl,
+                                                  ResolveScope &scope) {
+    if (!resolved_decl) {
+        return false;
+    }
+
+    if (auto builtin = get_builtin(name)) {
+        if (builtin != resolved_decl) {
+            return true;
+        }
+    }
+
+    for (auto current_scope = scope.block ? scope.block->scope : nullptr; current_scope;
+         current_scope = current_scope->parent) {
+        if (auto symbol = current_scope->find_one(name)) {
+            return symbol != resolved_decl;
+        }
+    }
+    return false;
+}
+
+void Resolver::resolve_contextual_identifier(ast::Node *node, ResolveScope &scope,
+                                             ast::Identifier &data, ChiType **type_override) {
+    ChiEnumVariant *variant = nullptr;
+    if (scope.value_type) {
+        auto expected_type = scope.value_type->eval();
+        switch (expected_type ? expected_type->kind : TypeKind::Unknown) {
+        case TypeKind::TypeSymbol:
+        case TypeKind::This:
+        case TypeKind::Enum:
+        case TypeKind::EnumValue:
+        case TypeKind::Subtype:
+            variant = find_expected_enum_variant(node->name, scope.value_type);
+            break;
+        default:
+            break;
+        }
+    }
+
+    if (variant) {
+        auto ambiguous = data.decl_is_provisional && data.decl && data.decl != variant->node;
+        data.decl = variant->node;
+        data.decl_is_provisional = false;
+        data.resolved_decl_source = ast::ResolvedDeclSourceKind::Contextual;
+        data.resolved_decl_is_ambiguous = ambiguous;
+        if (type_override) {
+            *type_override = resolve_expected_enum_variant_type(variant, scope.value_type);
+        }
+    } else if (data.decl_is_provisional) {
+        if (!data.decl) {
+            assert(false && "provisional identifier was not resolved");
+        }
+        data.decl_is_provisional = false;
+        data.resolved_decl_source = ast::ResolvedDeclSourceKind::Lexical;
+        data.resolved_decl_is_ambiguous = false;
+    }
+}
+
+ChiType *Resolver::resolve_enum_member_type(ChiType *enum_owner_type, const string &field_name,
+                                            ChiEnumVariant **member_out) {
+    if (member_out) {
+        *member_out = nullptr;
+    }
+    if (!enum_owner_type) {
+        return nullptr;
+    }
+
+    auto owner_type = enum_owner_type->eval();
+    if (!owner_type) {
+        return nullptr;
+    }
+
+    if (owner_type->kind == TypeKind::Enum) {
+        auto member = owner_type->data.enum_.find_member(field_name);
+        if (member_out) {
+            *member_out = member;
+        }
+        return member ? member->resolved_type : nullptr;
+    }
+
+    if (owner_type->kind == TypeKind::Subtype) {
+        auto &subtype_data = owner_type->data.subtype;
+        if (!(subtype_data.generic && subtype_data.generic->kind == TypeKind::Enum)) {
+            return nullptr;
+        }
+
+        auto concrete_enum = subtype_data.final_type;
+        if (!concrete_enum && !owner_type->is_placeholder) {
+            concrete_enum = resolve_subtype(owner_type);
+        }
+
+        auto member = concrete_enum && concrete_enum->kind == TypeKind::Enum
+                          ? concrete_enum->data.enum_.find_member(field_name)
+                          : subtype_data.generic->data.enum_.find_member(field_name);
+        if (member_out) {
+            *member_out = member;
+        }
+        if (!member) {
+            return nullptr;
+        }
+
+        auto result_type = concrete_enum && concrete_enum->kind == TypeKind::Enum
+                               ? member->resolved_type
+                               : type_placeholders_sub(member->resolved_type, &subtype_data);
+        if (result_type && result_type->kind == TypeKind::EnumValue) {
+            result_type->data.enum_value.enum_type =
+                concrete_enum && concrete_enum->kind == TypeKind::Enum ? concrete_enum
+                                                                       : owner_type;
+            result_type->is_placeholder = result_type->is_placeholder || owner_type->is_placeholder;
+        }
+        return result_type;
+    }
+
+    return nullptr;
+}
+
+ChiType *Resolver::resolve_expected_enum_variant_type(ChiEnumVariant *variant,
+                                                      ChiType *expected_type) {
+    return variant ? (resolve_enum_member_type(expected_type, variant->name) ?: variant->resolved_type)
+                   : nullptr;
 }
 
 ChiStructMember *Resolver::get_struct_member(ChiType *struct_type, const string &field_name) {
