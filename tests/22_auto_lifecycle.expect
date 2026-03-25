@@ -269,11 +269,49 @@ after unary
 --- struct field from fn call ---
   TrackedVal.new(7)
   h.data.id=7
+--- field projection from temp ---
+  TrackedVal.new(8)
+  TrackedVal.new(9)
+  TrackedVal.copy(8)
+  p.id=8
+--- tuple projection from temp ---
+  TrackedVal.new(10)
+  TrackedVal.new(11)
+  TrackedVal.copy(10)
+  q.id=10
+--- optional unwrap projection from temp ---
+  TrackedVal.new(12)
+  TrackedVal.new(13)
+  TrackedVal.copy(12)
+  r.id=12
+--- optional unwrap projection to arg ---
+  TrackedVal.new(14)
+  TrackedVal.new(15)
+  TrackedVal.copy(14)
+  consumed.id=14
+  TrackedVal.delete(14)
+--- optional unwrap projection to return ---
+  TrackedVal.new(16)
+  TrackedVal.new(17)
+  TrackedVal.copy(16)
+  TrackedVal.delete(17)
+  TrackedVal.delete(16)
+  s.id=16
 --- lambda lifecycle ---
   f1()=10
   f1()=10, f2()=10
   f1()=99, f2()=10
 --- scope exit ---
+  TrackedVal.delete(16)
+  TrackedVal.delete(15)
+  TrackedVal.delete(14)
+  TrackedVal.delete(12)
+  TrackedVal.delete(13)
+  TrackedVal.delete(12)
+  TrackedVal.delete(10)
+  TrackedVal.delete(8)
+  TrackedVal.delete(9)
+  TrackedVal.delete(8)
   TrackedVal.delete(7)
   TrackedVal.delete(6)
   TrackedVal.delete(4)

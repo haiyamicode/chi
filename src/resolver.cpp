@@ -7104,8 +7104,48 @@ bool Resolver::should_destroy(ast::Node *node, ChiType *type_override) {
     return type_needs_destruction(resolved_type);
 }
 
-void Resolver::mark_temp_moved_if_needed(ast::Node *expr, ChiType *type) {
+static bool can_move_unaddressable_expr(ast::Node *expr) {
+    if (!expr) {
+        return false;
+    }
+    switch (expr->type) {
+    case NodeType::ParenExpr:
+        return can_move_unaddressable_expr(expr->data.child_expr);
+    case NodeType::CastExpr:
+        return can_move_unaddressable_expr(expr->data.cast_expr.expr);
+    case NodeType::DotExpr:
+    case NodeType::IndexExpr:
+        return false;
+    case NodeType::UnaryOpExpr: {
+        auto &data = expr->data.unary_op_expr;
+        switch (data.op_type) {
+        case TokenType::MUL:
+        case TokenType::AND:
+        case TokenType::MUTREF:
+        case TokenType::MUTEXREF:
+        case TokenType::MOVEREF:
+        case TokenType::KW_MOVE:
+            return false;
+        case TokenType::LNOT:
+            return !data.is_suffix;
+        default:
+            return true;
+        }
+    }
+    default:
+        return true;
+    }
+}
+
+bool Resolver::should_move_temp_expr(ast::Node *expr, ChiType *type) {
     if (!expr || expr->escape.moved || is_addressable(expr) || !should_destroy(expr, type)) {
+        return false;
+    }
+    return can_move_unaddressable_expr(expr);
+}
+
+void Resolver::mark_temp_moved_if_needed(ast::Node *expr, ChiType *type) {
+    if (!should_move_temp_expr(expr, type)) {
         return;
     }
     expr->escape.moved = true;
@@ -9032,7 +9072,8 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             bool is_explicit_move = arg->type == NodeType::UnaryOpExpr &&
                                     arg->data.unary_op_expr.op_type == TokenType::KW_MOVE;
             if (param_type && !param_type->is_reference() &&
-                (!is_addressable(arg) || is_explicit_move) && should_destroy(arg, arg_type)) {
+                (is_explicit_move || should_move_temp_expr(arg, arg_type)) &&
+                should_destroy(arg, arg_type)) {
                 arg->escape.moved = true;
                 // Sink the temp outlet so cleanup doesn't destroy it
                 if (arg->resolved_outlet && scope.parent_fn_node) {

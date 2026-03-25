@@ -611,6 +611,34 @@ func make_val(id: int) TrackedVal {
     return {id};
 }
 
+struct PairVal {
+    first: TrackedVal;
+    second: TrackedVal;
+}
+
+func make_pair_val(a: int, b: int) PairVal {
+    return PairVal{
+        first: {a},
+        second: {b}
+    };
+}
+
+func make_tuple_val(a: int, b: int) Tuple<TrackedVal, TrackedVal> {
+    return (TrackedVal{a}, TrackedVal{b});
+}
+
+func make_optional_pair_val(a: int, b: int) ?PairVal {
+    return make_pair_val(a, b);
+}
+
+func consume_val(value: TrackedVal) {
+    printf("  consumed.id={}\n", value.id);
+}
+
+func unwrap_projected_val() TrackedVal {
+    return make_optional_pair_val(16, 17)!.first;
+}
+
 struct HoldsVal {
     data: TrackedVal;
 
@@ -648,6 +676,28 @@ func test_temp_move_semantics() {
     println("--- struct field from fn call ---");
     var h = HoldsVal{7};
     printf("  h.data.id={}\n", h.data.id);
+
+    // Projection from temp struct: copied, not moved from partial owner
+    println("--- field projection from temp ---");
+    var p = make_pair_val(8, 9).first;
+    printf("  p.id={}\n", p.id);
+
+    // Projection from temp tuple: copied, not moved from partial owner
+    println("--- tuple projection from temp ---");
+    var q = make_tuple_val(10, 11).0;
+    printf("  q.id={}\n", q.id);
+
+    // Optional unwrap projection from temp: copied, not moved from partial owner
+    println("--- optional unwrap projection from temp ---");
+    var r = make_optional_pair_val(12, 13)!.first;
+    printf("  r.id={}\n", r.id);
+
+    println("--- optional unwrap projection to arg ---");
+    consume_val(make_optional_pair_val(14, 15)!.first);
+
+    println("--- optional unwrap projection to return ---");
+    var s = unwrap_projected_val();
+    printf("  s.id={}\n", s.id);
 
     // Lambda vardecl and reassign: captures not leaked
     println("--- lambda lifecycle ---");

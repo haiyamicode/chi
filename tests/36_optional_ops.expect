@@ -62,6 +62,9 @@ if let alias return=a
 test_implicit_narrow:
 truthy return=hello
 guard return=world
+unwrap temp local=local
+unwrap temp arg=arg
+unwrap temp return=return
 
 test_if_let_enum_pattern:
 enum tuple=42

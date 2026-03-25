@@ -227,6 +227,27 @@ func take_present_after_guard(value: ?string) string {
     return value;
 }
 
+func make_optional_string(value: string) ?string {
+    return value;
+}
+
+func echo_string(value: string) string {
+    return value;
+}
+
+func unwrap_temp_to_local() string {
+    let value = make_optional_string("local")!;
+    return value;
+}
+
+func unwrap_temp_to_arg() string {
+    return echo_string(make_optional_string("arg")!);
+}
+
+func unwrap_temp_to_return() string {
+    return make_optional_string("return")!;
+}
+
 func test_if_let() {
     println("test_if_let:");
 
@@ -338,6 +359,9 @@ func test_implicit_narrow() {
 
     printf("truthy return={}\n", take_present("hello"));
     printf("guard return={}\n", take_present_after_guard("world"));
+    printf("unwrap temp local={}\n", unwrap_temp_to_local());
+    printf("unwrap temp arg={}\n", unwrap_temp_to_arg());
+    printf("unwrap temp return={}\n", unwrap_temp_to_return());
 
     println("");
 }
