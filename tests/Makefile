@@ -269,6 +269,36 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	done; \
 	if [ "$$failed" = "1" ]; then exit 1; fi
 
+# Expr block tests — also verify invalid if-expression forms are rejected.
+43_expr_blocks.test: 43_expr_blocks.expect
+	echo Test: 43_expr_blocks...
+	@$(CHIC) -o $(TMP).43_expr_blocks -c 43_expr_blocks.xs && $(TMP).43_expr_blocks 2>&1 >43_expr_blocks.output
+	@if [ "x`diff -qbu 43_expr_blocks.expect 43_expr_blocks.output`" != "x" ]; \
+	then \
+		echo "error in test 43_expr_blocks (output mismatch)"; \
+		diff -u 43_expr_blocks.expect 43_expr_blocks.output; \
+		rm -f 43_expr_blocks.output; \
+		exit 1; \
+	fi; \
+	rm -f 43_expr_blocks.output
+	@failed=0; \
+	for f in testdata/43_expr_blocks_errors/*.xs; do \
+		name=$$(basename $$f); \
+		errmsg=$$($(CHIC) -o /dev/null -c $$f -w /tmp/chitest_expr_blocks 2>&1); \
+		if [ $$? -eq 0 ]; then \
+			echo "error: $$name should have been rejected but compiled successfully"; \
+			failed=1; \
+		else \
+			expected=$$(grep '// expect-error:' $$f | head -1 | sed 's/.*expect-error: *//'); \
+			if [ -n "$$expected" ] && ! echo "$$errmsg" | grep -q "$$expected"; then \
+				echo "error: $$name wrong error (expected '$$expected')"; \
+				echo "  got: $$(echo "$$errmsg" | head -1)"; \
+				failed=1; \
+			fi; \
+		fi; \
+	done; \
+	if [ "$$failed" = "1" ]; then exit 1; fi
+
 # Special rule for GC tests - finalization order is non-deterministic,
 # so sort destruction lines (everything after "Test completed") before comparing.
 18_gc_escape.test: 18_gc_escape.expect

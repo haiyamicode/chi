@@ -3547,11 +3547,24 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // If-expression: both branches return non-void types
-        if (data.else_node && then_type && else_type && then_type->kind != TypeKind::Void &&
-            else_type->kind != TypeKind::Void) {
-            check_assignment(data.else_node, else_type, then_type, &scope);
-            return then_type;
+        if (data.else_node && then_type && else_type) {
+            bool then_is_value = then_type->kind != TypeKind::Void;
+            bool else_is_value = else_type->kind != TypeKind::Void;
+
+            if (then_is_value != else_is_value) {
+                error(node,
+                      "if expression branches must both produce values or both be void, got "
+                      "'{}' and '{}'",
+                      format_type_display(then_type), format_type_display(else_type));
+                return get_system_types()->void_;
+            }
+
+            if (then_is_value) {
+                check_assignment(data.else_node, else_type, then_type, &scope);
+                return then_type;
+            }
+
+            return get_system_types()->void_;
         }
 
         return nullptr;
@@ -11378,7 +11391,17 @@ void Resolver::track_move_sink(ast::Node *parent_fn_node, ast::Node *expr, ChiTy
     ast::Node *move_expr = get_moved_expr(expr);
 
     if (move_expr && move_expr != expr && move_expr->resolved_outlet) {
-        moved_src = move_expr->resolved_outlet;
+        auto *outlet_root = find_root_decl(move_expr->resolved_outlet);
+        if (!outlet_root) {
+            outlet_root = move_expr->resolved_outlet;
+        }
+        auto *dest_root = find_root_decl(dest);
+        if (!dest_root) {
+            dest_root = dest;
+        }
+        if (outlet_root != dest_root) {
+            moved_src = move_expr->resolved_outlet;
+        }
     }
 
     if (!moved_src && move_expr && move_expr->type == NodeType::UnaryOpExpr &&

@@ -11,6 +11,18 @@ struct PointHolder {
     point: ?Point = null;
 }
 
+struct FlagBox {
+    enabled: bool = true;
+
+    func is_enabled() bool {
+        return this.enabled;
+    }
+}
+
+func show_point(name: string, p: Point) {
+    printf("{} = ({}, {})\n", name, p.x, p.y);
+}
+
 enum MaybeValue {
     Number(int),
     Coord {
@@ -33,6 +45,24 @@ func test_null_coalescing() {
     var b: ?int = null;
     result = b ?? 99;
     printf("b ?? 99 = {}\n", result);
+
+    var fallback_point: ?Point = null;
+    show_point("fallback point", fallback_point ?? Point{});
+
+    var inferred_point: ?Point = null;
+    let inferred_fallback = inferred_point ?? {};
+    show_point("inferred fallback point", inferred_fallback);
+
+    println("");
+}
+
+func test_construct_operand_postfix() {
+    println("test_construct_operand_postfix:");
+
+    var maybe_enabled: ?bool = null;
+    printf("maybe ?? field = {}\n", maybe_enabled ?? FlagBox{}.enabled);
+    printf("true && field = {}\n", true && FlagBox{}.enabled);
+    printf("true && method = {}\n", true && FlagBox{}.is_enabled());
 
     println("");
 }
@@ -277,6 +307,7 @@ func test_if_let_zero() {
 
 func main() {
     test_null_coalescing();
+    test_construct_operand_postfix();
     test_optional_chain_field();
     test_optional_chain_method();
     test_chaining();

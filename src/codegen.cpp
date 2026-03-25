@@ -7556,8 +7556,14 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
             auto ref = compile_expr_ref(fn, base_expr);
             if (type->kind == TypeKind::Fn) {
                 ptr = ref.value;
-            } else {
+            } else if (ref.address) {
                 ptr = ref.address;
+            } else if (ref.value) {
+                auto base_ptr = fn->entry_alloca(compile_type(type), "dot_base");
+                builder.CreateStore(ref.value, base_ptr);
+                ptr = base_ptr;
+            } else {
+                ptr = nullptr;
             }
         }
 

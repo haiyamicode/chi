@@ -202,6 +202,8 @@ class Parser {
 
     Node *parse_unary_expr(bool lhs, Node *parent);
 
+    Node *parse_postfix_expr(Node *node, bool lhs, Node *parent);
+
     Node *parse_primary_expr(bool lhs, Node *parent);
 
     Node *parse_operand(bool lhs, Node *parent);
@@ -221,7 +223,7 @@ class Parser {
 
     Node *parse_branch_stmt();
 
-    Node *parse_if_expr();
+    Node *parse_if_expr(bool require_value = false);
 
     Node *parse_for_stmt();
 
@@ -258,7 +260,7 @@ class Parser {
 
     Node *parse_export_decl();
 
-    Node *parse_switch_expr();
+    Node *parse_switch_expr(bool require_value = false);
 
     Node *parse_case_expr(bool is_type_switch = false);
 };

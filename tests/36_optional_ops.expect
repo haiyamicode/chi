@@ -1,6 +1,13 @@
 test_null_coalescing:
 a ?? 0 = 42
 b ?? 99 = 99
+fallback point = (0, 0)
+inferred fallback point = (0, 0)
+
+test_construct_operand_postfix:
+maybe ?? field = true
+true && field = true
+true && method = true
 
 test_optional_chain_field:
 p?.x = 10

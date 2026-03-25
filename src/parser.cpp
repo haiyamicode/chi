@@ -1478,23 +1478,67 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
     return node;
 }
 
+static bool block_returns_value(ast::Node *node) {
+    return node && node->type == NodeType::Block && node->data.block.return_expr;
+}
+
+static bool if_expr_returns_value(ast::Node *node) {
+    if (!node || node->type != NodeType::IfExpr) {
+        return false;
+    }
+
+    auto &data = node->data.if_expr;
+    if (!data.else_node || !block_returns_value(data.then_block)) {
+        return false;
+    }
+
+    if (data.else_node->type == NodeType::Block) {
+        return block_returns_value(data.else_node);
+    }
+
+    if (data.else_node->type == NodeType::IfExpr) {
+        return if_expr_returns_value(data.else_node);
+    }
+
+    return false;
+}
+
+static bool switch_expr_returns_value(ast::Node *node) {
+    if (!node || node->type != NodeType::SwitchExpr) {
+        return false;
+    }
+
+    auto &cases = node->data.switch_expr.cases;
+    if (cases.len == 0) {
+        return false;
+    }
+
+    for (auto scase : cases) {
+        if (!scase || scase->type != NodeType::CaseExpr ||
+            !block_returns_value(scase->data.case_expr.body)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 Node *Parser::parse_stmt(bool *as_expr) {
     auto token = get();
     switch (token->type) {
     case TokenType::KW_IF: {
-        auto node = parse_if_expr();
-        // If-expression: only when both branches have return expressions
-        if (node->data.if_expr.else_node && next_is(TokenType::RBRACE) &&
-            node->data.if_expr.then_block->data.block.return_expr)
+        auto node = parse_if_expr(false);
+        // If-expression: only when every branch is syntactically value-producing.
+        if (next_is(TokenType::RBRACE) && if_expr_returns_value(node))
             *as_expr = true;
         return node;
     }
 
     case TokenType::KW_SWITCH: {
-        auto node = parse_switch_expr();
+        auto node = parse_switch_expr(false);
         if (next_is(TokenType::SEMICOLON)) {
             consume();
-        } else if (next_is(TokenType::RBRACE)) {
+        } else if (next_is(TokenType::RBRACE) && switch_expr_returns_value(node)) {
             // Last expression in block — treat as block result
             *as_expr = true;
         }
@@ -1642,15 +1686,25 @@ Node *Parser::parse_expr_clause(bool lhs) { return parse_binary_expr(lhs, nullpt
 Node *Parser::parse_child_expr_construct(bool lhs, Node *parent) {
     // Try to parse as type construct expression if that's possible (e.g., Array<int>{1, 2, 3})
     if (!lhs && is_construct_expr_with_type()) {
-        return parse_construct_expr();
+        return parse_postfix_expr(parse_construct_expr(), lhs, parent);
     }
 
     // Fall back to normal expression parsing
     return parse_child_expr(lhs, parent);
 }
 
+static Node *parse_binary_operand(Parser *parser, bool lhs, Node *parent) {
+    // Binary expression parsing normally starts from unary precedence, but a typed
+    // construct like `Point{}` is also a valid operand and may still be followed
+    // by postfix operators like `.field` or `.method()`.
+    if (!lhs && parser->is_construct_expr_with_type()) {
+        return parser->parse_postfix_expr(parser->parse_construct_expr(), lhs, parent);
+    }
+    return parser->parse_unary_expr(lhs, parent);
+}
+
 Node *Parser::parse_binary_expr(bool lhs, Node *parent, int prec) {
-    auto op1 = parse_unary_expr(lhs, parent);
+    auto op1 = parse_binary_operand(this, lhs, parent);
     for (;;) {
         auto op_token = get();
         if (op_token->type == TokenType::END) {
@@ -1701,6 +1755,87 @@ Node *Parser::parse_binary_expr(bool lhs, Node *parent, int prec) {
 
 Node *Parser::parse_child_expr(bool lhs, Node *parent) {
     return parse_binary_expr(lhs, parent, DEFAULT_PREC);
+}
+
+Node *Parser::parse_postfix_expr(Node *node, bool lhs, Node *parent) {
+    for (;;) {
+        auto token = get();
+        switch (token->type) {
+        case TokenType::DOT:
+            if (lookahead(1)->type == TokenType::LPAREN) {
+                node = parse_type_info_expr(node);
+                break;
+            }
+            node = parse_dot_expr(node);
+            break;
+
+        case TokenType::QUES_DOT:
+            node = parse_dot_expr(node, true);
+            break;
+
+        case TokenType::LBRACK:
+            node = parse_index_expr(node);
+            break;
+
+        case TokenType::LT:
+            // Check if this is a function call with type parameters
+            if (is_function_call_with_type_params()) {
+                node = parse_fn_call_with_type_params(node, lhs, parent);
+            } else if (is_type_access_with_type_params()) {
+                // Type<Args>.method() — parse as SubtypeExpr, loop continues with '.'
+                auto subtype_node = create_node(NodeType::SubtypeExpr, node->token);
+                subtype_node->data.subtype_expr.type = node;
+                expect(TokenType::LT);
+                for (;;) {
+                    auto tok = get();
+                    if (tok->type == TokenType::END) {
+                        error(tok, errors::UNEXPECTED_EOF);
+                        return subtype_node;
+                    }
+                    if (tok->type == TokenType::GT) {
+                        break;
+                    }
+                    // Check for ...T spread in type args
+                    if (tok->type == TokenType::ELLIPSIS) {
+                        consume(); // skip past ...
+                        auto param = parse_type_expr(true);
+                        auto expansion = create_node(NodeType::PackExpansion, tok);
+                        expansion->data.pack_expansion.expr = param;
+                        subtype_node->data.subtype_expr.args.add(expansion);
+                    } else {
+                        auto param = parse_type_expr(true);
+                        subtype_node->data.subtype_expr.args.add(param);
+                    }
+                    if (!at_comma(TokenType::GT)) {
+                        break;
+                    }
+                    consume();
+                }
+                expect(TokenType::GT);
+                node = subtype_node;
+            } else {
+                return node; // Let the expression parser handle it as a comparison
+            }
+            break;
+
+        case TokenType::LPAREN:
+            node = parse_fn_call_expr(node, lhs, parent);
+            break;
+
+        case TokenType::INC:
+        case TokenType::DEC:
+        case TokenType::LNOT: {
+            auto op1 = node;
+            node = create_unary_expr_node(read());
+            node->data.unary_op_expr.op1 = op1;
+            node->data.unary_op_expr.is_suffix = true;
+            break;
+        }
+
+        default:
+            return node;
+        }
+    }
 }
 
 Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
@@ -1798,85 +1933,7 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
 }
 
 Node *Parser::parse_primary_expr(bool lhs, Node *parent) {
-    auto node = parse_operand(lhs, parent);
-    for (;;) {
-        auto token = get();
-        switch (token->type) {
-        case TokenType::DOT:
-            if (lookahead(1)->type == TokenType::LPAREN) {
-                node = parse_type_info_expr(node);
-                break;
-            }
-            node = parse_dot_expr(node);
-            break;
-
-        case TokenType::QUES_DOT:
-            node = parse_dot_expr(node, true);
-            break;
-
-        case TokenType::LBRACK:
-            node = parse_index_expr(node);
-            break;
-
-        case TokenType::LT:
-            // Check if this is a function call with type parameters
-            if (is_function_call_with_type_params()) {
-                node = parse_fn_call_with_type_params(node, lhs, parent);
-            } else if (is_type_access_with_type_params()) {
-                // Type<Args>.method() — parse as SubtypeExpr, loop continues with '.'
-                auto subtype_node = create_node(NodeType::SubtypeExpr, node->token);
-                subtype_node->data.subtype_expr.type = node;
-                expect(TokenType::LT);
-                for (;;) {
-                    auto tok = get();
-                    if (tok->type == TokenType::END) {
-                        error(tok, errors::UNEXPECTED_EOF);
-                        return subtype_node;
-                    }
-                    if (tok->type == TokenType::GT) {
-                        break;
-                    }
-                    // Check for ...T spread in type args
-                    if (tok->type == TokenType::ELLIPSIS) {
-                        consume(); // skip past ...
-                        auto param = parse_type_expr(true);
-                        auto expansion = create_node(NodeType::PackExpansion, tok);
-                        expansion->data.pack_expansion.expr = param;
-                        subtype_node->data.subtype_expr.args.add(expansion);
-                    } else {
-                        auto param = parse_type_expr(true);
-                        subtype_node->data.subtype_expr.args.add(param);
-                    }
-                    if (!at_comma(TokenType::GT)) {
-                        break;
-                    }
-                    consume();
-                }
-                expect(TokenType::GT);
-                node = subtype_node;
-            } else {
-                return node; // Let the expression parser handle it as a comparison
-            }
-            break;
-
-        case TokenType::LPAREN:
-            node = parse_fn_call_expr(node, lhs, parent);
-            break;
-
-        case TokenType::INC:
-        case TokenType::DEC:
-        case TokenType::LNOT: {
-            auto op1 = node;
-            node = create_unary_expr_node(read());
-            node->data.unary_op_expr.op1 = op1;
-            node->data.unary_op_expr.is_suffix = true;
-            break;
-        }
-
-        default:
-            return node;
-        }
-    }
+    return parse_postfix_expr(parse_operand(lhs, parent), lhs, parent);
 }
 
 Node *Parser::parse_operand(bool lhs, Node *parent) {
@@ -1942,10 +1999,10 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
         return parse_fn_lambda();
     }
     case TokenType::KW_IF: {
-        return parse_if_expr();
+        return parse_if_expr(true);
     }
     case TokenType::KW_SWITCH: {
-        return parse_switch_expr();
+        return parse_switch_expr(true);
     }
     case TokenType::LBRACE: {
         return parse_construct_expr();
@@ -2410,7 +2467,7 @@ void Parser::add_to_scope(Node *node, const string &name) {
     }
 }
 
-Node *Parser::parse_if_expr() {
+Node *Parser::parse_if_expr(bool require_value) {
     auto kw = expect(TokenType::KW_IF);
     auto node = create_node(NodeType::IfExpr, kw);
     auto scope = m_ctx->resolver->push_scope(node);
@@ -2448,7 +2505,7 @@ Node *Parser::parse_if_expr() {
         consume();
         token = get();
         if (token->type == TokenType::KW_IF) {
-            node->data.if_expr.else_node = parse_if_expr();
+            node->data.if_expr.else_node = parse_if_expr(require_value);
         } else if (token->type == TokenType::ARROW) {
             node->data.if_expr.else_node = parse_block(nullptr, read());
         } else if (token->type == TokenType::LBRACE) {
@@ -2458,6 +2515,10 @@ Node *Parser::parse_if_expr() {
         }
     }
     m_ctx->resolver->pop_scope();
+    if (require_value && !if_expr_returns_value(node)) {
+        error(node->token,
+              "if used as an expression must have an else and every branch must produce a value");
+    }
     return node;
 }
 
@@ -3653,7 +3714,7 @@ bool Parser::looks_like_case_pattern_clause() {
     }
 }
 
-Node *Parser::parse_switch_expr() {
+Node *Parser::parse_switch_expr(bool require_value) {
     auto kw = expect(TokenType::KW_SWITCH);
     auto node = create_node(NodeType::SwitchExpr, kw);
     auto scope = m_ctx->resolver->push_scope(node);
@@ -3686,6 +3747,10 @@ Node *Parser::parse_switch_expr() {
     }
     expect(TokenType::RBRACE);
     m_ctx->resolver->pop_scope();
+    if (require_value && !switch_expr_returns_value(node)) {
+        error(node->token,
+              "switch used as an expression must have every case produce a value");
+    }
     return node;
 }
 

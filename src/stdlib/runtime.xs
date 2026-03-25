@@ -334,12 +334,13 @@ export func stringf(format: string, ...values: any) string {
 }
 
 export func assert(cond: bool, message: ?string) {
-    if !cond =>     if message {
-        throw new PanicError{text: stringf("assertion failed: {}", message)};
-    } else {
-        throw new PanicError{text: "assertion failed"};
+    if !cond {
+        if message {
+            throw new PanicError{text: stringf("assertion failed: {}", message)};
+        } else {
+            throw new PanicError{text: "assertion failed"};
+        }
     }
-
 }
 
 export struct Array<T> {
