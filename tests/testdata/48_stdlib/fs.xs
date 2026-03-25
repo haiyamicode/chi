@@ -63,6 +63,19 @@ func main() {
     fs.remove(test_file);
     println(fs.exists(test_file));
 
+    println("=== fs.remove_all / copy_all ===");
+    let source_tree = "/tmp/chi_fs_stdlib_test_src";
+    let copied_tree = "/tmp/chi_fs_stdlib_test_copy";
+    fs.remove_all(source_tree);
+    fs.remove_all(copied_tree);
+    fs.mkdir_all(source_tree + "/nested");
+    fs.write_file(source_tree + "/nested/data.txt", "copied");
+    fs.copy_all(source_tree, copied_tree);
+    println(fs.read_file(copied_tree + "/nested/data.txt"));
+    fs.remove_all(copied_tree);
+    println(fs.exists(copied_tree));
+    fs.remove_all(source_tree);
+
     println("=== File copy ===");
     fs.write_file(test_file, "shared handle");
     var f3 = fs.File.open(test_file);

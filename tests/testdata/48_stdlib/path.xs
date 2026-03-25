@@ -15,4 +15,6 @@ func main() {
     printf("join('a/', 'b') = {}\n", path.join("a/", "b"));
     printf("join('', 'b') = {}\n", path.join("", "b"));
     printf("join('a', '') = {}\n", path.join("a", ""));
+    printf("join('a', 'b', 'c') = {}\n", path.join("a", "b", "c"));
+    printf("join('a', '', 'c') = {}\n", path.join("a", "", "c"));
 }

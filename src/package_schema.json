@@ -9,6 +9,15 @@
       "type": "string",
       "description": "Package name"
     },
+    "include": {
+      "type": "array",
+      "description": "Additional files or directories to include when installing package sources",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "default": []
+    },
     "version": {
       "type": "string",
       "description": "Package version"

@@ -1766,6 +1766,14 @@ int32_t __cx_fs_flags(int32_t which) {
     }
 }
 
+int32_t __cx_path_separator(void) {
+#ifdef _WIN32
+    return '\\';
+#else
+    return '/';
+#endif
+}
+
 int32_t __cx_fs_open(const char *path, int32_t flags, int32_t mode) {
     return run_on_main_uv_thread_sync([=]() -> int32_t {
         uv_fs_t req;
@@ -1937,10 +1945,42 @@ int32_t __cx_file_exists(const char *path) {
     });
 }
 
+int32_t __cx_is_dir(const char *path) {
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t r = uv_fs_stat(main_uv_loop, &req, path, NULL);
+        if (r < 0) {
+            uv_fs_req_cleanup(&req);
+            return 0;
+        }
+        auto is_dir = S_ISDIR(req.statbuf.st_mode) ? 1 : 0;
+        uv_fs_req_cleanup(&req);
+        return is_dir;
+    });
+}
+
 int32_t __cx_file_remove(const char *path) {
     return run_on_main_uv_thread_sync([=]() -> int32_t {
         uv_fs_t req;
         int32_t r = uv_fs_unlink(main_uv_loop, &req, path, NULL);
+        uv_fs_req_cleanup(&req);
+        return r;
+    });
+}
+
+int32_t __cx_dir_remove(const char *path) {
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t r = uv_fs_rmdir(main_uv_loop, &req, path, NULL);
+        uv_fs_req_cleanup(&req);
+        return r;
+    });
+}
+
+int32_t __cx_copy_file(const char *src, const char *dest) {
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        uv_fs_t req;
+        int32_t r = uv_fs_copyfile(main_uv_loop, &req, src, dest, 0, NULL);
         uv_fs_req_cleanup(&req);
         return r;
     });

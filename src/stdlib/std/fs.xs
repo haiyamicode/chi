@@ -1,4 +1,5 @@
 // std/fs — filesystem operations
+import "std/filepath" as filepath;
 import "std/io" as io;
 import "std/ops" as ops;
 
@@ -24,7 +25,10 @@ extern "C" {
     );
     unsafe func __cx_fs_close(fd: int32) int32;
     unsafe func __cx_file_exists(path: *byte) int32;
+    unsafe func __cx_is_dir(path: *byte) int32;
     unsafe func __cx_file_remove(path: *byte) int32;
+    unsafe func __cx_dir_remove(path: *byte) int32;
+    unsafe func __cx_copy_file(src: *byte, dest: *byte) int32;
     unsafe func __cx_mkdir(path: *byte) int32;
     unsafe func __cx_list_dir(path: *byte, result: *void) int32;
     unsafe func __cx_uv_strerror(errnum: int32, result: *string);
@@ -317,6 +321,13 @@ export func exists(path: string) bool {
     }
 }
 
+export func is_dir(path: string) bool {
+    var cs = path.to_cstring();
+    unsafe {
+        return __cx_is_dir(cs.as_ptr()) != 0;
+    }
+}
+
 export func remove(path: string) {
     var cs = path.to_cstring();
     unsafe {
@@ -325,6 +336,31 @@ export func remove(path: string) {
             throw_fs_error("remove", path, r);
         }
     }
+}
+
+func remove_dir(path: string) {
+    var cs = path.to_cstring();
+    unsafe {
+        let r = __cx_dir_remove(cs.as_ptr());
+        if r != 0 {
+            throw_fs_error("rmdir", path, r);
+        }
+    }
+}
+
+export func remove_all(path: string) {
+    if !exists(path) {
+        return;
+    }
+    if is_dir(path) {
+        let entries = list_dir(path);
+        for entry in entries {
+            remove_all(filepath.join(path, entry));
+        }
+        remove_dir(path);
+        return;
+    }
+    remove(path);
 }
 
 export func mkdir(path: string) {
@@ -337,9 +373,34 @@ export func mkdir(path: string) {
     }
 }
 
+export func copy_file(src: string, dest: string) {
+    var src_cs = src.to_cstring();
+    var dest_cs = dest.to_cstring();
+    unsafe {
+        let r = __cx_copy_file(src_cs.as_ptr(), dest_cs.as_ptr());
+        if r != 0 {
+            throw_fs_error("copy", stringf("{} -> {}", src, dest), r);
+        }
+    }
+}
+
+export func copy_all(src: string, dest: string) {
+    if is_dir(src) {
+        mkdir_all(dest);
+        let entries = list_dir(src);
+        for entry in entries {
+            let child_src = filepath.join(src, entry);
+            let child_dest = filepath.join(dest, entry);
+            copy_all(child_src, child_dest);
+        }
+        return;
+    }
+    copy_file(src, dest);
+}
+
 export func mkdir_all(path: string) {
     for var i: uint32 = 1; i < path.byte_length(); i = i + 1 {
-        if path.byte_at(i) == '/' {
+        if path.byte_at(i) == filepath.PATH_SEPARATOR {
             var component = path.byte_slice(0, i);
             if !exists(component) {
                 mkdir(component);

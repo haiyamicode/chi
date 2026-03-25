@@ -1,4 +1,6 @@
 {
+  "name": "tests/15_package",
+  "include": ["assets"],
   // Entry point for the Chi package
   "entry_file": "main.xs",
 

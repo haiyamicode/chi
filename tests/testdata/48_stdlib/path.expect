@@ -12,3 +12,5 @@ join('a', 'b') = a/b
 join('a/', 'b') = a/b
 join('', 'b') = b
 join('a', '') = a
+join('a', 'b', 'c') = a/b/c
+join('a', '', 'c') = a/c

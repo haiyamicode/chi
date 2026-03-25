@@ -73,7 +73,6 @@ export struct ParseError {
         }
     }
 }
-
 export enum ValueKind {
     Null,
     Bool,

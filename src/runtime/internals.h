@@ -164,7 +164,6 @@ CHI_RT_EXPORT void cx_timeout(uint64_t delay, void *callback);
 CHI_RT_EXPORT uint64_t cx_meiyan(const void *key, int count);
 CHI_RT_EXPORT bool cx_string_eq(CxString *a, CxString *b);
 
-
 CHI_RT_EXPORT bool cx_parse_json(CxString *str, bool allow_jsonc, void *result,
                                  CxJsonParseError *error);
 CHI_RT_EXPORT void cx_json_value_delete(void *data);
@@ -181,6 +180,7 @@ CHI_RT_EXPORT uint64_t __cx_time_monotonic(void);
 
 CHI_RT_EXPORT int32_t __cx_fs_error_kind(int32_t uv_err);
 CHI_RT_EXPORT int32_t __cx_fs_flags(int32_t which);
+CHI_RT_EXPORT int32_t __cx_path_separator(void);
 CHI_RT_EXPORT int32_t __cx_fs_open(const char *path, int32_t flags, int32_t mode);
 CHI_RT_EXPORT int32_t __cx_fs_read(int32_t fd, void *buf, uint32_t size);
 CHI_RT_EXPORT void __cx_fs_read_async(int32_t fd, void *buf, uint32_t size, void *resolve_lambda,
@@ -190,7 +190,10 @@ CHI_RT_EXPORT void __cx_fs_write_async(int32_t fd, const void *data, uint32_t si
                                        void *resolve_lambda, void *reject_lambda);
 CHI_RT_EXPORT int32_t __cx_fs_close(int32_t fd);
 CHI_RT_EXPORT int32_t __cx_file_exists(const char *path);
+CHI_RT_EXPORT int32_t __cx_is_dir(const char *path);
 CHI_RT_EXPORT int32_t __cx_file_remove(const char *path);
+CHI_RT_EXPORT int32_t __cx_dir_remove(const char *path);
+CHI_RT_EXPORT int32_t __cx_copy_file(const char *src, const char *dest);
 CHI_RT_EXPORT int32_t __cx_mkdir(const char *path);
 CHI_RT_EXPORT int32_t __cx_get_errno();
 CHI_RT_EXPORT void __cx_uv_strerror(int32_t errnum, CxString *result);

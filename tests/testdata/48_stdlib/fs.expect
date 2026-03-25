@@ -12,6 +12,9 @@ overwritten!
 hello.txt
 === fs.remove ===
 false
+=== fs.remove_all / copy_all ===
+copied
+false
 === File copy ===
 shared handle
 === fs.exists (nonexistent) ===

@@ -1,0 +1,10 @@
+=== filepath.join ===
+/tmp/chi/src
+=== filepath.dir ===
+/tmp/chi
+=== filepath.base ===
+main.xs
+=== filepath.ext ===
+.xs
+=== filepath.is_absolute ===
+true
