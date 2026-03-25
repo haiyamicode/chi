@@ -15,6 +15,10 @@ func add_generic_offset<T>(x: T, offset: int = 3) int {
     return offset;
 }
 
+func infer_generic_offset<T>(x: T, offset: int = 4) int {
+    return offset;
+}
+
 struct Greeter {
     prefix: string;
 
@@ -89,6 +93,8 @@ func main() {
     printf("add_offset(5, 100) = {}\n", add_offset(5, 100));
     printf("add_generic_offset<int>(5) = {}\n", add_generic_offset<int>(5));
     printf("add_generic_offset<int>(5, 8) = {}\n", add_generic_offset<int>(5, 8));
+    printf("infer_generic_offset(5) = {}\n", infer_generic_offset(5));
+    printf("infer_generic_offset(5, 9) = {}\n", infer_generic_offset(5, 9));
     var g1 = Greeter{};
     g1.say("World");
     g1.say("World", "?");

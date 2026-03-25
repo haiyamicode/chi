@@ -7719,8 +7719,9 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
     // Initialize inferred types map
     inferred_types->clear();
 
-    // Check if we have the right number of arguments
-    if (fn->params.len != arg_types->len) {
+    // Type inference only needs the arguments that were actually provided.
+    // Trailing defaulted parameters may be omitted at the call site.
+    if (arg_types->len > fn->params.len) {
         return false;
     }
 
@@ -7772,7 +7773,7 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
     };
 
     // Use visitor pattern to unify each parameter with its argument
-    for (size_t i = 0; i < fn->params.len; i++) {
+    for (size_t i = 0; i < arg_types->len; i++) {
         ChiType *param_type = fn->params[i];
         ChiType *arg_type = (*arg_types)[i];
 
