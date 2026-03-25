@@ -11,6 +11,10 @@ func add_offset(x: int, offset: int = 10 * 2) int {
     return x + offset;
 }
 
+func add_generic_offset<T>(x: T, offset: int = 3) int {
+    return offset;
+}
+
 struct Greeter {
     prefix: string;
 
@@ -43,6 +47,30 @@ struct GenericHolder<T: ops.Construct> {
     }
 }
 
+struct ScoreBox<T> {
+    value: T;
+
+    func score(x: int = 5) int {
+        return x;
+    }
+}
+
+struct DefaultPair<T: ops.Construct> {
+    value: T;
+    extra: int;
+
+    mut func new(value: T = {}, extra: int = 4) {
+        this.value = value;
+        this.extra = extra;
+    }
+}
+
+struct Util<T> {
+    static func score(x: int = 6) int {
+        return x;
+    }
+}
+
 func optional_trailing(x: int, label: ?string) {
     if label {
         printf("x={}, label={}\n", x, label);
@@ -59,6 +87,8 @@ func main() {
     format_number(42, 5, '0');
     printf("add_offset(5) = {}\n", add_offset(5));
     printf("add_offset(5, 100) = {}\n", add_offset(5, 100));
+    printf("add_generic_offset<int>(5) = {}\n", add_generic_offset<int>(5));
+    printf("add_generic_offset<int>(5, 8) = {}\n", add_generic_offset<int>(5, 8));
     var g1 = Greeter{};
     g1.say("World");
     g1.say("World", "?");
@@ -79,6 +109,15 @@ func main() {
     printf("direct: ({}, {})\n", c.x, c.y);
     var c2 = Configurable{x: 5};
     printf("partial: ({}, {})\n", c2.x, c2.y);
+    var sb = ScoreBox<int>{value: 1};
+    printf("method default: {}\n", sb.score());
+    printf("method explicit: {}\n", sb.score(9));
+    printf("static default: {}\n", Util<int>.score());
+    printf("static explicit: {}\n", Util<int>.score(10));
+    var dp = DefaultPair<int>{};
+    var dp2 = DefaultPair<int>{extra: 8};
+    printf("generic ctor direct: ({}, {})\n", dp.value, dp.extra);
+    printf("generic ctor partial: ({}, {})\n", dp2.value, dp2.extra);
 
     // Trailing ?T params auto-default to null
     println("\n-- Optional param defaults --");

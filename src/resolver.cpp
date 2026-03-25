@@ -8671,12 +8671,10 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     // Count required parameters (those without defaults, excluding variadic)
     size_t params_required = n_params - (fn->is_variadic ? 1 : 0);
     size_t max_args = params_required;
-    if (fn_decl && fn_decl->type == ast::NodeType::FnDef) {
-        auto *fn_proto_node = fn_decl->data.fn_def.fn_proto;
-        auto &fn_proto = fn_proto_node->data.fn_proto;
+    if (auto *fn_proto = get_decl_fn_proto(fn_decl)) {
         params_required = 0;
-        for (size_t i = 0; i < fn_proto.params.len; i++) {
-            auto param = fn_proto.params[i];
+        for (size_t i = 0; i < fn_proto->params.len; i++) {
+            auto param = fn_proto->params[i];
             if (!param->data.param_decl.effective_default_value() &&
                 !param->data.param_decl.is_variadic) {
                 params_required++;

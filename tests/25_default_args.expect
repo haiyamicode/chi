@@ -5,6 +5,8 @@ n=42, width=5, fill=' '
 n=42, width=5, fill='0'
 add_offset(5) = 25
 add_offset(5, 100) = 105
+add_generic_offset<int>(5) = 3
+add_generic_offset<int>(5, 8) = 8
 Hey World!
 Hey World?
 Hello Chi!
@@ -15,6 +17,12 @@ config: (10, 20)
 explicit: (1, 2)
 direct: (10, 20)
 partial: (5, 20)
+method default: 5
+method explicit: 9
+static default: 6
+static explicit: 10
+generic ctor direct: (0, 4)
+generic ctor partial: (0, 8)
 
 -- Optional param defaults --
 x=1, label=hi
