@@ -454,6 +454,7 @@ class Resolver {
     bool has_interface_impl(ChiTypeStruct *struct_type, string interface_id);
 
     string resolve_qualified_name(ast::Node *node);
+    string resolve_display_name(ast::Node *node);
 
     ChiType *to_value_type(ChiType *type);
 

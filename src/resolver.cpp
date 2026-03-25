@@ -5683,6 +5683,45 @@ string Resolver::resolve_qualified_name(ast::Node *node) {
     return node->name;
 }
 
+string Resolver::resolve_display_name(ast::Node *node) {
+    if (!node) {
+        return "<anon>";
+    }
+
+    switch (node->type) {
+    case NodeType::FnDef:
+        if (node->resolved_type && node->resolved_type->kind == TypeKind::Fn) {
+            auto container_ref = node->resolved_type->data.fn.container_ref;
+            if (container_ref) {
+                auto container = container_ref->get_elem();
+                return fmt::format("{}.{}", format_type_display(container), node->name);
+            }
+        }
+        return node->name;
+    case NodeType::GeneratedFn: {
+        auto &data = node->data.generated_fn;
+        auto base_name = resolve_display_name(data.original_fn);
+        if (!data.fn_subtype || data.fn_subtype->kind != TypeKind::Subtype) {
+            return base_name;
+        }
+
+        std::stringstream ss;
+        ss << base_name << "<";
+        auto &args = data.fn_subtype->data.subtype.args;
+        for (int i = 0; i < args.len; i++) {
+            ss << format_type_display(args[i]);
+            if (i < args.len - 1) {
+                ss << ", ";
+            }
+        }
+        ss << ">";
+        return ss.str();
+    }
+    default:
+        return node->name;
+    }
+}
+
 string Resolver::format_type(ChiType *type, bool for_display) {
     if (!type) {
         return "<invalid-type>";

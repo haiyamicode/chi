@@ -1158,7 +1158,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     }
 
     // debug info
-    auto name = fn->qualified_name;
+    auto name = get_resolver()->resolve_display_name(node);
     auto cu = get_module_cu(fn->node->module);
     assert(cu);
     auto dbg_builder = m_ctx->dbg_builder.get();

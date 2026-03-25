@@ -26,6 +26,21 @@ null
 === typed parse ===
 typed name=chi
 typed version=1.7
+=== typed parse jsonc ===
+jsonc name=chi
+jsonc numbers=[3, 5, 8]
+=== non-comment parse catch ===
+non-comment detail=syntax error
+non-comment line=2
+non-comment column=1
+non-comment offset=2
+non-comment error=JSON parse error: syntax error (line 2, column 1, offset 2)
+=== non-comment parse ===
+non-comment name=chi
+=== typed parse field error ===
+field detail=expected uint32, got string
+field path=version.major
+field error=JSON parse error: expected uint32, got string at path 'version.major'
 === parse_into ===
 name=chi
 version=1.7

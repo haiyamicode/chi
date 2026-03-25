@@ -1451,10 +1451,55 @@ static void create_cx_json_result(boost::json::value *data, void *result) {
     result_p->kind = (uint32_t)data->kind();
 }
 
-void cx_parse_json(CxString *str, void *result) {
+static void fill_cx_json_parse_error(CxString *input, size_t offset, const string &detail,
+                                     CxJsonParseError *error) {
+    if (!error) {
+        return;
+    }
+
+    error->has_location = true;
+    error->offset = (uint32_t)offset;
+    error->line = 1;
+    error->column = 1;
+
+    auto limit = std::min(offset, (size_t)input->size);
+    for (size_t i = 0; i < limit; i++) {
+        if (input->data[i] == '\n') {
+            error->line++;
+            error->column = 1;
+        } else {
+            error->column++;
+        }
+    }
+
+    cx_string_from_chars(detail.data(), (uint32_t)detail.size(), &error->detail);
+}
+
+bool cx_parse_json(CxString *str, bool allow_jsonc, void *result, CxJsonParseError *error) {
     string s(str->data, str->size);
-    auto value = boost::json::parse(s);
+    std::error_code ec;
+    boost::json::parse_options opts;
+    opts.allow_comments = allow_jsonc;
+    opts.allow_trailing_commas = allow_jsonc;
+
+    boost::json::stream_parser parser({}, opts);
+    auto consumed = parser.write(s.data(), s.size(), ec);
+    if (ec) {
+        fill_cx_json_parse_error(str, consumed, ec.message(), error);
+        return false;
+    }
+
+    if (!parser.done()) {
+        parser.finish(ec);
+        if (ec) {
+            fill_cx_json_parse_error(str, s.size(), ec.message(), error);
+            return false;
+        }
+    }
+
+    auto value = parser.release();
     create_cx_json_result(&value, result);
+    return true;
 }
 
 void cx_json_value_delete(void *data) { delete (boost::json::value *)data; }

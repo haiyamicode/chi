@@ -73,6 +73,14 @@ struct CxJsonValue {
     uint32_t kind;
 };
 
+struct CxJsonParseError {
+    CxString detail;
+    bool has_location;
+    uint32_t offset;
+    uint32_t line;
+    uint32_t column;
+};
+
 struct CxEnumValue {
     int32_t value;
     CxString *display_name;
@@ -157,7 +165,8 @@ CHI_RT_EXPORT uint64_t cx_meiyan(const void *key, int count);
 CHI_RT_EXPORT bool cx_string_eq(CxString *a, CxString *b);
 
 
-CHI_RT_EXPORT void cx_parse_json(CxString *str, void *result);
+CHI_RT_EXPORT bool cx_parse_json(CxString *str, bool allow_jsonc, void *result,
+                                 CxJsonParseError *error);
 CHI_RT_EXPORT void cx_json_value_delete(void *data);
 CHI_RT_EXPORT void cx_json_value_get(void *data, CxString *key, void *result);
 CHI_RT_EXPORT void cx_json_value_convert(void *data, uint32_t kind, void *result);

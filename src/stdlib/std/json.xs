@@ -2,8 +2,21 @@
 import "std/ops" as ops;
 import "std/reflect" as reflect;
 
+struct RawParseError {
+    detail: string = "";
+    has_location: bool = false;
+    offset: uint32 = 0;
+    line: uint32 = 0;
+    column: uint32 = 0;
+}
+
 extern "C" {
-    unsafe func cx_parse_json(str: *string, result: *void);
+    unsafe func cx_parse_json(
+        str: *string,
+        allow_jsonc: bool,
+        result: *void,
+        error: *RawParseError
+    ) bool;
     unsafe func cx_json_value_delete(data: *void);
     unsafe func cx_json_value_get(data: *void, key: *string, result: *void);
     unsafe func cx_json_value_convert(data: *void, kind: uint32, result: *void);
@@ -24,6 +37,41 @@ struct RawArray {
 
 struct RawOptional {
     has_value: bool = false;
+}
+
+export struct ParseOptions {
+    jsonc: bool = true;
+}
+
+export struct ParseLocation {
+    offset: uint32 = 0;
+    line: uint32 = 0;
+    column: uint32 = 0;
+}
+
+export struct ParseError {
+    detail: string = "";
+    path: ?string = null;
+    location: ?ParseLocation = null;
+
+    impl Error {
+        func message() string {
+            var result = stringf("JSON parse error: {}", this.detail);
+            if let path = this.path {
+                result = stringf("{} at path '{}'", result, path);
+            }
+            if let location = this.location {
+                result = stringf(
+                    "{} (line {}, column {}, offset {})",
+                    result,
+                    location.line,
+                    location.column,
+                    location.offset
+                );
+            }
+            return result;
+        }
+    }
 }
 
 export enum ValueKind {
@@ -77,7 +125,11 @@ export struct Value {
 
     func assert_kind(kind: ValueKind) {
         if this.kind != kind {
-            panic(stringf("expected {}, got {}", kind, this.kind));
+            throw new ParseError{
+                detail: stringf("expected {}, got {}", kind, this.kind),
+                path: null,
+                location: null
+            };
         }
     }
 
@@ -199,18 +251,35 @@ export struct Value {
     }
 }
 
-export func parse_raw(str: string) Value {
+export func parse_raw(str: string, options: ?ParseOptions) Value {
     let result = Value{};
+    let parse_options = options ?? {};
+    var error = RawParseError{};
+    var ok = false;
     unsafe {
-        cx_parse_json(&str, &result);
+        ok = cx_parse_json(&str, parse_options.jsonc, &result, &error);
+    }
+    if !ok {
+        let location = if error.has_location => (ParseLocation{
+            offset: error.offset,
+            line: error.line,
+            column: error.column
+        } as ?ParseLocation) else => null;
+        throw new ParseError{
+            detail: move error.detail,
+            path: null,
+            :location
+        };
     }
     return result;
 }
 
 func json_type_error(path: string, ty: reflect.Type, value: Value) never {
-    panic(
-        stringf("std/json.parse_into: field '{}' expects {}, got {}", path, ty.name(), value.kind)
-    );
+    throw new ParseError{
+        detail: stringf("expected {}, got {}", ty.name(), value.kind),
+        path: move path,
+        location: null
+    };
 }
 
 unsafe func json_write_value<T>(dest: *void, value: T) {
@@ -260,7 +329,7 @@ unsafe func json_assign_int(path: string, value: Value, ty: reflect.Type, dest: 
         } else if bits == 64 {
             json_write_uint64(dest, raw);
         } else {
-            panic(stringf("std/json.parse_into: unsupported unsigned integer width {}", bits));
+            panic(stringf("unsupported unsigned integer width {}", bits));
         }
         return;
     }
@@ -283,7 +352,7 @@ unsafe func json_assign_int(path: string, value: Value, ty: reflect.Type, dest: 
     } else if bits == 64 {
         json_write_int64(dest, raw);
     } else {
-        panic(stringf("std/json.parse_into: unsupported integer width {}", bits));
+        panic(stringf("unsupported integer width {}", bits));
     }
 }
 
@@ -304,7 +373,7 @@ unsafe func json_assign_float(path: string, value: Value, ty: reflect.Type, dest
     } else if ty.float_bits() == 64 {
         json_write_float64(dest, raw);
     } else {
-        panic(stringf("std/json.parse_into: unsupported float width {}", ty.float_bits()));
+        panic(stringf("unsupported float width {}", ty.float_bits()));
     }
 }
 
@@ -318,7 +387,7 @@ unsafe func json_assign_array(path: string, value: Value, ty: reflect.Type, dest
     if elem {
         elem_type = elem;
     } else {
-        panic(stringf("std/json.parse_into: array type '{}' has no element type", ty.name()));
+        panic(stringf("array type '{}' has no element type", ty.name()));
     }
 
     let existing = dest as *RawArray;
@@ -343,7 +412,7 @@ unsafe func json_assign_optional(path: string, value: Value, ty: reflect.Type, d
     if elem {
         elem_type = elem;
     } else {
-        panic(stringf("std/json.parse_into: optional type '{}' has no element type", ty.name()));
+        panic(stringf("optional type '{}' has no element type", ty.name()));
     }
 
     let optional = dest as *RawOptional;
@@ -423,25 +492,23 @@ unsafe func json_assign(path: string, value: Value, ty: reflect.Type, dest: *voi
             json_write_value(dest, raw as rune);
         },
         Float => json_assign_float(path, value, ty, dest),
-        else => panic(stringf("std/json.parse_into: unsupported type '{}'", ty.name()))
+        else => panic(stringf("unsupported type '{}'", ty.name()))
     }
 }
 
-export func parse_into<T>(str: string, dest: &T) {
-    let value = parse_raw(str);
+export func parse_into<T>(str: string, dest: &T, options: ?ParseOptions) {
+    let value = parse_raw(str, options);
     let dest_type = dest.(type);
     let elem = dest_type.elem();
     var struct_type: reflect.Type = undefined;
     if elem {
         struct_type = elem;
     } else {
-        panic("std/json.parse_into expects a reference destination");
+        panic("expected a reference destination");
     }
 
     if struct_type.kind() != reflect.Kind.Struct {
-        panic(
-            stringf("std/json.parse_into expects a struct destination, got {}", struct_type.name())
-        );
+        panic(stringf("expected a struct destination, got {}", struct_type.name()));
     }
 
     unsafe {
@@ -449,8 +516,8 @@ export func parse_into<T>(str: string, dest: &T) {
     }
 }
 
-export func parse<T: ops.Construct>(str: string) T {
+export func parse<T: ops.Construct>(str: string, options: ?ParseOptions) T {
     var result = T{};
-    parse_into(str, &result);
+    parse_into(str, &result, options);
     return result;
 }
