@@ -138,7 +138,7 @@ struct HoldsShared {
 
     mut func new(v: int) {
         println("HoldsShared.new");
-        this.data = {new RefCountedData{v}};
+        this.data = {new {v}};
         printf("  ref_count after construction: {}\n", this.data.ref_count());
     }
 }
@@ -247,7 +247,7 @@ struct HoldsOptionalShared {
 
     mut func new(v: int) {
         println("HoldsOptionalShared.new");
-        this.data! = {new OptionalData{v}};
+        this.data! = {new {v}};
         printf("  ref_count: {}\n", this.data!.ref_count());
     }
 }
@@ -601,7 +601,7 @@ func test_method_param_cleanup() {
     // Rvalue to method: no caller-side copy, param still cleaned up
     println("--- rvalue to method ---");
     var t = TrackedVal{40};
-    var u = t.combine(TrackedVal{9});
+    var u = t.combine({9});
     printf("  u.id={}\n", u.id);
 
     println("--- scope exit ---");

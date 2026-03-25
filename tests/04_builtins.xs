@@ -209,25 +209,25 @@ struct MapTestPoint {
 func test_map_custom_key() {
     println("testing map custom key:");
     var m = Map<MapTestPoint, string>{};
-    m.set(MapTestPoint{1, 2}, "alpha");
-    m.set(MapTestPoint{3, 4}, "beta");
-    m.set(MapTestPoint{5, 6}, "gamma");
-    printf("m[(1,2)] = {}\n", m[MapTestPoint{1, 2}]);
-    printf("m[(3,4)] = {}\n", m[MapTestPoint{3, 4}]);
-    printf("m[(5,6)] = {}\n", m[MapTestPoint{5, 6}]);
+    m.set({1, 2}, "alpha");
+    m.set({3, 4}, "beta");
+    m.set({5, 6}, "gamma");
+    printf("m[(1,2)] = {}\n", m[{1, 2}]);
+    printf("m[(3,4)] = {}\n", m[{3, 4}]);
+    printf("m[(5,6)] = {}\n", m[{5, 6}]);
     // overwrite
-    m.set(MapTestPoint{1, 2}, "replaced");
-    printf("m[(1,2)] after overwrite = {}\n", m[MapTestPoint{1, 2}]);
+    m.set({1, 2}, "replaced");
+    printf("m[(1,2)] after overwrite = {}\n", m[{1, 2}]);
     // remove
-    m.remove(MapTestPoint{3, 4});
-    printf("m.get((3,4)) after remove = {}\n", m.get(MapTestPoint{3, 4}));
+    m.remove({3, 4});
+    printf("m.get((3,4)) after remove = {}\n", m.get({3, 4}));
     println("");
 }
 
 func test_map_lifecycle_helper() Map<string, TracedValue> {
     var m = Map<string, TracedValue>{};
-    m.set("a", TracedValue{id: 10});
-    m.set("b", TracedValue{id: 20});
+    m.set("a", {id: 10});
+    m.set("b", {id: 20});
     printf("m[\"a\"].id={}\n", m["a"].id);
     printf("m[\"b\"].id={}\n", m["b"].id);
     return m;

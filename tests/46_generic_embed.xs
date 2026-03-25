@@ -92,7 +92,7 @@ struct Wrapper {
 
 func main() {
     // --- Non-generic struct embedding concrete generic ---
-    var s = IntStack{items: Array<int>{}};
+    var s = IntStack{items: {}};
     s.push(10);
     s.push(20);
     s.push(30);
@@ -104,13 +104,13 @@ func main() {
     printf("IntStack after clear: {}\n", s.length);
 
     // --- Generic struct embedding generic ---
-    var vi = Vec<int>{data: Array<int>{}};
+    var vi = Vec<int>{data: {}};
     vi.push(1);
     vi.push(2);
     vi.push(3);
     printf("Vec<int> length: {}\n", vi.length);
 
-    var vs = Vec<string>{data: Array<string>{}};
+    var vs = Vec<string>{data: {}};
     vs.push("hello");
     vs.push("world");
     printf("Vec<string> length: {}\n", vs.length);
@@ -119,7 +119,7 @@ func main() {
     printf("Vec<string> after clear: {}\n", vs.length);
 
     // --- Method override: own add() uses promoted this.length to cap at max_size ---
-    var fv = FixedVec<int>{data: Array<int>{}, max_size: 2};
+    var fv = FixedVec<int>{data: {}, max_size: 2};
     fv.push(1);
     fv.push(2);
     fv.push(3); // capped
@@ -127,14 +127,14 @@ func main() {
     printf("FixedVec max_size: {}\n", fv.max_size);
 
     // --- Field override: own length field shadows promoted one ---
-    var cv = CountedVec<int>{data: Array<int>{}, length: 99};
+    var cv = CountedVec<int>{data: {}, length: 99};
     cv.data.push(1);
     cv.data.push(2);
     printf("CountedVec data.length: {}\n", cv.data.length);
     printf("CountedVec own length: {}\n", cv.length);
 
     // --- Chained generic embedding ---
-    var ds = DoubleStack<int>{inner: Stack<int>{data: Array<int>{}}};
+    var ds = DoubleStack<int>{inner: {data: {}}};
     ds.push(1);
     ds.push(2);
     ds.push(3);
@@ -143,7 +143,7 @@ func main() {
     printf("DoubleStack after clear: {}\n", ds.length);
 
     // --- Multi-type-param with two embeds ---
-    var p = Pair<int, string>{keys: Array<int>{}, values: Array<string>{}};
+    var p = Pair<int, string>{keys: {}, values: {}};
     p.keys.push(1);
     p.keys.push(2);
     p.values.push("a");
@@ -151,10 +151,10 @@ func main() {
     printf("Pair values length: {}\n", p.values.length);
 
     // --- Override with different signature when no interface is involved ---
-    var sw = SilentWrapper{inner: Barker{}};
+    var sw = SilentWrapper{inner: {}};
     sw.greet("hello");
 
     // --- Override invalidates embedded interface ---
-    var w = Wrapper{inner: Dog{}};
+    var w = Wrapper{inner: {}};
     w.greet(42);
 }

@@ -152,7 +152,7 @@ func main() {
     printf("\n");
     printf("\nTest 19: Array.map returning struct\n");
     var points = nums.map<Point>(func (n) {
-        return Point{n, n * 10};
+        return {n, n * 10};
     });
     printf("map to Points: ");
 

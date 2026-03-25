@@ -49,11 +49,13 @@ analyzer_test: build
 formatter_test: build
 	(cd tests; make formatter_test)
 	(cd tests; make formatter_collapse_test)
+	(cd tests; make formatter_semantic_collapse_test)
 
 test_all: build
 	(cd tests; make test)
 	(cd tests; make formatter_test)
 	(cd tests; make formatter_collapse_test)
+	(cd tests; make formatter_semantic_collapse_test)
 	(cd analyzer_tests; make test)
 
 clean:
@@ -88,6 +90,7 @@ format_all: build install
 	@find src/stdlib tests -type f \( -name "*.xs" -o -name "*.x" \) -print0 | while IFS= read -r -d '' file; do \
 		case "$$file" in \
 			tests/formatter_collapse.xs|\
+			tests/formatter_semantic_collapse.xs|\
 			tests/42_construct_expr.xs) \
 				echo "Skipping $$file (formatter test input)..."; \
 				continue; \

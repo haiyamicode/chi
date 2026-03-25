@@ -225,7 +225,7 @@ func test_tuple_enum() {
     var ok = TupleResult<int, string>.Ok{42};
     var ok2 = id_wrapbox<int>(ok);
     var ok3: TupleResult<int, string> = id_wrapbox<int>(ok2);
-    var typed_ok: TupleResult<int, string> = TupleResult<int, string>.Ok{99};
+    var typed_ok: TupleResult<int, string> = Ok{99};
     var err = TupleResult<int, string>.Err{"oops"};
     var add = IntExpr.Add{10, 20};
 
@@ -277,7 +277,7 @@ func test_enum_string_copy() {
 
 func test_enum_traced_copy() {
     println("=== Test: Enum traced copy ===");
-    var a = TaggedValue.Tracked{id: 1, trace: Traced{10}};
+    var a = TaggedValue.Tracked{id: 1, trace: {10}};
     printf("a.trace.id={}\n", a.trace.id);
     var b = a;
     printf("b.trace.id={}\n", b.trace.id);
@@ -286,8 +286,8 @@ func test_enum_traced_copy() {
 
 func test_enum_traced_reassign() {
     println("=== Test: Enum traced reassign ===");
-    var a = TaggedValue.Tracked{id: 1, trace: Traced{10}};
-    a = {id: 2, trace: Traced{20}};
+    var a = TaggedValue.Tracked{id: 1, trace: {10}};
+    a = {id: 2, trace: {20}};
     printf("a.trace.id={}\n", a.trace.id);
     println("--- scope exit ---");
 }
@@ -499,7 +499,7 @@ func test_enum_base_struct_lifecycle() {
 
     // Create: Traced in base struct is constructed
     println("-- create --");
-    var a = LifecycleEnum.Alpha{trace: Traced{1}};
+    var a = LifecycleEnum.Alpha{trace: {1}};
     printf("a.trace.id={}\n", a.trace.id);
 
     // Copy: base struct Traced is copied
@@ -509,12 +509,12 @@ func test_enum_base_struct_lifecycle() {
 
     // Reassign: old Traced destroyed, new one created
     println("-- reassign --");
-    a = {trace: Traced{2}};
+    a = {trace: {2}};
     printf("a.trace.id={}\n", a.trace.id);
 
     // Variant with extra data + base struct field
     println("-- variant with data --");
-    var c = LifecycleEnum.Beta{trace: Traced{3}, extra: 99};
+    var c = LifecycleEnum.Beta{trace: {3}, extra: 99};
     printf("c.trace.id={}, c.extra={}\n", c.trace.id, c.extra);
 
     // Copy variant with data
@@ -529,7 +529,7 @@ func test_enum_base_struct_lifecycle() {
 
 
 func make_traced_result() TracedResult<int, Traced> {
-    return TracedResult<int, Traced>.Err{Traced{11}};
+    return Err{{11}};
 }
 
 func test_generic_enum_lifecycle() {
@@ -539,13 +539,13 @@ func test_generic_enum_lifecycle() {
     println("-- err copy --");
     var forwarded: TracedResult<int, Traced> = err;
     println("-- err overwrite copy --");
-    forwarded = TracedResult<int, Traced>.Ok{123};
+    forwarded = Ok{123};
 
-    var ok = TracedResult<Traced, int>.Ok{Traced{22}};
+    var ok = TracedResult<Traced, int>.Ok{{22}};
     println("-- ok copy --");
     var ok_forwarded: TracedResult<Traced, int> = ok;
     println("-- ok overwrite copy --");
-    ok_forwarded = TracedResult<Traced, int>.Err{7};
+    ok_forwarded = Err{7};
 
     println("-- scope exit --");
 }

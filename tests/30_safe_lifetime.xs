@@ -192,7 +192,7 @@ func test_named_mutex_ref() {
 func test_mutex_array_ref_index() {
     printf("=== mutex array ref index ===\n");
     var items: Array<MutexElem> = [];
-    items.push(MutexElem{value: 9});
+    items.push({value: 9});
     let r = &mutex items;
     printf("item = {}\n", r[0].read());
 }
@@ -239,7 +239,7 @@ func first_inner(h: &ThisLifetimeHolder) &ThisLifetimeInner {
 
 func test_field_borrow_not_this() {
     printf("=== field borrow not this ===\n");
-    let holder = ThisLifetimeHolder{inner: ThisLifetimeInner{value: 17}};
+    let holder = ThisLifetimeHolder{inner: {value: 17}};
     let inner = first_inner(&holder);
     printf("inner = {}\n", inner.plain());
 }
@@ -265,7 +265,7 @@ func make_variant_ref(x: &int) VariantRefValue {
 }
 
 func make_generic_variant_ref(x: &int) GenericVariantRef<&int> {
-    return GenericVariantRef<&int>.Item{x};
+    return Item{x};
 }
 
 func make_base_ref_value(x: &int) BaseRefValue {
@@ -545,7 +545,7 @@ func identity_optional_ref(x: ?(&OptionalHolder)) ?(&OptionalHolder) {
 func test_optional_method_ref_return() {
     printf("=== optional method ref ===\n");
     var h = OptionalHolder{};
-    h.children.push(OptionalHolder{value: 88});
+    h.children.push({value: 88});
     let child = h.maybe_first_ref()!;
     printf("optional method ref = {}\n", child.value);
     let same = identity_optional_ref(child)!;
@@ -572,7 +572,7 @@ struct NestedCommand {
 func test_local_field_assign_does_not_leak_this() {
     printf("=== local field assign no this leak ===\n");
     var cmd = NestedCommand{name: "root"};
-    cmd.commands.push(NestedCommand{name: "child"});
+    cmd.commands.push({name: "child"});
     let subcommand = &cmd.commands[0];
     var child_matches = NestedMatches{};
     child_matches.command = subcommand.name;
@@ -915,7 +915,7 @@ struct ArrayElem {
 func test_array_elem_method_ok() {
     printf("=== array elem method ok ===\n");
     var items: Array<ArrayElem> = [];
-    items.push(ArrayElem{value: 1});
+    items.push({value: 1});
     items[0].bump();
     printf("item = {}\n", items[0].read());
 }

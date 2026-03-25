@@ -47,7 +47,7 @@ async func double_it(value: int) Promise<int> {
 
 async func trace_value_after_delay(value: int) Promise<TraceStressValue> {
     var y = await time.sleep(1);
-    return TraceStressValue{:value};
+    return {:value};
 }
 
 async func trace_throw_after_delay() Promise<int> {

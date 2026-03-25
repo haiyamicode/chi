@@ -2862,14 +2862,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     is_contextual = true;
                 } else if (data.type->type == NodeType::DotExpr) {
                     auto *resolved_decl = data.type->data.dot_expr.resolved_decl;
+                    auto *resolved_member =
+                        (result_type && result_type->eval() &&
+                         result_type->eval()->kind == TypeKind::EnumValue)
+                            ? result_type->eval()->data.enum_value.member
+                            : nullptr;
                     if (resolved_decl && resolved_decl->type == NodeType::EnumVariant) {
+                        resolved_member = resolved_decl->data.enum_variant.resolved_enum_variant;
+                    }
+                    if (resolved_member) {
                         auto *expected_variant =
                             find_expected_enum_variant(data.type->data.dot_expr.field->str, dest_type);
-                        if (expected_variant ==
-                            resolved_decl->data.enum_variant.resolved_enum_variant) {
+                        auto *result_enum_root = get_enum_root(result_type);
+                        auto *dest_enum_root = get_enum_root(dest_type);
+                        bool same_variant = expected_variant && resolved_member &&
+                                            expected_variant->name == resolved_member->name &&
+                                            result_enum_root && dest_enum_root &&
+                                            result_enum_root == dest_enum_root;
+                        if (same_variant) {
                             is_contextual = true;
                             data.resolved_type_is_ambiguous = is_contextual_resolution_ambiguous(
-                                data.type->data.dot_expr.field->str, resolved_decl, scope);
+                                data.type->data.dot_expr.field->str, resolved_member->node, scope);
                         }
                     }
                 }
@@ -2959,9 +2972,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 error(node, "too many items for [{}]{}: got {}, max {}", fa_size,
                       format_type_display(elem_type), data.items.len, fa_size);
             }
-            auto item_scope = scope.set_value_type(elem_type);
-            item_scope.move_outlet = nullptr; // Items need separate temporaries
             for (auto item : data.items) {
+                auto item_scope = scope.set_value_type(elem_type);
+                item_scope.move_outlet = nullptr; // Items need separate temporaries
                 auto item_type = resolve(item, item_scope);
                 if (item_type) {
                     check_assignment(item, item_type, elem_type, &scope);

@@ -169,7 +169,7 @@ export struct File {
     private handle: Shared<FileHandle>;
 
     private mut func new(fd: int32, path: string) {
-        this.handle = {new FileHandle{fd, move path}};
+        this.handle = {new {fd, move path}};
     }
 
     static func open(path: string, mode: OpenMode = OpenMode.Read) File {

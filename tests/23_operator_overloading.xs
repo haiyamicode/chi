@@ -179,26 +179,26 @@ func test_all_operators() {
 
     println("=== Compound assignments ===");
     var h = Vec2{x: 10, y: 20};
-    h += Vec2{x: 5, y: 5};
+    h += {x: 5, y: 5};
     printf("+=: {}\n", h);
-    h -= Vec2{x: 3, y: 3};
+    h -= {x: 3, y: 3};
     printf("-=: {}\n", h);
-    h *= Vec2{x: 2, y: 2};
+    h *= {x: 2, y: 2};
     printf("*=: {}\n", h);
-    h /= Vec2{x: 3, y: 11};
+    h /= {x: 3, y: 11};
     printf("/=: {}\n", h);
-    h %= Vec2{x: 3, y: 4};
+    h %= {x: 3, y: 4};
     printf("%=: {}\n", h);
-    h &= Vec2{x: 255, y: 255};
+    h &= {x: 255, y: 255};
     printf("&=: {}\n", h);
-    h |= Vec2{x: 16, y: 32};
+    h |= {x: 16, y: 32};
     printf("|=: {}\n", h);
-    h ^= Vec2{x: 255, y: 255};
+    h ^= {x: 255, y: 255};
     printf("^=: {}\n", h);
     var i = Vec2{x: 1, y: 2};
-    i <<= Vec2{x: 4, y: 3};
+    i <<= {x: 4, y: 3};
     printf("<<=: {}\n", i);
-    i >>= Vec2{x: 2, y: 1};
+    i >>= {x: 2, y: 1};
     printf(">>=: {}\n", i);
 
     println("=== Generic with Sub ===");
@@ -242,7 +242,7 @@ func main() {
     printf("int: 10 + 15 = {}\n", result2);
 
     // Box auto-deref
-    var b = Box<Point>{new Point{7, 8}};
+    var b = Box<Point>{new {7, 8}};
     printf("box deref: ({}, {})\n", b.x, b.y);
     b.x = 50;
     b.y = 60;

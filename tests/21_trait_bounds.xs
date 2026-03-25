@@ -220,18 +220,18 @@ func main() {
     printf("Different type, same interface: {}\n", num_container.show_container());
 
     printf("\n-- Where block --\n");
-    var sb1 = ShowBox<Point>{item: Point{x: 3, y: 4}};
+    var sb1 = ShowBox<Point>{item: {x: 3, y: 4}};
     printf("show_item: {}\n", sb1.show_item());
     printf("get point: ({}, {})\n", sb1.get().x, sb1.get().y);
     var sb2 = ShowBox<int>{item: 99};
     printf("get int: {}\n", sb2.get());
-    var sb3 = ShowBox<Number>{item: Number{value: 7}};
+    var sb3 = ShowBox<Number>{item: {value: 7}};
     printf("show_item Number: {}\n", sb3.show_item());
-    var wp = WherePair<Point, Number>{first: Point{x: 5, y: 6}, second: Number{value: 8}};
+    var wp = WherePair<Point, Number>{first: {x: 5, y: 6}, second: {value: 8}};
     printf("multi where: {}\n", wp.show_both());
-    var wp2 = WherePair<int, Number>{first: 10, second: Number{value: 9}};
+    var wp2 = WherePair<int, Number>{first: 10, second: {value: 9}};
     printf("partial get_first: {}\n", wp2.get_first());
-    var iwb = ImplWhereBox<Point>{item: Point{x: 7, y: 8}};
+    var iwb = ImplWhereBox<Point>{item: {x: 7, y: 8}};
     printf("impl where show: {}\n", iwb.show_item());
     var iwb2 = ImplWhereBox<int>{item: 55};
     printf("impl where get: {}\n", iwb2.get());
@@ -243,7 +243,7 @@ func main() {
     printf("string: {}\n", sized_identity("hello"));
     printf("bool: {}\n", sized_identity(true));
     printf("float: {}\n", sized_identity(3.14));
-    var sp: Point = sized_identity(Point{x: 5, y: 10});
+    var sp: Point = sized_identity({x: 5, y: 10});
     printf("struct: ({}, {})\n", sp.x, sp.y);
     var sb = SizedBox<int>{value: 99};
     printf("SizedBox<int>: {}\n", sb.get());
@@ -288,7 +288,7 @@ func main() {
     printf("default ctor via generic: {}\n", cb6.get().x);
 
     // Explicit args still work alongside Construct bound
-    var cb7 = ConstructBox<DefaultCtor>{item: DefaultCtor{x: 100}};
+    var cb7 = ConstructBox<DefaultCtor>{item: {x: 100}};
     printf("explicit ctor: {}\n", cb7.get().x);
 
     printf("\n-- Custom constructor interface --\n");
@@ -315,7 +315,7 @@ func main() {
     printf("return: {}\n", h3.value);
 
     // Allowed: pass temporary to function (not addressable)
-    consume_handle(NoCopyHandle{value: 99});
+    consume_handle({value: 99});
 
     // Allowed: pass via move to function
     consume_handle(move (h2));
@@ -343,7 +343,7 @@ func main() {
     printf("shared copy deref: {}\n", shared_pt.show());
 
     // Auto-deref through Box: method calls
-    var boxed_pt = Box<Point>.from_value(Point{x: 55, y: 66});
+    var boxed_pt = Box<Point>.from_value({x: 55, y: 66});
     printf("box deref method: {}\n", boxed_pt.show());
 
     // Auto-deref through Box: field access

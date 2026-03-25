@@ -200,7 +200,7 @@ func narrow_reassign() {
     var x: ?Traced = Traced{10};
     if x {
         printf("  before: {}\n", x.id);
-        x = Traced{20};
+        x = {20};
         printf("  after: {}\n", x.id);
     }
 }
@@ -221,7 +221,7 @@ func narrow_guard_reassign() {
         return;
     }
     printf("  before: {}\n", x.id);
-    x = Traced{300};
+    x = {300};
     printf("  after: {}\n", x.id);
 }
 
@@ -230,7 +230,7 @@ func narrow_assert_reassign() {
     var x: ?Traced = Traced{400};
     assert(x);
     printf("  before: {}\n", x.id);
-    x = Traced{500};
+    x = {500};
     printf("  after: {}\n", x.id);
 }
 

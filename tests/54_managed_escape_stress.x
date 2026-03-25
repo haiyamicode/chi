@@ -94,7 +94,7 @@ func make_nested_returned_lambda() (func () int) {
 
 func make_nested_holder() NestedHolder {
     var obj = GCThing{300};
-    return {slot: RefSlot{&obj}};
+    return {slot: {&obj}};
 }
 
 func make_optional_slot(flag: bool) ?RefSlot {

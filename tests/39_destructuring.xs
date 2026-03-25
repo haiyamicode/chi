@@ -102,7 +102,7 @@ func test_rename() {
 // === Nested destructuring ===
 
 func test_nested() {
-    var w = Wrapper{inner: Point{x: 3, y: 4}, label: "hello"};
+    var w = Wrapper{inner: {x: 3, y: 4}, label: "hello"};
     var {inner: {x, y}, label} = w;
     printf("x={} y={} label={}\n", x, y, label);
 }
@@ -110,7 +110,7 @@ func test_nested() {
 // === Deep nested destructuring ===
 
 func test_deep_nested() {
-    var d = Deep{wrapper: Wrapper{inner: Point{x: 5, y: 6}, label: "deep"}, id: 42};
+    var d = Deep{wrapper: {inner: {x: 5, y: 6}, label: "deep"}, id: 42};
     var {wrapper: {inner: {x, y}, label}, id} = d;
     printf("x={} y={} label={} id={}\n", x, y, label, id);
 }
@@ -174,7 +174,7 @@ func test_let_destructure() {
 // === Lifecycle: destructure from variable (scoped) ===
 
 func test_destructure_lifecycle() {
-    var pair = TracedPair{a: Traced{1}, b: Traced{2}};
+    var pair = TracedPair{a: {1}, b: {2}};
     println("before destructure");
     {
         var {a, b} = pair;
@@ -189,9 +189,9 @@ func test_destructure_lifecycle() {
 // === Lifecycle: spread with traced fields ===
 
 func test_spread_lifecycle() {
-    var p1 = TracedPair{a: Traced{10}, b: Traced{20}};
+    var p1 = TracedPair{a: {10}, b: {20}};
     println("before spread");
-    var p2 = TracedPair{...p1, b: Traced{30}};
+    var p2 = TracedPair{...p1, b: {30}};
     printf("p1.a.id={} p1.b.id={}\n", p1.a.id, p1.b.id);
     printf("p2.a.id={} p2.b.id={}\n", p2.a.id, p2.b.id);
     println("func exit");
@@ -200,7 +200,7 @@ func test_spread_lifecycle() {
 // === Lifecycle: nested destructure with traced types ===
 
 func test_nested_destructure_lifecycle() {
-    var w = TracedWrapper{inner: TracedPair{a: Traced{100}, b: Traced{200}}, label: "test"};
+    var w = TracedWrapper{inner: {a: {100}, b: {200}}, label: "test"};
     println("before destructure");
     var {inner: {a, b}, label} = w;
     printf("a.id={} b.id={}\n", a.id, b.id);
@@ -211,7 +211,7 @@ func test_nested_destructure_lifecycle() {
 // === Lifecycle: destructure from construct expr (RVO) ===
 
 func test_destructure_from_temp() {
-    var {a, b} = TracedPair{a: Traced{40}, b: Traced{50}};
+    var {a, b} = TracedPair{a: {40}, b: {50}};
     printf("a.id={} b.id={}\n", a.id, b.id);
     println("func exit");
 }
@@ -219,7 +219,7 @@ func test_destructure_from_temp() {
 // === Lifecycle: spread full copy (no overrides) ===
 
 func test_spread_full_copy() {
-    var p1 = TracedPair{a: Traced{60}, b: Traced{70}};
+    var p1 = TracedPair{a: {60}, b: {70}};
     println("before spread");
     var p2 = TracedPair{...p1};
     printf("p1.a.id={} p1.b.id={}\n", p1.a.id, p1.b.id);
@@ -266,7 +266,7 @@ func test_cross_spread_override() {
 // === Cross-type spread: with traced fields (lifecycle) ===
 
 func test_cross_spread_lifecycle() {
-    var tb = TracedBase{t: Traced{99}, name: "base"};
+    var tb = TracedBase{t: {99}, name: "base"};
     println("before cross spread");
     var te = TracedExtended{...tb, extra: 42};
     printf("te.t.id={} te.name={} te.extra={}\n", te.t.id, te.name, te.extra);
@@ -306,7 +306,7 @@ func test_cross_spread_discard_override() {
 
 func test_cross_spread_discard_lifecycle() {
     var te = TracedExtended{
-        t: Traced{77},
+        t: {77},
         name: "big",
         extra: 42
     };

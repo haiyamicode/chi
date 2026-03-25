@@ -611,7 +611,7 @@ func test_while_loop_control() {
 // --- Await: for loop control flow ---
 
 struct AsyncIterNode<T: ops.Construct> {
-    value: T = T{};
+    value: T = {};
     next: ?*AsyncIterNode<T> = null;
 }
 
@@ -1027,7 +1027,7 @@ async func trace_async_throw_after_delay() Promise<int> {
 
 async func trace_async_value_after_delay(value: int) Promise<TraceAsyncValue> {
     var y = await time.sleep(215);
-    return TraceAsyncValue{:value};
+    return {:value};
 }
 
 async func trace_async_lifecycle_probe() Promise<int> {
@@ -1438,7 +1438,7 @@ func test_try_await() {
     try_await_typed_result_mismatch().catch(
         func (err: Shared<Error>) Result<int, Shared<Error>> {
             printf("try await typed mismatch: {}\n", err.message());
-            return Result<int, Shared<Error>>.Ok{-1};
+            return Ok{-1};
         }
     );
 
@@ -1723,7 +1723,7 @@ async func run_async_tail() Promise {
     let _typed_result_mismatch = await try_await_typed_result_mismatch().catch(
         func (err: Shared<Error>) Result<int, Shared<Error>> {
             printf("try await typed mismatch: {}\n", err.message());
-            return Result<int, Shared<Error>>.Ok{-1};
+            return Ok{-1};
         }
     );
     printf("try await typed catch err: {}\n", await try_await_typed_catch_err());

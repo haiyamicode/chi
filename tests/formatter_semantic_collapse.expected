@@ -22,36 +22,31 @@ struct PointWrap {
 }
 
 func accept_parse(value: Parse<int, string>) {}
+
 func accept_point(value: Point) {}
 
 func make_ok() Parse<int, string> {
-    return Parse<int, string>.Ok{1};
+    return Ok{1};
 }
 
 func make_point() Point {
-    return Point{1, 2};
+    return {1, 2};
 }
 
 func main() {
-    var direct: Parse<int, string> = Parse<int, string>.Ok{1};
-    var wrap = Wrap{result: Parse<int, string>.Error{"field"}};
-    accept_parse(Parse<int, string>.Ok{2});
-    var arr: Array<Parse<int, string>> = [
-        Parse<int, string>.Ok{3},
-        Parse<int, string>.Error{"array"}
-    ];
+    var direct: Parse<int, string> = Ok{1};
+    var wrap = Wrap{result: Error{"field"}};
+    accept_parse(Ok{2});
+    var arr: Array<Parse<int, string>> = [Ok{3}, Error{"array"}];
 
     var picked = switch direct {
         Ok => Parse<int, string>.Ok{10},
         Error => Parse<int, string>.Error{"bad"}
     };
 
-    var point: Point = Point{3, 4};
-    var point_wrap = PointWrap{point: Point{5, 6}};
-    accept_point(Point{7, 8});
-    var point_arr: Array<Point> = [
-        Point{9, 10},
-        Point{11, 12}
-    ];
+    var point = {3, 4};
+    var point_wrap = PointWrap{point: {5, 6}};
+    accept_point({7, 8});
+    var point_arr: Array<Point> = [{9, 10}, {11, 12}];
     var maybe_point: ?Point = Point{13, 14};
 }

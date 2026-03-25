@@ -89,7 +89,7 @@ func main() {
     printf("p2: ({}, {})\n", p2.first, p2.second);
 
     // Multi-param: partial application (pin first)
-    var p3: IntFirst<string> = Pair<int, string>{42, "answer"};
+    var p3 = IntFirst<string>{42, "answer"};
     printf("p3: {} = {}\n", p3.second, p3.first);
 
     // IntFirst<string> is interchangeable with Pair<int, string>
@@ -97,10 +97,10 @@ func main() {
     printf("p4: {} = {}\n", p4.second, p4.first);
 
     // Multi-param: partial application (pin second)
-    var p5: WithName<int> = Pair<int, string>{100, "score"};
+    var p5 = WithName<int>{100, "score"};
     printf("named: {}\n", format_named<int>(p5));
 
-    var p6: WithName<float> = Pair<float, string>{3.14, "pi"};
+    var p6 = WithName<float>{3.14, "pi"};
     printf("named: {}\n", format_named<float>(p6));
 
     // Partial application of Map (construct via typedef name)
@@ -117,7 +117,7 @@ func main() {
     // Nested generics
     var a1: Array<int> = [1, 2];
     var a2: Array<int> = [3, 4];
-    var ap: ArrayPair<int> = Pair<Array<int>, Array<int>>{a1, a2};
+    var ap = ArrayPair<int>{a1, a2};
     printf("ap.first: {}\n", ap.first);
     printf("ap.second: {}\n", ap.second);
 

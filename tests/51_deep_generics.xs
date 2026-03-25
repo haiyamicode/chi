@@ -7,11 +7,11 @@ struct DeepWrap<T> {
     value: Pair<T>;
 
     static func make(v: T) DeepWrap<T> {
-        return {value: Pair<T>{a: v}};
+        return {value: {a: v}};
     }
 
     func wrap() DeepWrap<Pair<T>> {
-        return {value: Pair<Pair<T>>{}};
+        return {value: {}};
     }
 }
 

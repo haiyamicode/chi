@@ -407,7 +407,7 @@ formatter_test:
 	@fail=0; \
 	for t in $(FORMAT_TESTS); do \
 		src=$$t.xs; [ -f $$src ] || src=$$t.x; \
-		$(CHIC) -f -c $$src > $(TMP).$$t.fmt 2>/dev/null; \
+		$(CHIC) -f --formatter-no-semantic -c $$src > $(TMP).$$t.fmt 2>/dev/null; \
 		if ! diff -q $$src $(TMP).$$t.fmt >/dev/null 2>&1; then \
 			echo "FAIL $$t (formatter output differs from source)"; \
 			diff -u $$src $(TMP).$$t.fmt | head -20; \
@@ -429,6 +429,18 @@ formatter_collapse_test:
 	fi; \
 	rm -f $(TMP).formatter_collapse.fmt; \
 	echo "formatter collapse test passed"
+
+formatter_semantic_collapse_test:
+	@echo "Formatter semantic collapse test..."
+	@$(CHIC) -f -c formatter_semantic_collapse.xs > $(TMP).formatter_semantic_collapse.fmt 2>/dev/null; \
+	if ! diff -q formatter_semantic_collapse.expected $(TMP).formatter_semantic_collapse.fmt >/dev/null 2>&1; then \
+		echo "FAIL formatter_semantic_collapse (output differs from expected)"; \
+		diff -u formatter_semantic_collapse.expected $(TMP).formatter_semantic_collapse.fmt; \
+		rm -f $(TMP).formatter_semantic_collapse.fmt; \
+		exit 1; \
+	fi; \
+	rm -f $(TMP).formatter_semantic_collapse.fmt; \
+	echo "formatter semantic collapse test passed"
 
 # Stress test: run all tests N times to catch non-deterministic bugs
 # Usage: make stress N=1000

@@ -72,7 +72,7 @@ func main() {
     var gh2 = GenericHolder<Configurable>{};
     printf("config: ({}, {})\n", gh2.get_item().x, gh2.get_item().y);
     // Explicit override still works
-    var gh3 = GenericHolder<Configurable>{item: Configurable{x: 1, y: 2}};
+    var gh3 = GenericHolder<Configurable>{item: {x: 1, y: 2}};
     printf("explicit: ({}, {})\n", gh3.get_item().x, gh3.get_item().y);
     // Multi-default-arg struct constructed directly
     var c = Configurable{};
