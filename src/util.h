@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <climits>
 #include <filesystem>
@@ -387,56 +388,103 @@ static inline bool match_glob_pattern(const string &pattern, const string &text)
     return *p == '\0';
 }
 
-// Glob pattern matching using std::filesystem and portable pattern matching
-// Supports patterns like "*.c", "dir/*.cpp", "**/*.h", etc.
+static inline string normalize_glob_path(string path) {
+    path = string_replace(std::move(path), "\\", "/");
+    while (path.rfind("./", 0) == 0) {
+        path = path.substr(2);
+    }
+    if (!path.empty() && path.back() == '/') {
+        path.pop_back();
+    }
+    return path;
+}
+
+static inline std::vector<string> split_glob_path(const string &path) {
+    std::vector<string> parts;
+    string current;
+    for (char ch : normalize_glob_path(path)) {
+        if (ch == '/') {
+            if (!current.empty()) {
+                parts.push_back(current);
+                current.clear();
+            }
+            continue;
+        }
+        current.push_back(ch);
+    }
+    if (!current.empty()) {
+        parts.push_back(current);
+    }
+    return parts;
+}
+
+static inline bool match_glob_path_segments(const std::vector<string> &pattern_parts,
+                                            size_t pattern_index,
+                                            const std::vector<string> &path_parts,
+                                            size_t path_index) {
+    while (pattern_index < pattern_parts.size()) {
+        if (pattern_parts[pattern_index] == "**") {
+            while (pattern_index + 1 < pattern_parts.size() &&
+                   pattern_parts[pattern_index + 1] == "**") {
+                pattern_index++;
+            }
+            if (pattern_index + 1 == pattern_parts.size()) {
+                return true;
+            }
+            for (size_t i = path_index; i <= path_parts.size(); i++) {
+                if (match_glob_path_segments(pattern_parts, pattern_index + 1, path_parts, i)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if (path_index >= path_parts.size() ||
+            !match_glob_pattern(pattern_parts[pattern_index], path_parts[path_index])) {
+            return false;
+        }
+
+        pattern_index++;
+        path_index++;
+    }
+
+    return path_index == path_parts.size();
+}
+
+static inline bool match_glob_path(const string &pattern, const string &path) {
+    auto pattern_parts = split_glob_path(pattern);
+    auto path_parts = split_glob_path(path);
+    return match_glob_path_segments(pattern_parts, 0, path_parts, 0);
+}
+
+// Glob pattern matching using std::filesystem and portable pattern matching.
+// Supports patterns like "*.c", "dir/*.cpp", "assets/**/*.h", etc.
 static inline array<string> glob_files(const fs::path &base_path, const string &pattern) {
     array<string> matched_files;
+    std::error_code ec;
+    if (!fs::exists(base_path, ec) || ec || !fs::is_directory(base_path, ec) || ec) {
+        return matched_files;
+    }
 
-    // Check if this is a recursive pattern (**)
-    if (pattern.find("**") != string::npos) {
-        // Extract the filename pattern after **
-        size_t star_star_pos = pattern.find("**");
-        string filename_pattern = pattern.substr(star_star_pos + 2);
-
-        // Remove leading slash if present
-        if (!filename_pattern.empty() && filename_pattern[0] == '/') {
-            filename_pattern = filename_pattern.substr(1);
+    auto normalized_pattern = normalize_glob_path(pattern);
+    for (auto it = fs::recursive_directory_iterator(
+             base_path, fs::directory_options::skip_permission_denied, ec);
+         !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (!it->is_regular_file(ec) || ec) {
+            continue;
         }
 
-        // Use recursive_directory_iterator for ** patterns
-        for (auto &entry : fs::recursive_directory_iterator(
-                 base_path, fs::directory_options::skip_permission_denied)) {
-            if (entry.is_regular_file()) {
-                string filename = entry.path().filename().string();
-
-                // Use portable glob pattern matching
-                if (match_glob_pattern(filename_pattern, filename)) {
-                    matched_files.add(entry.path().string());
-                }
-            }
+        auto relative = fs::relative(it->path(), base_path, ec);
+        if (ec) {
+            continue;
         }
-    } else {
-        // Handle non-recursive patterns
-        fs::path pattern_path = base_path / pattern;
-        fs::path dir_path = pattern_path.parent_path();
-        string filename_pattern = pattern_path.filename().string();
 
-        if (fs::exists(dir_path) && fs::is_directory(dir_path)) {
-            // Use directory_iterator for non-recursive patterns
-            for (auto &entry :
-                 fs::directory_iterator(dir_path, fs::directory_options::skip_permission_denied)) {
-                if (entry.is_regular_file()) {
-                    string filename = entry.path().filename().string();
-
-                    // Use portable glob pattern matching
-                    if (match_glob_pattern(filename_pattern, filename)) {
-                        matched_files.add(entry.path().string());
-                    }
-                }
-            }
+        if (match_glob_path(normalized_pattern, relative.string())) {
+            matched_files.add(it->path().string());
         }
     }
 
+    std::sort(matched_files.begin(), matched_files.end());
     return matched_files;
 }
 

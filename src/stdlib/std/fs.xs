@@ -31,6 +31,7 @@ extern "C" {
     unsafe func __cx_copy_file(src: *byte, dest: *byte) int32;
     unsafe func __cx_mkdir(path: *byte) int32;
     unsafe func __cx_list_dir(path: *byte, result: *void) int32;
+    unsafe func __cx_glob(base: *byte, pattern: *byte, result: *void) int32;
     unsafe func __cx_uv_strerror(errnum: int32, result: *string);
 }
 
@@ -419,6 +420,19 @@ export func list_dir(path: string) Array<string> {
         let r = __cx_list_dir(cs.as_ptr(), &result);
         if r != 0 {
             throw_fs_error("list_dir", path, r);
+        }
+    }
+    return result;
+}
+
+export func glob(pattern: string, base: string = ".") Array<string> {
+    var result: Array<string> = [];
+    var base_cs = base.to_cstring();
+    var pattern_cs = pattern.to_cstring();
+    unsafe {
+        let r = __cx_glob(base_cs.as_ptr(), pattern_cs.as_ptr(), &result);
+        if r != 0 {
+            throw_fs_error("glob", filepath.join(base, pattern), r);
         }
     }
     return result;

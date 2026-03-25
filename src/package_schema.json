@@ -11,7 +11,7 @@
     },
     "include": {
       "type": "array",
-      "description": "Additional files or directories to include when installing package sources",
+      "description": "Additional files, directories, or glob patterns to include when installing package sources",
       "items": {
         "type": "string",
         "minLength": 1

@@ -76,6 +76,25 @@ func main() {
     println(fs.exists(copied_tree));
     fs.remove_all(source_tree);
 
+    println("=== fs.glob ===");
+    let glob_root = "/tmp/chi_fs_glob_test";
+    fs.remove_all(glob_root);
+    fs.mkdir_all(glob_root + "/nested");
+    fs.write_file(glob_root + "/a.txt", "a");
+    fs.write_file(glob_root + "/nested/b.txt", "b");
+    fs.write_file(glob_root + "/nested/c.h", "c");
+    let root_txt = fs.glob("*.txt", glob_root);
+    println(root_txt.length);
+    println(root_txt[0]);
+    let nested_txt = fs.glob("nested/*.txt", glob_root);
+    println(nested_txt.length);
+    println(nested_txt[0]);
+    let recursive_txt = fs.glob("**/*.txt", glob_root);
+    println(recursive_txt.length);
+    println(recursive_txt[0]);
+    println(recursive_txt[1]);
+    fs.remove_all(glob_root);
+
     println("=== File copy ===");
     fs.write_file(test_file, "shared handle");
     var f3 = fs.File.open(test_file);

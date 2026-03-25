@@ -15,6 +15,14 @@ false
 === fs.remove_all / copy_all ===
 copied
 false
+=== fs.glob ===
+1
+a.txt
+1
+nested/b.txt
+2
+a.txt
+nested/b.txt
 === File copy ===
 shared handle
 === fs.exists (nonexistent) ===

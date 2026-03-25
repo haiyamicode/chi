@@ -5,17 +5,17 @@ import "std/json" as json;
 import "std/os" as os;
 
 struct CliError {
-    text: string = "";
+    detail: string = "";
 
     impl Error {
         func message() string {
-            return this.text;
+            return this.detail;
         }
     }
 }
 
 func cli_error(message: string) never {
-    throw new CliError{text: move message};
+    throw new CliError{detail: move message};
 }
 
 func find_in_dir(dir: string, name: string) ?string {
@@ -222,12 +222,25 @@ func copy_filtered_source_tree(src_root: string, dest_root: string, relative: st
 func copy_included_path(root: string, dest: string, include_path: string) {
     let src_path = filepath.join(root, include_path);
     let dest_path = filepath.join(dest, include_path);
-    if fs.is_dir(src_path) {
-        fs.copy_all(src_path, dest_path);
+    if fs.exists(src_path) {
+        if fs.is_dir(src_path) {
+            fs.copy_all(src_path, dest_path);
+            return;
+        }
+
+        copy_source_file(src_path, dest_path);
         return;
     }
 
-    copy_source_file(src_path, dest_path);
+    let matches = try fs.glob(include_path, root) catch fs.FsError as err {
+        cli_error(err.message());
+    };
+    if matches.length == 0 {
+        return;
+    }
+    for match in matches {
+        copy_source_file(filepath.join(root, match), filepath.join(dest, match));
+    }
 }
 
 func copy_package_source(root: string, parent: string, dest: string, include_paths: Array<string>) {
@@ -252,9 +265,6 @@ func install_package_source(
     for include_path in include_paths {
         if !is_safe_package_relative_path(include_path) {
             cli_error("invalid package include path: " + include_path);
-        }
-        if !fs.exists(filepath.join(root, include_path)) {
-            cli_error("package include path does not exist: " + include_path);
         }
     }
 

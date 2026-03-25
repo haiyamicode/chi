@@ -28,6 +28,7 @@
 #include "internals.h"
 #include "format.h"
 #include "sema.h"
+#include "util.h"
 
 extern "C" {
 #include "include/hashdict/hashdict.h"
@@ -2023,6 +2024,33 @@ int32_t __cx_list_dir(const char *path, CxArray *result) {
         }
         uv_fs_req_cleanup(&req);
         return 0;
+    });
+}
+
+int32_t __cx_glob(const char *base, const char *pattern, CxArray *result) {
+    return run_on_main_uv_thread_sync([=]() -> int32_t {
+        try {
+            fs::path base_path(base);
+            if (!fs::exists(base_path)) {
+                return UV_ENOENT;
+            }
+            if (!fs::is_directory(base_path)) {
+                return UV_ENOTDIR;
+            }
+
+            auto matched = glob_files(base_path, pattern);
+            for (auto &match : matched) {
+                auto relative = fs::relative(fs::path(match), base_path);
+                auto relative_string = relative.string();
+                CxString s;
+                cx_string_from_chars(relative_string.c_str(), relative_string.size(), &s);
+                CxString *slot = (CxString *)cx_array_add(result, sizeof(CxString));
+                *slot = s;
+            }
+            return 0;
+        } catch (const fs::filesystem_error &err) {
+            return uv_translate_sys_error(err.code().value());
+        }
     });
 }
 }
