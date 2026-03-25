@@ -57,6 +57,11 @@ field destructure=(31, 32)
 test_if_let_zero:
 let zero=0
 if let zero expr=10
+if let alias return=a
+
+test_implicit_narrow:
+truthy return=hello
+guard return=world
 
 test_if_let_enum_pattern:
 enum tuple=42
@@ -65,4 +70,3 @@ enum expr=55
 enum miss=-1
 enum second struct=(5, 6)
 enum field=(7, 8)
-

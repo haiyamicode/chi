@@ -28,6 +28,10 @@ static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiT
 static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr);
 static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope);
 
+static bool is_nonowning_alias_decl(ast::Node *node) {
+    return node && node->type == NodeType::VarDecl && node->data.var_decl.narrowed_from;
+}
+
 // Check if a name matches a pattern (supports * wildcard)
 static bool matches_pattern(const std::string &name, const std::string &pattern) {
     size_t name_idx = 0;
@@ -1592,7 +1596,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             node->decl_order = scope.parent_fn_def()->next_decl_order++;
         }
         // Add to cleanup_vars on the current block
-        if (scope.parent_fn_node && scope.block && should_destroy(node, var_type) &&
+        if (scope.parent_fn_node && scope.block && !is_nonowning_alias_decl(node) &&
+            should_destroy(node, var_type) &&
             !node->escape.is_capture()) {
             scope.block->cleanup_vars.add(node);
             scope.parent_fn_def()->has_cleanup = true;
@@ -2070,8 +2075,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
+            auto *src_decl = find_root_decl(data.op1);
+            if (is_nonowning_alias_decl(src_decl)) {
+                error(node, "cannot move from non-owning alias '{}'", src_decl->name);
+            }
             if (scope.parent_fn_node && has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
-                auto *src_decl = find_root_decl(data.op1);
                 if (src_decl) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     if (fn_def.is_sunk(src_decl)) {
@@ -2086,8 +2094,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
+            auto *src_decl = find_root_decl(data.op1);
+            if (is_nonowning_alias_decl(src_decl)) {
+                error(node, "cannot move from non-owning alias '{}'", src_decl->name);
+            }
             if (scope.parent_fn_node) {
-                auto *src_decl = find_root_decl(data.op1);
                 if (src_decl) {
                     auto &fn_def = scope.parent_fn_node->data.fn_def;
                     if (has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) &&
@@ -2355,7 +2366,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     (decl->type == NodeType::VarDecl || decl->type == NodeType::ParamDecl)) {
                     bool is_field =
                         decl->type == NodeType::VarDecl && decl->data.var_decl.is_field;
-                    if (!is_field) {
+                    if (!is_field && !is_nonowning_alias_decl(decl)) {
                         auto *var_type = node_get_type(decl);
                         if (var_type && type_needs_destruction(var_type)) {
                             data.expr->escape.moved = true;
@@ -9640,6 +9651,17 @@ ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent
     var->data.var_decl.initialized_at = parent_stmt;
     var->data.var_decl.narrowed_from = expr_node;
     var->data.var_decl.kind = kind;
+    if (scope.parent_fn_node) {
+        var->decl_order = scope.parent_fn_def()->next_decl_order++;
+    }
+    if (scope.parent_fn_node && !scope.is_unsafe_block) {
+        auto &fn_def = scope.parent_fn_node->data.fn_def;
+        if (auto *root = find_root_decl(expr_node)) {
+            fn_def.add_ref_edge(var, root);
+        } else {
+            add_borrow_source_edges(fn_def, expr_node, var, false);
+        }
+    }
     return var;
 }
 
@@ -11376,6 +11398,10 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
     //   but doesn't depend on root itself (the data is copied out)
     auto *root = find_root_decl(expr);
     if (root) {
+        if (!is_ref && is_nonowning_alias_decl(root) &&
+            !type_may_propagate_borrow_deps(this, node_get_type(expr))) {
+            return;
+        }
         if (is_ref) {
             fn_def.add_ref_edge(target, root);
         } else {

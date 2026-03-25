@@ -146,6 +146,28 @@ func test_ref_to_param() {
     printf("ref = {}\n", *r);
 }
 
+func unwrap_optional_ref(x: ?&int) &int {
+    if let value = x {
+        return value;
+    }
+    panic("missing optional ref");
+}
+
+func wrap_and_unwrap_optional_ref(x: &int) &int {
+    var wrapped: ?&int = x;
+    if let value = wrapped {
+        return value;
+    }
+    panic("missing wrapped optional ref");
+}
+
+func test_optional_ref_if_let_return() {
+    printf("=== optional ref if let return ===\n");
+    var val = 66;
+    printf("direct = {}\n", *unwrap_optional_ref(&val));
+    printf("wrapped = {}\n", *wrap_and_unwrap_optional_ref(&val));
+}
+
 struct MutexBuf {
     value: int = 0;
 
@@ -1007,6 +1029,7 @@ func main() {
     test_chain();
     test_pair();
     test_ref_to_param();
+    test_optional_ref_if_let_return();
     test_mutex_field_method();
     test_named_mutex_ref();
     test_mutex_array_ref_index();

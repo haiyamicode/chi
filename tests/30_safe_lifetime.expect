@@ -10,6 +10,9 @@ chain = 99
 sum = 10
 === ref to param ===
 ref = 55
+=== optional ref if let return ===
+direct = 66
+wrapped = 66
 === mutex field method ===
 value = 1
 === named mutex ref ===

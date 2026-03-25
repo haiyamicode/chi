@@ -198,6 +198,35 @@ func maybe_point(has_value: bool) ?Point {
     return null;
 }
 
+func first_segment(path: string) ?string {
+    let entries = path.split(":");
+    for entry in entries {
+        return entry;
+    }
+    return null;
+}
+
+func take_first_segment(path: string) string {
+    if let segment = first_segment(path) {
+        return segment;
+    }
+    return "";
+}
+
+func take_present(value: ?string) string {
+    if value {
+        return value;
+    }
+    return "";
+}
+
+func take_present_after_guard(value: ?string) string {
+    if !value {
+        return "";
+    }
+    return value;
+}
+
 func test_if_let() {
     println("test_if_let:");
 
@@ -285,8 +314,6 @@ func test_if_let_enum_pattern() {
     if let Coord{x, y} = holder.value {
         printf("enum field=({}, {})\n", x, y);
     }
-
-    println("");
 }
 
 func test_if_let_zero() {
@@ -301,6 +328,16 @@ func test_if_let_zero() {
 
     var computed = if let value = zero => value + 10 else => -1;
     printf("if let zero expr={}\n", computed);
+    printf("if let alias return={}\n", take_first_segment("a:b:hello:c"));
+
+    println("");
+}
+
+func test_implicit_narrow() {
+    println("test_implicit_narrow:");
+
+    printf("truthy return={}\n", take_present("hello"));
+    printf("guard return={}\n", take_present_after_guard("world"));
 
     println("");
 }
@@ -315,5 +352,6 @@ func main() {
     test_optional_presence();
     test_if_let();
     test_if_let_zero();
+    test_implicit_narrow();
     test_if_let_enum_pattern();
 }
