@@ -22,6 +22,16 @@ struct OtherError {
     }
 }
 
+struct DetailedError {
+    line: ?int = null;
+
+    impl Error {
+        func message() string {
+            return "detail";
+        }
+    }
+}
+
 // --- Struct with destructor for testing cleanup during unwinding ---
 
 struct Resource {
@@ -71,6 +81,21 @@ func test_typed_catch() {
     // Catch specific error type with binding
     try fail_with("typed") catch MyError as err {
         printf("caught MyError: {}\n", err.message());
+    };
+}
+
+func fail_detailed() {
+    throw new DetailedError{line: 7};
+}
+
+func test_catch_binding_narrow() {
+    println("=== catch binding narrow ===");
+
+    try fail_detailed() catch DetailedError as err {
+        if let line = err.line {
+            printf("line = {}\n", line);
+        }
+        printf("detail = {}\n", err.message());
     };
 }
 
@@ -297,6 +322,7 @@ func test_catch_return() int {
 func main() {
     test_catch_all();
     test_typed_catch();
+    test_catch_binding_narrow();
     test_void_try();
     test_destructor_unwind();
     test_error_cleanup();

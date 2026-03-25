@@ -3,6 +3,9 @@ caught
 after success
 === typed catch ===
 caught MyError: typed
+=== catch binding narrow ===
+line = 7
+detail = detail
 === void try ===
 caught void
 void ok

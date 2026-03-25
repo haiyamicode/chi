@@ -2166,6 +2166,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.catch_err_var->parent_fn = scope.parent_fn_node;
                 data.catch_err_var->data.var_decl.is_generated = true;
                 data.catch_err_var->data.var_decl.initialized_at = node;
+                data.catch_err_var->decl_order = scope.parent_fn_def()->next_decl_order++;
                 auto &block_data = data.catch_block->data.block;
                 block_data.implicit_vars.add(data.catch_err_var);
                 block_data.scope->put(data.catch_err_var->name, data.catch_err_var);
