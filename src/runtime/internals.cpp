@@ -1737,8 +1737,8 @@ uint64_t __cx_time_monotonic(void) {
 }
 
 // std/fs helpers — minimal C primitives
-// Maps a libuv error code to a FsErrorKind enum value.
-// The enum order must match the Chi-side FsErrorKind enum.
+// Maps a libuv error code to a FileError kind value.
+// The enum order must match the Chi-side ErrorKind enum in std/fs.
 int32_t __cx_fs_error_kind(int32_t uv_err) {
     switch (uv_err) {
     case UV_ENOENT:    return 1; // NotFound

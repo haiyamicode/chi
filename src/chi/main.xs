@@ -155,7 +155,7 @@ struct InstallConfig {
 
 func parse_install_config(package_root: string) InstallConfig {
     let config_path = filepath.join(package_root, "package.jsonc");
-    let config_text = try fs.read_file(config_path) catch fs.FsError as err {
+    let config_text = try fs.read_file(config_path) catch fs.FileError as err {
         cli_error(err.message());
     };
     return try json.parse<InstallConfig>(config_text) catch json.ParseError as err {
@@ -232,7 +232,7 @@ func copy_included_path(root: string, dest: string, include_path: string) {
         return;
     }
 
-    let matches = try fs.glob(include_path, root) catch fs.FsError as err {
+    let matches = try fs.glob(include_path, root) catch fs.FileError as err {
         cli_error(err.message());
     };
     if matches.length == 0 {
@@ -268,7 +268,7 @@ func install_package_source(
         }
     }
 
-    try copy_package_source(root, parent, dest, include_paths) catch fs.FsError as err {
+    try copy_package_source(root, parent, dest, include_paths) catch fs.FileError as err {
         cli_error(err.message());
     };
 
@@ -276,7 +276,7 @@ func install_package_source(
     if normalized_working_dir.starts_with(root + filepath.separator_string()) {
         let relative = normalized_working_dir.byte_slice(root.byte_length() + 1, normalized_working_dir.byte_length());
         let nested = filepath.join(dest, relative);
-        try fs.remove_all(nested) catch fs.FsError as err {
+        try fs.remove_all(nested) catch fs.FileError as err {
             cli_error(err.message());
         };
     }
@@ -347,7 +347,7 @@ func run_build(match: &args.Matches) int32 {
 func run_install_inner(match: &args.Matches) int32 {
     let package_root = canonical_package_root(resolve_package_root(match));
     let bin_dir = resolve_install_dir();
-    try fs.mkdir_all(bin_dir) catch fs.FsError as err {
+    try fs.mkdir_all(bin_dir) catch fs.FileError as err {
         cli_error(err.message());
     };
 

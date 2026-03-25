@@ -62,7 +62,7 @@ func error_kind_from(uv_err: int32) ErrorKind {
     }
 }
 
-export struct FsError {
+export struct FileError {
     kind: ErrorKind = ErrorKind.Unknown;
     op: string = "";
     path: string = "";
@@ -77,7 +77,7 @@ export struct FsError {
 }
 
 func throw_fs_error(op: string, path: string, code: int32) never {
-    throw new FsError{
+    throw new FileError{
         kind: error_kind_from(code),
         :op,
         :path,
@@ -231,7 +231,7 @@ export struct FileAsync {
             };
             var reject = func [promise, path] (err: int32) {
                 promise.reject(
-                    new FsError{
+                    new FileError{
                         kind: error_kind_from(err),
                         op: "read",
                         :path,
@@ -262,7 +262,7 @@ export struct FileAsync {
             };
             var reject = func [promise, path] (err: int32) {
                 promise.reject(
-                    new FsError{
+                    new FileError{
                         kind: error_kind_from(err),
                         op: "write",
                         :path,

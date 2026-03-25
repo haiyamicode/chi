@@ -108,7 +108,7 @@ func main() {
     println(fs.exists("/tmp/chi_fs_stdlib_test_nonexistent_12345"));
 
     println("=== error: open nonexistent ===");
-    try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError as err {
+    try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FileError as err {
         printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
         printf("path: {}\n", err.path);
@@ -118,24 +118,24 @@ func main() {
     };
 
     println("=== error: remove nonexistent ===");
-    try fs.remove("/tmp/chi_no_such_file_12345") catch fs.FsError as err {
+    try fs.remove("/tmp/chi_no_such_file_12345") catch fs.FileError as err {
         printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
     };
 
     println("=== error: list_dir nonexistent ===");
-    try fs.list_dir("/tmp/chi_no_such_dir_12345") catch fs.FsError as err {
+    try fs.list_dir("/tmp/chi_no_such_dir_12345") catch fs.FileError as err {
         printf("kind: {}\n", err.kind);
         printf("op: {}\n", err.op);
     };
 
     println("=== error: result mode ===");
-    var result = try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FsError;
+    var result = try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FileError;
     switch result {
         Err(err) => {
             var e = err.as_ref();
             switch e.(type) {
-                &fs.FsError => {
+                &fs.FileError => {
                     printf("kind: {}\n", e.kind);
                     printf("op: {}\n", e.op);
                 },
