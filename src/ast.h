@@ -281,6 +281,12 @@ struct FnProto {
     ChiLifetime *resolved_return_lifetime = nullptr;
     array<int32_t> this_copy_edge_param_indices = {};
     array<int32_t> return_copy_edge_param_indices = {};
+    struct ProjectionCopySummary {
+        int32_t index = -1;
+        array<int32_t> param_indices = {};
+        bool from_this = false;
+    };
+    array<ProjectionCopySummary> return_projection_copy_summaries = {};
     bool return_copy_edge_from_this = false;
     bool copy_edge_summary_valid = false;
     array<Node *> requires_exclusive_capture_roots = {};

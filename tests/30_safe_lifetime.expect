@@ -128,6 +128,14 @@ Resource.delete(rho)
 after block
 === generic lifetime bound ===
 r = 42
+=== generic hidden ref bound ===
+wrapped = 77
+=== generic hidden ref identity ===
+wrapped = 99
+=== generic hidden ref tuple other field ok ===
+other = 7
+=== generic hidden ref struct other field ok ===
+left = 11
 === array elem method ok ===
 item = 2
 === generic receiver copy edge value ===
@@ -195,4 +203,8 @@ after try
 === try catch guard ===
 h alive: 1300
 Heavy.delete(1300)
+=== nested field projection copy ===
+inner = 77
+value = 77
+moved.other = 1
 Heavy.delete(20)

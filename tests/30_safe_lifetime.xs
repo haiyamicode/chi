@@ -915,11 +915,37 @@ func get_val_lt<'a, T: 'a>(val: T) T {
     return val;
 }
 
+func get_val<T>(val: T) T {
+    return val;
+}
+
 func test_generic_lifetime_bound() {
     printf("=== generic lifetime bound ===\n");
     var x = 42;
     var r = get_val_lt<&int>(&x);
     printf("r = {}\n", *r);
+}
+
+struct GenericHiddenRef<T> {
+    value: &T;
+
+    mut func new(v: &'this T) {
+        this.value = v;
+    }
+}
+
+func test_generic_hidden_ref_bound() {
+    printf("=== generic hidden ref bound ===\n");
+    var x = 77;
+    var wrapped = get_val_lt<GenericHiddenRef<int>>(GenericHiddenRef<int>{&x});
+    printf("wrapped = {}\n", *wrapped.value);
+}
+
+func test_generic_hidden_ref_identity() {
+    printf("=== generic hidden ref identity ===\n");
+    var x = 99;
+    var wrapped = get_val<GenericHiddenRef<int>>(GenericHiddenRef<int>{&x});
+    printf("wrapped = {}\n", *wrapped.value);
 }
 
 struct ArrayElem {
@@ -940,6 +966,37 @@ func test_array_elem_method_ok() {
     items.push({value: 1});
     items[0].bump();
     printf("item = {}\n", items[0].read());
+}
+
+func make_hidden_pair<'a, T: 'a>(value: T) Tuple<T, int> {
+    return (value, 7);
+}
+
+func test_generic_hidden_ref_tuple_other_field_ok() {
+    printf("=== generic hidden ref tuple other field ok ===\n");
+    var obj = ArrayElem{value: 88};
+    var pair = make_hidden_pair<GenericHiddenRef<ArrayElem>>(GenericHiddenRef<ArrayElem>{&obj});
+    var other = pair.1;
+    var moved = move obj;
+    printf("other = {}\n", other);
+}
+
+struct GenericHiddenPair<A, B> {
+    left: GenericHiddenRef<A>;
+    right: GenericHiddenRef<B>;
+}
+
+func test_generic_hidden_ref_struct_other_field_ok() {
+    printf("=== generic hidden ref struct other field ok ===\n");
+    var left_obj = ArrayElem{value: 11};
+    var right_obj = ArrayElem{value: 22};
+    var pair = GenericHiddenPair<ArrayElem, ArrayElem>{
+        left: GenericHiddenRef<ArrayElem>{&left_obj},
+        right: GenericHiddenRef<ArrayElem>{&right_obj}
+    };
+    var left = pair.left;
+    var moved = move right_obj;
+    printf("left = {}\n", left.value.value);
 }
 
 struct GenericValueHolder<T> {
@@ -1022,6 +1079,31 @@ func test_lambda_capture_maybe_move(flag: bool) {
     println("after lambda call");
 }
 
+struct NestedProjObj {
+    value: int = 0;
+}
+
+struct NestedProjRefBox {
+    value: &NestedProjObj;
+}
+
+struct NestedProjOuter {
+    inner: NestedProjRefBox;
+    other: int = 0;
+}
+
+func test_nested_field_projection_copy() {
+    println("=== nested field projection copy ===");
+    var obj = NestedProjObj{value: 77};
+    let outer = NestedProjOuter{inner: NestedProjRefBox{value: &obj}, other: 1};
+    let inner = outer.inner;
+    let value = outer.inner.value;
+    var moved = move outer;
+    printf("inner = {}\n", inner.value.value);
+    printf("value = {}\n", value.value);
+    printf("moved.other = {}\n", moved.other);
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -1068,6 +1150,10 @@ func main() {
     test_move_in_loop();
     test_move_ptr_block();
     test_generic_lifetime_bound();
+    test_generic_hidden_ref_bound();
+    test_generic_hidden_ref_identity();
+    test_generic_hidden_ref_tuple_other_field_ok();
+    test_generic_hidden_ref_struct_other_field_ok();
     test_array_elem_method_ok();
     test_generic_receiver_copy_edge_value();
     test_generic_receiver_copy_edge_ref();
@@ -1087,4 +1173,5 @@ func main() {
     test_switch_else_alive();
     test_try_catch_maybe_move();
     test_try_catch_guard();
+    test_nested_field_projection_copy();
 }

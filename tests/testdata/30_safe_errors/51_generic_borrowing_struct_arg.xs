@@ -1,5 +1,6 @@
-// Struct containing references as generic type argument is rejected in safe mode.
-// expect-error: cannot use borrowing type
+// Struct containing references as generic type argument is allowed, but escaping a local borrow
+// through it must still be rejected.
+// expect-error: does not live long enough
 
 struct Wrapper {
     ref: &int;
@@ -13,8 +14,12 @@ func identity<T>(val: T) T {
     return val;
 }
 
-func main() {
+func leak() Wrapper {
     var x = 42;
     var w = Wrapper{&x};
-    var w2 = identity<Wrapper>(w);
+    return identity<Wrapper>(w);
+}
+
+func main() {
+    let _ = leak();
 }

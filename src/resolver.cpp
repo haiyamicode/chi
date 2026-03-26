@@ -881,7 +881,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // - By-value captures: copy edges (lambda inherits the variable's
             //   borrow dependencies — e.g., a captured &T still borrows the pointee)
             if (scope.parent_fn_node) {
-                auto &parent_fn_def = scope.parent_fn_node->data.fn_def;
+                auto &parent_fn_def = *scope.parent_fn_def();
                 for (auto &cap : data.captures) {
                     if (cap.decl->parent_fn != scope.parent_fn_node)
                         continue;
@@ -1372,7 +1372,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Check use-after-move/delete via sink_edges (safe mode only)
         if (scope.parent_fn_node && !scope.is_lhs &&
             has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
-            auto &fn_def = scope.parent_fn_node->data.fn_def;
+            auto &fn_def = *scope.parent_fn_def();
             if (fn_def.is_sunk(data.decl)) {
                 auto *target = fn_def.flow.sink_target(data.decl);
                 bool is_delete = target && target->type == NodeType::PrefixExpr &&
@@ -1388,7 +1388,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Track last-use position for sink check (NLL-like)
         if (scope.parent_fn_node && node->token) {
-            auto &fn_def = scope.parent_fn_node->data.fn_def;
+            auto &fn_def = *scope.parent_fn_def();
             fn_def.flow.terminal_last_use[data.decl] = node->token->pos.offset;
             fn_def.flow.terminal_last_use_node[data.decl] = node;
         }
@@ -1481,8 +1481,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!scope.is_unsafe_block) {
                 bool is_ref =
                     expr_creates_direct_borrow(this, expr_node, expr_type, expr_type, &scope);
-                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, expr_node, temp_var,
-                                        is_ref);
+                auto &fn_def = *scope.parent_fn_def();
+                add_borrow_source_edges(fn_def, expr_node, temp_var, is_ref);
+                copy_projection_summaries(fn_def, expr_node, temp_var, expr_type);
             }
         }
 
@@ -1539,7 +1540,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto *target_type_for_borrows = var_type ? var_type : expr_type;
                 bool is_ref = expr_creates_direct_borrow(this, data.expr, expr_type,
                                                          target_type_for_borrows, &scope);
-                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, data.expr, node, is_ref);
+                auto &fn_def = *scope.parent_fn_def();
+                add_borrow_source_edges(fn_def, data.expr, node, is_ref);
+                copy_projection_summaries(fn_def, data.expr, node,
+                                          target_type_for_borrows);
             }
             // Move tracking: &move x sinks source into this variable
             track_move_sink(scope.parent_fn_node, data.expr, expr_type, node,
@@ -1661,11 +1665,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 bool is_new_expr = data.op2->type == NodeType::ConstructExpr &&
                                    data.op2->data.construct_expr.is_new;
                 if (lhs_decl && !scope.is_unsafe_block && !is_new_expr) {
-                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    auto &fn_def = *scope.parent_fn_def();
                     fn_def.bump_edge_offset(lhs_decl);
                     bool is_ref_target =
                         expr_creates_direct_borrow(this, data.op2, t2, t1, &scope);
                     add_borrow_source_edges(fn_def, data.op2, lhs_decl, is_ref_target);
+                    copy_projection_summaries(fn_def, data.op2, lhs_decl, t1);
                     if (fn_def.flow.ref_edges.has_key(lhs_decl)) {
                         fn_def.add_terminal(lhs_decl);
                         if (data.op1->type == NodeType::DotExpr) {
@@ -2055,7 +2060,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         if (resolved)
                             outlet = resolved;
                     }
-                    scope.parent_fn_node->data.fn_def.add_ref_edge(outlet, ref_target);
+                    scope.parent_fn_def()->add_ref_edge(outlet, ref_target);
                 }
             }
             if (scope.is_escaping) {
@@ -2081,7 +2086,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             if (scope.parent_fn_node && has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE)) {
                 if (src_decl) {
-                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    auto &fn_def = *scope.parent_fn_def();
                     if (fn_def.is_sunk(src_decl)) {
                         error(node, "'{}' used after move", src_decl->name);
                     }
@@ -2100,7 +2105,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             if (scope.parent_fn_node) {
                 if (src_decl) {
-                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    auto &fn_def = *scope.parent_fn_def();
                     if (has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) &&
                         fn_def.is_sunk(src_decl)) {
                         error(node, "'{}' used after move", src_decl->name);
@@ -2174,7 +2179,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             // Fork flow state for branch-aware analysis
             assert(scope.parent_fn_node);
-            auto *fn_def = &scope.parent_fn_node->data.fn_def;
+            auto *fn_def = scope.parent_fn_def();
             auto pre_catch = fn_def->flow.fork();
 
             resolve(data.catch_block, scope);
@@ -2380,7 +2385,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         if (data.expr && scope.parent_fn_node && expr_type && !scope.is_unsafe_block) {
-            auto &fn_def = scope.parent_fn_node->data.fn_def;
+            auto &fn_def = *scope.parent_fn_def();
             bool is_ref = expr_type->is_reference();
             add_borrow_source_edges(fn_def, data.expr, node, is_ref);
             if (fn_def.flow.ref_edges.has_key(node) || fn_def.flow.copy_edges.has_key(node)) {
@@ -2426,11 +2431,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::TupleExpr: {
         auto &data = node->data.tuple_expr;
+        if (scope.move_outlet) {
+            node->resolved_outlet = scope.move_outlet;
+        }
         TypeList elements;
-        for (auto item : data.items) {
+        auto *tuple_owner = scope.move_outlet ? scope.move_outlet : node;
+        for (int32_t i = 0; i < data.items.len; i++) {
+            auto *item = data.items[i];
             auto elem_type = resolve(item, scope);
             if (!elem_type) return nullptr;
             elements.add(elem_type);
+            if (scope.parent_fn_node && !scope.is_unsafe_block) {
+                auto &fn_def = *scope.parent_fn_def();
+                add_borrow_source_edges(fn_def, item, tuple_owner, false);
+                if (type_may_propagate_borrow_deps(this, elem_type)) {
+                    auto *projection = get_projection_node(tuple_owner, i, nullptr);
+                    add_borrow_source_edges(fn_def, item, projection, false);
+                    copy_projection_summaries(fn_def, item, projection, elem_type);
+                }
+            }
         }
         return get_tuple_type(elements);
     }
@@ -2657,6 +2676,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (*end == '\0' && idx >= 0 && idx < elems.len) {
                 data.resolved_value = idx;
                 data.resolved_dot_kind = DotKind::TupleField;
+                if (scope.parent_fn_node && !scope.is_unsafe_block &&
+                    type_may_propagate_borrow_deps(this, elems[idx])) {
+                    auto *projection_source = data.narrowed_var ? data.narrowed_var : data.expr;
+                    auto &fn_def = *scope.parent_fn_def();
+                    auto *projection = get_expr_projection_node(node);
+                    seed_projection_node(fn_def, projection_source, elems[idx], projection, idx,
+                                         nullptr);
+                    fn_def.copy_ref_edges(node, projection, false);
+                }
                 return elems[idx];
             }
             error(node, errors::MEMBER_NOT_FOUND, field_name, format_type_display(expr_type));
@@ -2814,6 +2842,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (data.is_optional_chain && !member->is_method()) {
             return get_wrapped_type(result_type, TypeKind::Optional);
+        }
+        if (scope.parent_fn_node && !scope.is_unsafe_block && !member->is_method() &&
+            type_may_propagate_borrow_deps(this, result_type)) {
+            auto *projection_source = data.narrowed_var ? data.narrowed_var : data.effective_expr();
+            auto &fn_def = *scope.parent_fn_def();
+            auto *projection = get_expr_projection_node(node);
+            seed_projection_node(fn_def, projection_source, result_type, projection, -1, member);
+            fn_def.copy_ref_edges(node, projection, false);
         }
         return result_type;
     }
@@ -3027,7 +3063,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             resolve_fn_call(node, scope, &list_init_fn, &data.items, list_init_member->node);
 
             if (scope.parent_fn_node && !scope.is_unsafe_block) {
-                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                auto &fn_def = *scope.parent_fn_def();
                 for (auto item : data.items) {
                     add_borrow_source_edges(fn_def, item, node, false);
                 }
@@ -3050,7 +3086,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // constructed value using the constructor's saved `this <- param`
             // summary. This handles generic/value params too.
             if (scope.parent_fn_node && !scope.is_unsafe_block) {
-                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                auto &fn_def = *scope.parent_fn_def();
                 auto *ctor_proto = get_decl_summary_proto(constructor->node);
                 assert(ctor_proto && "constructor summary proto missing");
                 if (ctor_proto->copy_edge_summary_valid) {
@@ -3097,8 +3133,15 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto item_type = resolve(item, item_scope, flags);
                     check_assignment(item, item_type, field->resolved_type, &scope);
                     if (scope.parent_fn_node && !scope.is_unsafe_block) {
-                        auto &fn_def = scope.parent_fn_node->data.fn_def;
-                        add_borrow_source_edges(fn_def, item, node, false);
+                        auto &fn_def = *scope.parent_fn_def();
+                        auto *construct_owner = scope.move_outlet ? scope.move_outlet : node;
+                        add_borrow_source_edges(fn_def, item, construct_owner, false);
+                        if (type_may_propagate_borrow_deps(this, field->resolved_type)) {
+                            auto *projection = get_projection_node(construct_owner, -1, field);
+                            add_borrow_source_edges(fn_def, item, projection, false);
+                            copy_projection_summaries(fn_def, item, projection,
+                                                      field->resolved_type);
+                        }
                     }
                 }
             } else if (result_type->kind == TypeKind::Optional) {
@@ -3170,8 +3213,35 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             if (scope.parent_fn_node && !scope.is_unsafe_block) {
                 auto outlet = scope.move_outlet ? scope.move_outlet : node;
-                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                auto &fn_def = *scope.parent_fn_def();
                 add_borrow_source_edges(fn_def, data.value, outlet, false);
+                if (type_may_propagate_borrow_deps(this, field_member->resolved_type)) {
+                    auto *projection = get_projection_node(outlet, -1, field_member);
+                    add_borrow_source_edges(fn_def, data.value, projection, false);
+                    copy_projection_summaries(fn_def, data.value, projection,
+                                              field_member->resolved_type);
+                }
+            }
+        }
+
+        if (scope.parent_fn_node && data.spread_expr && value_type &&
+            value_type->kind == TypeKind::Struct && !scope.is_unsafe_block) {
+            std::set<long> provided_fields;
+            for (auto *field_init : data.field_inits) {
+                auto *member = field_init->data.field_init_expr.resolved_field;
+                if (member && member->field_index >= 0) {
+                    provided_fields.insert(member->field_index);
+                }
+            }
+            auto &fn_def = *scope.parent_fn_def();
+            auto *construct_owner = scope.move_outlet ? scope.move_outlet : node;
+            for (auto *field : value_type->data.struct_.own_fields()) {
+                if (field->field_index < 0 || provided_fields.count(field->field_index) > 0 ||
+                    !type_may_propagate_borrow_deps(this, field->resolved_type)) {
+                    continue;
+                }
+                seed_projection_node(fn_def, data.spread_expr, field->resolved_type,
+                                     get_projection_node(construct_owner, -1, field), -1, field);
             }
         }
 
@@ -3203,7 +3273,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 // For 'a: 'b, each 'a source must outlive each 'b source.
                 // For 'a: 'this, each 'a source must outlive the struct instance.
                 // In LIFO order: 'a source must be declared before 'b source.
-                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                auto &fn_def = *scope.parent_fn_def();
                 for (auto *lt_a : st.lifetime_params) {
                     auto *a_sources = lt_to_sources.get(lt_a);
                     if (!a_sources) continue;
@@ -3291,7 +3361,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::FnCallExpr: {
         auto &data = node->data.fn_call_expr;
         if (scope.parent_fn_node && !scope.is_unsafe_block) {
-            scope.parent_fn_node->data.fn_def.call_sites.add(node);
+            scope.parent_fn_def()->call_sites.add(node);
         }
         auto fn_ref_scope = scope.set_is_lhs(false).set_is_fn_call(true);
         auto fn_type = resolve(data.fn_ref_expr, fn_ref_scope);
@@ -3327,7 +3397,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             scope.parent_fn_node) {
             auto *src_decl = find_root_decl(data.args[1]);
             if (src_decl) {
-                scope.parent_fn_node->data.fn_def.add_sink_edge(src_decl, node);
+                scope.parent_fn_def()->add_sink_edge(src_decl, node);
             }
         }
 
@@ -3339,7 +3409,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto *value_expr = unwrap_lifetime_copy_intrinsic_arg(data.args[1]);
             auto *owner_root = owner_expr ? find_root_decl(owner_expr) : nullptr;
             if (owner_root && value_expr) {
-                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, value_expr, owner_root,
+                add_borrow_source_edges(*scope.parent_fn_def(), value_expr, owner_root,
                                         false);
             }
         }
@@ -3350,7 +3420,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             ast::FnProto *callee_proto =
                 data.generated_fn ? get_decl_fn_proto(data.generated_fn) : get_decl_fn_proto(fn_decl);
             if (callee_proto) {
-                auto &fn_def = scope.parent_fn_node->data.fn_def;
+                auto &fn_def = *scope.parent_fn_def();
                 for (size_t i = 0; i < callee_proto->params.len && i < data.args.len; i++) {
                     auto *lt = callee_proto->params[i]->data.param_decl.borrow_lifetime;
                     if (lt && lt->kind == LifetimeKind::Static) {
@@ -3515,7 +3585,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Fork flow state for branch-aware analysis
         assert(scope.parent_fn_node);
-        auto *fn_def = &scope.parent_fn_node->data.fn_def;
+        auto *fn_def = scope.parent_fn_def();
         auto pre_branch = fn_def->flow.fork();
 
         auto then_type = resolve(data.then_block, scope);
@@ -3605,7 +3675,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Snapshot flow state and run lifetime checks at block exit
         assert(scope.parent_fn_node);
         auto snapshot_flow = [&]() {
-            auto &fn_def = scope.parent_fn_node->data.fn_def;
+            auto &fn_def = *scope.parent_fn_def();
             data.exit_flow = fn_def.flow.fork();
             check_lifetime_constraints(&fn_def, data.exit_flow);
         };
@@ -4868,7 +4938,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (scope.parent_fn_node) {
                 auto *deleted_decl = find_root_decl(data.expr);
                 if (deleted_decl) {
-                    auto &fn_def = scope.parent_fn_node->data.fn_def;
+                    auto &fn_def = *scope.parent_fn_def();
                     fn_def.add_sink_edge(deleted_decl, node);
                     // Propagate sink to the data this variable currently points to
                     auto *edges = fn_def.flow.ref_edges.get(deleted_decl);
@@ -5180,7 +5250,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
             // Fork flow state for branch-aware analysis
             assert(scope.parent_fn_node);
-            auto *fn_def = &scope.parent_fn_node->data.fn_def;
+            auto *fn_def = scope.parent_fn_def();
             auto pre_branch = fn_def->flow.fork();
 
             ChiType *ret_type = (scope.value_type && scope.value_type->kind != TypeKind::Any)
@@ -5286,7 +5356,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Fork flow state for branch-aware analysis
         assert(scope.parent_fn_node);
-        auto *fn_def = &scope.parent_fn_node->data.fn_def;
+        auto *fn_def = scope.parent_fn_def();
         auto pre_branch = fn_def->flow.fork();
 
         ChiType *ret_type = (scope.value_type && scope.value_type->kind != TypeKind::Any)
@@ -6474,6 +6544,16 @@ static void add_unique_int32(array<int32_t> &out, int32_t value) {
         out[i] = out[i - 1];
     }
     out[insert_at] = value;
+}
+
+static ast::FnProto::ProjectionCopySummary *find_projection_copy_summary(
+    array<ast::FnProto::ProjectionCopySummary> &items, int32_t index) {
+    for (size_t i = 0; i < items.len; i++) {
+        if (items[i].index == index) {
+            return &items[i];
+        }
+    }
+    return nullptr;
 }
 
 static void collect_copy_edge_reachable_params(ast::FlowState &flow, array<ast::Node *> &params,
@@ -8946,16 +9026,6 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 continue;
             auto type_arg = type_args[i];
 
-            // In safe mode, reject borrowing types (references, structs with ref fields)
-            // as generic type arguments — unless T has a lifetime bound (T: 'a)
-            if (type_arg && is_borrowing_type(type_arg) &&
-                has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE) &&
-                !lookup_key->data.placeholder.lifetime_bound) {
-                error(node, "cannot use borrowing type '{}' as type argument for '{}'",
-                      format_type_display(type_arg), lookup_key->name.value_or("T"));
-                return fn->return_type;
-            }
-
             for (auto trait : get_placeholder_traits(lookup_key)) {
                 if (!check_trait_bound(type_arg, trait)) {
                     error(node, "Type '{}' does not satisfy trait bound '{}'",
@@ -9077,7 +9147,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 arg->escape.moved = true;
                 // Sink the temp outlet so cleanup doesn't destroy it
                 if (arg->resolved_outlet && scope.parent_fn_node) {
-                    scope.parent_fn_node->data.fn_def.add_sink_edge(arg->resolved_outlet, node);
+                    scope.parent_fn_def()->add_sink_edge(arg->resolved_outlet, node);
                 }
             }
 
@@ -9088,7 +9158,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             }
         }
         if (scope.parent_fn_node && node->type == NodeType::FnCallExpr) {
-            apply_call_capture_move_effects(scope.parent_fn_node->data.fn_def,
+            apply_call_capture_move_effects(*scope.parent_fn_def(),
                                             node->data.fn_call_expr, node);
         }
     }
@@ -9387,7 +9457,11 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
         field_data.resolved_field = member;
 
         if (field_data.nested) {
-            resolve_destructure(field_data.nested, member->resolved_type, scope, borrow_source);
+            auto *source = borrow_source ? borrow_source : parent->data.destructure_decl.temp_var;
+            auto *nested_source =
+                get_projection_node(find_projection_owner(source), -1, member, false);
+            resolve_destructure(field_data.nested, member->resolved_type, scope,
+                               nested_source ? nested_source : source);
         } else {
             // Create a VarDecl for this binding
             auto binding_name = string(field_data.binding_name->str);
@@ -9420,7 +9494,9 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
                 bool is_ref = field_data.sigil == ast::SigilKind::Reference ||
                               field_data.sigil == ast::SigilKind::MutRef ||
                               field_data.sigil == ast::SigilKind::MutexRef;
-                add_borrow_source_edges(scope.parent_fn_node->data.fn_def, source, var, is_ref);
+                add_projection_source_edges(*scope.parent_fn_def(), source,
+                                            field_data.resolved_field->resolved_type, var, is_ref,
+                                            -1, field_data.resolved_field);
             }
 
             if (scope.parent_fn_node && scope.block && should_destroy(var, field_type) &&
@@ -9514,7 +9590,7 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
             bool is_ref = field_data.sigil == ast::SigilKind::Reference ||
                           field_data.sigil == ast::SigilKind::MutRef ||
                           field_data.sigil == ast::SigilKind::MutexRef;
-            add_borrow_source_edges(scope.parent_fn_node->data.fn_def, source, var, is_ref);
+            add_borrow_source_edges(*scope.parent_fn_def(), source, var, is_ref);
         }
 
         if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
@@ -9642,11 +9718,11 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
             scope.block->scope->put(binding_name, var);
         }
 
-        if (scope.parent_fn_node && !scope.is_unsafe_block && var->resolved_type &&
-            is_borrowing_type(var->resolved_type)) {
+        if (scope.parent_fn_node && !scope.is_unsafe_block) {
             auto *source = borrow_source ? borrow_source : parent->data.destructure_decl.temp_var;
             bool is_ref = var->resolved_type->is_reference();
-            add_borrow_source_edges(scope.parent_fn_node->data.fn_def, source, var, is_ref);
+            add_projection_source_edges(*scope.parent_fn_def(), source, elem_type, var,
+                                        is_ref, field_data.is_rest ? -1 : i, nullptr);
         }
 
         if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
@@ -9697,7 +9773,7 @@ ast::Node *Resolver::create_narrowed_var(ast::Node *expr_node, ast::Node *parent
         var->decl_order = scope.parent_fn_def()->next_decl_order++;
     }
     if (scope.parent_fn_node && !scope.is_unsafe_block) {
-        auto &fn_def = scope.parent_fn_node->data.fn_def;
+        auto &fn_def = *scope.parent_fn_def();
         if (auto *root = find_root_decl(expr_node)) {
             fn_def.add_ref_edge(var, root);
         } else {
@@ -10913,6 +10989,9 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
 
 ast::Node *Resolver::find_root_decl(ast::Node *node) {
     switch (node->type) {
+    case NodeType::VarDecl:
+    case NodeType::ParamDecl:
+        return node;
     case NodeType::Identifier: {
         if (node->data.identifier.kind != ast::IdentifierKind::Value) {
             return node;
@@ -10936,6 +11015,321 @@ ast::Node *Resolver::find_root_decl(ast::Node *node) {
     default:
         // Literals, casts, etc. — no root decl to track
         return nullptr;
+    }
+}
+
+ast::Node *Resolver::find_projection_owner(ast::Node *node) {
+    if (!node) {
+        return nullptr;
+    }
+    if (is_this_identifier_node(node) && node->parent_fn) {
+        return node->parent_fn;
+    }
+    if (auto *root = find_root_decl(node)) {
+        if (is_this_identifier_node(root) && root->parent_fn) {
+            return root->parent_fn;
+        }
+        return root;
+    }
+    if (node->resolved_outlet) {
+        return node->resolved_outlet;
+    }
+    return node;
+}
+
+ast::Node *Resolver::create_projection_node(ast::Node *owner, string name) {
+    auto *node = get_dummy_var(name);
+    node->module = owner->module;
+    node->parent_fn = owner->parent_fn;
+    node->token = owner->token;
+    node->name = std::move(name);
+    return node;
+}
+
+ast::Node *Resolver::get_expr_projection_node(ast::Node *expr, bool create) {
+    if (!expr || expr->type != NodeType::DotExpr) {
+        return nullptr;
+    }
+    auto &data = expr->data.dot_expr;
+    auto *projection_source = data.narrowed_var ? data.narrowed_var : data.effective_expr();
+    auto *owner = find_projection_owner(projection_source);
+    if (!owner) {
+        return nullptr;
+    }
+    auto *field_member =
+        data.resolved_struct_member && !data.resolved_struct_member->is_method()
+            ? data.resolved_struct_member
+            : nullptr;
+    auto tuple_index = data.resolved_dot_kind == DotKind::TupleField
+                           ? static_cast<int32_t>(data.resolved_value)
+                           : -1;
+    return get_projection_node(owner, tuple_index, field_member, create);
+}
+
+ast::Node *Resolver::get_projection_node(ast::Node *owner, int32_t tuple_index,
+                                         ChiStructMember *field_member, bool create) {
+    if (tuple_index >= 0) {
+        return get_tuple_projection_node(owner, tuple_index, create);
+    }
+    if (field_member) {
+        return get_field_projection_node(owner, field_member, create);
+    }
+    return nullptr;
+}
+
+ast::Node *Resolver::get_tuple_projection_node(ast::Node *owner, int32_t index, bool create) {
+    if (!owner || index < 0) {
+        return nullptr;
+    }
+    auto *items = m_tuple_projection_nodes.get(owner);
+    if (items) {
+        auto *existing = items->get(index);
+        if (existing) {
+            return *existing;
+        }
+    }
+    if (!create) {
+        return nullptr;
+    }
+    auto *node = create_projection_node(owner, fmt::format("__tuple_proj_{}", index));
+    m_tuple_projection_nodes[owner][index] = node;
+    return node;
+}
+
+ast::Node *Resolver::get_field_projection_node(ast::Node *owner, ChiStructMember *member,
+                                               bool create) {
+    if (!owner || !member || member->field_index < 0) {
+        return nullptr;
+    }
+    auto *items = m_field_projection_nodes.get(owner);
+    if (items) {
+        auto *existing = items->get(member);
+        if (existing) {
+            return *existing;
+        }
+    }
+    if (!create) {
+        return nullptr;
+    }
+    auto *node = create_projection_node(owner, fmt::format("__field_proj_{}", member->get_name()));
+    m_field_projection_nodes[owner][member] = node;
+    return node;
+}
+
+void Resolver::seed_projection_node(ast::FnDef &fn_def, ast::Node *source,
+                                    ChiType *projection_type, ast::Node *projection,
+                                    int32_t tuple_index, ChiStructMember *field_member) {
+    if (!projection) {
+        return;
+    }
+    add_projection_source_edges(fn_def, source, projection_type, projection, false, tuple_index,
+                                field_member);
+    copy_projection_summaries(fn_def, source, projection, projection_type);
+}
+
+void Resolver::add_projection_source_edges(ast::FnDef &fn_def, ast::Node *expr,
+                                           ChiType *projected_type, ast::Node *target, bool is_ref,
+                                           int32_t tuple_index,
+                                           ChiStructMember *field_member) {
+    if (!expr || !target) {
+        return;
+    }
+
+    switch (expr->type) {
+    case NodeType::ParenExpr:
+        add_projection_source_edges(fn_def, expr->data.child_expr, projected_type, target, is_ref,
+                                    tuple_index, field_member);
+        return;
+    case NodeType::TryExpr:
+        add_projection_source_edges(fn_def, expr->data.try_expr.expr, projected_type, target, is_ref,
+                                    tuple_index, field_member);
+        return;
+    case NodeType::CastExpr:
+        add_projection_source_edges(fn_def, expr->data.cast_expr.expr, projected_type, target,
+                                    is_ref, tuple_index, field_member);
+        return;
+    default:
+        break;
+    }
+
+    if (!is_ref && !type_may_propagate_borrow_deps(this, projected_type)) {
+        return;
+    }
+
+    if (expr->type == NodeType::DotExpr) {
+        auto *expr_projection = get_expr_projection_node(expr, false);
+        if (expr->data.dot_expr.resolved_dot_kind == DotKind::TupleField ||
+            (expr->data.dot_expr.resolved_struct_member &&
+             !expr->data.dot_expr.resolved_struct_member->is_method())) {
+            if (!expr_projection) {
+                auto &data = expr->data.dot_expr;
+                auto *projection_source = data.narrowed_var ? data.narrowed_var : data.effective_expr();
+                auto *projection_type = node_get_type(expr);
+                expr_projection = get_expr_projection_node(expr);
+                auto tuple_index = data.resolved_dot_kind == DotKind::TupleField
+                                       ? static_cast<int32_t>(data.resolved_value)
+                                       : -1;
+                auto *field_member =
+                    data.resolved_dot_kind == DotKind::TupleField ? nullptr : data.resolved_struct_member;
+                seed_projection_node(fn_def, projection_source, projection_type, expr_projection,
+                                     tuple_index, field_member);
+                fn_def.copy_ref_edges(expr, expr_projection, false);
+            }
+            assert(expr_projection && "missing projection node for projected dot expression");
+            auto *nested_projection =
+                get_projection_node(expr_projection, tuple_index, field_member, false);
+            assert(nested_projection && "missing nested projection summary");
+            if (is_ref) {
+                fn_def.add_ref_edge(target, nested_projection);
+            } else {
+                fn_def.copy_ref_edges(target, nested_projection, false);
+            }
+            return;
+        }
+    }
+
+    auto *owner = find_projection_owner(expr);
+    if (!is_ref && owner) {
+        auto *source_projection = get_projection_node(owner, tuple_index, field_member, false);
+        if (source_projection && source_projection != target) {
+            fn_def.copy_ref_edges(target, source_projection, false);
+            return;
+        }
+        if (source_projection == target &&
+            (fn_def.flow.ref_edges.has_key(source_projection) ||
+             fn_def.flow.copy_edges.has_key(source_projection))) {
+            return;
+        }
+    }
+
+    if (is_ref) {
+        if (auto *root = find_root_decl(expr)) {
+            fn_def.add_ref_edge(target, root);
+            return;
+        }
+        if (expr->resolved_outlet) {
+            fn_def.add_ref_edge(target, expr->resolved_outlet);
+            return;
+        }
+    }
+
+    switch (expr->type) {
+    case NodeType::TupleExpr: {
+        if (tuple_index < 0 || tuple_index >= expr->data.tuple_expr.items.len) {
+            return;
+        }
+        add_borrow_source_edges(fn_def, expr->data.tuple_expr.items[tuple_index], target, false);
+        return;
+    }
+    case NodeType::ConstructExpr: {
+        auto &data = expr->data.construct_expr;
+        if (field_member) {
+            for (auto *field_init : data.field_inits) {
+                auto &field_data = field_init->data.field_init_expr;
+                if (field_data.resolved_field == field_member) {
+                    add_borrow_source_edges(fn_def, field_data.value, target, false);
+                    return;
+                }
+            }
+
+            auto *value_type = to_value_type(node_get_type(expr));
+            auto payload_fields = value_type ? get_enum_payload_fields(value_type) : array<ChiStructMember *>{};
+            for (uint32_t i = 0; i < payload_fields.len && i < data.items.len; i++) {
+                if (payload_fields[i] == field_member) {
+                    add_borrow_source_edges(fn_def, data.items[i], target, false);
+                    return;
+                }
+            }
+
+            if (data.spread_expr) {
+                add_projection_source_edges(fn_def, data.spread_expr, projected_type, target, false,
+                                            tuple_index, field_member);
+                return;
+            }
+        }
+        return;
+    }
+    case NodeType::FnCallExpr: {
+        auto &call = expr->data.fn_call_expr;
+        auto *summary_proto = get_call_effect_proto(call);
+        if (summary_proto && summary_proto->copy_edge_summary_valid) {
+            int32_t summary_index = tuple_index >= 0
+                                        ? tuple_index
+                                        : field_member ? static_cast<int32_t>(field_member->field_index)
+                                                       : -1;
+            if (summary_index >= 0) {
+                auto *summary = find_projection_copy_summary(
+                    summary_proto->return_projection_copy_summaries, summary_index);
+                if (summary) {
+                    if (summary->from_this && call.fn_ref_expr->type == NodeType::DotExpr) {
+                        add_borrow_source_edges(
+                            fn_def, call.fn_ref_expr->data.dot_expr.effective_expr(), target,
+                            false);
+                    }
+                    for (auto idx : summary->param_indices) {
+                        if (idx >= 0 && idx < static_cast<int32_t>(call.args.len)) {
+                            add_borrow_source_edges(fn_def, call.args[static_cast<uint32_t>(idx)],
+                                                    target, false);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    auto *root = find_root_decl(expr);
+    if (!is_ref && root) {
+        fn_def.copy_ref_edges(target, root, expr_can_fallback_to_borrow_source(expr));
+        return;
+    }
+    if (is_ref) {
+        add_borrow_source_edges(fn_def, expr, target, true);
+    } else {
+        add_borrow_source_edges(fn_def, expr, target, false);
+    }
+}
+
+void Resolver::copy_projection_summaries(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
+                                         ChiType *target_type) {
+    if (!expr || !target || !target_type) {
+        return;
+    }
+    if (find_projection_owner(expr) == target) {
+        return;
+    }
+    target_type = to_value_type(target_type);
+    if (!target_type) {
+        return;
+    }
+
+    if (target_type->kind == TypeKind::Tuple) {
+        auto &elems = target_type->data.tuple.elements;
+        for (int32_t i = 0; i < elems.len; i++) {
+            if (!type_may_propagate_borrow_deps(this, elems[i])) {
+                continue;
+            }
+            seed_projection_node(fn_def, expr, elems[i],
+                                 get_projection_node(target, i, nullptr), i, nullptr);
+        }
+        return;
+    }
+
+    auto *struct_type = resolve_struct_type(target_type);
+    if (!struct_type) {
+        return;
+    }
+    for (auto *field : struct_type->own_fields()) {
+        auto *field_type = to_value_type(field->resolved_type);
+        if (!type_may_propagate_borrow_deps(this, field_type)) {
+            continue;
+        }
+        seed_projection_node(fn_def, expr, field_type,
+                             get_projection_node(target, -1, field), -1, field);
     }
 }
 
@@ -11023,6 +11417,7 @@ void Resolver::compute_receiver_copy_edge_summary(ast::FnDef &fn_def) {
     auto &proto = fn_def.fn_proto->data.fn_proto;
     proto.this_copy_edge_param_indices = {};
     proto.return_copy_edge_param_indices = {};
+    proto.return_projection_copy_summaries = {};
     proto.return_copy_edge_from_this = false;
     if (fn_def.flow.copy_edges.size() > 0) {
         for (auto &[node, _] : fn_def.flow.copy_edges.data) {
@@ -11042,7 +11437,69 @@ void Resolver::compute_receiver_copy_edge_summary(ast::FnDef &fn_def) {
         }
     }
 
+    compute_return_projection_copy_summaries(fn_def);
+
     proto.copy_edge_summary_valid = true;
+}
+
+void Resolver::compute_return_projection_copy_summaries(ast::FnDef &fn_def) {
+    if (!fn_def.fn_proto) {
+        return;
+    }
+    auto &proto = fn_def.fn_proto->data.fn_proto;
+    proto.return_projection_copy_summaries = {};
+
+    auto add_projection_summary = [&](int32_t index, ast::Node *source) {
+        if (!source) {
+            return;
+        }
+        auto *summary = find_projection_copy_summary(proto.return_projection_copy_summaries, index);
+        if (!summary) {
+            proto.return_projection_copy_summaries.add({});
+            summary = &proto.return_projection_copy_summaries[proto.return_projection_copy_summaries.len - 1];
+            summary->index = index;
+        }
+        collect_copy_edge_reachable_params(fn_def.flow, proto.params, source,
+                                           &summary->param_indices, &summary->from_this);
+    };
+
+    for (auto *terminal : fn_def.flow.terminals) {
+        if (!terminal || terminal->type != ast::NodeType::ReturnStmt ||
+            !terminal->data.return_stmt.expr) {
+            continue;
+        }
+
+        auto *expr = terminal->data.return_stmt.expr;
+        auto *owner = find_projection_owner(expr);
+        auto *type = to_value_type(node_get_type(expr));
+        if (!type) {
+            continue;
+        }
+
+        if (type->kind == TypeKind::Tuple) {
+            auto &elems = type->data.tuple.elements;
+            for (int32_t i = 0; i < elems.len; i++) {
+                if (!type_may_propagate_borrow_deps(this, elems[i])) {
+                    continue;
+                }
+                add_projection_summary(i, get_projection_node(owner, i, nullptr, false));
+            }
+            continue;
+        }
+
+        auto *struct_type = resolve_struct_type(type);
+        if (!struct_type) {
+            continue;
+        }
+        for (auto *field : struct_type->own_fields()) {
+            auto *field_type = to_value_type(field->resolved_type);
+            if (!type_may_propagate_borrow_deps(this, field_type)) {
+                continue;
+            }
+            add_projection_summary(static_cast<int32_t>(field->field_index),
+                                   get_projection_node(owner, -1, field, false));
+        }
+    }
 }
 
 void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_decls) {
@@ -11290,7 +11747,7 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
             (fn_type && fn_type->kind == TypeKind::Fn) ? fn_type->data.fn.get_param_at(i) : nullptr;
         auto *param_node = i < callee_proto->params.len ? callee_proto->params[i] : nullptr;
         slot.is_borrow = is_exclusive_access_borrow_param(param_type, param_node) ||
-                         (param_type && is_borrowing_type(param_type));
+                         type_may_propagate_borrow_deps(this, param_type);
         slot.is_exclusive = is_exclusive_access_borrow_param(param_type, param_node);
         slot.exclusive_source = slot.is_exclusive ? param_node : nullptr;
         slots.add(slot);
@@ -11398,7 +11855,7 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
         auto &fn = ct->data.fn;
         auto *ret = fn.return_type;
         ret_lt = get_first_ref_lifetime(ret);
-        conservative = (!ret_lt && ret && is_borrowing_type(ret));
+        conservative = (!ret_lt && type_may_propagate_borrow_deps(this, ret));
         for (size_t i = 0; i < fn.params.len; i++) {
             param_lts.add(get_first_ref_lifetime(fn.params[i]));
         }
@@ -11424,8 +11881,10 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
         if (param_lts[i] && ret_lt && lifetime_outlives(param_lts[i], ret_lt)) {
             add_borrow_source_edges(fn_def, call.args[i], target, true);
         } else if (conservative && !param_lts[i]) {
-            // No lifetime info for this param — conservatively assume it flows to return
-            add_borrow_source_edges(fn_def, call.args[i], target, true);
+            // No direct lifetime info for this by-value param — conservatively propagate any
+            // borrow deps it carries into the return value, but do not treat the parameter root
+            // itself as directly borrowed.
+            add_borrow_source_edges(fn_def, call.args[i], target, false);
         }
     }
 }
@@ -11434,6 +11893,21 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
                                        bool is_ref) {
     if (!expr)
         return;
+    if (expr->type == NodeType::DotExpr) {
+        auto &data = expr->data.dot_expr;
+        auto *projection_source = data.narrowed_var ? data.narrowed_var : data.effective_expr();
+        if (data.resolved_dot_kind == DotKind::TupleField) {
+            add_projection_source_edges(fn_def, projection_source, node_get_type(expr), target,
+                                        is_ref, static_cast<int32_t>(data.resolved_value),
+                                        nullptr);
+            return;
+        }
+        if (data.resolved_struct_member && !data.resolved_struct_member->is_method()) {
+            add_projection_source_edges(fn_def, projection_source, node_get_type(expr), target,
+                                        is_ref, -1, data.resolved_struct_member);
+            return;
+        }
+    }
     // If the expression traces to a root declaration (variable, field, index, etc.):
     // - is_ref=true (reference): add_ref_edge — target depends on root's own lifetime
     // - is_ref=false (by-value): copy_ref_edges — target inherits root's dependencies
@@ -11461,6 +11935,9 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
         // Transitively copy those leaf edges to the target.
         // A value construction is not itself a direct borrow source, so if the
         // construct carries no borrow deps this must remain a no-op.
+        fn_def.copy_ref_edges(target, expr, false);
+        break;
+    case NodeType::TupleExpr:
         fn_def.copy_ref_edges(target, expr, false);
         break;
     case NodeType::TryExpr:
@@ -11539,6 +12016,17 @@ static string node_label(ast::Node *n) {
     if (n->name.empty())
         return type_str;
     return fmt::format("{} ({})", n->name, type_str);
+}
+
+static string debug_node_label(ast::Node *n) {
+    if (!n) {
+        return "<null>";
+    }
+    auto label = node_label(n);
+    if (n->name.rfind("__tuple_proj_", 0) == 0 || n->name.rfind("__field_proj_", 0) == 0) {
+        return fmt::format("{}@{:p}", label, static_cast<void *>(n));
+    }
+    return label;
 }
 
 static string describe_exclusive_access_source(ast::Node *n) {
@@ -11733,17 +12221,19 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
         fmt::print("[lifetime] edges:\n");
         for (auto &[from, tos] : flow.ref_edges.data) {
             for (auto *to : tos) {
-                fmt::print("[lifetime]   borrow {} -> {}\n", node_label(from), node_label(to));
+                fmt::print("[lifetime]   borrow {} -> {}\n", debug_node_label(from),
+                           debug_node_label(to));
             }
         }
         for (auto &[from, tos] : flow.copy_edges.data) {
             for (auto *to : tos) {
-                fmt::print("[lifetime]   copy {} -> {}\n", node_label(from), node_label(to));
+                fmt::print("[lifetime]   copy {} -> {}\n", debug_node_label(from),
+                           debug_node_label(to));
             }
         }
         fmt::print("[lifetime] terminals ({}):\n", flow.terminals.len);
         for (size_t i = 0; i < flow.terminals.len; i++) {
-            fmt::print("[lifetime]   {}\n", node_label(flow.terminals[i]));
+            fmt::print("[lifetime]   {}\n", debug_node_label(flow.terminals[i]));
         }
     }
 
@@ -11800,6 +12290,10 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
             size_t offset = flow.current_edge_offset(terminal);
             auto *last_use = flow.terminal_last_use.get(terminal);
             auto *last_use_node = flow.terminal_last_use_node.get(terminal);
+            if ((terminal->type == NodeType::VarDecl || terminal->type == NodeType::ParamDecl) &&
+                (!last_use_node || !*last_use_node)) {
+                continue;
+            }
             for (size_t i = offset; i < deps->len; i++) {
                 auto *node = deps->items[i];
                 if (flow.is_sunk(node)) {
@@ -11821,11 +12315,11 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                         notes.add(
                             {is_delete ? "deleted here" : "moved here", sink_target->token->pos});
                     }
-                    notes.add({"referenced here",
-                               last_use_node && (*last_use_node)->token
-                                   ? (*last_use_node)->token->pos
-                                   : terminal->token->pos});
-                    error_with_notes(terminal, std::move(notes), "'{}' used after {}",
+                    auto *error_node = last_use_node && *last_use_node ? *last_use_node : terminal;
+                    assert(error_node && error_node->token &&
+                           "lifetime sink violation missing diagnostic node");
+                    notes.add({"referenced here", error_node->token->pos});
+                    error_with_notes(error_node, std::move(notes), "'{}' used after {}",
                                      terminal->name, is_delete ? "delete" : "move");
                 }
             }
@@ -11845,6 +12339,10 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
             size_t offset = flow.current_edge_offset(terminal);
             auto *last_use = flow.terminal_last_use.get(terminal);
             auto *last_use_node = flow.terminal_last_use_node.get(terminal);
+            if ((terminal->type == NodeType::VarDecl || terminal->type == NodeType::ParamDecl) &&
+                (!last_use_node || !*last_use_node)) {
+                continue;
+            }
             auto *edge_offsets = flow.ref_edge_offsets.get(terminal);
             for (size_t i = offset; i < deps->len; i++) {
                 auto *root = deps->items[i];
@@ -11883,16 +12381,12 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                                            describe_exclusive_access_source(target)),
                                target->token->pos});
                 }
-                auto *error_node = last_use_node && *last_use_node && (*last_use_node)->token
-                                       ? *last_use_node
-                                       : terminal;
-                if (error_node && error_node->token) {
-                    notes.add({errors::EXCLUSIVE_ACCESS_BORROW_REFERENCED,
-                               error_node->token->pos});
-                }
-                error_with_notes(error_node ? error_node : terminal, std::move(notes),
-                                 errors::EXCLUSIVE_ACCESS_BORROW_USED_AFTER,
-                                 node_label(root));
+                auto *error_node = last_use_node && *last_use_node ? *last_use_node : terminal;
+                assert(error_node && error_node->token &&
+                       "lifetime invalidation violation missing diagnostic node");
+                notes.add({errors::EXCLUSIVE_ACCESS_BORROW_REFERENCED, error_node->token->pos});
+                error_with_notes(error_node, std::move(notes),
+                                 errors::EXCLUSIVE_ACCESS_BORROW_USED_AFTER, node_label(root));
                 break;
             }
         }

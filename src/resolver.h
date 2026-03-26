@@ -299,6 +299,8 @@ class Resolver {
     ast::Module *m_module = nullptr;
     ast::Node *m_subtype_origin = nullptr; // propagated origin during resolve_subtype
     ChiType *m_resolving_subtype = nullptr; // the subtype currently being resolved (for deferral)
+    map<ast::Node *, map<int32_t, ast::Node *>> m_tuple_projection_nodes = {};
+    map<ast::Node *, map<ChiStructMember *, ast::Node *>> m_field_projection_nodes = {};
 
     Context *get_allocator() { return m_ctx->allocator; }
 
@@ -582,6 +584,23 @@ class Resolver {
                               RecursiveCallHandler make_recursive_call);
 
     ast::Node *find_root_decl(ast::Node *node);
+    ast::Node *find_projection_owner(ast::Node *node);
+    ast::Node *create_projection_node(ast::Node *owner, string name);
+    ast::Node *get_expr_projection_node(ast::Node *expr, bool create = true);
+    ast::Node *get_projection_node(ast::Node *owner, int32_t tuple_index,
+                                   ChiStructMember *field_member, bool create = true);
+    ast::Node *get_tuple_projection_node(ast::Node *owner, int32_t index, bool create = true);
+    ast::Node *get_field_projection_node(ast::Node *owner, ChiStructMember *member,
+                                         bool create = true);
+    void seed_projection_node(ast::FnDef &fn_def, ast::Node *source, ChiType *projection_type,
+                              ast::Node *projection, int32_t tuple_index,
+                              ChiStructMember *field_member);
+    void add_projection_source_edges(ast::FnDef &fn_def, ast::Node *expr, ChiType *projected_type,
+                                     ast::Node *target, bool is_ref, int32_t tuple_index = -1,
+                                     ChiStructMember *field_member = nullptr);
+    void copy_projection_summaries(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
+                                   ChiType *target_type);
+    void compute_return_projection_copy_summaries(ast::FnDef &fn_def);
     void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target);
     void add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
                                  bool is_ref = false);

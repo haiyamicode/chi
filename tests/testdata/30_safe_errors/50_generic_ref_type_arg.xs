@@ -1,5 +1,5 @@
-// Reference type as generic type argument is rejected in safe mode.
-// expect-error: cannot use borrowing type
+// Reference type as generic type argument is allowed, but dangling return must still be rejected.
+// expect-error: does not live long enough
 
 func get_val<T>(val: T) T {
     return val;
