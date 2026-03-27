@@ -305,6 +305,13 @@ func test_struct_display() {
     println(DisplayOuter{});
 }
 
+func test_variadic_println() {
+    println("testing variadic println:");
+    println();
+    println("hello", 42, true);
+    println("display", DisplayInner{}, DisplayOuter{});
+}
+
 func test_named_field_construct() {
     println("testing named field construct:");
     var first = TracedStringField{value: "left"};
@@ -329,4 +336,5 @@ func main() {
     test_box();
     test_named_field_construct();
     test_struct_display();
+    test_variadic_println();
 }

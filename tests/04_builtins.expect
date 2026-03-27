@@ -95,3 +95,7 @@ before scope exit:
 testing struct display:
 DisplayInner{value: 5}
 DisplayOuter{name: chi, inner: DisplayInner{value: 5}}
+testing variadic println:
+
+hello 42 true
+display DisplayInner{value: 5} DisplayOuter{name: chi, inner: DisplayInner{value: 5}}

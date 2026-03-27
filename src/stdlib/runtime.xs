@@ -3,17 +3,17 @@ import "std/mem" as mem;
 import "std/atomic" as atomic;
 
 extern "C" {
-    unsafe func cx_print(str: string);
-    unsafe func cx_printf(format: *string, values: *void);
+    func cx_print(str: string);
+    func cx_printf(format: *string, values: *void);
     unsafe func cx_array_new(dest: *void);
     unsafe func cx_array_delete(dest: *void);
     unsafe func cx_array_add(dest: *void, size: uint32) *void;
     unsafe func cx_array_write_str(dest: *void, str: *string);
     unsafe func cx_array_reserve(dest: *void, elem_size: uint32, new_cap: uint32);
     unsafe func cx_array_append(dest: *void, src: *void, elem_size: uint32);
-    unsafe func cx_print_any(value: *void);
-    unsafe func cx_print_number(value: uint64);
-    unsafe func cx_print_string(str: *string);
+    func cx_print_any(value: *void);
+    func cx_print_number(value: uint64);
+    func cx_print_string(str: *string);
     unsafe func cx_gc_alloc(size: uint32, destructor: *void) *void;
     unsafe func cx_malloc(size: uint32, ignored: *void) *void;
     unsafe func cx_free(address: *void);
@@ -34,7 +34,7 @@ extern "C" {
     unsafe func cx_get_error_vtable() *void;
     unsafe func cx_get_error_type_id() uint32;
     unsafe func cx_personality(...) int32;
-    unsafe func cx_string_format(format: *string, values: *void, str: *string);
+    func cx_string_format(format: *string, values: *void, str: *string);
     unsafe func cx_string_from_chars(data: *void, size: uint32, str: *string);
     unsafe func cx_string_delete(dest: *string);
     unsafe func cx_string_copy(dest: *string, src: *string);
@@ -292,11 +292,14 @@ struct __CxLambda {
     }
 }
 
-export func println(value: any) {
-    unsafe {
+export func println(...values: any) {
+    for value, i in values {
+        if i > 0 {
+            cx_print(" ");
+        }
         cx_print_any(&value);
-        cx_print("\n");
     }
+    cx_print("\n");
 }
 
 export func gc_alloc(size: uint32) *void {
@@ -306,9 +309,7 @@ export func gc_alloc(size: uint32) *void {
 }
 
 export func printf(format: string, ...values: any) {
-    unsafe {
-        cx_printf(&format, &values);
-    }
+    cx_printf(&format, &values);
 }
 
 export struct PanicError {
@@ -327,9 +328,7 @@ export func panic(message: string) never {
 
 export func stringf(format: string, ...values: any) string {
     var str: string = "";
-    unsafe {
-        cx_string_format(&format, &values, &str);
-    }
+    cx_string_format(&format, &values, &str);
     return str;
 }
 
