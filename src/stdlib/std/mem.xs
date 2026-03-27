@@ -96,6 +96,10 @@ export unsafe func write<T>(dest: *T, value: T) {
     __move(dest as *void, &value, sizeof T);
 }
 
+export unsafe func transmute<TFrom: ops.Unsized, TTo: ops.Unsized>(ptr: *TFrom) TTo {
+    return *(ptr as *TFrom as *TTo);
+}
+
 export unsafe func destroy(ptr: *void) {
     __destroy(ptr);
 }

@@ -38,7 +38,19 @@ export enum Kind {
     Never,
     Unit,
     Tuple,
-    Null
+    Null;
+
+    struct {
+        func is_ref() bool {
+            return switch this {
+                Reference => true,
+                MutRef => true,
+                MutexRef => true,
+                MoveRef => true,
+                else => false
+            };
+        }
+    }
 }
 
 extern "C" {

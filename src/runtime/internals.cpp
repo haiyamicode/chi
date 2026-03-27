@@ -1584,6 +1584,12 @@ void cx_json_value_copy(void *data, void *result) {
     create_cx_json_result(value, result);
 }
 
+void cx_json_value_stringify(void *data, CxString *result) {
+    auto value = (boost::json::value *)data;
+    auto text = boost::json::serialize(*value);
+    cx_string_from_chars(text.data(), (uint32_t)text.size(), result);
+}
+
 // SharedData refcounting helpers for type-erased pointers
 // All SharedData<T> instances have ref_count as the first field at offset 0
 

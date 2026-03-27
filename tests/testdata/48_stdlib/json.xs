@@ -1,4 +1,5 @@
 import "std/json" as json;
+import "std/math" as math;
 
 struct Version {
     major: uint32 = 0;
@@ -14,6 +15,14 @@ struct Config {
     numbers: Array<int> = [];
     active: bool = false;
     count: int = 0;
+    ratio: float64 = 0.0;
+}
+
+struct EscapeConfig {
+    text: string = "";
+}
+
+struct FloatConfig {
     ratio: float64 = 0.0;
 }
 
@@ -62,6 +71,19 @@ func main() {
     printf("typed name={}\n", cfg2.name);
     printf("typed version={}.{}\n", cfg2.version.major, cfg2.version.minor);
 
+    println("=== encode typed ===");
+    let encoded = json.encode(cfg2);
+    printf("encoded={}\n", encoded);
+    let encoded_ref = json.encode(&cfg2);
+    printf("encoded_ref={}\n", encoded_ref);
+
+    println("=== encode escaping ===");
+    let escaped = json.encode(EscapeConfig{text: "quote \" slash \\ line\n\tctrl"});
+    printf("escaped={}\n", escaped);
+
+    println("=== raw stringify ===");
+    printf("raw={}\n", obj.stringify());
+
     println("=== typed parse jsonc ===");
     let cfg_jsonc = json.parse<Config>(
         "{\n// config for chi\n\"name\": \"chi\",\n\"version\": {\"major\": 1, \"minor\": 7},\n\"alias\": \"chi-lang\",\n\"latest\": {\"major\": 2, \"minor\": 0},\n\"history\": [{\"major\": 0, \"minor\": 9}, {\"major\": 1, \"minor\": 0},],\n\"numbers\": [3, 5, 8,],\n\"active\": true,\n\"count\": 42,\n\"ratio\": 2.5,\n}"
@@ -99,6 +121,15 @@ func main() {
             printf("field path={}\n", path);
         }
         printf("field error={}\n", err.message());
+    };
+
+    println("=== encode error ===");
+    try json.encode(FloatConfig{ratio: math.NAN}) catch json.EncodeError as err {
+        printf("encode detail={}\n", err.detail);
+        if let path = err.path {
+            printf("encode path={}\n", path);
+        }
+        printf("encode error={}\n", err.message());
     };
 
     println("=== parse_into ===");

@@ -1,4 +1,6 @@
 // std/json — JSON parsing and manipulation
+import "std/math" as math;
+import "std/mem" as mem;
 import "std/ops" as ops;
 import "std/reflect" as reflect;
 
@@ -23,6 +25,7 @@ extern "C" {
     unsafe func cx_json_array_index(data: *void, index: uint32, result: *void);
     unsafe func cx_json_array_length(data: *void) uint32;
     unsafe func cx_json_value_copy(data: *void, result: *void);
+    unsafe func cx_json_value_stringify(data: *void, result: *string);
     unsafe func cx_array_new(dest: *void);
     unsafe func cx_array_add(dest: *void, elem_size: uint32) *void;
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
@@ -33,6 +36,13 @@ struct RawArray {
     data: *void = null;
     length: uint32 = 0;
     capacity: uint32 = 0;
+}
+
+struct RuntimeArray {
+    data: *void = null;
+    length: uint32 = 0;
+    capacity: uint32 = 0;
+    allocator: *void = null;
 }
 
 struct RawOptional {
@@ -73,6 +83,22 @@ export struct ParseError {
         }
     }
 }
+
+export struct EncodeError {
+    detail: string = "";
+    path: ?string = null;
+
+    impl Error {
+        func message() string {
+            var result = stringf("JSON encode error: {}", this.detail);
+            if let path = this.path {
+                result = stringf("{} at path '{}'", result, path);
+            }
+            return result;
+        }
+    }
+}
+
 export enum ValueKind {
     Null,
     Bool,
@@ -239,6 +265,14 @@ export struct Value {
     func has(key: string) bool {
         let val = this.get(key);
         return !val.is_null();
+    }
+
+    func stringify() string {
+        let result = "";
+        unsafe {
+            cx_json_value_stringify(this.data, &result);
+        }
+        return result;
     }
 
     impl ops.Copy {
@@ -519,4 +553,208 @@ export func parse<T: ops.Construct>(str: string, options: ?ParseOptions) T {
     var result = T{};
     parse_into(str, &result, options);
     return result;
+}
+
+func json_encode_hex_byte(buf: &mutex Buffer, value: byte) {
+    let digits = "0123456789abcdef";
+    let high = (value / 16) as uint32;
+    let low = (value % 16) as uint32;
+    buf.write_string(digits.byte_slice(high, high + 1));
+    buf.write_string(digits.byte_slice(low, low + 1));
+}
+
+func json_encode_string(buf: &mutex Buffer, value: string) {
+    buf.write_string("\"");
+    var i: uint32 = 0;
+    while i < value.byte_length() {
+        let ch = value.byte_at(i);
+        if ch == '"' {
+            buf.write_string("\\\"");
+        } else if ch == '\\' {
+            buf.write_string("\\\\");
+        } else if ch == '\b' {
+            buf.write_string("\\b");
+        } else if ch == '\f' {
+            buf.write_string("\\f");
+        } else if ch == '\n' {
+            buf.write_string("\\n");
+        } else if ch == '\r' {
+            buf.write_string("\\r");
+        } else if ch == '\t' {
+            buf.write_string("\\t");
+        } else if ch < 0x20 {
+            buf.write_string("\\u00");
+            json_encode_hex_byte(buf, ch);
+        } else {
+            buf.write_string(value.byte_slice(i, i + 1));
+        }
+        i = i + 1;
+    }
+    buf.write_string("\"");
+}
+
+func encode_type_error(path: string, ty: reflect.Type, detail: string) never {
+    let err_path = if path.is_empty() => (null as ?string) else => path as ?string;
+    throw new EncodeError{
+        :detail,
+        path: err_path
+    };
+}
+
+unsafe func json_encode_int(ty: reflect.Type, src: *void, buf: &mutex Buffer) {
+    let bits = ty.int_bits();
+    if ty.int_is_unsigned() {
+        if bits == 8 {
+            buf.write_string(stringf("{}", *(src as *uint8)));
+        } else if bits == 16 {
+            buf.write_string(stringf("{}", *(src as *uint16)));
+        } else if bits == 32 {
+            buf.write_string(stringf("{}", *(src as *uint32)));
+        } else if bits == 64 {
+            buf.write_string(stringf("{}", *(src as *uint64)));
+        } else {
+            panic(stringf("unsupported unsigned integer width {}", bits));
+        }
+        return;
+    }
+
+    if bits == 8 {
+        buf.write_string(stringf("{}", *(src as *int8)));
+    } else if bits == 16 {
+        buf.write_string(stringf("{}", *(src as *int16)));
+    } else if bits == 32 {
+        buf.write_string(stringf("{}", *(src as *int32)));
+    } else if bits == 64 {
+        buf.write_string(stringf("{}", *(src as *int64)));
+    } else {
+        panic(stringf("unsupported integer width {}", bits));
+    }
+}
+
+unsafe func json_encode_float(path: string, ty: reflect.Type, src: *void, buf: &mutex Buffer) {
+    var raw: float64 = 0.0;
+    if ty.float_bits() == 32 {
+        raw = *(src as *float) as float64;
+    } else if ty.float_bits() == 64 {
+        raw = *(src as *float64);
+    } else {
+        panic(stringf("unsupported float width {}", ty.float_bits()));
+    }
+
+    if math.is_nan(raw) || math.is_inf(raw) {
+        encode_type_error(path, ty, "non-finite floats cannot be encoded as JSON");
+    }
+    buf.write_string(stringf("{}", raw));
+}
+
+unsafe func json_encode_field_path(path: string, field_name: string) string {
+    if path.is_empty() {
+        return field_name;
+    }
+    return path + "." + field_name;
+}
+
+unsafe func json_encode_index_path(path: string, index: uint32) string {
+    return stringf("{}[{}]", path, index);
+}
+
+unsafe func json_encode(path: string, ty: reflect.Type, src: *void, buf: &mutex Buffer) {
+    switch ty.kind() {
+        Struct => {
+            buf.write_string("{");
+            let fields = ty.fields();
+            var i: uint32 = 0;
+            while i < fields.length {
+                let field = fields[i];
+                if i > 0 {
+                    buf.write_string(",");
+                }
+                json_encode_string(buf, field.name());
+                buf.write_string(":");
+                let field_path = json_encode_field_path(path, field.name());
+                json_encode(field_path, field.type(), field.ptr_at(src), buf);
+                i = i + 1;
+            }
+            buf.write_string("}");
+        },
+        Array => {
+            let elem = ty.elem();
+            var elem_type: reflect.Type = undefined;
+            if elem {
+                elem_type = elem;
+            } else {
+                panic(stringf("array type '{}' has no element type", ty.name()));
+            }
+
+            let array = src as *RuntimeArray;
+            buf.write_string("[");
+            var i: uint32 = 0;
+            while i < array.length {
+                if i > 0 {
+                    buf.write_string(",");
+                }
+                let item_ptr = ((array.data as *byte) + (i * elem_type.size()) as int) as *void;
+                let item_path = json_encode_index_path(path, i);
+                json_encode(item_path, elem_type, item_ptr, buf);
+                i = i + 1;
+            }
+            buf.write_string("]");
+        },
+        Optional => {
+            let optional = src as *RawOptional;
+            if !optional.has_value {
+                buf.write_string("null");
+                return;
+            }
+
+            let elem = ty.elem();
+            var elem_type: reflect.Type = undefined;
+            if elem {
+                elem_type = elem;
+            } else {
+                panic(stringf("optional type '{}' has no element type", ty.name()));
+            }
+
+            let value_ptr = ((src as *byte) + (ty.optional_value_offset() as int)) as *void;
+            json_encode(path, elem_type, value_ptr, buf);
+        },
+        Bool => {
+            if *(src as *bool) {
+                buf.write_string("true");
+            } else {
+                buf.write_string("false");
+            }
+        },
+        String => json_encode_string(buf, *(src as *string)),
+        Int => json_encode_int(ty, src, buf),
+        Byte => buf.write_string(stringf("{}", *(src as *byte))),
+        Rune => buf.write_string(stringf("{}", *(src as *rune))),
+        Float => json_encode_float(path, ty, src, buf),
+        Null => buf.write_string("null"),
+        else => encode_type_error(path, ty, stringf("unsupported type '{}'", ty.name()))
+    }
+}
+
+export func encode<T>(value: T) string {
+    var value_type = value.(type);
+    var value_ptr: *void = null;
+    unsafe {
+        let kind = value_type.kind();
+        if kind.is_ref() {
+            let elem = value_type.elem();
+            if !elem {
+                panic(stringf("reference type '{}' has no element type", value_type.name()));
+            }
+            value_type = elem;
+            value_ptr = mem.transmute<T, *void>(&value);
+        } else {
+            value_ptr = &value as *T as *void;
+        }
+    }
+
+    var buf = Buffer{};
+    unsafe {
+        json_encode("", value_type, value_ptr, &mutex buf);
+    }
+    return buf.to_string();
 }

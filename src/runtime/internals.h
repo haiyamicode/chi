@@ -172,6 +172,7 @@ CHI_RT_EXPORT void cx_json_value_convert(void *data, uint32_t kind, void *result
 CHI_RT_EXPORT void cx_json_array_index(void *data, uint32_t index, void *result);
 CHI_RT_EXPORT uint32_t cx_json_array_length(void *data);
 CHI_RT_EXPORT void cx_json_value_copy(void *data, void *result);
+CHI_RT_EXPORT void cx_json_value_stringify(void *data, CxString *result);
 
 CHI_RT_EXPORT void cx_file_read(CxString *path, CxString *result);
 

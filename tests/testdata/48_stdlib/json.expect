@@ -26,6 +26,13 @@ null
 === typed parse ===
 typed name=chi
 typed version=1.7
+=== encode typed ===
+encoded={"name":"chi","version":{"major":1,"minor":7},"alias":"chi-lang","latest":{"major":2,"minor":0},"history":[{"major":0,"minor":9},{"major":1,"minor":0}],"numbers":[3,5,8],"active":true,"count":42,"ratio":2.5}
+encoded_ref={"name":"chi","version":{"major":1,"minor":7},"alias":"chi-lang","latest":{"major":2,"minor":0},"history":[{"major":0,"minor":9},{"major":1,"minor":0}],"numbers":[3,5,8],"active":true,"count":42,"ratio":2.5}
+=== encode escaping ===
+escaped={"text":"quote \" slash \\ line\n\tctrl"}
+=== raw stringify ===
+raw={"name":"chi","version":1,"active":true}
 === typed parse jsonc ===
 jsonc name=chi
 jsonc numbers=[3, 5, 8]
@@ -41,6 +48,10 @@ non-comment name=chi
 field detail=expected uint32, got string
 field path=version.major
 field error=JSON parse error: expected uint32, got string at path 'version.major'
+=== encode error ===
+encode detail=non-finite floats cannot be encoded as JSON
+encode path=ratio
+encode error=JSON encode error: non-finite floats cannot be encoded as JSON at path 'ratio'
 === parse_into ===
 name=chi
 version=1.7
