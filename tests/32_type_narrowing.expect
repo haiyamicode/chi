@@ -4,6 +4,12 @@ basic_positive(null)=-1
 basic_guard(5)=6
 basic_guard(null)=-1
 basic_assert(5)=6
+eq_null_guard(5)=6
+eq_null_guard(null)=-1
+neq_null_positive(5)=6
+neq_null_positive(null)=-1
+reversed_null_guard(5)=6
+reversed_null_positive(5)=6
 
 -- Compound && positive --
 and_positive(1,2)=3
@@ -50,7 +56,12 @@ and_second_clause_mixed(null,2)=-1
 or_second_clause(5)=6
 or_second_clause(-1)=-1
 or_second_clause(null)=-1
+neq_null_second_clause(5)=6
+neq_null_second_clause(2)=-1
+neq_null_second_clause(null)=-1
 dot_second_clause_chain=3 hello
+dot_eq_null_guard=8
+dot_neq_null_second_clause=6
 short_circuit:
 and_short_circuit(null)=false
 or_short_circuit(5)=true

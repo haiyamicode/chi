@@ -21,6 +21,34 @@ func basic_assert(x: ?int) int {
     return x + 1;
 }
 
+func eq_null_guard(x: ?int) int {
+    if x == null {
+        return -1;
+    }
+    return x + 1;
+}
+
+func neq_null_positive(x: ?int) int {
+    if x != null {
+        return x + 1;
+    }
+    return -1;
+}
+
+func reversed_null_guard(x: ?int) int {
+    if null == x {
+        return -1;
+    }
+    return x + 1;
+}
+
+func reversed_null_positive(x: ?int) int {
+    if null != x {
+        return x + 1;
+    }
+    return -1;
+}
+
 // === Compound && narrowing ===
 
 func and_positive(a: ?int, b: ?int) int {
@@ -125,6 +153,13 @@ func or_second_clause(x: ?int) int {
         return -1;
     }
     return x + 1;
+}
+
+func neq_null_second_clause(x: ?int) int {
+    if x != null && x > 3 {
+        return x + 1;
+    }
+    return -1;
 }
 
 func rhs_true() bool {
@@ -339,6 +374,24 @@ func dot_second_clause_chain() string {
     return "missing";
 }
 
+func dot_eq_null_guard() int {
+    var c = Container{};
+    c.value = 7;
+    if c.value == null {
+        return -1;
+    }
+    return c.value + 1;
+}
+
+func dot_neq_null_second_clause() int {
+    var c = Container{};
+    c.value = 5;
+    if c.value != null && c.value > 3 {
+        return c.value + 1;
+    }
+    return -1;
+}
+
 struct App {
     service: ?Traced = null;
 
@@ -444,6 +497,12 @@ func main() {
     printf("basic_guard(5)={}\n", basic_guard(5));
     printf("basic_guard(null)={}\n", basic_guard(null));
     printf("basic_assert(5)={}\n", basic_assert(5));
+    printf("eq_null_guard(5)={}\n", eq_null_guard(5));
+    printf("eq_null_guard(null)={}\n", eq_null_guard(null));
+    printf("neq_null_positive(5)={}\n", neq_null_positive(5));
+    printf("neq_null_positive(null)={}\n", neq_null_positive(null));
+    printf("reversed_null_guard(5)={}\n", reversed_null_guard(5));
+    printf("reversed_null_positive(5)={}\n", reversed_null_positive(5));
 
     println("\n-- Compound && positive --");
     printf("and_positive(1,2)={}\n", and_positive(1, 2));
@@ -490,7 +549,12 @@ func main() {
     printf("or_second_clause(5)={}\n", or_second_clause(5));
     printf("or_second_clause(-1)={}\n", or_second_clause(-1));
     printf("or_second_clause(null)={}\n", or_second_clause(null));
+    printf("neq_null_second_clause(5)={}\n", neq_null_second_clause(5));
+    printf("neq_null_second_clause(2)={}\n", neq_null_second_clause(2));
+    printf("neq_null_second_clause(null)={}\n", neq_null_second_clause(null));
     printf("dot_second_clause_chain={}\n", dot_second_clause_chain());
+    printf("dot_eq_null_guard={}\n", dot_eq_null_guard());
+    printf("dot_neq_null_second_clause={}\n", dot_neq_null_second_clause());
     println("short_circuit:");
     printf("and_short_circuit(null)={}\n", and_short_circuit(null));
     printf("or_short_circuit(5)={}\n", or_short_circuit(5));

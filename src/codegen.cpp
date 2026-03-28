@@ -5071,6 +5071,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return builder.CreateLoad(compile_type(expr->resolved_type), value_p);
                 }
+                if (data.op1->type == ast::NodeType::Identifier &&
+                    data.op1->data.identifier.decl &&
+                    data.op1->data.identifier.decl->type == ast::NodeType::VarDecl &&
+                    data.op1->data.identifier.decl->data.var_decl.narrowed_from) {
+                    return compile_expr(fn, data.op1);
+                }
                 if (data.op1->type == ast::NodeType::DotExpr &&
                     data.op1->data.dot_expr.narrowed_var) {
                     return compile_expr(fn, data.op1);
@@ -7632,6 +7638,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
                     emit_runtime_assert(fn, has_value, msg, expr);
                     auto value_p = builder.CreateStructGEP(opt_type_l, ref.address, 1);
                     return RefValue::from_address(value_p);
+                }
+                if (data.op1->type == ast::NodeType::Identifier &&
+                    data.op1->data.identifier.decl &&
+                    data.op1->data.identifier.decl->type == ast::NodeType::VarDecl &&
+                    data.op1->data.identifier.decl->data.var_decl.narrowed_from) {
+                    return compile_expr_ref(fn, data.op1);
                 }
                 if (data.op1->type == ast::NodeType::DotExpr &&
                     data.op1->data.dot_expr.narrowed_var) {

@@ -28,6 +28,8 @@ static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiT
 static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr);
 static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope);
 static bool logical_rhs_uses_truthy_narrowing(TokenType op_type);
+static bool is_null_literal(ast::Node *node);
+static ast::Node *find_narrowed_optional_var(ast::Node *node, ResolveScope &scope);
 
 static bool is_nonowning_alias_decl(ast::Node *node) {
     return node && node->type == NodeType::VarDecl && node->data.var_decl.narrowed_from;
@@ -2033,7 +2035,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (t->kind == TypeKind::Optional) {
                     return t->get_elem();
                 }
-                if (expr_is_narrowed_from_optional(data.op1, scope)) {
+                if (auto *narrowed = find_narrowed_optional_var(data.op1, scope)) {
+                    if (data.op1->type == NodeType::Identifier) {
+                        data.op1->data.identifier.decl = narrowed;
+                    } else if (data.op1->type == NodeType::DotExpr) {
+                        data.op1->data.dot_expr.narrowed_var = narrowed;
+                    }
                     return t;
                 }
                 // Check for ops.Unwrap / ops.UnwrapMut
@@ -6276,9 +6283,9 @@ static void add_unique_node(array<ast::Node *> &nodes, ast::Node *node) {
     nodes.add(node);
 }
 
-static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope) {
+static ast::Node *find_narrowed_optional_var(ast::Node *node, ResolveScope &scope) {
     if (!node || !scope.block || !scope.block->scope) {
-        return false;
+        return nullptr;
     }
     ast::Node *narrowed = nullptr;
     if (node->type == NodeType::DotExpr) {
@@ -6296,11 +6303,23 @@ static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope)
         }
     }
     if (!narrowed || narrowed->type != NodeType::VarDecl) {
-        return false;
+        return nullptr;
     }
     auto *source = narrowed->data.var_decl.narrowed_from;
     auto *source_type = source ? source->resolved_type : nullptr;
-    return source_type && source_type->kind == TypeKind::Optional;
+    if (!source_type || source_type->kind != TypeKind::Optional) {
+        return nullptr;
+    }
+    return narrowed;
+}
+
+static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope) {
+    return find_narrowed_optional_var(node, scope) != nullptr;
+}
+
+static bool is_null_literal(ast::Node *node) {
+    return node && node->type == ast::NodeType::LiteralExpr && node->token &&
+           node->token->type == TokenType::NULLP;
 }
 
 static void append_leaf_borrow_roots(ast::FlowState &flow, ast::Node *source,
@@ -9861,6 +9880,22 @@ void Resolver::collect_narrowables(ast::Node *expr, bool when_truthy, array<ast:
 
     if (expr->type == NodeType::BinOpExpr) {
         auto &data = expr->data.bin_op_expr;
+        if (data.op_type == TokenType::EQ || data.op_type == TokenType::NE) {
+            ast::Node *candidate = nullptr;
+            if (is_null_literal(data.op1) && data.op2) {
+                candidate = data.op2;
+            } else if (is_null_literal(data.op2) && data.op1) {
+                candidate = data.op1;
+            }
+            if (candidate) {
+                bool narrows = (data.op_type == TokenType::NE && when_truthy) ||
+                               (data.op_type == TokenType::EQ && !when_truthy);
+                if (narrows) {
+                    collect_narrowables(candidate, true, out);
+                }
+            }
+            return;
+        }
         if (data.op_type == TokenType::LAND && when_truthy) {
             collect_narrowables(data.op1, true, out);
             collect_narrowables(data.op2, true, out);
