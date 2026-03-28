@@ -437,9 +437,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::MutRef:
     case TypeKind::MutexRef:
     case TypeKind::MoveRef: {
-        // Allow null to any pointer type
         if (from_type->kind == TypeKind::Null) {
-            return true;
+            return to_type->kind == TypeKind::Pointer;
         }
 
         // Handle pointer/reference conversions
@@ -615,7 +614,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Bool:
         // Allow implicit conversion from any int type to bool
         return from_type->is_int_like() || from_type->kind == TypeKind::Optional ||
-               from_type->is_pointer_like() ||
+               from_type->kind == TypeKind::Pointer ||
                (is_explicit && from_type->kind == TypeKind::Byte);
     case TypeKind::Optional: {
         // Allow null, same optional type, or implicit T -> ?T wrap
@@ -1790,6 +1789,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if ((lhs_null && t2->kind == TypeKind::Optional) ||
                     (rhs_null && t1->kind == TypeKind::Optional)) {
                     return get_system_types()->bool_;
+                }
+                if ((lhs_null && t2->is_reference()) || (rhs_null && t1->is_reference())) {
+                    error(node, "references cannot be compared to null");
+                    return nullptr;
                 }
                 // Optional-to-optional: reject (only null checks allowed)
                 else if (t1->kind == TypeKind::Optional && t2->kind == TypeKind::Optional) {

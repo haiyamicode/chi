@@ -106,26 +106,26 @@ func main() {
     println("Scope ended - non-escaping object should be destroyed by now");
 
     println("\nTest 2: Object escaping via ref assignment");
-    var escaped: &GCBox = null;
+    var escaped: ?&GCBox = null;
     {
         var local = GCBox{2};
         escaped = &local;
-        printf("Inside scope - local.id: {}, escaped.id: {}\n", local.id, escaped.id);
+        printf("Inside scope - local.id: {}, escaped.id: {}\n", local.id, escaped!.id);
         println("Local object escapes via ref assignment");
     }
     println("Scope ended - escaped object should still be alive");
     printf(
         "CRITICAL TEST: Accessing escaped ref after scope: GCBox({}).id = {}\n",
-        escaped.id,
-        escaped.id
+        escaped!.id,
+        escaped!.id
     );
 
     println("\nTest 3: Object escaping via return value");
-    var returned = get_escaped_ref();
+    var returned: ?&GCBox = get_escaped_ref();
     printf(
         "CRITICAL TEST: Function returned ref to GCBox({}), accessing id: {}\n",
-        returned.id,
-        returned.id
+        returned!.id,
+        returned!.id
     );
 
     println("\nTest 4: Non-escaping function call");
@@ -139,23 +139,23 @@ func main() {
     test_lambda_capture_ref_by_value();
 
     println("\nTest 6: Use-after-scope validation");
-    var ref1: &GCBox = null;
-    var ref2: &GCBox = null;
+    var ref1: ?&GCBox = null;
+    var ref2: ?&GCBox = null;
     {
         var a = GCBox{6};
         var b = GCBox{7};
         ref1 = &a;
         ref2 = &b;
         printf("Inside scope - accessing a.id: {}, b.id: {}\n", a.id, b.id);
-        printf("Inside scope - accessing via refs: ref1.id={}, ref2.id={}\n", ref1.id, ref2.id);
+        printf("Inside scope - accessing via refs: ref1.id={}, ref2.id={}\n", ref1!.id, ref2!.id);
         println("Both objects created and refs assigned");
     }
     println("Both objects should still be accessible:");
-    printf("CRITICAL TEST: After scope ended - ref1.id={}, ref2.id={}\n", ref1.id, ref2.id);
+    printf("CRITICAL TEST: After scope ended - ref1.id={}, ref2.id={}\n", ref1!.id, ref2!.id);
     printf(
         "CRITICAL TEST: Accessing values - GCBox({}) and GCBox({}) both accessible!\n",
-        ref1.id,
-        ref2.id
+        ref1!.id,
+        ref2!.id
     );
 
     // Release earlier refs before transitive tests

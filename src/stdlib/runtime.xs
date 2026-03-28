@@ -83,8 +83,8 @@ struct SharedHeader {
 }
 
 export struct Shared<T: ops.Unsized + ops.NoCopy> {
-    private _header: *SharedHeader = null;
-    private _ptr: *T = null;
+    private _header: *SharedHeader;
+    private _ptr: *T;
 
     mut func new(ptr: &move T) {
         this._header = new SharedHeader{};
@@ -172,7 +172,7 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
 }
 
 export struct Box<T: ops.Unsized + ops.NoCopy> {
-    private _ptr: *T = null;
+    private _ptr: *T;
 
     mut func new(ptr: &move T) {
         unsafe {
