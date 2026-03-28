@@ -16,8 +16,8 @@ struct LinkedListIterator<T: ops.Construct> {
                 return null;
             }
             var ptr = this.current;
-            this.current = ptr.next;
             unsafe {
+                this.current = ptr.next;
                 return &mut ptr.value;
             }
         }

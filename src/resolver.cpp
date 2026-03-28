@@ -2694,6 +2694,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        if (expr_type->kind == TypeKind::Pointer && !scope.is_unsafe_block) {
+            error(node, "raw pointer member access requires unsafe block");
+            return nullptr;
+        }
+
         // Tuple field access: expr.0, expr.1, ...
         if (expr_type->kind == TypeKind::Tuple) {
             auto &elems = expr_type->data.tuple.elements;

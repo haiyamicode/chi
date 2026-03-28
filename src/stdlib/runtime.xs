@@ -93,26 +93,26 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    private mut func retain() {
+    private unsafe mut func retain() {
         if this._header {
             this._header.ref_count.fetch_add(1);
         }
     }
 
-    private mut func release() {
+    private unsafe mut func release() {
         if this._header {
             var old = this._header.ref_count.fetch_sub(1);
             if old == 1 {
-                unsafe {
-                    delete this._ptr;
-                    delete this._header;
-                }
+                delete this._ptr;
+                delete this._header;
             }
         }
     }
 
     mutex func delete() {
-        this.release();
+        unsafe {
+            this.release();
+        }
     }
 
     func as_ref() &T {
@@ -128,14 +128,18 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
     }
 
     func ref_count() uint32 {
-        return this._header.ref_count.load();
+        unsafe {
+            return this._header.ref_count.load();
+        }
     }
 
     impl ops.Copy {
         mut func copy(source: &This) {
             var header = source._header;
             if header {
-                header.ref_count.fetch_add(1);
+                unsafe {
+                    header.ref_count.fetch_add(1);
+                }
             }
             this._header = header;
             this._ptr = source._ptr;

@@ -49,14 +49,16 @@ struct DataHolder<T> {
 }
 
 struct RefHolder<T> {
-    data: *DataHolder<T> = null;
+    data: *DataHolder<T>;
 
     mut func new(value: T) {
         this.data = new DataHolder<T>{value};
     }
 
     func get() T {
-        return this.data.value;
+        unsafe {
+            return this.data.value;
+        }
     }
 
     mut func delete() {

@@ -207,11 +207,15 @@ export struct Field {
     }
 
     func type() Type {
-        return {this.raw.type_info};
+        unsafe {
+            return {this.raw.type_info};
+        }
     }
 
     func offset() uint32 {
-        return this.raw.offset as uint32;
+        unsafe {
+            return this.raw.offset as uint32;
+        }
     }
 
     unsafe func ptr_at(base: *void) *void {
@@ -238,7 +242,9 @@ export struct Type {
     }
 
     func kind() Kind {
-        return this.raw.kind_value as Kind;
+        unsafe {
+            return this.raw.kind_value as Kind;
+        }
     }
 
     func name() string {
@@ -252,7 +258,9 @@ export struct Type {
     }
 
     func size() uint32 {
-        return this.raw.size_value as uint32;
+        unsafe {
+            return this.raw.size_value as uint32;
+        }
     }
 
     func elem() ?Type {
@@ -297,7 +305,9 @@ export struct Type {
     }
 
     func has_destructor() bool {
-        return this.raw.destructor != null;
+        unsafe {
+            return this.raw.destructor != null;
+        }
     }
 
     unsafe func destroy(ptr: *void) {
@@ -321,14 +331,24 @@ export struct Type {
     }
 
     func field_count() uint32 {
-        if !this.raw.field_table {
+        var field_table: *__TypeFieldEntry = null;
+        unsafe {
+            field_table = this.raw.field_table;
+        }
+        if !field_table {
             return 0;
         }
-        return this.raw.field_table_len as uint32;
+        unsafe {
+            return this.raw.field_table_len as uint32;
+        }
     }
 
     func field(index: uint32) ?Field {
-        if !this.raw.field_table || index >= this.field_count() {
+        var field_table: *__TypeFieldEntry = null;
+        unsafe {
+            field_table = this.raw.field_table;
+        }
+        if !field_table || index >= this.field_count() {
             return null;
         }
         unsafe {

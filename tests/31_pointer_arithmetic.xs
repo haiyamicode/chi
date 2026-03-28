@@ -1,5 +1,9 @@
 import "std/mem" as mem;
 
+struct PtrPoint {
+    value: int = 0;
+}
+
 func test_ptr_add_sub() {
     println("=== Test: ptr + n, ptr - n ===");
     var arr: Array<int> = [10, 20, 30, 40, 50];
@@ -124,6 +128,17 @@ func test_ptr_null_compare() {
     }
 }
 
+func test_ptr_member_access() {
+    println("=== Test: ptr member access in unsafe ===");
+    var point = PtrPoint{value: 99};
+    unsafe {
+        var p = &point as *PtrPoint;
+        printf("p.value={}\n", p.value);
+        p.value = 123;
+        printf("after write: point.value={}\n", point.value);
+    }
+}
+
 func main() {
     test_ptr_add_sub();
     test_ptr_diff();
@@ -134,4 +149,5 @@ func main() {
     test_malloc_ptr_arith();
     test_ptr_indexing();
     test_ptr_null_compare();
+    test_ptr_member_access();
 }

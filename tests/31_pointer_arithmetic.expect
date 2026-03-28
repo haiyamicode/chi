@@ -33,3 +33,6 @@ p != null: true
 p == null: false
 null != p: true
 null == p: false
+=== Test: ptr member access in unsafe ===
+p.value=99
+after write: point.value=123
