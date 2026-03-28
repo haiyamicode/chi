@@ -60,6 +60,11 @@ sequential_guards(1,2)=3
 sequential_guards(null,2)=-1
 sequential_guards(1,null)=-2
 
+-- Nested guard inheritance --
+nested_guard_inheritance(5,true,true)=6
+nested_guard_inheritance(null,true,true)=-1
+nested_dot_guard_inheritance=9
+
 -- And with else branch --
 and_else_branch(3,7)=sum=10
 and_else_branch(null,7)=missing

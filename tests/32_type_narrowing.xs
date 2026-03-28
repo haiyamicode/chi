@@ -157,6 +157,35 @@ func sequential_guards(a: ?int, b: ?int) int {
     return a + b;
 }
 
+// === Guard narrowing inherited into later nested blocks ===
+
+func nested_guard_inheritance(x: ?int, ok: bool, also: bool) int {
+    if !x {
+        return -1;
+    }
+    if ok {
+        if also {
+            return x + 1;
+        }
+    }
+    return 0;
+}
+
+func nested_dot_guard_inheritance() int {
+    var c = Container{};
+    c.value = 4;
+    c.name = "hello";
+    if !c.value || !c.name {
+        return -1;
+    }
+    if c.name.length > 3 {
+        if true {
+            return c.value + c.name.length;
+        }
+    }
+    return 0;
+}
+
 // === && inside if-else (narrowing in then-block only) ===
 
 func and_else_branch(a: ?int, b: ?int) string {
@@ -470,6 +499,12 @@ func main() {
     printf("sequential_guards(1,2)={}\n", sequential_guards(1, 2));
     printf("sequential_guards(null,2)={}\n", sequential_guards(null, 2));
     printf("sequential_guards(1,null)={}\n", sequential_guards(1, null));
+
+    println("\n-- Nested guard inheritance --");
+    printf("nested_guard_inheritance(5,true,true)={}\n", nested_guard_inheritance(5, true, true));
+    printf("nested_guard_inheritance(null,true,true)={}\n",
+           nested_guard_inheritance(null, true, true));
+    printf("nested_dot_guard_inheritance={}\n", nested_dot_guard_inheritance());
 
     println("\n-- And with else branch --");
     printf("and_else_branch(3,7)={}\n", and_else_branch(3, 7));
