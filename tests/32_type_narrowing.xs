@@ -104,6 +104,47 @@ func guard_or_with_bool(x: ?int, flag: bool) int {
     return x * 2;
 }
 
+// === Second-clause narrowing ===
+
+func and_second_clause(x: ?int) int {
+    if x && x > 3 {
+        return x + 1;
+    }
+    return -1;
+}
+
+func and_second_clause_mixed(x: ?int, y: int) int {
+    if x && y > 0 {
+        return x + y;
+    }
+    return -1;
+}
+
+func or_second_clause(x: ?int) int {
+    if !x || x < 0 {
+        return -1;
+    }
+    return x + 1;
+}
+
+func rhs_true() bool {
+    println("  rhs_true");
+    return true;
+}
+
+func rhs_false() bool {
+    println("  rhs_false");
+    return false;
+}
+
+func and_short_circuit(x: ?int) bool {
+    return x && rhs_false();
+}
+
+func or_short_circuit(x: ?int) bool {
+    return x || rhs_true();
+}
+
 // === Chained guards (sequential if-guards) ===
 
 func sequential_guards(a: ?int, b: ?int) int {
@@ -259,6 +300,16 @@ struct Container {
     name: ?string = null;
 }
 
+func dot_second_clause_chain() string {
+    var c = Container{};
+    c.value = 3;
+    c.name = "hello";
+    if c.value && c.name && c.name.length > c.value {
+        return stringf("{} {}", c.value, c.name);
+    }
+    return "missing";
+}
+
 struct App {
     service: ?Traced = null;
 
@@ -400,6 +451,20 @@ func main() {
     printf("guard_or_with_bool(5,true)={}\n", guard_or_with_bool(5, true));
     printf("guard_or_with_bool(5,false)={}\n", guard_or_with_bool(5, false));
     printf("guard_or_with_bool(null,true)={}\n", guard_or_with_bool(null, true));
+
+    println("\n-- Second-clause narrowing --");
+    printf("and_second_clause(5)={}\n", and_second_clause(5));
+    printf("and_second_clause(2)={}\n", and_second_clause(2));
+    printf("and_second_clause(null)={}\n", and_second_clause(null));
+    printf("and_second_clause_mixed(5,2)={}\n", and_second_clause_mixed(5, 2));
+    printf("and_second_clause_mixed(null,2)={}\n", and_second_clause_mixed(null, 2));
+    printf("or_second_clause(5)={}\n", or_second_clause(5));
+    printf("or_second_clause(-1)={}\n", or_second_clause(-1));
+    printf("or_second_clause(null)={}\n", or_second_clause(null));
+    printf("dot_second_clause_chain={}\n", dot_second_clause_chain());
+    println("short_circuit:");
+    printf("and_short_circuit(null)={}\n", and_short_circuit(null));
+    printf("or_short_circuit(5)={}\n", or_short_circuit(5));
 
     println("\n-- Sequential guards --");
     printf("sequential_guards(1,2)={}\n", sequential_guards(1, 2));

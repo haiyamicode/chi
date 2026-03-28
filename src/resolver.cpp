@@ -27,6 +27,7 @@ static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiT
                                        ChiType *to_type, const ResolveScope *scope);
 static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr);
 static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope);
+static bool logical_rhs_uses_truthy_narrowing(TokenType op_type);
 
 static bool is_nonowning_alias_decl(ast::Node *node) {
     return node && node->type == NodeType::VarDecl && node->data.var_decl.narrowed_from;
@@ -1222,7 +1223,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (data.kind == ast::IdentifierKind::This) {
             // Check for narrowed 'this' (e.g., enum variant narrowing in switch)
             if (scope.block && scope.block->scope) {
-                auto narrowed = scope.block->scope->find_one("this");
+                auto narrowed = scope.block->scope->find_one("this", true);
                 if (narrowed && narrowed->type == NodeType::VarDecl &&
                     narrowed->data.var_decl.is_generated && narrowed->data.var_decl.narrowed_from) {
                     data.decl = narrowed;
@@ -1305,7 +1306,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return create_type(TypeKind::Unknown);
         }
         if (data.kind == ast::IdentifierKind::Value && scope.block) {
-            auto replacement = scope.block->scope->find_one(data.decl->name);
+            auto replacement = scope.block->scope->find_one(data.decl->name, true);
             if (replacement && replacement->type == NodeType::VarDecl &&
                 replacement->data.var_decl.is_generated && replacement != data.decl) {
                 data.decl = replacement;
@@ -1706,6 +1707,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 ctx_type = t1->get_elem();
             }
             auto op2_scope = scope.set_value_type(ctx_type);
+            ast::Block rhs_narrow_block = {};
+            if ((data.op_type == TokenType::LAND || data.op_type == TokenType::LOR) && scope.block &&
+                scope.block->scope && scope.parent_fn_node) {
+                array<ast::Node *> rhs_narrowables;
+                collect_narrowables(data.op1, logical_rhs_uses_truthy_narrowing(data.op_type),
+                                    rhs_narrowables);
+                if (rhs_narrowables.len > 0) {
+                    rhs_narrow_block.scope = m_ctx->allocator->create_scope(scope.block->scope);
+                    for (auto ident : rhs_narrowables) {
+                        auto var = create_narrowed_var(ident, node, scope);
+                        rhs_narrow_block.scope->put(var->name, var);
+                        data.rhs_narrow_vars.add(var);
+                    }
+                    op2_scope = op2_scope.set_block(&rhs_narrow_block);
+                }
+            }
             t2 = resolve(data.op2, op2_scope);
         }
 
@@ -2831,7 +2848,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (scope.block && !member->is_method() && !scope.is_lhs) {
             auto path = build_narrowing_path(node);
             if (!path.empty()) {
-                auto narrowed = scope.block->scope->find_one(path);
+                auto narrowed = scope.block->scope->find_one(path, true);
                 if (narrowed && narrowed->type == NodeType::VarDecl &&
                     narrowed->data.var_decl.is_generated && narrowed->data.var_decl.narrowed_from) {
                     data.narrowed_var = narrowed;
@@ -6267,7 +6284,7 @@ static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope)
     if (node->type == NodeType::DotExpr) {
         auto path = build_narrowing_path(node);
         if (!path.empty()) {
-            narrowed = scope.block->scope->find_one(path);
+            narrowed = scope.block->scope->find_one(path, true);
         }
     } else if (node->type == NodeType::Identifier) {
         string name = node->name;
@@ -6275,7 +6292,7 @@ static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope)
             name = "this";
         }
         if (!name.empty()) {
-            narrowed = scope.block->scope->find_one(name);
+            narrowed = scope.block->scope->find_one(name, true);
         }
     }
     if (!narrowed || narrowed->type != NodeType::VarDecl) {
@@ -9852,6 +9869,10 @@ void Resolver::collect_narrowables(ast::Node *expr, bool when_truthy, array<ast:
             collect_narrowables(data.op2, false, out);
         }
     }
+}
+
+static bool logical_rhs_uses_truthy_narrowing(TokenType op_type) {
+    return op_type == TokenType::LAND;
 }
 
 bool Resolver::fn_type_has_placeholder(ChiType *fn_type) {

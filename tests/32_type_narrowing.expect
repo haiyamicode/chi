@@ -41,6 +41,20 @@ guard_or_with_bool(5,true)=10
 guard_or_with_bool(5,false)=-1
 guard_or_with_bool(null,true)=-1
 
+-- Second-clause narrowing --
+and_second_clause(5)=6
+and_second_clause(2)=-1
+and_second_clause(null)=-1
+and_second_clause_mixed(5,2)=7
+and_second_clause_mixed(null,2)=-1
+or_second_clause(5)=6
+or_second_clause(-1)=-1
+or_second_clause(null)=-1
+dot_second_clause_chain=3 hello
+short_circuit:
+and_short_circuit(null)=false
+or_short_circuit(5)=true
+
 -- Sequential guards --
 sequential_guards(1,2)=3
 sequential_guards(null,2)=-1

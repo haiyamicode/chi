@@ -5242,6 +5242,35 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));
             return builder.CreateCmp(cmpop, lhs, rhs);
         }
+        case TokenType::LAND:
+        case TokenType::LOR: {
+            auto lhs = compile_assignment_to_type(fn, data.op1, get_system_types()->bool_);
+            auto lhs_block = builder.GetInsertBlock();
+            auto rhs_b = fn->new_label(data.op_type == TokenType::LAND ? "_and_rhs" : "_or_rhs");
+            auto end_b = fn->new_label(data.op_type == TokenType::LAND ? "_and_end" : "_or_end");
+
+            if (data.op_type == TokenType::LAND) {
+                builder.CreateCondBr(lhs, rhs_b, end_b);
+            } else {
+                builder.CreateCondBr(lhs, end_b, rhs_b);
+            }
+
+            fn->use_label(rhs_b);
+            for (auto var : data.rhs_narrow_vars) {
+                compile_stmt(fn, var);
+            }
+            auto rhs = compile_assignment_to_type(fn, data.op2, get_system_types()->bool_);
+            auto rhs_block = builder.GetInsertBlock();
+            builder.CreateBr(end_b);
+
+            fn->use_label(end_b);
+            auto phi = builder.CreatePHI(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 2);
+            auto short_value = llvm::ConstantInt::getBool(
+                *m_ctx->llvm_ctx, data.op_type == TokenType::LOR);
+            phi->addIncoming(short_value, lhs_block);
+            phi->addIncoming(rhs, rhs_block);
+            return phi;
+        }
         case TokenType::QUES: {
             auto result_type = get_chitype(expr);
             auto result_type_l = compile_type(result_type);

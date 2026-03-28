@@ -429,6 +429,7 @@ struct BinOpExpr {
     Node *op2 = nullptr;
     Node *resolved_call = nullptr;
     bool is_initializing = false; // true when this assignment is the first write to the target
+    array<Node *> rhs_narrow_vars = {}; // narrowed vars visible only while resolving/evaluating op2
 };
 
 struct UnaryOpExpr {
