@@ -10,7 +10,7 @@ func main() {
     var count = r1.ref_count(
 
     // as_ref incomplete
-    var val = r1.as_ref().
+    var val = r1.ref().
 
     // Nested Shared with errors
     var r3: Shared<Shared<int>> = {{
@@ -19,7 +19,7 @@ func main() {
     var ref: &mut< = null;
 
     // Chained operations on Shared
-    r1.set(.as_ref();
+    r1.set(.ref();
 
     // Invalid Shared method
     r1.invalid_method();

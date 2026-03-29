@@ -178,11 +178,11 @@ func test_box() {
     println("=== Box<Shape> ===");
     var c = new Circle{radius: 7};
     var b = Box<Shape>{c};
-    printf("{}: area={}\n", b.as_ref().name(), b.as_ref().area());
+    printf("{}: area={}\n", b.ref().name(), b.ref().area());
 
     var r = new Rect{w: 2, h: 3};
     var b2 = Box<Shape>{r};
-    printf("{}: area={}\n", b2.as_ref().name(), b2.as_ref().area());
+    printf("{}: area={}\n", b2.ref().name(), b2.ref().area());
     println("before cleanup:");
 }
 

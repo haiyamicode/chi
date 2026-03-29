@@ -112,7 +112,10 @@ Token *Parser::expect_identifier() {
     case TokenType::KW_DELETE:
     case TokenType::KW_CATCH:
     case TokenType::KW_ASYNC:
+    case TokenType::KW_MUT:
         if (token->type == TokenType::KW_ASYNC) {
+            token->type = TokenType::IDEN;
+        } else if (token->type == TokenType::KW_MUT) {
             token->type = TokenType::IDEN;
         }
         return token;

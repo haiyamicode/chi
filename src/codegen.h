@@ -747,7 +747,7 @@ class Compiler {
     void emit_async_promise_reject(Function *fn, llvm::Value *data_ptr, llvm::Value *vtable_ptr);
     void emit_async_promise_reject_shared(Function *fn, llvm::Value *shared_error);
     llvm::Value *compile_shared_new(Function *fn, ChiType *shared_type, llvm::Value *owned_value);
-    llvm::Value *compile_shared_as_ref(Function *fn, llvm::Value *shared_ptr, ChiType *shared_type);
+    llvm::Value *compile_shared_ref(Function *fn, llvm::Value *shared_ptr, ChiType *shared_type);
     llvm::Value *compile_interface_type_match(Function *fn, llvm::Value *fat_ptr, ChiType *iface_type,
                                               ChiType *concrete_type);
     llvm::Value *extract_interface_data_ptr(llvm::Value *fat_ptr);

@@ -261,7 +261,7 @@ func main() {
     printf("wrapper write: {}\n", w!);
 
     // Address-of deref: &(b.deref_mut()) should give &Point
-    let ref = b.as_mut();
+    let ref = b.mut();
     printf("addr of deref: {}\n", *ref);
 
     // Operator on temporaries (LHS has no address)

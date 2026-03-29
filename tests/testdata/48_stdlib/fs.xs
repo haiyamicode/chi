@@ -133,7 +133,7 @@ func main() {
     var result = try fs.File.open("/tmp/chi_no_such_file_12345") catch fs.FileError;
     switch result {
         Err(err) => {
-            var e = err.as_ref();
+            var e = err.ref();
             switch e.(type) {
                 &fs.FileError => {
                     printf("kind: {}\n", e.kind);

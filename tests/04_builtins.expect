@@ -50,9 +50,9 @@ before scope exit:
   TracedValue.delete(10)
   TracedValue.delete(20)
 testing shared:
-r1.as_ref()=42, ref_count=1
+r1.ref()=42, ref_count=1
 after copy: ref_count=2
-r2.as_ref()=42
+r2.ref()=42
 testing nested shared:
 ns.ref_count()=1
 ns.get_count()=0
@@ -64,7 +64,7 @@ s1 + " World"=Hello World
 empty.is_empty()=true
 
 testing box:
-b1.as_ref()=42
+b1.ref()=42
 after copy: b1=42, b2=42
 creating box:
   Traced.new(1)

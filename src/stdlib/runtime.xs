@@ -83,28 +83,28 @@ struct SharedHeader {
 }
 
 export struct Shared<T: ops.Unsized + ops.NoCopy> {
-    private _header: *SharedHeader;
-    private _ptr: *T;
+    private header: *SharedHeader;
+    private ptr: *T;
 
     mut func new(ptr: &move T) {
-        this._header = new SharedHeader{};
+        this.header = new SharedHeader{};
         unsafe {
-            this._ptr = (move ptr) as *T;
+            this.ptr = (move ptr) as *T;
         }
     }
 
     private mut unsafe func retain() {
-        if this._header {
-            this._header.ref_count.fetch_add(1);
+        if this.header {
+            this.header.ref_count.fetch_add(1);
         }
     }
 
     private mut unsafe func release() {
-        if this._header {
-            var old = this._header.ref_count.fetch_sub(1);
+        if this.header {
+            var old = this.header.ref_count.fetch_sub(1);
             if old == 1 {
-                delete this._ptr;
-                delete this._header;
+                delete this.ptr;
+                delete this.header;
             }
         }
     }
@@ -115,41 +115,41 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    func as_ref() &T {
+    func ref() &T {
         unsafe {
-            return this._ptr;
+            return this.ptr;
         }
     }
 
-    mut func as_mut() &mut T {
+    mut func mut() &mut T {
         unsafe {
-            return this._ptr;
+            return this.ptr;
         }
     }
 
     func ref_count() uint32 {
         unsafe {
-            return this._header.ref_count.load();
+            return this.header.ref_count.load();
         }
     }
 
     impl ops.Copy {
         mut func copy(source: &This) {
-            var header = source._header;
+            var header = source.header;
             if header {
                 unsafe {
                     header.ref_count.fetch_add(1);
                 }
             }
-            this._header = header;
-            this._ptr = source._ptr;
+            this.header = header;
+            this.ptr = source.ptr;
         }
     }
 
     impl ops.Deref<T> {
         func deref() &T {
             unsafe {
-                return this._ptr;
+                return this.ptr;
             }
         }
     }
@@ -157,7 +157,7 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
     impl ops.DerefMut<T> {
         mut func deref_mut() &mut T {
             unsafe {
-                return this._ptr;
+                return this.ptr;
             }
         }
     }
@@ -170,44 +170,44 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
 
     impl ops.Display {
         func display() string {
-            return stringf("{}", this.as_ref());
+            return stringf("{}", this.ref());
         }
     }
 }
 
 export struct Box<T: ops.Unsized + ops.NoCopy> {
-    private _ptr: *T;
+    private ptr: *T;
 
     mut func new(ptr: &move T) {
         unsafe {
-            this._ptr = (move ptr) as *T;
+            this.ptr = (move ptr) as *T;
         }
     }
 
     mut func delete() {
         unsafe {
-            if this._ptr {
-                delete this._ptr;
+            if this.ptr {
+                delete this.ptr;
             }
         }
     }
 
-    func as_ref() &T {
+    func ref() &T {
         unsafe {
-            return this._ptr;
+            return this.ptr;
         }
     }
 
-    mut func as_mut() &mut T {
+    mut func mut() &mut T {
         unsafe {
-            return this._ptr;
+            return this.ptr;
         }
     }
 
     impl ops.Copy where T: ops.Copy {
         mut func copy(source: &This) {
             unsafe {
-                this._ptr = mem.copy<T>(source._ptr as &T) as *T;
+                this.ptr = mem.copy<T>(source.ptr as &T) as *T;
             }
         }
     }
@@ -221,7 +221,7 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
     impl ops.Deref<T> {
         func deref() &T {
             unsafe {
-                return this._ptr;
+                return this.ptr;
             }
         }
     }
@@ -229,7 +229,7 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
     impl ops.DerefMut<T> {
         mut func deref_mut() &mut T {
             unsafe {
-                return this._ptr;
+                return this.ptr;
             }
         }
     }
@@ -237,7 +237,7 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
     impl ops.Display {
         func display() string {
             unsafe {
-                return stringf("{}", this.as_ref());
+                return stringf("{}", this.ref());
             }
         }
     }
@@ -1151,7 +1151,7 @@ export struct Promise<T = Unit> {
     }
 
     func error() ?(&Error) {
-        return this.data.error?.as_ref();
+        return this.data.error?.ref();
     }
 
     private mut func on_resolve(callback: func <'static>(value: T)) {

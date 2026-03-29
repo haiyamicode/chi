@@ -77,10 +77,10 @@ func test_map() {
 func test_shared() {
     println("testing shared:");
     var r1 = Shared<int>.from_value(42);
-    printf("r1.as_ref()={}, ref_count={}\n", r1.as_ref(), r1.ref_count());
+    printf("r1.ref()={}, ref_count={}\n", r1.ref(), r1.ref_count());
     var r2: Shared<int> = r1;
     printf("after copy: ref_count={}\n", r1.ref_count());
-    printf("r2.as_ref()={}\n", r2.as_ref());
+    printf("r2.ref()={}\n", r2.ref());
 }
 
 struct NestedState {
@@ -96,7 +96,7 @@ struct NestedShared {
     }
 
     func get_count() int {
-        return this.data.as_ref().count;
+        return this.data.ref().count;
     }
 
     func ref_count() uint32 {
@@ -244,19 +244,19 @@ func test_box_helper() {
     println("creating box:");
     var t = new Traced{1};
     var b1 = Box<Traced>{t};
-    printf("b1.id={}\n", b1.as_ref().id);
+    printf("b1.id={}\n", b1.ref().id);
     println("copying box:");
     var b2 = b1;
-    printf("b2.id={}\n", b2.as_ref().id);
+    printf("b2.id={}\n", b2.ref().id);
     println("before scope exit:");
 }
 
 func test_box() {
     println("testing box:");
     var b1 = Box.from_value(42);
-    printf("b1.as_ref()={}\n", b1.as_ref());
+    printf("b1.ref()={}\n", b1.ref());
     var b2 = b1;
-    printf("after copy: b1={}, b2={}\n", b1.as_ref(), b2.as_ref());
+    printf("after copy: b1={}, b2={}\n", b1.ref(), b2.ref());
     test_box_helper();
     println("after helper returned");
     println("");

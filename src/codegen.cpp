@@ -4741,16 +4741,16 @@ llvm::Value *Compiler::compile_shared_new(Function *fn, ChiType *shared_type,
     return builder.CreateLoad(shared_type_l, shared_var, "_shared_value");
 }
 
-llvm::Value *Compiler::compile_shared_as_ref(Function *fn, llvm::Value *shared_ptr,
-                                             ChiType *shared_type) {
+llvm::Value *Compiler::compile_shared_ref(Function *fn, llvm::Value *shared_ptr,
+                                          ChiType *shared_type) {
     auto shared_struct = get_resolver()->resolve_struct_type(shared_type);
     assert(shared_struct);
-    auto as_ref_member = shared_struct->find_member("as_ref");
-    assert(as_ref_member && "Shared.as_ref() method not found");
+    auto ref_member = shared_struct->find_member("ref");
+    assert(ref_member && "Shared.ref() method not found");
     auto variant_type_id = resolve_variant_type_id(fn, shared_type);
-    auto as_ref_node = get_variant_member_node(as_ref_member, variant_type_id);
-    auto as_ref_fn = get_fn(as_ref_node);
-    return m_ctx->llvm_builder->CreateCall(as_ref_fn->llvm_fn, {shared_ptr});
+    auto ref_node = get_variant_member_node(ref_member, variant_type_id);
+    auto ref_fn = get_fn(ref_node);
+    return m_ctx->llvm_builder->CreateCall(ref_fn->llvm_fn, {shared_ptr});
 }
 
 llvm::Value *Compiler::extract_interface_data_ptr(llvm::Value *fat_ptr) {
@@ -5877,7 +5877,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             fn->use_label(err_b);
             if (data.catch_expr) {
                 auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
-                auto error_iface = compile_shared_as_ref(fn, shared_error_ptr, shared_error_type);
+                auto error_iface = compile_shared_ref(fn, shared_error_ptr, shared_error_type);
                 auto type_matches = compile_interface_type_match(
                     fn, error_iface, get_resolver()->get_context()->rt_error_type, catch_type);
                 auto match_b = fn->new_label("_try_await_type_match");
@@ -5920,7 +5920,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 if (data.catch_err_var) {
                     auto err_var = compile_alloc(fn, data.catch_err_var);
                     add_var(data.catch_err_var, err_var);
-                    auto owner_iface = compile_shared_as_ref(fn, shared_owner_var, shared_error_type);
+                    auto owner_iface = compile_shared_ref(fn, shared_owner_var, shared_error_type);
                     auto concrete_data_ptr = extract_interface_data_ptr(owner_iface);
                     builder.CreateStore(concrete_data_ptr, err_var);
                     data.catch_block->data.block.implicit_vars.len = 0;

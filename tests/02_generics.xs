@@ -34,7 +34,7 @@ struct Wrapper<T> {
     }
 
     func get_inner() &Inner<T> {
-        return this.data.as_ref();
+        return this.data.ref();
     }
 }
 
