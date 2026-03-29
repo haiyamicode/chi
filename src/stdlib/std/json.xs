@@ -595,10 +595,7 @@ func json_encode_string(buf: &mutex Buffer, value: string) {
 
 func encode_type_error(path: string, ty: reflect.Type, detail: string) never {
     let err_path = if path.is_empty() => (null as ?string) else => path as ?string;
-    throw new EncodeError{
-        :detail,
-        path: err_path
-    };
+    throw new EncodeError{:detail, path: err_path};
 }
 
 unsafe func json_encode_int(ty: reflect.Type, src: *void, buf: &mutex Buffer) {

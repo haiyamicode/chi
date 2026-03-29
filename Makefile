@@ -91,12 +91,14 @@ format_all: build install
 		case "$$file" in \
 			tests/formatter_collapse.xs|\
 			tests/formatter_semantic_collapse.xs|\
-			tests/42_construct_expr.xs) \
+			tests/42_construct_expr.xs|\
+			tests/testdata/*_errors/*) \
 				echo "Skipping $$file (formatter test input)..."; \
 				continue; \
 				;; \
 		esac; \
 		echo "Formatting $$file..."; \
-		$(CHIC) -f -c "$$file" > "$$file.tmp" && mv "$$file.tmp" "$$file"; \
+		$(CHIC) -f -c "$$file" > "$$file.tmp" || { rm -f "$$file.tmp"; exit 1; }; \
+		mv "$$file.tmp" "$$file"; \
 	done
 	@echo "Formatting complete!"

@@ -1063,14 +1063,26 @@ string cx::get_strlit_repr(const string &str) {
     stringstream out;
     for (auto c : str) {
         switch (c) {
+        case '\\':
+            out << "\\\\";
+            break;
         case '"':
             out << "\\\"";
+            break;
+        case '\b':
+            out << "\\b";
+            break;
+        case '\f':
+            out << "\\f";
             break;
         case '\t':
             out << "\\t";
             break;
         case '\n':
             out << "\\n";
+            break;
+        case '\r':
+            out << "\\r";
             break;
         default:
             out.put(c);
@@ -1103,6 +1115,24 @@ string Token::to_string() const {
         return fmt::format("'{}", str);
     case TokenType::CHAR: {
         uint32_t cp = (uint32_t)val.i;
+        switch (cp) {
+        case '\\':
+            return "'\\\\'";
+        case '\'':
+            return "'\\''";
+        case '\b':
+            return "'\\b'";
+        case '\f':
+            return "'\\f'";
+        case '\n':
+            return "'\\n'";
+        case '\r':
+            return "'\\r'";
+        case '\t':
+            return "'\\t'";
+        default:
+            break;
+        }
         if (cp >= 32 && cp <= 126) {
             return fmt::format("'{}'", (char)cp);
         }

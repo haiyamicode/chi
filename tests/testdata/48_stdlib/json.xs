@@ -114,8 +114,7 @@ func main() {
     printf("non-comment name={}\n", non_comment_cfg.name);
 
     println("=== typed parse field error ===");
-    try json.parse<Config>("{\"version\": {\"major\": \"oops\", \"minor\": 7}}")
-    catch json.ParseError as err {
+    try json.parse<Config>("{\"version\": {\"major\": \"oops\", \"minor\": 7}}") catch json.ParseError as err {
         printf("field detail={}\n", err.detail);
         if let path = err.path {
             printf("field path={}\n", path);

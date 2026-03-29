@@ -1544,7 +1544,9 @@ void AstPrinter::print_node(Node *node) {
             body->data.block.is_arrow = false;
             body->data.block.has_braces = true;
         } else {
-            emit(" ");
+            if (!(body && body->type == NodeType::Block && body->data.block.is_arrow)) {
+                emit(" ");
+            }
             print_node(data.body);
         }
         break;

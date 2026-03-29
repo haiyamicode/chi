@@ -617,10 +617,7 @@ struct PairVal {
 }
 
 func make_pair_val(a: int, b: int) PairVal {
-    return PairVal{
-        first: {a},
-        second: {b}
-    };
+    return {first: {a}, second: {b}};
 }
 
 func make_tuple_val(a: int, b: int) Tuple<TrackedVal, TrackedVal> {

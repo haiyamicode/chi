@@ -146,7 +146,7 @@ func test_ref_to_param() {
     printf("ref = {}\n", *r);
 }
 
-func unwrap_optional_ref(x: ?&int) &int {
+func unwrap_optional_ref(x: ?(&int)) &int {
     if let value = x {
         return value;
     }
@@ -154,7 +154,7 @@ func unwrap_optional_ref(x: ?&int) &int {
 }
 
 func wrap_and_unwrap_optional_ref(x: &int) &int {
-    var wrapped: ?&int = x;
+    var wrapped: ?(&int) = x;
     if let value = wrapped {
         return value;
     }
@@ -937,14 +937,14 @@ struct GenericHiddenRef<T> {
 func test_generic_hidden_ref_bound() {
     printf("=== generic hidden ref bound ===\n");
     var x = 77;
-    var wrapped = get_val_lt<GenericHiddenRef<int>>(GenericHiddenRef<int>{&x});
+    var wrapped = get_val_lt<GenericHiddenRef<int>>({&x});
     printf("wrapped = {}\n", *wrapped.value);
 }
 
 func test_generic_hidden_ref_identity() {
     printf("=== generic hidden ref identity ===\n");
     var x = 99;
-    var wrapped = get_val<GenericHiddenRef<int>>(GenericHiddenRef<int>{&x});
+    var wrapped = get_val<GenericHiddenRef<int>>({&x});
     printf("wrapped = {}\n", *wrapped.value);
 }
 
@@ -975,7 +975,7 @@ func make_hidden_pair<'a, T: 'a>(value: T) Tuple<T, int> {
 func test_generic_hidden_ref_tuple_other_field_ok() {
     printf("=== generic hidden ref tuple other field ok ===\n");
     var obj = ArrayElem{value: 88};
-    var pair = make_hidden_pair<GenericHiddenRef<ArrayElem>>(GenericHiddenRef<ArrayElem>{&obj});
+    var pair = make_hidden_pair<GenericHiddenRef<ArrayElem>>({&obj});
     var other = pair.1;
     var moved = move obj;
     printf("other = {}\n", other);
@@ -990,10 +990,7 @@ func test_generic_hidden_ref_struct_other_field_ok() {
     printf("=== generic hidden ref struct other field ok ===\n");
     var left_obj = ArrayElem{value: 11};
     var right_obj = ArrayElem{value: 22};
-    var pair = GenericHiddenPair<ArrayElem, ArrayElem>{
-        left: GenericHiddenRef<ArrayElem>{&left_obj},
-        right: GenericHiddenRef<ArrayElem>{&right_obj}
-    };
+    var pair = GenericHiddenPair<ArrayElem, ArrayElem>{left: {&left_obj}, right: {&right_obj}};
     var left = pair.left;
     var moved = move right_obj;
     printf("left = {}\n", left.value.value);
@@ -1095,7 +1092,7 @@ struct NestedProjOuter {
 func test_nested_field_projection_copy() {
     println("=== nested field projection copy ===");
     var obj = NestedProjObj{value: 77};
-    let outer = NestedProjOuter{inner: NestedProjRefBox{value: &obj}, other: 1};
+    let outer = NestedProjOuter{inner: {value: &obj}, other: 1};
     let inner = outer.inner;
     let value = outer.inner.value;
     var moved = move outer;

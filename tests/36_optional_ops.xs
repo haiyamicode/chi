@@ -47,7 +47,7 @@ func test_null_coalescing() {
     printf("b ?? 99 = {}\n", result);
 
     var fallback_point: ?Point = null;
-    show_point("fallback point", fallback_point ?? Point{});
+    show_point("fallback point", fallback_point ?? {});
 
     var inferred_point: ?Point = null;
     let inferred_fallback = inferred_point ?? {};
@@ -369,27 +369,27 @@ func test_implicit_narrow() {
 func test_optional_inference() {
     println("test_optional_inference:");
 
-    let explicit_if_left: ?Point = if true => Point{x: 10, y: 11} else => null;
+    let explicit_if_left: ?Point = if true => (Point{x: 10, y: 11}) else => null;
     printf("explicit ?T if T/null = ({}, {})\n", explicit_if_left!.x, explicit_if_left!.y);
 
-    let explicit_if_right: ?Point = if false => null else => Point{x: 12, y: 13};
+    let explicit_if_right: ?Point = if false => null else => (Point{x: 12, y: 13});
     printf("explicit ?T if null/T = ({}, {})\n", explicit_if_right!.x, explicit_if_right!.y);
 
-    var inferred_if_left = if true => Point{x: 1, y: 2} else => null;
+    var inferred_if_left = if true => (Point{x: 1, y: 2}) else => null;
     printf("if T/null = ({}, {})\n", inferred_if_left!.x, inferred_if_left!.y);
 
-    var inferred_if_right = if false => null else => Point{x: 3, y: 4};
+    var inferred_if_right = if false => null else => (Point{x: 3, y: 4});
     printf("if null/T = ({}, {})\n", inferred_if_right!.x, inferred_if_right!.y);
 
     var inferred_switch_left = switch 1 {
-        1 => Point{x: 5, y: 6},
-        else => null,
+        1 => (Point{x: 5, y: 6}),
+        else => null
     };
     printf("switch T/null = ({}, {})\n", inferred_switch_left!.x, inferred_switch_left!.y);
 
     var inferred_switch_right = switch 0 {
         1 => null,
-        else => Point{x: 7, y: 8},
+        else => (Point{x: 7, y: 8})
     };
     printf("switch null/T = ({}, {})\n", inferred_switch_right!.x, inferred_switch_right!.y);
 
@@ -400,19 +400,25 @@ func test_optional_inference() {
 
     var inferred_nested_if = if true => nested else => null;
     var inferred_deeper_if = if true => nested2 else => null;
-    printf("if ?T/null preserves = {} / if ??T/null preserves = {}\n", inferred_nested_if!,
-           inferred_deeper_if!!);
+    printf(
+        "if ?T/null preserves = {} / if ??T/null preserves = {}\n",
+        inferred_nested_if!,
+        inferred_deeper_if!!
+    );
 
     var inferred_nested_switch = switch 1 {
         1 => nested,
-        else => null,
+        else => null
     };
     var inferred_deeper_switch = switch 1 {
         1 => nested2,
-        else => null,
+        else => null
     };
-    printf("switch ?T/null preserves = {} / switch ??T/null preserves = {}\n",
-           inferred_nested_switch!, inferred_deeper_switch!!);
+    printf(
+        "switch ?T/null preserves = {} / switch ??T/null preserves = {}\n",
+        inferred_nested_switch!,
+        inferred_deeper_switch!!
+    );
 
     println("");
 }

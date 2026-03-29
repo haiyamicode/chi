@@ -149,7 +149,7 @@ func test_struct_copy() {
 
 func test_lifecycle_construct_destroy() {
     println("=== lifecycle: construct + destroy ===");
-    var arr = [3]Traced{{1}, Traced{2}, Traced{3}};
+    var arr = [3]Traced{{1}, {2}, {3}};
     println("before scope exit");
 }
 
@@ -161,7 +161,7 @@ func test_lifecycle_partial_init() {
 
 func test_lifecycle_copy() {
     println("=== lifecycle: copy ===");
-    var arr = [3]Traced{{1}, Traced{2}, Traced{3}};
+    var arr = [3]Traced{{1}, {2}, {3}};
     println("copying...");
     var arr2 = arr;
     arr2[0].id = 99;
@@ -172,7 +172,7 @@ func test_lifecycle_copy() {
 
 func test_lifecycle_for_in_value() {
     println("=== lifecycle: for-in value copy ===");
-    var arr = [2]Traced{{1}, Traced{2}};
+    var arr = [2]Traced{{1}, {2}};
     println("iterating...");
     for item in arr {
         printf("item: {}\n", item.id);

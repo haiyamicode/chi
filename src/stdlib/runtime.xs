@@ -93,13 +93,13 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    private unsafe mut func retain() {
+    private mut unsafe func retain() {
         if this._header {
             this._header.ref_count.fetch_add(1);
         }
     }
 
-    private unsafe mut func release() {
+    private mut unsafe func release() {
         if this._header {
             var old = this._header.ref_count.fetch_sub(1);
             if old == 1 {

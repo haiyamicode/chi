@@ -106,7 +106,7 @@ func main() {
     println("Scope ended - non-escaping object should be destroyed by now");
 
     println("\nTest 2: Object escaping via ref assignment");
-    var escaped: ?&GCBox = null;
+    var escaped: ?(&GCBox) = null;
     {
         var local = GCBox{2};
         escaped = &local;
@@ -121,7 +121,7 @@ func main() {
     );
 
     println("\nTest 3: Object escaping via return value");
-    var returned: ?&GCBox = get_escaped_ref();
+    var returned: ?(&GCBox) = get_escaped_ref();
     printf(
         "CRITICAL TEST: Function returned ref to GCBox({}), accessing id: {}\n",
         returned!.id,
@@ -139,8 +139,8 @@ func main() {
     test_lambda_capture_ref_by_value();
 
     println("\nTest 6: Use-after-scope validation");
-    var ref1: ?&GCBox = null;
-    var ref2: ?&GCBox = null;
+    var ref1: ?(&GCBox) = null;
+    var ref2: ?(&GCBox) = null;
     {
         var a = GCBox{6};
         var b = GCBox{7};

@@ -566,8 +566,10 @@ func main() {
 
     println("\n-- Nested guard inheritance --");
     printf("nested_guard_inheritance(5,true,true)={}\n", nested_guard_inheritance(5, true, true));
-    printf("nested_guard_inheritance(null,true,true)={}\n",
-           nested_guard_inheritance(null, true, true));
+    printf(
+        "nested_guard_inheritance(null,true,true)={}\n",
+        nested_guard_inheritance(null, true, true)
+    );
     printf("nested_dot_guard_inheritance={}\n", nested_dot_guard_inheritance());
 
     println("\n-- And with else branch --");
