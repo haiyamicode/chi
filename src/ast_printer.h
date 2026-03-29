@@ -99,6 +99,10 @@ class AstPrinter {
     // Emit construct body (spread + items + field_inits) with wrapping support.
     void emit_construct_body(ConstructExpr &data);
 
+    bool should_arrow_body_use_block_form(Node *value);
+    bool should_suppress_construct_type_in_value_context(Node *value);
+    void print_arrow_body_value(Node *value);
+
     bool should_semantically_shorthand_construct_type(Node *node);
     bool should_semantically_collapse_case_clause(Node *node);
 };

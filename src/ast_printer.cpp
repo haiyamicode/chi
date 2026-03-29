@@ -17,6 +17,26 @@ static bool node_spells_name(Node *node, const string &name) {
     return node->token && node->token->get_name() == name;
 }
 
+static Node *get_arrow_block_value(Node *block) {
+    if (!block || block->type != NodeType::Block) {
+        return nullptr;
+    }
+    auto &data = block->data.block;
+    if (data.return_expr) {
+        return data.return_expr;
+    }
+    if (data.statements.len == 1) {
+        auto *stmt = data.statements[0];
+        if (stmt->type == NodeType::ConstructExpr) {
+            return stmt;
+        }
+        if (stmt->type == NodeType::ReturnStmt && stmt->data.return_stmt.expr) {
+            return stmt->data.return_stmt.expr;
+        }
+    }
+    return nullptr;
+}
+
 static bool should_collapse_promise_unit_subtype(SubtypeExpr &data) {
     return node_spells_name(data.type, "Promise") && data.lifetime_args.len == 0 &&
            data.args.len == 1 && node_spells_name(data.args[0], "Unit");
@@ -117,6 +137,55 @@ string AstPrinter::format_to_string() {
     return string(buf.data(), buf.size());
 }
 
+bool AstPrinter::should_arrow_body_use_block_form(Node *value) {
+    if (!value || value->type != NodeType::ConstructExpr) {
+        return false;
+    }
+    auto rendered = format_node_to_string(value);
+    if (rendered.find('\n') != string::npos) {
+        return true;
+    }
+    return m_current_column + 2 + (int)rendered.size() > m_max_line_length;
+}
+
+bool AstPrinter::should_suppress_construct_type_in_value_context(Node *value) {
+    if (!value || value->type != NodeType::ConstructExpr) {
+        return false;
+    }
+    auto &data = value->data.construct_expr;
+    if (data.is_new || !data.type) {
+        return false;
+    }
+    if (should_semantically_shorthand_construct_type(value)) {
+        return true;
+    }
+    if (data.type->type == NodeType::DotExpr) {
+        return false;
+    }
+    auto *parent = value->parent;
+    if (parent && parent->type == NodeType::Block && parent->resolved_type && value->resolved_type &&
+        parent->resolved_type->eval() == value->resolved_type->eval()) {
+        return true;
+    }
+    return m_fn_return_type && types_match(m_fn_return_type, data.type);
+}
+
+void AstPrinter::print_arrow_body_value(Node *value) {
+    bool wrap_construct = value && value->type == NodeType::ConstructExpr;
+    bool suppress_construct = should_suppress_construct_type_in_value_context(value);
+    if (wrap_construct) {
+        emit("(");
+    }
+    if (suppress_construct) {
+        m_suppress_construct_type = true;
+    }
+    print_node(value);
+    m_suppress_construct_type = false;
+    if (wrap_construct) {
+        emit(")");
+    }
+}
+
 void AstPrinter::print_node(Node *node) {
     if (!node)
         return;
@@ -202,20 +271,41 @@ void AstPrinter::print_node(Node *node) {
             emit("] ");
         }
         // Arrow lambdas: omit 'func' keyword — (n) => n * 2
-        if (data.fn_kind == FnKind::Lambda && data.body && data.body->data.block.is_arrow) {
+        bool lambda_arrow_construct_block =
+            data.fn_kind == FnKind::Lambda && data.body && data.body->type == NodeType::Block &&
+            data.body->data.block.is_arrow && !data.body->data.block.has_braces &&
+            should_arrow_body_use_block_form(get_arrow_block_value(data.body));
+        if (data.fn_kind == FnKind::Lambda && data.body && data.body->data.block.is_arrow &&
+            !lambda_arrow_construct_block) {
             m_suppress_func_keyword = true;
         }
         print_node(data.fn_proto);
         m_suppress_func_keyword = false;
         if (data.body) {
-            if (!data.body->data.block.is_arrow) {
+            if (!data.body->data.block.is_arrow || lambda_arrow_construct_block) {
                 emit(" ");
             }
             auto prev_fn_ret = m_fn_return_type;
             auto prev_strip_arrow_return = m_strip_arrow_return;
             m_fn_return_type = data.fn_proto ? data.fn_proto->data.fn_proto.return_type : nullptr;
-            m_strip_arrow_return = data.fn_kind == FnKind::Lambda && data.body->data.block.is_arrow;
+            m_strip_arrow_return =
+                data.fn_kind == FnKind::Lambda && data.body->data.block.is_arrow &&
+                !lambda_arrow_construct_block;
+            bool restore_arrow = false;
+            bool restore_braces = false;
+            if (lambda_arrow_construct_block) {
+                data.body->data.block.is_arrow = false;
+                data.body->data.block.has_braces = true;
+                restore_arrow = true;
+                restore_braces = true;
+            }
             print_node(data.body);
+            if (restore_arrow) {
+                data.body->data.block.is_arrow = true;
+            }
+            if (restore_braces) {
+                data.body->data.block.has_braces = false;
+            }
             m_strip_arrow_return = prev_strip_arrow_return;
             m_fn_return_type = prev_fn_ret;
             if (data.fn_kind != FnKind::Lambda) {
@@ -388,7 +478,10 @@ void AstPrinter::print_node(Node *node) {
             // Arrow lambda bodies: print expression directly without 'return' keyword
             if (arrow_value_context && stmt->type == NodeType::ReturnStmt &&
                 stmt->data.return_stmt.expr) {
-                print_node(stmt->data.return_stmt.expr);
+                print_arrow_body_value(stmt->data.return_stmt.expr);
+            } else if (data.is_arrow && stmt->type == NodeType::ConstructExpr &&
+                       !data.return_expr && data.statements.len == 1 && !data.has_braces) {
+                print_arrow_body_value(stmt);
             } else {
                 // Preserve blank lines from original source
                 if (prev_stmt && has_blank_line_between(prev_stmt, stmt)) {
@@ -398,7 +491,19 @@ void AstPrinter::print_node(Node *node) {
                 if (ft)
                     flush_comments_before(ft->pos);
                 print_indent(m_indent);
+                bool wrap_value_construct = !data.is_arrow && is_value_context(node) &&
+                                            !data.return_expr && data.statements.len == 1 &&
+                                            stmt->type == NodeType::ConstructExpr &&
+                                            should_suppress_construct_type_in_value_context(stmt);
+                if (wrap_value_construct) {
+                    emit("(");
+                    m_suppress_construct_type = true;
+                }
                 print_node(stmt);
+                m_suppress_construct_type = false;
+                if (wrap_value_construct) {
+                    emit(")");
+                }
                 if (stmt->type == NodeType::ForStmt || stmt->type == NodeType::WhileStmt) {
                     // These handlers print their own \n
                 } else if (stmt->type == NodeType::IfExpr || stmt->type == NodeType::Block ||
@@ -424,7 +529,22 @@ void AstPrinter::print_node(Node *node) {
                     flush_comments_before(ft->pos);
                 print_indent(m_indent);
             }
-            print_node(data.return_expr);
+            if (data.is_arrow && !data.has_braces) {
+                print_arrow_body_value(data.return_expr);
+            } else {
+                bool wrap_value_construct =
+                    is_value_context(node) && data.return_expr->type == NodeType::ConstructExpr &&
+                    should_suppress_construct_type_in_value_context(data.return_expr);
+                if (wrap_value_construct) {
+                    emit("(");
+                    m_suppress_construct_type = true;
+                }
+                print_node(data.return_expr);
+                m_suppress_construct_type = false;
+                if (wrap_value_construct) {
+                    emit(")");
+                }
+            }
             if (!is_inline) {
                 emit("\n");
             }
@@ -897,7 +1017,6 @@ void AstPrinter::print_node(Node *node) {
         auto already_arrow = [](Node *block) {
             return block && block->type == NodeType::Block && block->data.block.is_arrow;
         };
-
         bool collapse_then = can_collapse(data.then_block);
         if (collapse_then) {
             data.then_block->data.block.is_arrow = true;
@@ -1402,17 +1521,30 @@ void AstPrinter::print_node(Node *node) {
         }
 
         auto *body = data.body;
+        auto can_collapse = [](Node *block) {
+            return block && block->type == NodeType::Block && block->data.block.has_braces &&
+                   block->data.block.statements.len == 0 &&
+                   block->data.block.return_expr != nullptr;
+        };
         if (body && body->type == NodeType::Block && body->data.block.is_arrow &&
             !body->data.block.has_braces) {
             emit(" => ");
             if (body->data.block.statements.len == 1 && !body->data.block.return_expr) {
-                print_node(body->data.block.statements[0]);
+                print_arrow_body_value(body->data.block.statements[0]);
             } else if (body->data.block.statements.len == 0 && body->data.block.return_expr) {
-                print_node(body->data.block.return_expr);
+                print_arrow_body_value(body->data.block.return_expr);
             } else {
                 print_node(body);
             }
+        } else if (can_collapse(body)) {
+            body->data.block.is_arrow = true;
+            body->data.block.has_braces = false;
+            emit(" => ");
+            print_arrow_body_value(body->data.block.return_expr);
+            body->data.block.is_arrow = false;
+            body->data.block.has_braces = true;
         } else {
+            emit(" ");
             print_node(data.body);
         }
         break;

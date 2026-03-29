@@ -21,6 +21,12 @@ struct PointWrap {
     point: Point;
 }
 
+struct LongPoint {
+    extremely_long_field_name_alpha_component: int;
+    extremely_long_field_name_beta_component: int;
+    extremely_long_field_name_gamma_component: int;
+}
+
 func accept_parse(value: Parse<int, string>) {}
 func accept_point(value: Point) {}
 
@@ -30,6 +36,81 @@ func make_ok() Parse<int, string> {
 
 func make_point() Point {
     return Point{1, 2};
+}
+
+func choose_point(flag: bool) Point {
+    return if flag => Point{15, 16} else => Point{17, 18};
+}
+
+func choose_parse(flag: bool) Parse<int, string> {
+    return switch flag {
+        true => Parse<int, string>.Ok{20},
+        else => Parse<int, string>.Error{"switch"}
+    };
+}
+
+func apply_point(f: func () Point) Point {
+    return f();
+}
+
+func choose_point_multiline(flag: bool) Point {
+    return if flag => Point{
+        x: 30,
+        y: 31
+    } else => Point{
+        x: 32,
+        y: 33
+    };
+}
+
+func choose_long_point(flag: bool) LongPoint {
+    return if flag => LongPoint{
+        extremely_long_field_name_alpha_component: 1000,
+        extremely_long_field_name_beta_component: 2000,
+        extremely_long_field_name_gamma_component: 3000
+    } else => LongPoint{
+        extremely_long_field_name_alpha_component: 4000,
+        extremely_long_field_name_beta_component: 5000,
+        extremely_long_field_name_gamma_component: 6000
+    };
+}
+
+func choose_long_point_switch(flag: bool) LongPoint {
+    return switch flag {
+        true => LongPoint{
+            extremely_long_field_name_alpha_component: 7000,
+            extremely_long_field_name_beta_component: 8000,
+            extremely_long_field_name_gamma_component: 9000
+        },
+        else => LongPoint{
+            extremely_long_field_name_alpha_component: 10000,
+            extremely_long_field_name_beta_component: 11000,
+            extremely_long_field_name_gamma_component: 12000
+        }
+    };
+}
+
+func collapse_brace_if(flag: bool) Point {
+    return if flag {
+        Point{x: 40, y: 41}
+    } else {
+        Point{x: 42, y: 43}
+    };
+}
+
+func collapse_brace_switch(flag: bool) Parse<int, string> {
+    return switch flag {
+        true => {
+            Parse<int, string>.Ok{50}
+        },
+        else => {
+            Parse<int, string>.Error{"brace"}
+        }
+    };
+}
+
+func apply_long_point(f: func () LongPoint) LongPoint {
+    return f();
 }
 
 func main() {
@@ -54,4 +135,21 @@ func main() {
         Point{11, 12}
     ];
     var maybe_point: ?Point = Point{13, 14};
+    var chosen = choose_point(true);
+    var chosen_multiline = choose_point_multiline(false);
+    var chosen_long = choose_long_point(true);
+    var chosen_long_switch = choose_long_point_switch(false);
+    var collapsed_if = collapse_brace_if(false);
+    var collapsed_switch = collapse_brace_switch(true);
+    var chosen_parse = choose_parse(false);
+    var lambda_point = apply_point(() => Point{21, 22});
+    var lambda_point_multiline = apply_point(() => Point{
+        x: 23,
+        y: 24
+    });
+    var lambda_long_point = apply_long_point(() => LongPoint{
+        extremely_long_field_name_alpha_component: 13000,
+        extremely_long_field_name_beta_component: 14000,
+        extremely_long_field_name_gamma_component: 15000
+    });
 }
