@@ -236,7 +236,9 @@ ChiType *ChiTypeFn::get_variadic_span_param() {
         return nullptr;
     }
     auto *va_param = params.last();
-    assert(va_param && va_param->kind == TypeKind::Span);
+    if (!va_param || va_param->kind != TypeKind::Span) {
+        return nullptr;
+    }
     return va_param;
 }
 
