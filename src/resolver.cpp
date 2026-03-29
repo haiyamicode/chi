@@ -2913,6 +2913,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             } else {
                 value_type = resolve_value(data.type, scope);
             }
+            if (!value_type) {
+                return nullptr;
+            }
             if (data.items.len == 0 && value_type->kind == TypeKind::Placeholder) {
                 bool has_construct_bound = false;
                 for (auto t : get_placeholder_traits(value_type)) {
