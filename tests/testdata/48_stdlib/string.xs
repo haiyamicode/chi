@@ -84,4 +84,9 @@ func main() {
     printf("trim_left = '{}'\n", "  hello  ".trim_left());
     printf("trim_right = '{}'\n", "  hello  ".trim_right());
     printf("trim empty = '{}'\n", "   ".trim());
+
+    // multiline continuation
+    var continued = "hello\
+world";
+    printf("continued = '{}'\n", continued);
 }

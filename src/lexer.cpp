@@ -544,6 +544,13 @@ bool Lexer::read_char(char quote, char *out) {
 
     c = read();
     switch (c) {
+    case '\n':
+        return read_char(quote, out);
+    case '\r':
+        if (peek() == '\n') {
+            read();
+        }
+        return read_char(quote, out);
     case 'x':
         *out = read_hex_char(2);
         return true;
