@@ -3,4 +3,31 @@ level3: 4
 numbers: 100 200 300
 count: 0
 mixed: 4
+red green blue
+< alpha beta >
+< >
+inspect any empty=true ptr_null=true
+inspect any empty=false ptr_null=false
+inspect any first=7
+inspect any tail_len=2
+inspect string empty=false ptr_null=false
+inspect string first=red
+inspect string tail=[green, blue]
+inspect string head=[red, green]
+inspect string empty=false ptr_null=false
+inspect string first=left
+inspect string tail=[right, center]
+inspect string head=[left, right]
 count: 1
+shared refs before: 5
+count: 2
+shared refs after: 5
+tracked.new(1)
+tracked.new(2)
+tracked.copy(1)
+tracked.copy(2)
+count: 2
+tracked.delete(1)
+tracked.delete(2)
+tracked.delete(2)
+tracked.delete(1)

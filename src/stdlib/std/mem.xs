@@ -100,6 +100,6 @@ export unsafe func transmute<TFrom: ops.Unsized, TTo: ops.Unsized>(ptr: *TFrom) 
     return *(ptr as *TFrom as *TTo);
 }
 
-export unsafe func destroy(ptr: *void) {
+export unsafe func destroy<T: ops.Unsized>(ptr: *T) {
     __destroy(ptr);
 }

@@ -226,18 +226,24 @@ ChiType *ChiTypeFn::get_param_at(size_t index) {
     if (params.len == 0) {
         return nullptr;
     }
-    // For Chi variadic functions, the last parameter is Array<T>, get its element type
-    auto *va_param = params.last();
-    if (!va_param) {
-        return nullptr;
-    }
-    if (va_param->kind == TypeKind::Array) {
-        return va_param->data.array.elem;
-    }
-    return nullptr;
+    return get_variadic_elem_type();
 }
 
 int ChiTypeFn::get_va_start() { return params.len - (int)(is_variadic && !is_extern); }
+
+ChiType *ChiTypeFn::get_variadic_span_param() {
+    if (!is_variadic || is_extern || params.len == 0) {
+        return nullptr;
+    }
+    auto *va_param = params.last();
+    assert(va_param && va_param->kind == TypeKind::Span);
+    return va_param;
+}
+
+ChiType *ChiTypeFn::get_variadic_elem_type() {
+    auto *va_param = get_variadic_span_param();
+    return va_param ? va_param->get_elem() : nullptr;
+}
 
 bool ChiType::has_unresolved_subtype() {
     switch (kind) {

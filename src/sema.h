@@ -64,6 +64,8 @@ struct ChiTypeFn {
     array<ChiLifetime *> lifetime_params = {};
 
     ChiType *get_param_at(size_t index);
+    ChiType *get_variadic_span_param();
+    ChiType *get_variadic_elem_type();
     int get_va_start();
     bool should_use_sret();
     bool is_generic() const { return type_params.len > 0; }

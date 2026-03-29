@@ -310,13 +310,22 @@ static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolv
     std::stringstream ss;
     ss << "func(";
     for (int i = 0; i < fn.params.len; i++) {
+        auto *param_type = fn.params[i];
         if (fn.is_variadic && i == fn.params.len - 1) {
             ss << "...";
         }
         if (i < proto_params.len && !proto_params[i]->name.empty()) {
             ss << proto_params[i]->name << ": ";
         }
-        ss << resolver.format_type_display(fn.params[i]);
+        if (fn.is_variadic && i == fn.params.len - 1) {
+            if (auto *elem_type = fn.get_variadic_elem_type()) {
+                ss << resolver.format_type_display(elem_type);
+            } else {
+                ss << resolver.format_type_display(param_type);
+            }
+        } else {
+            ss << resolver.format_type_display(param_type);
+        }
         if (i < fn.params.len - 1) {
             ss << ", ";
         }
@@ -384,6 +393,7 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
     boost::json::array params_json;
 
     for (int i = 0; i < fn.params.len; i++) {
+        auto *param_type = fn.params[i];
         auto param_start = label.size();
         if (fn.is_variadic && i == fn.params.len - 1) {
             label += "...";
@@ -391,7 +401,15 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
         if (i < proto_params.len && !proto_params[i]->name.empty()) {
             label += proto_params[i]->name + ": ";
         }
-        label += resolver.format_type_display(fn.params[i]);
+        if (fn.is_variadic && i == fn.params.len - 1) {
+            if (auto *elem_type = fn.get_variadic_elem_type()) {
+                label += resolver.format_type_display(elem_type);
+            } else {
+                label += resolver.format_type_display(param_type);
+            }
+        } else {
+            label += resolver.format_type_display(param_type);
+        }
         auto param_end = label.size();
 
         boost::json::object param;

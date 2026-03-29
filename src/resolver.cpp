@@ -1110,7 +1110,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 expected_param_type ? fn_scope.set_value_type(expected_param_type) : fn_scope;
             auto param_type = resolve_value(param, param_scope);
             if (pdata.is_variadic) {
-                param_type = get_array_type(param_type);
+                param_type = get_span_type(param_type);
                 param->resolved_type = param_type;
                 is_variadic = true;
             }
@@ -3377,21 +3377,22 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::PackExpansion: {
         // Pack expansion is only valid in function call arguments
-        // Resolve the inner expression - it should be a homogeneous variadic (Array<any>)
+        // Resolve the inner expression - it should be a homogeneous variadic slice
         auto &data = node->data.pack_expansion;
         auto expr_type = resolve(data.expr, scope);
         if (!expr_type) {
             return nullptr;
         }
 
-        // For now, just validate it's an Array type (homogeneous variadics are Array<T>)
+        // Variadics inside Chi functions are exposed as &[T], but pack expansion also accepts
+        // Array<T> sources for compatibility.
         auto val_type = to_value_type(expr_type);
-        if (val_type->kind != TypeKind::Array) {
-            error(node, "pack expansion can only be used on variadic parameters (Array type)");
+        if (val_type->kind != TypeKind::Span && val_type->kind != TypeKind::Array) {
+            error(node, "pack expansion can only be used on variadic parameters (Array<T> or &[T])");
             return nullptr;
         }
 
-        // The type of the pack expansion is the array type
+        // The type of the pack expansion is the source sequence type
         return expr_type;
     }
     case NodeType::FnCallExpr: {
@@ -4800,7 +4801,37 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         auto idx_scope = scope.set_value_type(get_system_types()->uint32);
                         resolve(data.index_bind, idx_scope);
                     }
-                    resolve(data.body, scope);
+                    auto loop_scope = scope.set_parent_loop(node);
+                    resolve(data.body, loop_scope);
+                    return nullptr;
+                }
+
+                if (expr_type && expr_type->kind == TypeKind::Span) {
+                    if (data.bind) {
+                        auto elem_type = expr_type->data.span.elem;
+                        ChiType *value_type = elem_type;
+                        switch (data.bind_sigil) {
+                        case ast::SigilKind::Reference:
+                            value_type = get_pointer_type(value_type, TypeKind::Reference);
+                            break;
+                        case ast::SigilKind::MutRef:
+                            value_type = get_pointer_type(value_type, TypeKind::MutRef);
+                            break;
+                        case ast::SigilKind::MutexRef:
+                            value_type = get_pointer_type(value_type, TypeKind::MutexRef);
+                            break;
+                        default:
+                            break;
+                        }
+                        auto bind_scope = scope.set_value_type(value_type);
+                        resolve(data.bind, bind_scope);
+                    }
+                    if (data.index_bind) {
+                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        resolve(data.index_bind, idx_scope);
+                    }
+                    auto loop_scope = scope.set_parent_loop(node);
+                    resolve(data.body, loop_scope);
                     return nullptr;
                 }
 
@@ -6042,6 +6073,16 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         for (int i = 0; i < fn.params.len; i++) {
             if (fn.is_variadic && i == fn.params.len - 1) {
                 ss << "...";
+                auto *param = fn.get_variadic_elem_type();
+                if (param) {
+                    ss << format_type(param, for_display);
+                } else {
+                    ss << format_type(fn.params[i], for_display);
+                }
+                if (i < fn.params.len - 1) {
+                    ss << ",";
+                }
+                continue;
             }
             ss << format_type(fn.params[i], for_display);
             if (i < fn.params.len - 1) {
@@ -7142,6 +7183,25 @@ ast::ConversionType Resolver::resolve_conversion_type(ChiType *from_type, ChiTyp
         return ast::ConversionType::OwningCoercion;
     }
     return ast::ConversionType::None;
+}
+
+bool Resolver::can_forward_variadic_pack_directly(ChiType *arg_type, ChiType *param_type) {
+    if (!param_type || param_type->kind != TypeKind::Span) {
+        return false;
+    }
+
+    auto *value_type = to_value_type(arg_type);
+    if (!value_type || value_type->kind != TypeKind::Span) {
+        return false;
+    }
+
+    auto *arg_elem = value_type->get_elem();
+    auto *param_elem = param_type->get_elem();
+    if (!arg_elem || !param_elem || !is_same_type(arg_elem, param_elem)) {
+        return false;
+    }
+
+    return !param_type->data.span.is_mut || value_type->data.span.is_mut;
 }
 
 ChiType *Resolver::resolve_common_value_type(ChiType *left_type, ChiType *right_type,
@@ -9029,6 +9089,20 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     // (compile_construction and compile_fn_args inject them at compile time).
     // We do NOT mutate the AST args list here.
 
+    auto stamp_pack_forward_decision = [&](ast::Node *arg, ChiType *arg_type, ChiType *param_type) {
+        if (!arg || arg->type != NodeType::PackExpansion) {
+            return;
+        }
+        arg->data.pack_expansion.can_forward_directly =
+            can_forward_variadic_pack_directly(arg_type, param_type);
+    };
+    auto get_call_param_type = [&](ChiTypeFn *call_fn, size_t index, ast::Node *arg) -> ChiType * {
+        if (arg && arg->type == NodeType::PackExpansion && call_fn->is_variadic && !call_fn->is_extern) {
+            return call_fn->get_variadic_span_param();
+        }
+        return call_fn->get_param_at(index);
+    };
+
     // Check if this is a generic function call that needs explicit type parameters
     if (fn->is_generic()) {
         array<ChiType *> type_args;
@@ -9108,7 +9182,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         array<ChiType *> arg_types;
         for (size_t i = 0; i < n_args; i++) {
             auto arg = args->at(i);
-            auto param_type = fn->get_param_at(i);
+            auto param_type = get_call_param_type(fn, i, arg);
 
             // If we have type args (explicit or inferred from return type), substitute
             // placeholders in parameter types for proper lambda parameter inference
@@ -9210,11 +9284,13 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                         if (used_infer_wrapping) {
                             for (size_t i = 0; i < n_args; i++) {
                                 auto arg = args->at(i);
-                                auto concrete_param = spec_fn.get_param_at(i);
+                                auto concrete_param = get_call_param_type(&spec_fn, i, arg);
                                 auto arg_type = node_get_type(arg);
                                 auto concrete_arg_type =
                                     type_placeholders_sub_map(arg_type, &type_substitutions);
                                 arg->resolved_type = concrete_arg_type;
+                                stamp_pack_forward_decision(arg, concrete_arg_type,
+                                                            fn->get_variadic_span_param());
                                 if (concrete_param) {
                                     check_assignment(arg, concrete_arg_type, concrete_param, &scope);
                                 }
@@ -9245,10 +9321,12 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         if (used_infer_wrapping) {
             for (size_t i = 0; i < n_args; i++) {
                 auto arg = args->at(i);
-                auto concrete_param = spec_fn.get_param_at(i);
+                auto concrete_param = get_call_param_type(&spec_fn, i, arg);
                 auto arg_type = node_get_type(arg);
                 auto concrete_arg_type = type_placeholders_sub_map(arg_type, &type_substitutions);
                 arg->resolved_type = concrete_arg_type;
+                stamp_pack_forward_decision(arg, concrete_arg_type,
+                                            fn->get_variadic_span_param());
                 if (concrete_param) {
                     check_assignment(arg, concrete_arg_type, concrete_param, &scope);
                 }
@@ -9264,12 +9342,13 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     // Normal path — shared by regular calls and delegated-from-generic calls
     {
         for (size_t i = 0; i < n_args; i++) {
-            auto param_type = fn->get_param_at(i);
             auto arg = args->at(i);
+            auto param_type = get_call_param_type(fn, i, arg);
             // Clear move_outlet for function args - they're passed by value,
             // not written directly to any outer destination
             auto arg_scope = scope.set_value_type(param_type).set_move_outlet(nullptr);
             auto arg_type = resolve(arg, arg_scope);
+            stamp_pack_forward_decision(arg, arg_type, fn->get_variadic_span_param());
 
             // For C variadic functions, param_type is nullptr for variadic args (any type allowed)
             if (param_type) {

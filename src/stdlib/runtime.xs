@@ -377,7 +377,8 @@ export struct Array<T> {
         }
         unsafe {
             for var i: uint32 = 0; i < this.length; i++ {
-                mem.destroy((&mut this.data[i]) as *void);
+                let ptr = (&mut this.data[i]) as *T;
+                mem.destroy<T>(ptr);
             }
             this.allocator.free(this.data as *void);
         }
@@ -427,7 +428,7 @@ export struct Array<T> {
             if this.data {
                 for var i: uint32 = 0; i < this.length; i++ {
                     let ptr = (&mut this.data[i]) as *T;
-                    mem.destroy(ptr as *void);
+                    mem.destroy<T>(ptr);
                 }
                 this.allocator.free(this.data as *void);
             }
@@ -452,7 +453,8 @@ export struct Array<T> {
             if n < this.length {
                 unsafe {
                     for i in n..this.length {
-                        mem.destroy((&mut this.data[i]) as *void);
+                        let ptr = (&mut this.data[i]) as *T;
+                        mem.destroy<T>(ptr);
                     }
                 }
                 this.length = n;

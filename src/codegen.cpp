@@ -1152,10 +1152,14 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (!fn) {
         fn = compile_fn_proto(proto_node, node);
     }
-    if (!fn->llvm_fn->empty()) {
-        panic("function already compiled");
+    if (fn->body_compiled) {
+        return fn;
+    }
+    if (fn->is_compiling_body) {
+        panic("function body compilation re-entered");
         return nullptr;
     }
+    fn->is_compiling_body = true;
 
     // debug info
     auto name = get_resolver()->resolve_display_name(node);
@@ -1281,10 +1285,6 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     // clean up & return (block-local vars are destroyed at block exit or inline at return sites)
     fn->use_label(return_b);
     emit_cleanup_owners(fn);
-    for (auto ptr : fn->vararg_pointers) {
-        emit_dbg_location(fn->node);
-        builder.CreateCall(get_system_fn("cx_array_delete")->llvm_fn, {ptr});
-    }
     if (is_entry) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
@@ -1331,6 +1331,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
 
     llvm::verifyFunction(*fn->llvm_fn);
     m_ctx->dbg_scopes.resize(saved_dbg_scope_len);
+    fn->is_compiling_body = false;
+    fn->body_compiled = true;
     return fn;
 }
 
@@ -1542,6 +1544,248 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
     }
 
     return compile_arg_for_call(fn, expr, param_type);
+}
+
+llvm::Value *Compiler::build_span_value(ChiType *span_type, llvm::Value *data_ptr,
+                                        llvm::Value *length) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto *span_type_l = compile_type(span_type);
+    llvm::Value *span_value = llvm::UndefValue::get(span_type_l);
+    span_value = builder.CreateInsertValue(span_value, data_ptr, {0});
+    span_value = builder.CreateInsertValue(span_value, length, {1});
+    return span_value;
+}
+
+void Compiler::compile_any_box_ref_to_ptr(Function *fn, RefValue src, ChiType *src_type,
+                                          llvm::Value *dest, ChiType *dest_type) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+    auto *any_type_l = (llvm::StructType *)compile_type(dest_type);
+
+    auto *ti_gep = builder.CreateStructGEP(any_type_l, dest, 0);
+    builder.CreateStore(compile_type_info(src_type), ti_gep);
+
+    auto *inlined_gep = builder.CreateStructGEP(any_type_l, dest, 1);
+    auto *src_type_l = compile_type(src_type);
+    auto type_size = llvm_type_size(src_type_l);
+    auto inlined = type_size <= sizeof(CxAnyStorage);
+    builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), inlined),
+                        inlined_gep);
+
+    auto *data_gep = builder.CreateStructGEP(any_type_l, dest, 3);
+    if (inlined) {
+        compile_copy_with_ref(fn, src, data_gep, src_type, nullptr, false);
+        return;
+    }
+
+    auto *malloc_fn = get_system_fn("cx_malloc");
+    auto *size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), type_size);
+    auto *heap_ptr = builder.CreateCall(malloc_fn->llvm_fn, {size_l, get_null_ptr()}, "any_alloc");
+    compile_copy_with_ref(fn, src, heap_ptr, src_type, nullptr, false);
+    builder.CreateStore(heap_ptr, data_gep);
+}
+
+void Compiler::compile_ref_value_to_ptr(Function *fn, RefValue src, ChiType *src_type,
+                                        llvm::Value *dest, ChiType *dest_type) {
+    auto &builder = *m_ctx->llvm_builder.get();
+
+    if (get_resolver()->is_same_type(src_type, dest_type)) {
+        compile_copy_with_ref(fn, src, dest, dest_type, nullptr, false);
+        return;
+    }
+
+    if (get_resolver()->use_implicit_owning_coercion(src_type, dest_type)) {
+        if (dest_type->kind == TypeKind::Optional) {
+            auto *opt_type_l = compile_type(dest_type);
+            auto *has_value_p = builder.CreateStructGEP(opt_type_l, dest, 0);
+            builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
+                                has_value_p);
+            auto *value_p = builder.CreateStructGEP(opt_type_l, dest, 1);
+            compile_ref_value_to_ptr(fn, src, src_type, value_p, dest_type->get_elem());
+            return;
+        }
+        if (dest_type->kind == TypeKind::Any) {
+            compile_any_box_ref_to_ptr(fn, src, src_type, dest, dest_type);
+            return;
+        }
+    }
+
+    auto *value = src.value;
+    if (!value) {
+        value = builder.CreateLoad(compile_type(src_type), src.address);
+    }
+    auto *converted = compile_conversion(fn, value, src_type, dest_type);
+    builder.CreateStore(converted, dest);
+}
+
+llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *> args,
+                                                 int va_start, ChiType *span_type,
+                                                 ast::Node *dbg_node) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    auto *resolver = get_resolver();
+    auto *elem_type = span_type->get_elem();
+    auto *i32_ty = llvm::Type::getInt32Ty(*m_ctx->llvm_ctx);
+
+    if ((int)args.len <= va_start) {
+        return llvm::Constant::getNullValue(compile_type(span_type));
+    }
+
+    if ((int)args.len == va_start + 1 && args[va_start]->type == ast::NodeType::PackExpansion) {
+        auto &pack_data = args[va_start]->data.pack_expansion;
+        if (pack_data.can_forward_directly) {
+            return compile_assignment_to_type(fn, pack_data.expr, span_type);
+        }
+    }
+
+    struct PackSource {
+        ast::Node *arg = nullptr;
+        ChiType *seq_type = nullptr;
+        llvm::Value *data = nullptr;
+        llvm::Value *length = nullptr;
+    };
+
+    array<PackSource> pack_sources = {};
+    llvm::Value *total_count = llvm::ConstantInt::get(i32_ty, args.len - va_start);
+    bool has_pack = false;
+
+    for (int i = va_start; i < args.len; i++) {
+        auto *arg = args[i];
+        if (arg->type != ast::NodeType::PackExpansion) {
+            continue;
+        }
+
+        has_pack = true;
+        total_count = builder.CreateSub(total_count, llvm::ConstantInt::get(i32_ty, 1));
+
+        auto *seq_expr = arg->data.pack_expansion.expr;
+        auto *seq_type = resolver->to_value_type(get_chitype(seq_expr));
+
+        auto seq_ref = compile_expr_ref(fn, seq_expr);
+        auto [data_value, length_value] =
+            compile_sequence_data_and_length(fn, seq_ref.address, seq_type);
+        total_count = builder.CreateAdd(total_count, length_value);
+        pack_sources.add({arg, seq_type, data_value, length_value});
+    }
+
+    llvm::Value *blob_data = nullptr;
+    llvm::Value *length_value = nullptr;
+    if (!has_pack) {
+        auto count = (uint32_t)(args.len - va_start);
+        auto *length_const = llvm::ConstantInt::get(i32_ty, count);
+        if (count == 0) {
+            return llvm::Constant::getNullValue(compile_type(span_type));
+        }
+
+        auto *fixed_array_type = resolver->get_fixed_array_type(elem_type, count);
+        auto *fixed_array_ptr =
+            fn->entry_alloca(compile_type(fixed_array_type), "vararg_blob");
+        emit_dbg_location(dbg_node);
+        auto *arr_type_l = compile_type(fixed_array_type);
+        auto *zero = llvm::ConstantInt::get(i32_ty, 0);
+        for (uint32_t i = 0; i < count; i++) {
+            auto *idx = llvm::ConstantInt::get(i32_ty, i);
+            auto *elem_ptr = builder.CreateGEP(arr_type_l, fixed_array_ptr, {zero, idx});
+            compile_assignment_to_ptr(fn, args[va_start + (int)i], elem_ptr, elem_type, false);
+        }
+        blob_data = builder.CreateGEP(arr_type_l, fixed_array_ptr, {zero, zero});
+        length_value = length_const;
+        if (resolver->type_needs_destruction(elem_type)) {
+            auto *active_var = fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx),
+                                                "_vararg_fixed.active");
+            builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
+            fn->cleanup_owner_vars.push_back({fixed_array_ptr, fixed_array_type, active_var, false});
+        }
+    } else {
+        emit_dbg_location(dbg_node);
+        auto *array_type = resolver->get_array_type(elem_type);
+        auto *array_struct_type = resolver->eval_struct_type(array_type);
+        assert(array_struct_type);
+        auto *array_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
+        emit_construct_init(fn, array_ptr, array_type);
+
+        auto *elem_size =
+            llvm::ConstantInt::get(i32_ty, llvm_type_size(compile_type(elem_type)).getFixedValue());
+        auto reserve_fn = get_system_fn("cx_array_reserve");
+        builder.CreateCall(reserve_fn->llvm_fn, {array_ptr, elem_size, total_count});
+
+        int pack_index = 0;
+
+        for (int i = va_start; i < args.len; i++) {
+            auto *arg = args[i];
+            if (arg->type != ast::NodeType::PackExpansion) {
+                auto add_fn = get_system_fn("cx_array_add");
+                auto *slot_void =
+                    builder.CreateCall(add_fn->llvm_fn, {array_ptr, elem_size}, "vararg_slot");
+                auto *dest_elem_ptr =
+                    builder.CreateBitCast(slot_void, compile_type(resolver->get_pointer_type(elem_type)));
+                compile_assignment_to_ptr(fn, arg, dest_elem_ptr, elem_type, false);
+                continue;
+            }
+
+            auto pack = pack_sources[pack_index++];
+            auto *loop_index = fn->entry_alloca(i32_ty, "_pack_i");
+            builder.CreateStore(llvm::ConstantInt::get(i32_ty, 0), loop_index);
+            auto *bb_cond = fn->new_label("pack_expand_cond");
+            auto *bb_body = fn->new_label("pack_expand_body");
+            auto *bb_end = fn->new_label("pack_expand_end");
+            builder.CreateBr(bb_cond);
+
+            fn->use_label(bb_cond);
+            auto *src_idx = builder.CreateLoad(i32_ty, loop_index);
+            auto *cond = builder.CreateICmpULT(src_idx, pack.length);
+            builder.CreateCondBr(cond, bb_body, bb_end);
+
+            fn->use_label(bb_body);
+            auto add_fn = get_system_fn("cx_array_add");
+            auto *slot_void =
+                builder.CreateCall(add_fn->llvm_fn, {array_ptr, elem_size}, "vararg_slot");
+            auto *dst_elem_ptr =
+                builder.CreateBitCast(slot_void, compile_type(resolver->get_pointer_type(elem_type)));
+            auto *src_elem_ptr =
+                builder.CreateGEP(compile_type(pack.seq_type->get_elem()), pack.data, {src_idx});
+            compile_ref_value_to_ptr(fn, RefValue::from_address(src_elem_ptr), pack.seq_type->get_elem(),
+                                     dst_elem_ptr, elem_type);
+            builder.CreateStore(
+                builder.CreateAdd(src_idx, llvm::ConstantInt::get(i32_ty, 1)), loop_index);
+            builder.CreateBr(bb_cond);
+
+            fn->use_label(bb_end);
+        }
+
+        auto *array_data_field = array_struct_type->data.struct_.find_member("data");
+        auto *array_length_field = array_struct_type->data.struct_.find_member("length");
+        assert(array_data_field && array_length_field);
+        auto *data_ptr = compile_dot_access(fn, array_ptr, array_type, array_data_field);
+        auto *length_ptr = compile_dot_access(fn, array_ptr, array_type, array_length_field);
+        blob_data = builder.CreateLoad(compile_type(array_data_field->resolved_type), data_ptr);
+        length_value = builder.CreateLoad(i32_ty, length_ptr);
+
+        auto *active_var =
+            fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), "_vararg_array.active");
+        builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
+        fn->cleanup_owner_vars.push_back({array_ptr, array_type, active_var, false});
+    }
+
+    return build_span_value(span_type, blob_data, length_value);
+}
+
+std::pair<llvm::Value *, llvm::Value *> Compiler::compile_sequence_data_and_length(Function *fn,
+                                                                                    llvm::Value *seq_ptr,
+                                                                                    ChiType *seq_type) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    assert(seq_type && (seq_type->kind == TypeKind::Span || seq_type->kind == TypeKind::Array));
+    auto *seq_struct = get_resolver()->resolve_struct_type(seq_type);
+    assert(seq_struct);
+    auto *data_field = seq_struct->find_member("data");
+    auto *length_field = seq_struct->find_member("length");
+    assert(data_field && length_field);
+
+    auto *data_ptr = compile_dot_access(fn, seq_ptr, seq_type, data_field);
+    auto *length_ptr = compile_dot_access(fn, seq_ptr, seq_type, length_field);
+    auto *data_value = builder.CreateLoad(compile_type(data_field->resolved_type), data_ptr);
+    auto *length_value =
+        builder.CreateLoad(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), length_ptr);
+    return {data_value, length_value};
 }
 
 bool Compiler::needs_implicit_owning_conversion(ast::Node *expr) {
@@ -3851,7 +4095,8 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
         cond = builder.CreateICmpSLT(iter_value, end_value);
     } else if (fixed_array_loop) {
         auto arr_type = expr_type->is_reference() ? expr_type->get_elem() : expr_type;
-        auto size_val = llvm::ConstantInt::get(iter_value->getType(), arr_type->data.fixed_array.size);
+        auto size_val =
+            llvm::ConstantInt::get(iter_value->getType(), arr_type->data.fixed_array.size);
         cond = builder.CreateICmpULT(iter_value, size_val);
     } else if (kind == ast::ForLoopKind::Range) {
         auto ptr = compile_dot_ptr(fn, data.expr);
@@ -7946,36 +8191,16 @@ normal:
 std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *callee,
                                                      array<ast::Node *> args, ast::Node *fn_call) {
     std::vector<llvm::Value *> call_args = {};
-    auto &builder = *m_ctx->llvm_builder.get();
-    llvm::Value *va_ptr = nullptr;
-    ChiType *va_type = nullptr;
     auto &fn_spec = callee->fn_type->data.fn;
     auto va_start = fn_spec.get_va_start();
 
     bool is_variadic = callee->fn_type->data.fn.is_variadic;
     bool is_extern = callee->fn_type->data.fn.is_extern;
 
-    // Only use array-based variadic for Chi functions, not extern C functions
-    if (is_variadic && !is_extern) {
-        auto array_type = fn_spec.params.last();
-        va_type = array_type->get_elem();
-        va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
-        emit_dbg_location(fn_call);
-        emit_construct_init(fn, va_ptr, array_type);
-    }
-
     for (int i = 0; i < args.len; i++) {
         if (is_variadic && !is_extern && i >= va_start) {
-            emit_dbg_location(args[i]);
-            auto add_fn = get_system_fn("cx_array_add");
-            auto tsize =
-                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
-            auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
-            auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
-            compile_assignment_to_ptr(fn, args[i], ptr, va_type, false);
             continue;
         }
-        // For extern variadic functions, pass variadic args directly
         if (is_variadic && is_extern && i >= va_start) {
             call_args.push_back(compile_extern_variadic_arg(fn, args[i]));
             continue;
@@ -7991,9 +8216,9 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
         }
     }
 
-    if (va_ptr) {
-        call_args.push_back(builder.CreateLoad(compile_type(fn_spec.params.last()), va_ptr));
-        fn->vararg_pointers.add(va_ptr);
+    if (is_variadic && !is_extern) {
+        call_args.push_back(
+            compile_variadic_span_arg(fn, args, va_start, fn_spec.get_variadic_span_param(), fn_call));
     }
 
     return call_args;
@@ -8488,16 +8713,6 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto va_start = fn_spec.get_va_start();
 
     std::vector<llvm::Value *> args;
-    llvm::Value *va_ptr = nullptr;
-    ChiType *va_type = nullptr;
-    // Only use array-based variadic for Chi functions, not extern C functions
-    if (is_variadic && !is_extern) {
-        auto array_type = fn_spec.params.last();
-        va_type = array_type->get_elem();
-        va_ptr = fn->entry_alloca(compile_type(array_type), "vararg_array");
-        emit_dbg_location(data.fn_ref_expr);
-        emit_construct_init(fn, va_ptr, array_type);
-    }
 
     llvm::FunctionCallee callee;
     llvm::Value *ctn_ptr = nullptr;
@@ -8601,35 +8816,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
 
     for (int i = 0; i < data.args.len; i++) {
         if (is_variadic && !is_extern && i >= va_start) {
-            emit_dbg_location(data.args[i]);
-
-            // Check for pack expansion - use Array.copy to append all elements
-            if (data.args[i]->type == ast::NodeType::PackExpansion) {
-                auto &pack_data = data.args[i]->data.pack_expansion;
-                auto src_ptr = compile_expr_ref(fn, pack_data.expr).address;
-
-                // Call dest_array.copy(&src_array)
-                auto array_type = fn_spec.params.last(); // variadic param is Array<any>
-                auto array_struct = get_resolver()->resolve_struct_type(array_type);
-                auto copy_member = array_struct->find_member("copy");
-                assert(copy_member && "Array.copy() method not found");
-                auto copy_method_node =
-                    get_variant_member_node(copy_member, std::nullopt);
-                auto copy_fn = get_fn(copy_method_node);
-                builder.CreateCall(copy_fn->llvm_fn, {va_ptr, src_ptr});
-                continue;
-            }
-
-            auto add_fn = get_system_fn("cx_array_add");
-            auto arg = compile_assignment_to_type(fn, data.args[i], va_type);
-            auto tsize =
-                m_ctx->llvm_module->getDataLayout().getTypeAllocSize(compile_type(va_type));
-            auto tsize_l = llvm::ConstantInt::get(*m_ctx->llvm_ctx, llvm::APInt(32, tsize));
-            auto ptr = builder.CreateCall(add_fn->llvm_fn, {va_ptr, tsize_l});
-            builder.CreateStore(arg, ptr);
             continue;
         }
-        // For extern variadic functions, pass variadic args directly
         if (is_variadic && is_extern && i >= va_start) {
             args.push_back(compile_extern_variadic_arg(fn, data.args[i]));
             continue;
@@ -8657,9 +8845,9 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         }
     }
 
-    if (va_ptr) {
-        args.push_back(builder.CreateLoad(compile_type(fn_spec.params.last()), va_ptr));
-        fn->vararg_pointers.add(va_ptr);
+    if (is_variadic && !is_extern) {
+        args.push_back(
+            compile_variadic_span_arg(fn, data.args, va_start, fn_spec.get_variadic_span_param(), expr));
     }
 
     emit_dbg_location(expr);
@@ -9469,8 +9657,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 builder.CreateStore(builder.CreateLoad(i32_ty, it), index_var);
             }
             if (item_var) {
-                auto zero = llvm::ConstantInt::get(i32_ty, 0);
                 auto idx = builder.CreateLoad(i32_ty, it);
+                auto zero = llvm::ConstantInt::get(i32_ty, 0);
                 auto elem_ptr = builder.CreateGEP(arr_type_l, arr_addr, {zero, idx});
                 if (data.bind_sigil != ast::SigilKind::None) {
                     // Reference bind: store pointer to element
@@ -9814,6 +10002,21 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
 
     if (!type)
         return;
+
+    if (type->kind == TypeKind::Array) {
+        if (!type->data.array.internal) {
+            get_resolver()->eval_struct_type(type);
+        }
+        auto internal = type->data.array.internal;
+        if (!internal) {
+            return;
+        }
+        auto dtor = generate_destructor(internal, nullptr);
+        if (dtor) {
+            builder.CreateCall(dtor->llvm_fn, {address});
+        }
+        return;
+    }
 
     // Any: destroy inner value via TypeInfo destructor, free heap if not inlined
     if (type->kind == TypeKind::Any) {
@@ -11322,6 +11525,9 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
         fn->type == ast::NodeType::GeneratedFn ? fn->data.generated_fn.fn_subtype : nullptr;
     m_fn_eval_subtype = subtype;
     auto ftype = fn_type_override ? fn_type_override : get_chitype(fn);
+    bool use_default_global_key = register_global && name.empty() && !module_override &&
+                                  !subtype && !fn_type_override &&
+                                  fn->type == ast::NodeType::FnDef;
 
     // Determine bind parameter information
     bool has_bind = false;
@@ -11371,6 +11577,13 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     if (name.empty()) {
         name = get_resolver()->resolve_qualified_name(fn);
+    }
+
+    if (use_default_global_key) {
+        auto fn_id = get_resolver()->resolve_global_id(fn);
+        if (auto existing_entry = m_ctx->function_table.get(fn_id)) {
+            return *existing_entry;
+        }
     }
 
     llvm::FunctionType *ftype_l = nullptr;
@@ -11423,6 +11636,12 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
         }
         if (container && container->kind == TypeKind::Subtype) {
             new_fn->container_subtype = &container->data.subtype;
+            if (!new_fn->type_env) {
+                if (auto entry =
+                        get_resolver()->get_generics()->struct_envs.get(container->global_id)) {
+                    new_fn->type_env = &entry->subs;
+                }
+            }
         }
     }
 
@@ -11537,29 +11756,7 @@ llvm::Type *Compiler::compile_type(ChiType *type) {
 }
 
 llvm::Type *Compiler::_compile_type(ChiType *type) {
-    // Allow types with stale is_placeholder when they contain resolved Infer types
-    // (from generic inference through lambda bodies). Recursive compile_type calls
-    // will extract concrete types via eval_type's Infer handler.
     if (type->is_placeholder && type->kind == TypeKind::Placeholder) {
-        fmt::print(stderr, "PLACEHOLDER in compile_type: {} (name: {})\n",
-                   get_resolver()->format_type_display(type), type->name.value_or("?"));
-        if (m_fn) {
-            fmt::print(stderr, "  in fn: {} (depth: {})\n",
-                       get_resolver()->format_type_display(m_fn->fn_type),
-                       m_fn->fn_type ? m_fn->fn_type->subtype_depth() : -1);
-            if (m_fn->fn_type && m_fn->fn_type->data.fn.container_ref)
-                fmt::print(stderr, "  container: {}\n",
-                           get_resolver()->format_type_display(m_fn->fn_type->data.fn.container_ref));
-            fmt::print(stderr, "  has type_env: {}\n", m_fn->type_env != nullptr);
-            fmt::print(stderr, "  container_type: {}\n", m_fn->container_type ? m_fn->container_type->global_id : "null");
-            fmt::print(stderr, "  fn llvm name: {}\n", m_fn->llvm_fn ? m_fn->llvm_fn->getName().str() : "null");
-            if (m_fn->container_type) {
-                auto entry = get_resolver()->get_generics()->struct_envs.get(m_fn->container_type->global_id);
-                fmt::print(stderr, "  in struct_envs: {}\n", entry != nullptr);
-            }
-            if (m_fn->node)
-                fmt::print(stderr, "  node name: {}\n", m_fn->node->name);
-        }
         assert(false && "compile_type called on unresolved placeholder type");
     }
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
@@ -11652,10 +11849,14 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         return llvm::StructType::create(members, get_resolver()->format_type_display(type));
     }
     case TypeKind::Array: {
-        return compile_type(type->data.array.internal);
+        auto internal = get_resolver()->eval_struct_type(type);
+        assert(internal);
+        return compile_type(internal);
     }
     case TypeKind::Span: {
-        return compile_type(type->data.span.internal);
+        auto internal = get_resolver()->eval_struct_type(type);
+        assert(internal);
+        return compile_type(internal);
     }
     case TypeKind::FixedArray: {
         auto elem_type_l = compile_type(type->data.fixed_array.elem);

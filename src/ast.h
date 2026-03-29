@@ -702,6 +702,7 @@ struct PrefixExpr {
 
 struct PackExpansion {
     Node *expr = nullptr; // The expression being expanded (e.g., args)
+    bool can_forward_directly = false;
 };
 
 struct CapturePath {

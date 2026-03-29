@@ -432,6 +432,7 @@ class Resolver {
     ChiType *resolve_common_value_type(ChiType *left_type, ChiType *right_type,
                                        ChiType *preferred_type = nullptr);
     bool use_implicit_owning_coercion(ChiType *from_type, ChiType *to_type);
+    bool can_forward_variadic_pack_directly(ChiType *arg_type, ChiType *param_type);
 
     void context_init_primitives();
     void context_init_builtins(ast::Module *builtin_module);

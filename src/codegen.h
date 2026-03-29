@@ -89,8 +89,6 @@ struct Function {
     ChiType *specialized_subtype = nullptr; // For specialized generic functions
     map<ChiType *, ChiType *> *type_env = nullptr; // TypeEnv from GenericResolver (placeholder → concrete)
     label_t *next_end_label = nullptr;
-    array<llvm::Value *> vararg_pointers = {};
-
     std::list<BlockScope> block_scopes;
     std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
@@ -112,6 +110,8 @@ struct Function {
     };
     std::vector<CleanupOwner> cleanup_owner_vars;
     std::set<ast::Node *> async_frame_owned_vars;
+    bool is_compiling_body = false;
+    bool body_compiled = false;
 
     Function(CodegenContext *ctx, llvm::Function *llvm_fn, ast::Node *node);
     ~Function() {}
@@ -539,6 +539,12 @@ class Compiler {
     llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type);
     llvm::Value *compile_extern_variadic_arg(Function *fn, ast::Node *expr);
     llvm::Value *compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type);
+    llvm::Value *build_span_value(ChiType *span_type, llvm::Value *data_ptr, llvm::Value *length);
+    llvm::Value *compile_variadic_span_arg(Function *fn, array<ast::Node *> args, int va_start,
+                                           ChiType *span_type, ast::Node *dbg_node);
+    std::pair<llvm::Value *, llvm::Value *> compile_sequence_data_and_length(Function *fn,
+                                                                             llvm::Value *seq_ptr,
+                                                                             ChiType *seq_type);
     bool needs_implicit_owning_conversion(ast::Node *expr);
     ast::ConversionType get_saved_conversion_type(ast::Node *expr);
     ast::Node *unwrap_noop_cast(ast::Node *expr);
@@ -549,6 +555,10 @@ class Compiler {
     void emit_alloc_init(Function *fn, llvm::Value *dest, ChiType *struct_type);
     void emit_construct_init(Function *fn, llvm::Value *dest, ChiType *type,
                              ast::Module *context_module = nullptr);
+    void compile_ref_value_to_ptr(Function *fn, RefValue src, ChiType *src_type,
+                                  llvm::Value *dest, ChiType *dest_type);
+    void compile_any_box_ref_to_ptr(Function *fn, RefValue src, ChiType *src_type,
+                                    llvm::Value *dest, ChiType *dest_type);
     void compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                 ChiType *dest_type, bool destruct_old = false);
     void compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
@@ -591,7 +601,6 @@ class Compiler {
                                ChiType *type = nullptr);
 
     void compile_stmt(Function *fn, ast::Node *stmt);
-
     llvm::Value *compile_block(Function *fn, ast::Node *parent, ast::Node *block,
                                label_t *end_label, llvm::Value *var = nullptr);
 
