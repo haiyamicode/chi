@@ -67,6 +67,8 @@ unwrap temp arg=arg
 unwrap temp return=return
 
 test_optional_inference:
+explicit ?T if T/null = (10, 11)
+explicit ?T if null/T = (12, 13)
 if T/null = (1, 2)
 if null/T = (3, 4)
 switch T/null = (5, 6)

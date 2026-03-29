@@ -369,6 +369,12 @@ func test_implicit_narrow() {
 func test_optional_inference() {
     println("test_optional_inference:");
 
+    let explicit_if_left: ?Point = if true => Point{x: 10, y: 11} else => null;
+    printf("explicit ?T if T/null = ({}, {})\n", explicit_if_left!.x, explicit_if_left!.y);
+
+    let explicit_if_right: ?Point = if false => null else => Point{x: 12, y: 13};
+    printf("explicit ?T if null/T = ({}, {})\n", explicit_if_right!.x, explicit_if_right!.y);
+
     var inferred_if_left = if true => Point{x: 1, y: 2} else => null;
     printf("if T/null = ({}, {})\n", inferred_if_left!.x, inferred_if_left!.y);
 
