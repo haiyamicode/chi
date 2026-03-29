@@ -153,6 +153,7 @@ inline const char *node_type_display_name(NodeType type) {
 
 MAKE_ENUM(ModuleKind, XS, XM);
 MAKE_ENUM(ForLoopKind, Empty, Ternary, Range, Iter, IntRange);
+MAKE_ENUM(ConversionType, None, NoOp, ValueCast, OwningCoercion);
 
 enum FnParsingFlags : uint32_t {
     FN_BODY_REQUIRED = 1 << 0,
@@ -711,7 +712,7 @@ struct CapturePath {
 struct EscapeAnalysis {
     bool escaped = false;
     bool moved = false;
-    bool use_owning_coercion = false;
+    ConversionType conversion_type = ConversionType::None;
     array<CapturePath> capture_path = {}; // Path from original declaration to current context
 
     bool is_capture() { return capture_path.len > 0; }

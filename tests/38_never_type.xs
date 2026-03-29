@@ -68,11 +68,48 @@ struct Wrapper {
     value: ?int = null;
 }
 
+interface Marker {}
+
+struct Marked {
+    value: int = 0;
+
+    impl Marker {}
+}
+
 func dot_guard_never(w: &Wrapper) int {
     if !w.value {
         die("no value");
     }
     return w.value + 1;
+}
+
+func if_stmt_never(flag: bool) {
+    if flag {
+        println("if_stmt_never then");
+        return;
+    } else {
+        die("if_stmt_never else");
+    }
+}
+
+func switch_stmt_never(x: int) {
+    switch x {
+        1 => {
+            println("switch_stmt_never case");
+            return;
+        },
+        else => die("switch_stmt_never else")
+    }
+}
+
+func type_switch_stmt_never(value: &Marker) {
+    switch value.(type) {
+        &Marked => {
+            println("type_switch_stmt_never case");
+            return;
+        },
+        else => die("type_switch_stmt_never else")
+    }
 }
 
 func main() {
@@ -97,4 +134,10 @@ func main() {
     var w = Wrapper{};
     w.value = 100;
     printf("dot_guard_never={}\n", dot_guard_never(&w));
+
+    println("\n-- Statement if/switch with never --");
+    if_stmt_never(true);
+    switch_stmt_never(1);
+    var marked = Marked{value: 7};
+    type_switch_stmt_never(&marked);
 }

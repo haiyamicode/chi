@@ -534,11 +534,15 @@ class Compiler {
 
     llvm::Value *compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest);
 
-    llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type);
+    llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type,
+                                            bool allow_saved_owning_conversion = true);
     llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type);
     llvm::Value *compile_extern_variadic_arg(Function *fn, ast::Node *expr);
     llvm::Value *compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type);
-    bool needs_implicit_owning_conversion(ChiType *src_type, ChiType *dest_type);
+    bool needs_implicit_owning_conversion(ast::Node *expr);
+    ast::ConversionType get_saved_conversion_type(ast::Node *expr);
+    ast::Node *unwrap_noop_cast(ast::Node *expr);
+    ast::Node *get_owning_conversion_source_expr(ast::Node *expr);
     bool compile_implicit_owning_conversion_to_ptr(Function *fn, ast::Node *expr,
                                                    llvm::Value *dest, ChiType *dest_type,
                                                    bool destruct_old = false);
@@ -550,7 +554,8 @@ class Compiler {
     void compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                       ChiType *dest_type, bool destruct_old = false);
     void compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
-                                   ChiType *dest_type, bool destruct_old = false);
+                                   ChiType *dest_type, bool destruct_old = false,
+                                   bool allow_saved_owning_conversion = true);
 
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                       array<ast::FnCapture> *captures);

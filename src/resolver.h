@@ -321,8 +321,6 @@ class Resolver {
     bool can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit = false);
     bool can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit = false);
 
-    bool is_same_type(ChiType *a, ChiType *b);
-
     TypeKind get_sigil_type_kind(ast::SigilKind sigil);
     bool type_needs_first_ref_lifetime(ChiType *type);
     ChiType *with_first_ref_lifetime(ChiType *type, ChiLifetime *lt);
@@ -429,6 +427,10 @@ class Resolver {
     bool should_move_temp_expr(ast::Node *expr, ChiType *type);
     void mark_temp_moved_if_needed(ast::Node *expr, ChiType *type);
     ast::Node *get_moved_expr(ast::Node *expr);
+    ast::ConversionType resolve_conversion_type(ChiType *from_type, ChiType *to_type,
+                                                bool is_explicit_cast = false);
+    ChiType *resolve_common_value_type(ChiType *left_type, ChiType *right_type,
+                                       ChiType *preferred_type = nullptr);
     bool use_implicit_owning_coercion(ChiType *from_type, ChiType *to_type);
 
     void context_init_primitives();
@@ -439,6 +441,8 @@ class Resolver {
     SystemTypes *get_system_types() { return &m_ctx->system_types; }
 
     ChiType *get_system_type(TypeKind kind);
+
+    bool is_same_type(ChiType *a, ChiType *b);
 
     ChiType *node_get_type(ast::Node *node);
 

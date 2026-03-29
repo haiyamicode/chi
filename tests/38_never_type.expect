@@ -17,3 +17,8 @@ if_else_never(9)=9
 
 -- DotExpr with never guard --
 dot_guard_never=101
+
+-- Statement if/switch with never --
+if_stmt_never then
+switch_stmt_never case
+type_switch_stmt_never case

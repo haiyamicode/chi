@@ -23,6 +23,7 @@ using ast::NodeType;
 
 static ChiType *get_struct_access_root_type(ast::Node *expr);
 static bool expr_is_direct_borrow_value(ast::Node *expr);
+static ast::Node *get_assignment_expr_node(ast::Node *node);
 static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiType *from_type,
                                        ChiType *to_type, const ResolveScope *scope);
 static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr);
@@ -1834,7 +1835,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
             auto elem_type = t1->get_elem();
-            data.op2->escape.use_owning_coercion = use_implicit_owning_coercion(t2, elem_type);
+            data.op2->escape.conversion_type = resolve_conversion_type(t2, elem_type);
             mark_temp_moved_if_needed(data.op2, t2);
             if (data.op2->escape.moved) {
                 node->escape.moved = true;
@@ -2255,10 +2256,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.cast_expr;
         auto dest_type = resolve_value(data.dest_type, scope);
         auto from_type = resolve(data.expr, scope);
-        node->escape.use_owning_coercion = use_implicit_owning_coercion(from_type, dest_type);
+        node->escape.conversion_type = resolve_conversion_type(from_type, dest_type, true);
         ensure_temp_owner(data.expr, from_type, scope);
         if (data.expr) {
-            if (node->escape.use_owning_coercion) {
+            if (node->escape.conversion_type == ast::ConversionType::OwningCoercion) {
                 mark_temp_moved_if_needed(data.expr, from_type);
             }
             if (data.expr->escape.moved) {
@@ -3674,8 +3675,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             if (then_is_value) {
-                check_assignment(data.else_node, else_type, then_type, &scope);
-                return then_type;
+                auto result_type =
+                    resolve_common_value_type(then_type, else_type, scope.value_type);
+                auto *then_value = get_assignment_expr_node(data.then_block);
+                auto *else_value = get_assignment_expr_node(data.else_node);
+                check_assignment(then_value, then_type, result_type, &scope);
+                check_assignment(else_value, else_type, result_type, &scope);
+                return result_type;
             }
 
             return get_system_types()->void_;
@@ -5352,7 +5358,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
 
                 if (ret_type) {
-                    check_assignment(scase, case_type, ret_type, &scope);
+                    auto result_type =
+                        resolve_common_value_type(ret_type, case_type, scope.value_type);
+                    check_assignment(get_assignment_expr_node(scase->data.case_expr.body), case_type,
+                                     result_type, &scope);
+                    ret_type = result_type;
                     scase->resolved_type = ret_type;
                 } else {
                     ret_type = case_type;
@@ -5513,9 +5523,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
 
             if (ret_type) {
-                check_assignment(scase, case_type, ret_type, &scope);
+                auto result_type =
+                    resolve_common_value_type(ret_type, case_type, scope.value_type);
+                check_assignment(get_assignment_expr_node(scase->data.case_expr.body), case_type,
+                                 result_type, &scope);
+                ret_type = result_type;
                 scase->resolved_type = ret_type;
-            } else {
+            } else if (case_type && case_type->kind != TypeKind::Void) {
                 ret_type = case_type;
             }
         }
@@ -6121,6 +6135,18 @@ static bool expr_is_direct_borrow_value(ast::Node *expr) {
     }
 }
 
+static ast::Node *get_assignment_expr_node(ast::Node *node) {
+    if (!node) {
+        return nullptr;
+    }
+    if (node->type == ast::NodeType::Block) {
+        if (node->data.block.return_expr) {
+            return node->data.block.return_expr;
+        }
+    }
+    return node;
+}
+
 static bool expr_can_fallback_to_borrow_source(ast::Node *expr) {
     if (!expr) {
         return false;
@@ -6180,6 +6206,13 @@ void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *t
     // If from_type is null (failed to resolve), skip assignment check
     if (!from_type || !to_type) {
         return;
+    }
+
+    if (!is_explicit && value && value->type != NodeType::CastExpr) {
+        auto conversion_type = resolve_conversion_type(from_type, to_type);
+        if (conversion_type == ast::ConversionType::OwningCoercion) {
+            value->escape.conversion_type = conversion_type;
+        }
     }
 
     // Check for negative literal being assigned to unsigned type
@@ -7086,6 +7119,71 @@ bool Resolver::is_borrowing_type(ChiType *type) {
     default:
         return false;
     }
+}
+
+ast::ConversionType Resolver::resolve_conversion_type(ChiType *from_type, ChiType *to_type,
+                                                      bool is_explicit_cast) {
+    if (!from_type || !to_type) {
+        return ast::ConversionType::None;
+    }
+    if (is_same_type(from_type, to_type)) {
+        return is_explicit_cast ? ast::ConversionType::NoOp : ast::ConversionType::None;
+    }
+    if (is_explicit_cast) {
+        if (use_implicit_owning_coercion(from_type, to_type)) {
+            return ast::ConversionType::OwningCoercion;
+        }
+        return ast::ConversionType::ValueCast;
+    }
+    if (use_implicit_owning_coercion(from_type, to_type)) {
+        return ast::ConversionType::OwningCoercion;
+    }
+    return ast::ConversionType::None;
+}
+
+ChiType *Resolver::resolve_common_value_type(ChiType *left_type, ChiType *right_type,
+                                             ChiType *preferred_type) {
+    if (!left_type || !right_type) {
+        return left_type ? left_type : right_type;
+    }
+
+    bool left_is_null = left_type->kind == TypeKind::Null;
+    bool right_is_null = right_type->kind == TypeKind::Null;
+    bool left_is_optional = left_type->kind == TypeKind::Optional;
+    bool right_is_optional = right_type->kind == TypeKind::Optional;
+    bool has_preferred = preferred_type && preferred_type->kind != TypeKind::Void &&
+                         preferred_type->kind != TypeKind::Any;
+    bool left_to_preferred = has_preferred && can_assign(left_type, preferred_type, false);
+    bool right_to_preferred = has_preferred && can_assign(right_type, preferred_type, false);
+
+    if (left_to_preferred && right_to_preferred) {
+        return preferred_type;
+    }
+
+    if (left_is_null && right_is_null) {
+        return left_type;
+    }
+    if (left_is_null && right_type->kind != TypeKind::Void) {
+        return right_is_optional ? right_type : get_wrapped_type(right_type, TypeKind::Optional);
+    }
+    if (right_is_null && left_type->kind != TypeKind::Void) {
+        return left_is_optional ? left_type : get_wrapped_type(left_type, TypeKind::Optional);
+    }
+
+    bool right_to_left = can_assign(right_type, left_type, false);
+    bool left_to_right = can_assign(left_type, right_type, false);
+
+    if (right_to_left && !left_to_right) {
+        return left_type;
+    }
+    if (left_to_right && !right_to_left) {
+        return right_type;
+    }
+    if (right_to_left && left_to_right && left_is_optional != right_is_optional) {
+        return left_is_optional ? left_type : right_type;
+    }
+
+    return left_type;
 }
 
 // Check if a type needs destruction (has destructor or has fields that need destruction)

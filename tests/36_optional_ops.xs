@@ -366,6 +366,51 @@ func test_implicit_narrow() {
     println("");
 }
 
+func test_optional_inference() {
+    println("test_optional_inference:");
+
+    var inferred_if_left = if true => Point{x: 1, y: 2} else => null;
+    printf("if T/null = ({}, {})\n", inferred_if_left!.x, inferred_if_left!.y);
+
+    var inferred_if_right = if false => null else => Point{x: 3, y: 4};
+    printf("if null/T = ({}, {})\n", inferred_if_right!.x, inferred_if_right!.y);
+
+    var inferred_switch_left = switch 1 {
+        1 => Point{x: 5, y: 6},
+        else => null,
+    };
+    printf("switch T/null = ({}, {})\n", inferred_switch_left!.x, inferred_switch_left!.y);
+
+    var inferred_switch_right = switch 0 {
+        1 => null,
+        else => Point{x: 7, y: 8},
+    };
+    printf("switch null/T = ({}, {})\n", inferred_switch_right!.x, inferred_switch_right!.y);
+
+    var nested: ?int = 9;
+    var nested2: ??int = nested;
+    var nested3: ???int = nested2;
+    printf("direct ?T/??T/???T = {} {} {}\n", nested!, nested2!!, nested3!!!);
+
+    var inferred_nested_if = if true => nested else => null;
+    var inferred_deeper_if = if true => nested2 else => null;
+    printf("if ?T/null preserves = {} / if ??T/null preserves = {}\n", inferred_nested_if!,
+           inferred_deeper_if!!);
+
+    var inferred_nested_switch = switch 1 {
+        1 => nested,
+        else => null,
+    };
+    var inferred_deeper_switch = switch 1 {
+        1 => nested2,
+        else => null,
+    };
+    printf("switch ?T/null preserves = {} / switch ??T/null preserves = {}\n",
+           inferred_nested_switch!, inferred_deeper_switch!!);
+
+    println("");
+}
+
 func main() {
     test_null_coalescing();
     test_construct_operand_postfix();
@@ -377,5 +422,6 @@ func main() {
     test_if_let();
     test_if_let_zero();
     test_implicit_narrow();
+    test_optional_inference();
     test_if_let_enum_pattern();
 }

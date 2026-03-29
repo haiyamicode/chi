@@ -1398,15 +1398,14 @@ llvm::Value *Compiler::compile_c_string_literal(const string &str) {
 }
 
 llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
-                                                  ChiType *dest_type) {
-    if (expr->type == ast::NodeType::CastExpr) {
-        auto &cast_data = expr->data.cast_expr;
-        if (get_chitype(cast_data.expr) == get_chitype(expr) &&
-            (!dest_type || get_chitype(cast_data.expr) == dest_type)) {
-            return compile_assignment_to_type(fn, cast_data.expr, dest_type);
-        }
+                                                  ChiType *dest_type,
+                                                  bool allow_saved_owning_conversion) {
+    auto *effective_expr = unwrap_noop_cast(expr);
+    if (effective_expr != expr) {
+        return compile_assignment_to_type(fn, effective_expr, dest_type,
+                                          allow_saved_owning_conversion);
     }
-    auto src_type = get_chitype(expr);
+    auto src_type = get_chitype(effective_expr);
 
     // Check if src_type has placeholder type params (for generic struct field defaults)
     auto has_placeholder_params = [](ChiType *type) -> bool {
@@ -1419,39 +1418,42 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
     };
 
     // Handle ConstructExpr with placeholder type - use dest_type for compilation
-    if (expr->type == ast::NodeType::ConstructExpr && has_placeholder_params(src_type) &&
+    if (effective_expr->type == ast::NodeType::ConstructExpr && has_placeholder_params(src_type) &&
         dest_type && !has_placeholder_params(dest_type)) {
         auto &builder = *m_ctx->llvm_builder.get();
         auto ptr = fn->entry_alloca(compile_type(dest_type), "placeholder_tmp");
-        compile_construction(fn, ptr, dest_type, expr);
+        compile_construction(fn, ptr, dest_type, effective_expr);
         return builder.CreateLoad(compile_type(dest_type), ptr);
     }
 
-    if (needs_implicit_owning_conversion(src_type, dest_type)) {
+    if (allow_saved_owning_conversion && needs_implicit_owning_conversion(effective_expr)) {
         auto &builder = *m_ctx->llvm_builder.get();
         auto tmp = fn->entry_alloca(compile_type(dest_type),
                                     dest_type->kind == TypeKind::Any ? "implicit_any"
                                                                      : "implicit_wrap");
-        compile_implicit_owning_conversion_to_ptr(fn, expr, tmp, dest_type);
+        bool converted =
+            compile_implicit_owning_conversion_to_ptr(fn, effective_expr, tmp, dest_type);
+        assert(converted);
         return builder.CreateLoad(compile_type(dest_type), tmp);
     }
 
-    auto src_value = compile_expr(fn, expr);
+    auto src_value = compile_expr(fn, effective_expr);
     if (src_type->kind == TypeKind::Undefined) {
         return nullptr;
     }
     if (src_type->kind == TypeKind::ZeroInit) {
         return llvm::Constant::getNullValue(compile_type(dest_type));
     }
-    if (!dest_type || src_type == dest_type) {
+    if (!dest_type || get_resolver()->is_same_type(src_type, dest_type)) {
         return src_value;
     }
-    if (expr->type == ast::NodeType::ConstructExpr && src_type == dest_type) {
+    if (effective_expr->type == ast::NodeType::ConstructExpr &&
+        get_resolver()->is_same_type(src_type, dest_type)) {
         return src_value;
     }
     auto value = src_value;
     if (dest_type) {
-        emit_dbg_location(expr);
+        emit_dbg_location(effective_expr);
         value = compile_conversion(fn, src_value, src_type, dest_type);
     }
     return value;
@@ -1460,7 +1462,7 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
 llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type) {
     auto &builder = *m_ctx->llvm_builder;
     auto src_type = get_chitype(expr);
-    if (needs_implicit_owning_conversion(src_type, param_type)) {
+    if (needs_implicit_owning_conversion(expr)) {
         auto arg_tmp = fn->entry_alloca(compile_type(param_type),
                                         param_type->kind == TypeKind::Any ? "_arg_any"
                                                                           : "_arg_wrap");
@@ -1518,7 +1520,7 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
     auto &builder = *m_ctx->llvm_builder;
     auto src_type = get_chitype(expr);
 
-    if (needs_implicit_owning_conversion(src_type, param_type)) {
+    if (needs_implicit_owning_conversion(expr)) {
         return compile_arg_for_call(fn, expr, param_type);
     }
 
@@ -1542,25 +1544,41 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
     return compile_arg_for_call(fn, expr, param_type);
 }
 
-bool Compiler::needs_implicit_owning_conversion(ChiType *src_type, ChiType *dest_type) {
-    if (!src_type || !dest_type) {
-        return false;
+bool Compiler::needs_implicit_owning_conversion(ast::Node *expr) {
+    return expr && expr->escape.conversion_type == ast::ConversionType::OwningCoercion;
+}
+
+ast::ConversionType Compiler::get_saved_conversion_type(ast::Node *expr) {
+    assert(expr && expr->type == ast::NodeType::CastExpr);
+    assert(expr->escape.conversion_type != ast::ConversionType::None);
+    return expr->escape.conversion_type;
+}
+
+ast::Node *Compiler::unwrap_noop_cast(ast::Node *expr) {
+    if (!expr || expr->type != ast::NodeType::CastExpr) {
+        return expr;
     }
-    if (dest_type->kind == TypeKind::Optional) {
-        return src_type->kind != TypeKind::Optional && src_type->kind != TypeKind::Null;
+    if (get_saved_conversion_type(expr) == ast::ConversionType::NoOp) {
+        return expr->data.cast_expr.expr;
     }
-    if (dest_type->kind == TypeKind::Any) {
-        return src_type->kind != TypeKind::Any && src_type->kind != TypeKind::Undefined &&
-               src_type->kind != TypeKind::ZeroInit;
+    return expr;
+}
+
+ast::Node *Compiler::get_owning_conversion_source_expr(ast::Node *expr) {
+    if (!expr || expr->type != ast::NodeType::CastExpr) {
+        return expr;
     }
-    return false;
+    if (get_saved_conversion_type(expr) == ast::ConversionType::OwningCoercion) {
+        return expr->data.cast_expr.expr;
+    }
+    return expr;
 }
 
 bool Compiler::compile_implicit_owning_conversion_to_ptr(Function *fn, ast::Node *expr,
                                                          llvm::Value *dest, ChiType *dest_type,
                                                          bool destruct_old) {
     auto src_type = get_chitype(expr);
-    if (!needs_implicit_owning_conversion(src_type, dest_type)) {
+    if (!needs_implicit_owning_conversion(expr)) {
         return false;
     }
     if (dest_type->kind == TypeKind::Optional) {
@@ -1578,8 +1596,10 @@ void Compiler::compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value
                                       ChiType *dest_type, bool destruct_old) {
     auto &builder = *m_ctx->llvm_builder.get();
     auto &llvm_ctx = *m_ctx->llvm_ctx.get();
-    auto src_type = get_chitype(expr);
     auto any_type_l = (llvm::StructType *)compile_type(dest_type);
+
+    auto source_expr = get_owning_conversion_source_expr(expr);
+    auto src_type = get_chitype(source_expr);
 
     if (destruct_old) {
         compile_destruction_for_type(fn, dest, dest_type);
@@ -1596,14 +1616,14 @@ void Compiler::compile_any_box_to_ptr(Function *fn, ast::Node *expr, llvm::Value
 
     auto data_gep = builder.CreateStructGEP(any_type_l, dest, 3);
     if (inlined) {
-        compile_assignment_to_ptr(fn, expr, data_gep, src_type);
+        compile_assignment_to_ptr(fn, source_expr, data_gep, src_type, false, false);
         return;
     }
 
     auto malloc_fn = get_system_fn("cx_malloc");
     auto size_l = llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), type_size);
     auto heap_ptr = builder.CreateCall(malloc_fn->llvm_fn, {size_l, get_null_ptr()}, "any_alloc");
-    compile_assignment_to_ptr(fn, expr, heap_ptr, src_type);
+    compile_assignment_to_ptr(fn, source_expr, heap_ptr, src_type, false, false);
     builder.CreateStore(heap_ptr, data_gep);
 }
 
@@ -1619,51 +1639,56 @@ void Compiler::compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm:
     builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
                         has_value_p);
     auto value_p = builder.CreateStructGEP(opt_type_l, dest, 1);
-    compile_assignment_to_ptr(fn, expr, value_p, elem_type);
+    auto source_expr = get_owning_conversion_source_expr(expr);
+    compile_assignment_to_ptr(fn, source_expr, value_p, elem_type, false, false);
 }
 
 void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
-                                         ChiType *dest_type, bool destruct_old) {
-    if (expr->type == ast::NodeType::CastExpr) {
-        auto &cast_data = expr->data.cast_expr;
-        if (get_chitype(cast_data.expr) == get_chitype(expr) &&
-            get_chitype(cast_data.expr) == dest_type) {
-            compile_assignment_to_ptr(fn, cast_data.expr, dest, dest_type, destruct_old);
-            return;
-        }
+                                         ChiType *dest_type, bool destruct_old,
+                                         bool allow_saved_owning_conversion) {
+    auto *effective_expr = unwrap_noop_cast(expr);
+    if (effective_expr != expr) {
+        compile_assignment_to_ptr(fn, effective_expr, dest, dest_type, destruct_old,
+                                  allow_saved_owning_conversion);
+        return;
     }
-    auto saved_outlet = expr->resolved_outlet;
-    expr->resolved_outlet = nullptr;
+    auto saved_outlet = effective_expr->resolved_outlet;
+    effective_expr->resolved_outlet = nullptr;
 
-    auto src_type = get_chitype(expr);
-    if (compile_implicit_owning_conversion_to_ptr(fn, expr, dest, dest_type, destruct_old)) {
-        expr->resolved_outlet = saved_outlet;
+    auto src_type = get_chitype(effective_expr);
+    if (allow_saved_owning_conversion &&
+        compile_implicit_owning_conversion_to_ptr(fn, effective_expr, dest, dest_type,
+                                                  destruct_old)) {
+        effective_expr->resolved_outlet = saved_outlet;
         return;
     }
     // RVO: construct directly at destination when types match
-    if (expr->type == ast::NodeType::ConstructExpr && src_type == dest_type &&
-        !expr->data.construct_expr.is_new) {
-        compile_construction(fn, dest, dest_type, expr);
-        expr->resolved_outlet = saved_outlet;
+    if (effective_expr->type == ast::NodeType::ConstructExpr &&
+        get_resolver()->is_same_type(src_type, dest_type) &&
+        !effective_expr->data.construct_expr.is_new) {
+        compile_construction(fn, dest, dest_type, effective_expr);
+        effective_expr->resolved_outlet = saved_outlet;
         return;
     }
     // RVO: forward dest as sret for function calls (non-lambda, non-optional-chain)
-    if (expr->type == ast::NodeType::FnCallExpr && src_type == dest_type) {
-        auto &fn_call_data = expr->data.fn_call_expr;
+    if (effective_expr->type == ast::NodeType::FnCallExpr &&
+        get_resolver()->is_same_type(src_type, dest_type)) {
+        auto &fn_call_data = effective_expr->data.fn_call_expr;
         bool is_lambda = fn_call_data.fn_ref_expr->resolved_type->kind == TypeKind::FnLambda;
         bool is_optional_chain = fn_call_data.fn_ref_expr->type == ast::NodeType::DotExpr &&
                                  fn_call_data.fn_ref_expr->data.dot_expr.is_optional_chain;
         if (!is_lambda && !is_optional_chain) {
-            compile_fn_call(fn, expr, nullptr, dest);
-            expr->resolved_outlet = saved_outlet;
+            compile_fn_call(fn, effective_expr, nullptr, dest);
+            effective_expr->resolved_outlet = saved_outlet;
             return;
         }
     }
-    auto value = compile_assignment_to_type(fn, expr, dest_type);
+    auto value = compile_assignment_to_type(fn, effective_expr, dest_type,
+                                            allow_saved_owning_conversion);
     if (value) {
-        compile_store_or_copy(fn, value, dest, dest_type, expr, destruct_old);
+        compile_store_or_copy(fn, value, dest, dest_type, effective_expr, destruct_old);
     }
-    expr->resolved_outlet = saved_outlet;
+    effective_expr->resolved_outlet = saved_outlet;
 }
 
 llvm::Value *Compiler::compile_assignment_value(Function *fn, ast::Node *expr, ast::Node *dest) {
@@ -4770,8 +4795,7 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
                   get_resolver()->format_type_display(to_type),
                   fn && fn->node ? fn->node->name : "<null>");
         }
-        if (from_type->kind == TypeKind::Optional) {
-            // Same optional type - return as-is
+        if (get_resolver()->is_same_type(from_type, to_type)) {
             return value;
         }
         // Implicit T -> ?T wrap: construct optional with has_value=true
@@ -5310,6 +5334,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::ASS: {
             auto assign_target = data.op1;
             bool unwrap_optional_lhs = false;
+            llvm::Value *optional_value_ptr = nullptr;
+            llvm::Value *optional_had_value = nullptr;
             if (data.op1->type == ast::NodeType::UnaryOpExpr) {
                 auto &lhs_unary = data.op1->data.unary_op_expr;
                 if (lhs_unary.is_suffix && lhs_unary.op_type == TokenType::LNOT &&
@@ -5322,15 +5348,38 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto ref = compile_expr_ref(fn, assign_target);
             assert(ref.address);
             auto dest_type = get_chitype(assign_target);
+            auto dest_ptr = ref.address;
+            if (unwrap_optional_lhs) {
+                auto opt_type_l = compile_type(dest_type);
+                auto has_value_p = builder.CreateStructGEP(opt_type_l, ref.address, 0);
+                optional_had_value = builder.CreateLoad(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx),
+                                                        has_value_p);
+                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
+                                    has_value_p);
+                optional_value_ptr = builder.CreateStructGEP(opt_type_l, ref.address, 1);
+                dest_ptr = optional_value_ptr;
+                dest_type = dest_type->get_elem();
+            }
             auto src_type = get_chitype(data.op2);
             bool destruct_old = !data.is_initializing;
+            if (unwrap_optional_lhs && destruct_old && get_resolver()->type_needs_destruction(dest_type)) {
+                auto bb_destroy = fn->new_label("opt_assign_destroy");
+                auto bb_done = fn->new_label("opt_assign_ready");
+                builder.CreateCondBr(optional_had_value, bb_destroy, bb_done);
+
+                builder.SetInsertPoint(bb_destroy);
+                compile_destruction_for_type(fn, dest_ptr, dest_type);
+                builder.CreateBr(bb_done);
+
+                builder.SetInsertPoint(bb_done);
+                destruct_old = false;
+            }
             if (compile_implicit_owning_conversion_to_ptr(
-                    fn, data.op2, ref.address, dest_type, destruct_old)) {
+                    fn, data.op2, dest_ptr, dest_type, destruct_old)) {
                 if (unwrap_optional_lhs) {
-                    auto value_p = builder.CreateStructGEP(compile_type(dest_type), ref.address, 1);
-                    return builder.CreateLoad(compile_type(dest_type->get_elem()), value_p);
+                    return builder.CreateLoad(compile_type(dest_type), dest_ptr);
                 }
-                return builder.CreateLoad(compile_type(dest_type), ref.address);
+                return builder.CreateLoad(compile_type(dest_type), dest_ptr);
             }
             // Fallback for cloned AST nodes (e.g. subtype variants):
             // check if this is a field being initialized inside a constructor
@@ -5353,7 +5402,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                             data.op2->resolved_outlet;
             // If in-place, destruct old BEFORE RHS overwrites dest
             if (in_place && destruct_old) {
-                compile_destruction_for_type(fn, ref.address, dest_type);
+                compile_destruction_for_type(fn, dest_ptr, dest_type);
             }
 
             // Get RHS as ref to preserve source address for efficient copy
@@ -5361,7 +5410,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto src_ref = compile_expr_ref(fn, data.op2);
 
             // Only load the value when needed (type conversion)
-            if (dest_type && src_type != dest_type) {
+            if (dest_type && !get_resolver()->is_same_type(src_type, dest_type)) {
                 if (!src_ref.value && src_ref.address) {
                     src_ref.value = builder.CreateLoad(compile_type(src_type), src_ref.address);
                 }
@@ -5376,7 +5425,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto val = src_ref.value;
             if (!val && src_ref.address)
                 val = builder.CreateLoad(compile_type(dest_type), src_ref.address);
-            compile_store_or_copy(fn, val, ref.address, dest_type, data.op2, destruct_old);
+            compile_store_or_copy(fn, val, dest_ptr, dest_type, data.op2, destruct_old);
             return val;
         }
         case TokenType::ADD_ASS:
@@ -6191,14 +6240,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.cast_expr;
         auto from_type = get_chitype(data.expr);
         auto to_type = get_chitype(expr);
-        if (from_type == to_type) {
+        auto conversion_type = get_saved_conversion_type(expr);
+        if (conversion_type == ast::ConversionType::NoOp) {
             return compile_expr(fn, data.expr);
         }
-        if (expr->escape.use_owning_coercion) {
+        if (conversion_type == ast::ConversionType::OwningCoercion) {
             auto &builder = *m_ctx->llvm_builder.get();
             auto tmp = fn->entry_alloca(compile_type(to_type),
                                         to_type->kind == TypeKind::Any ? "cast_any" : "cast_wrap");
-            compile_implicit_owning_conversion_to_ptr(fn, data.expr, tmp, to_type);
+            bool converted = compile_implicit_owning_conversion_to_ptr(fn, expr, tmp, to_type);
+            assert(converted);
             return builder.CreateLoad(compile_type(to_type), tmp);
         }
         auto from_value = compile_expr(fn, data.expr);
@@ -6281,11 +6332,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &builder = *m_ctx->llvm_builder;
 
         llvm::Value *var = nullptr;
-        if (ret_type && ret_type->kind != TypeKind::Void) {
+        if (ret_type && ret_type->kind != TypeKind::Void &&
+            ret_type->kind != TypeKind::Never) {
             if (expr->resolved_outlet) {
                 var = compile_expr_ref(fn, expr->resolved_outlet).address;
             } else {
-                var = compile_alloc(fn, expr, false);
+                var = compile_alloc(fn, expr, false, ret_type);
             }
         }
 
@@ -6352,11 +6404,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto ret_type = get_chitype(expr);
         auto &builder = *m_ctx->llvm_builder;
         llvm::Value *var = nullptr;
-        if (ret_type->kind != TypeKind::Void) {
+        if (ret_type->kind != TypeKind::Void && ret_type->kind != TypeKind::Never) {
             if (expr->resolved_outlet) {
                 var = compile_expr_ref(fn, expr->resolved_outlet).address;
             } else {
-                var = compile_alloc(fn, expr, false);
+                var = compile_alloc(fn, expr, false, ret_type);
             }
         }
 
@@ -6967,12 +7019,14 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 
         for (auto field_init : expr->data.construct_expr.field_inits) {
             auto &data = field_init->data.field_init_expr;
-            auto gep = compile_dot_access(fn, dest, type, data.resolved_field);
+            auto *field = get_resolver()->get_struct_member(type, data.resolved_field->get_name());
+            assert(field);
+            auto gep = compile_dot_access(fn, dest, type, field);
             data.compiled_field_address = gep;
             if (data.value->type == ast::NodeType::ConstructExpr) {
-                compile_construction(fn, gep, data.resolved_field->resolved_type, data.value);
+                compile_construction(fn, gep, field->resolved_type, data.value);
             } else {
-                compile_assignment_to_ptr(fn, data.value, gep, data.resolved_field->resolved_type);
+                compile_assignment_to_ptr(fn, data.value, gep, field->resolved_type);
             }
             emit_dbg_location(expr);
         }
@@ -7100,10 +7154,11 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 
         for (auto field_init : expr->data.construct_expr.field_inits) {
             auto &data = field_init->data.field_init_expr;
-            auto field_gep =
-                builder.CreateStructGEP(compile_type(type), dest, data.resolved_field->field_index);
+            auto *field = get_resolver()->get_struct_member(type, data.resolved_field->get_name());
+            assert(field);
+            auto field_gep = builder.CreateStructGEP(compile_type(type), dest, field->field_index);
             data.compiled_field_address = field_gep;
-            compile_assignment_to_ptr(fn, data.value, field_gep, data.resolved_field->resolved_type);
+            compile_assignment_to_ptr(fn, data.value, field_gep, field->resolved_type);
         }
         break;
     }
