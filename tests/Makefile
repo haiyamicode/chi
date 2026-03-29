@@ -333,7 +333,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		exit 1; \
 	fi; \
 	rm -f testdata/15_package/15_package; \
-	(cd testdata/15_package && $(CHI) build --output /tmp/chitest_chi_package_bin --cwd /tmp/chitest_chi_package_build >/tmp/chitest_chi_build.out 2>&1 && /tmp/chitest_chi_package_bin > /tmp/chitest_chi_package.output 2>&1); \
+		(cd testdata/15_package && PATH=$(dir $(CHI)):$$PATH $(CHI) build --output /tmp/chitest_chi_package_bin --cwd /tmp/chitest_chi_package_build >/tmp/chitest_chi_build.out 2>&1 && /tmp/chitest_chi_package_bin > /tmp/chitest_chi_package.output 2>&1); \
 	if [ $$? -ne 0 ]; then \
 		echo "error in test 15_package (chi build)"; \
 		cat /tmp/chitest_chi_build.out; \
@@ -355,7 +355,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		rm -f testdata/15_package/15_package; \
 		exit 1; \
 	fi; \
-	$(CHI) build testdata/15_package --output /tmp/chitest_chi_package_path_bin --cwd /tmp/chitest_chi_package_path_build >/tmp/chitest_chi_build_path.out 2>&1 && /tmp/chitest_chi_package_path_bin > /tmp/chitest_chi_package_path.output 2>&1; \
+		PATH=$(dir $(CHI)):$$PATH $(CHI) build testdata/15_package --output /tmp/chitest_chi_package_path_bin --cwd /tmp/chitest_chi_package_path_build >/tmp/chitest_chi_build_path.out 2>&1 && /tmp/chitest_chi_package_path_bin > /tmp/chitest_chi_package_path.output 2>&1; \
 	if [ $$? -ne 0 ]; then \
 		echo "error in test 15_package (chi build explicit path)"; \
 		cat /tmp/chitest_chi_build_path.out; \
@@ -377,7 +377,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		rm -f testdata/15_package/15_package; \
 		exit 1; \
 	fi; \
-	(cd testdata/15_package && $(CHI) build --release --strip --output /tmp/chitest_chi_package_release_bin --cwd /tmp/chitest_chi_package_release_build >/tmp/chitest_chi_build_release.out 2>&1 && /tmp/chitest_chi_package_release_bin > /tmp/chitest_chi_package_release.output 2>&1); \
+		(cd testdata/15_package && PATH=$(dir $(CHI)):$$PATH $(CHI) build --release --strip --output /tmp/chitest_chi_package_release_bin --cwd /tmp/chitest_chi_package_release_build >/tmp/chitest_chi_build_release.out 2>&1 && /tmp/chitest_chi_package_release_bin > /tmp/chitest_chi_package_release.output 2>&1); \
 	if [ $$? -ne 0 ]; then \
 		echo "error in test 15_package (chi release build)"; \
 		cat /tmp/chitest_chi_build_release.out; \
@@ -399,7 +399,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		rm -f testdata/15_package/15_package; \
 		exit 1; \
 	fi; \
-	(cd testdata/15_package/src && $(CHI) build --output /tmp/chitest_chi_package_src_bin --cwd /tmp/chitest_chi_package_src_build >/tmp/chitest_chi_build_src.out 2>&1 && /tmp/chitest_chi_package_src_bin > /tmp/chitest_chi_package_src.output 2>&1); \
+		(cd testdata/15_package/src && PATH=$(dir $(CHI)):$$PATH $(CHI) build --output /tmp/chitest_chi_package_src_bin --cwd /tmp/chitest_chi_package_src_build >/tmp/chitest_chi_build_src.out 2>&1 && /tmp/chitest_chi_package_src_bin > /tmp/chitest_chi_package_src.output 2>&1); \
 	if [ $$? -ne 0 ]; then \
 		echo "error in test 15_package (chi build from src)"; \
 		cat /tmp/chitest_chi_build_src.out; \
