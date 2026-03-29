@@ -710,7 +710,7 @@ struct CapturePath {
     int32_t capture_index = -1; // Index of this variable in this function's captures
 };
 
-struct EscapeAnalysis {
+struct SemanticAnalysis {
     bool escaped = false;
     bool moved = false;
     ConversionType conversion_type = ConversionType::None;
@@ -797,7 +797,7 @@ struct Node {
     string name = "";
     ChiType *resolved_type = nullptr;
     ChiType *orig_type = nullptr;
-    EscapeAnalysis escape = {};
+    SemanticAnalysis analysis = {};
     Node *parent_fn = nullptr;
     Node *root_node = nullptr;
     uint32_t id = 0;
@@ -950,7 +950,7 @@ struct Node {
         b->name = name;
         b->resolved_type = resolved_type;
         b->orig_type = orig_type;
-        b->escape = escape;
+        b->analysis = analysis;
         b->parent_fn = parent_fn;
         b->index = index;
         b->parent = parent;
@@ -981,7 +981,7 @@ struct Node {
         }
     }
 
-    bool is_heap_allocated() { return escape.escaped; }
+    bool is_heap_allocated() { return analysis.escaped; }
 
     Node *get_decl(optional<TypeId> container_type_id = std::nullopt) {
         switch (type) {

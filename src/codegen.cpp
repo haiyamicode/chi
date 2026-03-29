@@ -1476,7 +1476,7 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
     // Caller-side copy: for non-moved args (named vars) passed to by-value
     // params, do copy here since the callee only does a bitwise store.
     // Moved args (rvalues) are already fresh values — ownership transfers.
-    if (!expr->escape.moved && param_type && !param_type->is_reference() &&
+    if (!expr->analysis.moved && param_type && !param_type->is_reference() &&
         get_resolver()->type_needs_destruction(param_type)) {
         auto tmp = fn->entry_alloca(compile_type(param_type), "_arg_copy");
         emit_dbg_location(expr);
@@ -1526,7 +1526,7 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
         return compile_arg_for_call(fn, expr, param_type);
     }
 
-    if (expr->escape.moved && param_type && !param_type->is_reference()) {
+    if (expr->analysis.moved && param_type && !param_type->is_reference()) {
         auto src_ref = compile_expr_ref(fn, expr);
         if (src_ref.address) {
             auto arg_value = src_ref.value;
@@ -1789,13 +1789,13 @@ std::pair<llvm::Value *, llvm::Value *> Compiler::compile_sequence_data_and_leng
 }
 
 bool Compiler::needs_implicit_owning_conversion(ast::Node *expr) {
-    return expr && expr->escape.conversion_type == ast::ConversionType::OwningCoercion;
+    return expr && expr->analysis.conversion_type == ast::ConversionType::OwningCoercion;
 }
 
 ast::ConversionType Compiler::get_saved_conversion_type(ast::Node *expr) {
     assert(expr && expr->type == ast::NodeType::CastExpr);
-    assert(expr->escape.conversion_type != ast::ConversionType::None);
-    return expr->escape.conversion_type;
+    assert(expr->analysis.conversion_type != ast::ConversionType::None);
+    return expr->analysis.conversion_type;
 }
 
 ast::Node *Compiler::unwrap_noop_cast(ast::Node *expr) {
@@ -4522,7 +4522,7 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
         llvm_builder.CreateCall(resolve_method->llvm_fn, {result_promise_ptr, ret_value});
 
         ast::Node *move_returned_var = nullptr;
-        if (data.return_expr->escape.moved &&
+        if (data.return_expr->analysis.moved &&
             data.return_expr->type == ast::NodeType::Identifier) {
             move_returned_var = data.return_expr->data.identifier.decl;
         }
@@ -5642,7 +5642,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 }
             }
             // Check if RHS constructs in-place at dest (resolved_outlet set)
-            bool in_place = data.op2->escape.moved &&
+            bool in_place = data.op2->analysis.moved &&
                             data.op2->type == ast::NodeType::ConstructExpr &&
                             data.op2->resolved_outlet;
             // If in-place, destruct old BEFORE RHS overwrites dest
@@ -6800,7 +6800,7 @@ void Compiler::compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Val
                                      ChiType *type, ast::Node *expr, bool destruct_old) {
     if (!value)
         return;
-    if (expr->escape.moved) {
+    if (expr->analysis.moved) {
         if (expr->type == ast::NodeType::AwaitExpr) {
             auto it = m_async_await_refs.find(expr);
             if (it != m_async_await_refs.end() && it->second.address) {
@@ -8067,11 +8067,11 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
 }
 
 llvm::Value *Compiler::load_capture_move_flag_ptr(Function *fn, ast::Node *iden) {
-    if (!fn || !fn->bind_ptr || !iden || !iden->escape.is_capture() ||
-        iden->escape.capture_path.len == 0) {
+    if (!fn || !fn->bind_ptr || !iden || !iden->analysis.is_capture() ||
+        iden->analysis.capture_path.len == 0) {
         return nullptr;
     }
-    auto &immediate_capture = iden->escape.capture_path[0];
+    auto &immediate_capture = iden->analysis.capture_path[0];
     auto capture_idx = immediate_capture.capture_index;
     if (capture_idx < 0) {
         return nullptr;
@@ -8154,13 +8154,13 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
 
 normal:
     // handle captured variables
-    if (iden->escape.is_capture()) {
+    if (iden->analysis.is_capture()) {
         assert(fn->bind_ptr);
-        assert(iden->escape.capture_path.len > 0);
+        assert(iden->analysis.capture_path.len > 0);
 
         // The capture_path[0] represents the current function's capture
         // We just need to access the immediate capture from current function's bind_ptr
-        auto &immediate_capture = iden->escape.capture_path[0];
+        auto &immediate_capture = iden->analysis.capture_path[0];
         auto capture_idx = immediate_capture.capture_index;
 
         // Get the binding structure for the current function
@@ -9477,7 +9477,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         }
         // If return expression was a moved local, skip its destruction
         ast::Node *move_returned_var = nullptr;
-        if (data.expr && data.expr->escape.moved && data.expr->type == ast::NodeType::Identifier) {
+        if (data.expr && data.expr->analysis.moved && data.expr->type == ast::NodeType::Identifier) {
             move_returned_var = data.expr->data.identifier.decl;
         }
         // Destroy all active block-local vars (inner to outer) before returning

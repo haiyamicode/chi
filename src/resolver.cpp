@@ -1317,7 +1317,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto type = type_override ? type_override : resolve(data.decl, scope);
         if (auto decl_fn = data.decl->parent_fn) {
             if (decl_fn != scope.parent_fn_node) {
-                data.decl->escape.escaped = true;
+                data.decl->analysis.escaped = true;
 
                 // Build capture path: each function that captures this variable
                 // The path represents the chain from innermost to outermost capturing function
@@ -1360,7 +1360,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     ast::CapturePath path_entry;
                     path_entry.function = fn;
                     path_entry.capture_index = capture_idx;
-                    node->escape.capture_path.add(path_entry);
+                    node->analysis.capture_path.add(path_entry);
                 }
             }
         }
@@ -1497,7 +1497,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Add temp to cleanup if needed
         if (scope.parent_fn_node && scope.block && should_destroy(temp_var, expr_type) &&
-            !temp_var->escape.is_capture()) {
+            !temp_var->analysis.is_capture()) {
             scope.block->cleanup_vars.add(temp_var);
             scope.parent_fn_def()->has_cleanup = true;
         }
@@ -1565,7 +1565,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             // NoCopy: error if initializing from a named value
             if (var_type && is_non_copyable(var_type) && is_addressable(data.expr) &&
-                !data.expr->escape.moved && should_destroy(data.expr, expr_type)) {
+                !data.expr->analysis.moved && should_destroy(data.expr, expr_type)) {
                 error(data.expr, errors::TYPE_NOT_COPYABLE,
                       format_type_display(var_type));
             }
@@ -1605,7 +1605,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Add to cleanup_vars on the current block
         if (scope.parent_fn_node && scope.block && !is_nonowning_alias_decl(node) &&
             should_destroy(node, var_type) &&
-            !node->escape.is_capture()) {
+            !node->analysis.is_capture()) {
             scope.block->cleanup_vars.add(node);
             scope.parent_fn_def()->has_cleanup = true;
         }
@@ -1615,7 +1615,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.bin_op_expr;
         if (data.op_type == TokenType::QUES && scope.move_outlet) {
             node->resolved_outlet = scope.move_outlet;
-            node->escape.moved = true;
+            node->analysis.moved = true;
         }
         auto op1_scope = scope;
         if (is_assignment_op(data.op_type)) {
@@ -1737,7 +1737,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_assignment(data.op2, t2, t1, &scope);
             // NoCopy: error if assigning from a named value
             if (is_non_copyable(t1) && is_addressable(data.op2) &&
-                !data.op2->escape.moved && should_destroy(data.op2, t2)) {
+                !data.op2->analysis.moved && should_destroy(data.op2, t2)) {
                 error(data.op2, errors::TYPE_NOT_COPYABLE, format_type_display(t1));
             }
             // RHS is a non-addressable temp (fn call, construct, etc.):
@@ -1835,10 +1835,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
             auto elem_type = t1->get_elem();
-            data.op2->escape.conversion_type = resolve_conversion_type(t2, elem_type);
+            data.op2->analysis.conversion_type = resolve_conversion_type(t2, elem_type);
             mark_temp_moved_if_needed(data.op2, t2);
-            if (data.op2->escape.moved) {
-                node->escape.moved = true;
+            if (data.op2->analysis.moved) {
+                node->analysis.moved = true;
             }
             check_assignment(data.op2, t2, elem_type, &scope);
             return elem_type;
@@ -2094,7 +2094,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (scope.is_escaping) {
                 auto decl = find_root_decl(data.op1);
                 if (decl) {
-                    decl->escape.escaped = decl->can_escape();
+                    decl->analysis.escaped = decl->can_escape();
                 }
             }
             return get_pointer_type(t->eval(),
@@ -2143,7 +2143,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     fn_def.add_sink_edge(src_decl, node);
                 }
             }
-            node->escape.moved = true;
+            node->analysis.moved = true;
             return t; // move produces the value type, not a reference
         }
         default:
@@ -2256,16 +2256,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.cast_expr;
         auto dest_type = resolve_value(data.dest_type, scope);
         auto from_type = resolve(data.expr, scope);
-        node->escape.conversion_type = resolve_conversion_type(from_type, dest_type, true);
+        node->analysis.conversion_type = resolve_conversion_type(from_type, dest_type, true);
         ensure_temp_owner(data.expr, from_type, scope);
         if (data.expr) {
-            if (node->escape.conversion_type == ast::ConversionType::OwningCoercion) {
+            if (node->analysis.conversion_type == ast::ConversionType::OwningCoercion) {
                 mark_temp_moved_if_needed(data.expr, from_type);
             }
-            if (data.expr->escape.moved) {
-                node->escape.moved = true;
+            if (data.expr->analysis.moved) {
+                node->analysis.moved = true;
             }
-            if (is_addressable(data.expr) && !data.expr->escape.moved &&
+            if (is_addressable(data.expr) && !data.expr->analysis.moved &&
                 is_non_copyable(from_type)) {
                 error(data.expr, errors::TYPE_NOT_COPYABLE, format_type_display(from_type));
             }
@@ -2392,7 +2392,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // For named locals/params, skip their destruction at the return site.
         // For non-addressable temps (e.g. lambda expressions), avoid creating
         // a copy that would leak since the temp has no cleanup.
-        if (data.expr && !data.expr->escape.moved) {
+        if (data.expr && !data.expr->analysis.moved) {
             if (data.expr->type == NodeType::Identifier &&
                 data.expr->data.identifier.kind == ast::IdentifierKind::Value) {
                 auto *decl = data.expr->data.identifier.decl;
@@ -2403,7 +2403,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     if (!is_field && !is_nonowning_alias_decl(decl)) {
                         auto *var_type = node_get_type(decl);
                         if (var_type && type_needs_destruction(var_type)) {
-                            data.expr->escape.moved = true;
+                            data.expr->analysis.moved = true;
                         }
                     }
                 }
@@ -2449,8 +2449,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     case NodeType::ParenExpr: {
         auto &child = node->data.child_expr;
         auto type = resolve(child, scope);
-        if (child && child->escape.moved) {
-            node->escape.moved = true;
+        if (child && child->analysis.moved) {
+            node->analysis.moved = true;
         }
         return type;
     }
@@ -2894,7 +2894,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto dest_type = scope.value_type; // Save before resolve calls modify scope
         if (scope.move_outlet && !data.is_new) {
             node->resolved_outlet = scope.move_outlet;
-            node->escape.moved = true;
+            node->analysis.moved = true;
         }
         ChiType *value_type;
         ChiType *result_type;
@@ -3494,7 +3494,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (scope.move_outlet) {
             node->resolved_outlet = scope.move_outlet;
-            node->escape.moved = true;
+            node->analysis.moved = true;
         }
 
         auto cond_type = resolve(data.condition, scope);
@@ -5243,7 +5243,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Add to cleanup_vars if this bind variable needs destruction (for-range by value)
         auto bind_type = scope.value_type;
         if (scope.parent_fn_node && scope.block && should_destroy(node, bind_type) &&
-            !node->escape.is_capture()) {
+            !node->analysis.is_capture()) {
             scope.block->cleanup_vars.add(node);
             scope.parent_fn_def()->has_cleanup = true;
         }
@@ -5302,7 +5302,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.switch_expr;
         if (scope.move_outlet) {
             node->resolved_outlet = scope.move_outlet;
-            node->escape.moved = true;
+            node->analysis.moved = true;
         }
         auto expr_type = resolve(data.expr, scope);
         ensure_temp_owner(data.expr, expr_type, scope);
@@ -6255,7 +6255,7 @@ void Resolver::check_assignment(ast::Node *value, ChiType *from_type, ChiType *t
     if (!is_explicit && value && value->type != NodeType::CastExpr) {
         auto conversion_type = resolve_conversion_type(from_type, to_type);
         if (conversion_type == ast::ConversionType::OwningCoercion) {
-            value->escape.conversion_type = conversion_type;
+            value->analysis.conversion_type = conversion_type;
         }
     }
 
@@ -7423,7 +7423,7 @@ static bool can_move_unaddressable_expr(ast::Node *expr) {
 }
 
 bool Resolver::should_move_temp_expr(ast::Node *expr, ChiType *type) {
-    if (!expr || expr->escape.moved || is_addressable(expr) || !should_destroy(expr, type)) {
+    if (!expr || expr->analysis.moved || is_addressable(expr) || !should_destroy(expr, type)) {
         return false;
     }
     return can_move_unaddressable_expr(expr);
@@ -7433,11 +7433,11 @@ void Resolver::mark_temp_moved_if_needed(ast::Node *expr, ChiType *type) {
     if (!should_move_temp_expr(expr, type)) {
         return;
     }
-    expr->escape.moved = true;
+    expr->analysis.moved = true;
 }
 
 ast::Node *Resolver::get_moved_expr(ast::Node *expr) {
-    if (!expr || !expr->escape.moved) {
+    if (!expr || !expr->analysis.moved) {
         return expr;
     }
     switch (expr->type) {
@@ -7447,7 +7447,7 @@ ast::Node *Resolver::get_moved_expr(ast::Node *expr) {
         return get_moved_expr(expr->data.cast_expr.expr);
     case NodeType::BinOpExpr: {
         auto &data = expr->data.bin_op_expr;
-        if (data.op_type == TokenType::QUES && data.op2 && data.op2->escape.moved) {
+        if (data.op_type == TokenType::QUES && data.op2 && data.op2->analysis.moved) {
             return get_moved_expr(data.op2);
         }
         return expr;
@@ -8418,7 +8418,7 @@ void Resolver::add_fn_body_param_cleanups(ast::Node *fn_node, ast::Node *body) {
     }
 
     for (auto param : proto->params) {
-        if (should_destroy(param) && !param->escape.is_capture()) {
+        if (should_destroy(param) && !param->analysis.is_capture()) {
             add_cleanup_var(&body->data.block, param);
             if (has_cleanup) {
                 *has_cleanup = true;
@@ -9368,7 +9368,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             if (param_type && !param_type->is_reference() &&
                 (is_explicit_move || should_move_temp_expr(arg, arg_type)) &&
                 should_destroy(arg, arg_type)) {
-                arg->escape.moved = true;
+                arg->analysis.moved = true;
                 // Sink the temp outlet so cleanup doesn't destroy it
                 if (arg->resolved_outlet && scope.parent_fn_node) {
                     scope.parent_fn_def()->add_sink_edge(arg->resolved_outlet, node);
@@ -9377,7 +9377,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
 
             // NoCopy: error if passing a named value by value to a non-ref param
             if (param_type && !param_type->is_reference() && is_addressable(arg) &&
-                !arg->escape.moved && is_non_copyable(arg_type)) {
+                !arg->analysis.moved && is_non_copyable(arg_type)) {
                 error(arg, errors::TYPE_NOT_COPYABLE, format_type_display(arg_type));
             }
         }
@@ -9724,7 +9724,7 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
             }
 
             if (scope.parent_fn_node && scope.block && should_destroy(var, field_type) &&
-                !var->escape.is_capture()) {
+                !var->analysis.is_capture()) {
                 scope.block->cleanup_vars.add(var);
                 scope.parent_fn_def()->has_cleanup = true;
             }
@@ -9818,7 +9818,7 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
         }
 
         if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
-            !var->escape.is_capture()) {
+            !var->analysis.is_capture()) {
             scope.block->cleanup_vars.add(var);
             scope.parent_fn_def()->has_cleanup = true;
         }
@@ -9950,7 +9950,7 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
         }
 
         if (scope.parent_fn_node && scope.block && should_destroy(var, var_type) &&
-            !var->escape.is_capture()) {
+            !var->analysis.is_capture()) {
             scope.block->cleanup_vars.add(var);
             scope.parent_fn_def()->has_cleanup = true;
         }
@@ -12512,7 +12512,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
                     error_with_notes(node, std::move(notes), "'{}' does not live long enough",
                                      node->name);
                 } else {
-                    node->escape.escaped = true;
+                    node->analysis.escaped = true;
                 }
             }
         }
