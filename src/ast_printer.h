@@ -8,6 +8,7 @@
 #pragma once
 
 #include "ast.h"
+#include <string_view>
 
 using namespace cx::ast;
 
@@ -26,22 +27,23 @@ class AstPrinter {
     int m_current_column = 0;
     int m_max_line_length = 100;
 
-    // Shadows global fmt::print — routes output to buffer when set, stdout otherwise.
-    template <typename... Args> void emit(fmt::format_string<Args...> fmt, Args &&...args) {
-        auto formatted = fmt::format(fmt, std::forward<Args>(args)...);
+    void emit(std::string_view text) {
         if (m_buffer) {
-            fmt::format_to(std::back_inserter(*m_buffer), "{}", formatted);
+            fmt::format_to(std::back_inserter(*m_buffer), "{}", text);
         } else {
-            fmt::print("{}", formatted);
+            fmt::print("{}", text);
         }
-        // Track column position (reset on newline)
-        for (char c : formatted) {
+        for (char c : text) {
             if (c == '\n') {
                 m_current_column = 0;
             } else {
                 m_current_column++;
             }
         }
+    }
+
+    template <typename... Args> void emit_fmt(fmt::format_string<Args...> fmt, Args &&...args) {
+        emit(fmt::format(fmt, std::forward<Args>(args)...));
     }
 
   public:

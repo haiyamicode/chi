@@ -249,7 +249,7 @@ void AstPrinter::print_node(Node *node) {
         if (m_comments) {
             while (m_comment_idx < m_comments->len) {
                 auto &comment = m_comments->at(m_comment_idx);
-                emit("{}\n", comment.text);
+                emit_fmt("{}\n", comment.text);
                 m_comment_idx++;
             }
         }
@@ -263,7 +263,7 @@ void AstPrinter::print_node(Node *node) {
             m_suppress_func_keyword = true;
             emit("func [");
             for (size_t i = 0; i < data.value_captures.len; i++) {
-                emit("{}", data.value_captures.at(i));
+                emit_fmt("{}", data.value_captures.at(i));
                 if (i < data.value_captures.len - 1) {
                     emit(", ");
                 }
@@ -328,10 +328,10 @@ void AstPrinter::print_node(Node *node) {
                     if (i > 0)
                         emit(", ");
                     auto *lt = data.lifetime_params[i];
-                    emit("'{}", lt->name);
+                    emit_fmt("'{}", lt->name);
                     auto &bound = lt->data.lifetime_param.bound;
                     if (!bound.empty())
-                        emit(": '{}", bound);
+                        emit_fmt(": '{}", bound);
                 }
                 emit(">");
             }
@@ -339,10 +339,10 @@ void AstPrinter::print_node(Node *node) {
         }
         if (m_suppress_func_keyword) {
             if (!node->name.empty()) {
-                emit("{}", node->name);
+                emit_fmt("{}", node->name);
             }
         } else {
-            emit("func {}", node->name);
+            emit_fmt("func {}", node->name);
         }
         // Print lifetime and type parameters if present
         if (data.lifetime_params.len > 0 || data.type_params.len > 0) {
@@ -351,10 +351,10 @@ void AstPrinter::print_node(Node *node) {
                 if (i > 0)
                     emit(", ");
                 auto *lt = data.lifetime_params[i];
-                emit("'{}", lt->name);
+                emit_fmt("'{}", lt->name);
                 auto &bound = lt->data.lifetime_param.bound;
                 if (!bound.empty())
-                    emit(": '{}", bound);
+                    emit_fmt(": '{}", bound);
             }
             if (data.lifetime_params.len > 0 && data.type_params.len > 0)
                 emit(", ");
@@ -410,19 +410,19 @@ void AstPrinter::print_node(Node *node) {
         break;
     }
     case NodeType::Identifier: {
-        emit("{}", node->name);
+        emit_fmt("{}", node->name);
         break;
     }
     case NodeType::Primitive: {
-        emit("{}", node->name);
+        emit_fmt("{}", node->name);
         break;
     }
     case NodeType::TypeParam: {
         auto &data = node->data.type_param;
         if (data.is_variadic) emit("...");
-        emit("{}", node->name);
+        emit_fmt("{}", node->name);
         if (!data.lifetime_bound.empty()) {
-            emit(": '{}", data.lifetime_bound);
+            emit_fmt(": '{}", data.lifetime_bound);
         } else if (data.type_bounds.len > 0) {
             emit(": ");
             for (size_t i = 0; i < data.type_bounds.len; i++) {
@@ -466,11 +466,11 @@ void AstPrinter::print_node(Node *node) {
         bool is_empty_block = data.has_braces && !data.statements.len && !data.return_expr;
         if (data.has_braces) {
             if (is_empty_block) {
-                emit("{{}}");
+                emit("{}");
                 break;
             }
             m_indent++;
-            emit("{{\n");
+            emit("{\n");
         }
 
         Node *prev_stmt = nullptr;
@@ -557,7 +557,7 @@ void AstPrinter::print_node(Node *node) {
             }
             m_indent--;
             print_indent(m_indent);
-            emit("}}");
+            emit("}");
         }
         break;
     }
@@ -666,7 +666,7 @@ void AstPrinter::print_node(Node *node) {
                     !cdata.is_new && should_semantically_shorthand_construct_type(expr);
                 if (etype) {
                     if (shorthand_construct && etype->type == NodeType::DotExpr) {
-                        emit("{}", etype->data.dot_expr.field->str);
+                        emit_fmt("{}", etype->data.dot_expr.field->str);
                     } else if (shorthand_construct) {
                         // Context already determines the constructed struct type.
                     } else {
@@ -698,9 +698,9 @@ void AstPrinter::print_node(Node *node) {
         if (data.decl_spec) {
             print_declspec(data.decl_spec);
         }
-        emit("{} ", node->token->str);
+        emit_fmt("{} ", node->token->str);
         if (!node->name.empty()) {
-            emit("{}", node->name);
+            emit_fmt("{}", node->name);
         }
         if (data.lifetime_params.len > 0 || data.type_params.len > 0) {
             emit("<");
@@ -708,17 +708,17 @@ void AstPrinter::print_node(Node *node) {
                 if (i > 0)
                     emit(", ");
                 auto *lt = data.lifetime_params[i];
-                emit("'{}", lt->name);
+                emit_fmt("'{}", lt->name);
                 auto &bound = lt->data.lifetime_param.bound;
                 if (!bound.empty())
-                    emit(": '{}", bound);
+                    emit_fmt(": '{}", bound);
             }
             if (data.lifetime_params.len > 0 && data.type_params.len > 0)
                 emit(", ");
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
-        emit(" {{");
+        emit(" {");
 
         if (data.members.len) {
             emit("\n");
@@ -775,7 +775,7 @@ void AstPrinter::print_node(Node *node) {
             m_indent--;
             print_indent(m_indent);
         }
-        emit("}}");
+        emit("}");
         emit("\n");
         break;
     }
@@ -809,7 +809,7 @@ void AstPrinter::print_node(Node *node) {
                 print_node(data.where_clauses[i].bound_type);
             }
         }
-        emit(" {{");
+        emit(" {");
         if (data.members.len) {
             emit("\n");
             m_indent++;
@@ -832,14 +832,14 @@ void AstPrinter::print_node(Node *node) {
             m_indent--;
             print_indent(m_indent);
         }
-        emit("}}");
+        emit("}");
         emit("\n");
         break;
     }
     case NodeType::DotExpr: {
         auto &data = node->data.dot_expr;
         print_node(data.expr);
-        emit("{}{}", data.is_optional_chain ? "?." : ".", data.field->str);
+        emit_fmt("{}{}", data.is_optional_chain ? "?." : ".", data.field->str);
         break;
     }
     case NodeType::TypeInfoExpr: {
@@ -878,7 +878,7 @@ void AstPrinter::print_node(Node *node) {
         bool shorthand_construct = !suppress && should_semantically_shorthand_construct_type(node);
         if (data.type && !suppress) {
             if (shorthand_construct && data.type->type == NodeType::DotExpr) {
-                emit("{}", data.type->data.dot_expr.field->str);
+                emit_fmt("{}", data.type->data.dot_expr.field->str);
             } else if (shorthand_construct) {
                 // Context already determines the constructed struct type.
             } else {
@@ -894,7 +894,7 @@ void AstPrinter::print_node(Node *node) {
                 emit_construct_body(data);
             }
         } else {
-            emit("{{}}");
+            emit("{}");
         }
         break;
     }
@@ -903,9 +903,9 @@ void AstPrinter::print_node(Node *node) {
         // Collapse key: key → :key
         if (data.value && data.value->type == NodeType::Identifier &&
             data.value->name == data.field->str) {
-            emit(":{}", data.field->str);
+            emit_fmt(":{}", data.field->str);
         } else {
-            emit("{}: ", data.field->str);
+            emit_fmt("{}: ", data.field->str);
             print_node(data.value);
         }
         break;
@@ -917,7 +917,7 @@ void AstPrinter::print_node(Node *node) {
         if (data.op_type == TokenType::QUES)
             emit(" ?? ");
         else
-            emit(" {} ", get_token_symbol(data.op_type));
+            emit_fmt(" {} ", get_token_symbol(data.op_type));
         // Strip redundant type from construct in assignments (same pattern as ReturnStmt)
         if (data.op_type == TokenType::ASS && data.op2 &&
             data.op2->type == NodeType::ConstructExpr && data.op2->data.construct_expr.type &&
@@ -940,7 +940,7 @@ void AstPrinter::print_node(Node *node) {
         break;
     }
     case NodeType::LiteralExpr: {
-        emit("{}", node->token->to_string());
+        emit_fmt("{}", node->token->to_string());
         break;
     }
     case NodeType::ReturnStmt: {
@@ -1076,10 +1076,10 @@ void AstPrinter::print_node(Node *node) {
             if (i > 0)
                 emit(", ");
             auto *lt = data.lifetime_args[i];
-            emit("'{}", lt->name);
+            emit_fmt("'{}", lt->name);
             auto &bound = lt->data.lifetime_param.bound;
             if (!bound.empty())
-                emit(": '{}", bound);
+                emit_fmt(": '{}", bound);
         }
         if (data.lifetime_args.len > 0 && data.args.len > 0)
             emit(", ");
@@ -1123,12 +1123,12 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::TypeSigil: {
         auto &data = node->data.sigil_type;
         if (data.sigil == SigilKind::FixedArray) {
-            emit("[{}]", data.fixed_size);
+            emit_fmt("[{}]", data.fixed_size);
             print_node(data.type);
             break;
         }
         if (data.sigil == SigilKind::Span) {
-            emit("{}", format_span_prefix(data.is_mut, data.lifetime));
+            emit_fmt("{}", format_span_prefix(data.is_mut, data.lifetime));
             emit("[");
             print_node(data.type);
             emit("]");
@@ -1139,13 +1139,13 @@ void AstPrinter::print_node(Node *node) {
         bool is_mutex = data.sigil == SigilKind::MutexRef;
         bool is_move = data.sigil == SigilKind::Move;
         if (has_lifetime && is_mutex) {
-            emit("&(mutex, '{})", data.lifetime);
+            emit_fmt("&(mutex, '{})", data.lifetime);
         } else if (has_lifetime && is_mut) {
-            emit("&(mut, '{})", data.lifetime);
+            emit_fmt("&(mut, '{})", data.lifetime);
         } else if (has_lifetime) {
-            emit("&'{}", data.lifetime);
+            emit_fmt("&'{}", data.lifetime);
         } else {
-            emit("{}", get_sigil_symbol(data.sigil));
+            emit_fmt("{}", get_sigil_symbol(data.sigil));
         }
         if (is_mut || is_move || has_lifetime) {
             emit(" ");
@@ -1181,7 +1181,7 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::EnumVariant: {
         auto &data = node->data.enum_variant;
-        emit("{}", node->name);
+        emit_fmt("{}", node->name);
         if (data.is_tuple_form) {
             emit("(");
             for (int i = 0; i < data.tuple_types.len; i++) {
@@ -1215,12 +1215,12 @@ void AstPrinter::print_node(Node *node) {
             } else if (data.op_type == TokenType::KW_DELETE) {
                 emit("delete ");
             } else {
-                emit("{}", get_token_symbol(data.op_type));
+                emit_fmt("{}", get_token_symbol(data.op_type));
             }
             print_node(data.op1);
         } else {
             print_node(data.op1);
-            emit("{}", get_token_symbol(data.op_type));
+            emit_fmt("{}", get_token_symbol(data.op_type));
         }
         break;
     }
@@ -1261,7 +1261,7 @@ void AstPrinter::print_node(Node *node) {
         break;
     }
     case NodeType::BindIdentifier: {
-        emit("{}", node->token->to_string());
+        emit_fmt("{}", node->token->to_string());
         break;
     }
     case NodeType::ForStmt: {
@@ -1280,7 +1280,7 @@ void AstPrinter::print_node(Node *node) {
                 data.post->data.unary_op_expr.op_type == TokenType::INC &&
                 data.post->data.unary_op_expr.op1->type == NodeType::Identifier &&
                 data.post->data.unary_op_expr.op1->name == data.init->name) {
-                emit("{} in ", data.init->name);
+                emit_fmt("{} in ", data.init->name);
                 print_node(data.init->data.var_decl.expr);
                 emit("..");
                 print_node(data.condition->data.bin_op_expr.op2);
@@ -1306,7 +1306,7 @@ void AstPrinter::print_node(Node *node) {
         }
         if (data.kind == ForLoopKind::Range) {
             if (data.bind_sigil != SigilKind::None) {
-                emit("{}", get_sigil_symbol(data.bind_sigil));
+                emit_fmt("{}", get_sigil_symbol(data.bind_sigil));
                 if (data.bind_sigil == SigilKind::MutRef ||
                     data.bind_sigil == SigilKind::MutexRef ||
                     data.bind_sigil == SigilKind::Move) {
@@ -1345,7 +1345,7 @@ void AstPrinter::print_node(Node *node) {
         break;
     }
     case NodeType::BranchStmt: {
-        emit("{}", node->token->to_string());
+        emit_fmt("{}", node->token->to_string());
         break;
     }
     case NodeType::ExternDecl: {
@@ -1353,8 +1353,8 @@ void AstPrinter::print_node(Node *node) {
         if (data.decl_spec) {
             print_declspec(data.decl_spec);
         }
-        emit("extern {} ", data.type->to_string());
-        emit("{{\n");
+        emit_fmt("extern {} ", data.type->to_string());
+        emit("{\n");
         m_indent++;
 
         // Print imports
@@ -1396,12 +1396,12 @@ void AstPrinter::print_node(Node *node) {
             }
         }
         m_indent--;
-        emit("}}\n");
+        emit("}\n");
         break;
     }
     case NodeType::Error: {
         if (node->token) {
-            emit("{}", node->token->to_string());
+            emit_fmt("{}", node->token->to_string());
         }
         break;
     }
@@ -1414,7 +1414,7 @@ void AstPrinter::print_node(Node *node) {
         if (data.alias) {
             // Canonical form: import "./module" as mod;
             emit(data.path->to_string());
-            emit(" as {}", data.alias->to_string());
+            emit_fmt(" as {}", data.alias->to_string());
         } else if (data.symbols.len) {
             // Canonical form: import {X, Y} from "./module";
             // Use wrapped list for long imports
@@ -1450,15 +1450,15 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::ImportSymbol: {
         auto &data = node->data.import_symbol;
-        emit("{}", data.name->to_string());
+        emit_fmt("{}", data.name->to_string());
         if (data.alias) {
-            emit(" as {}", data.alias->to_string());
+            emit_fmt(" as {}", data.alias->to_string());
         }
         break;
     }
     case NodeType::PrefixExpr: {
         auto &data = node->data.prefix_expr;
-        emit("{} ", data.prefix->str);
+        emit_fmt("{} ", data.prefix->str);
         print_node(data.expr);
         break;
     }
@@ -1471,7 +1471,7 @@ void AstPrinter::print_node(Node *node) {
         print_node(expr);
         if (data.is_type_switch)
             emit(".(type)");
-        emit(" {{\n");
+        emit(" {\n");
         m_indent++;
         for (int i = 0; i < data.cases.len; i++) {
             auto case_node = data.cases.at(i);
@@ -1495,7 +1495,7 @@ void AstPrinter::print_node(Node *node) {
         }
         m_indent--;
         print_indent(m_indent);
-        emit("}}");
+        emit("}");
         break;
     }
 
@@ -1507,7 +1507,7 @@ void AstPrinter::print_node(Node *node) {
             for (int i = 0; i < data.clauses.len; i++) {
                 auto clause = data.clauses.at(i);
                 if (should_semantically_collapse_case_clause(clause)) {
-                    emit("{}", clause->data.dot_expr.field->str);
+                    emit_fmt("{}", clause->data.dot_expr.field->str);
                 } else {
                     print_node(clause);
                 }
@@ -1556,7 +1556,7 @@ void AstPrinter::print_node(Node *node) {
         print_declspec(data.decl_spec);
         emit("enum ");
         if (!node->name.empty()) {
-            emit("{}", node->name);
+            emit_fmt("{}", node->name);
         }
         if (data.type_params.len) {
             emit("<");
@@ -1567,10 +1567,10 @@ void AstPrinter::print_node(Node *node) {
             emit(": ");
             print_node(data.discriminator_type);
             if (data.discriminator_field) {
-                emit(" as {}", data.discriminator_field->get_name());
+                emit_fmt(" as {}", data.discriminator_field->get_name());
             }
         }
-        emit(" {{\n");
+        emit(" {\n");
         m_indent++;
         for (int i = 0; i < data.variants.len; i++) {
             auto variant = data.variants.at(i);
@@ -1603,7 +1603,7 @@ void AstPrinter::print_node(Node *node) {
             emit("\n");
         }
         m_indent--;
-        emit("}}\n");
+        emit("}\n");
         break;
     }
     case NodeType::PackExpansion: {
@@ -1648,7 +1648,7 @@ void AstPrinter::print_destructure_pattern(Node *node) {
                 emit("&mutex ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");
-            emit("{}", field_data.binding_name->str);
+            emit_fmt("{}", field_data.binding_name->str);
         }
         emit(")");
     } else if (data.is_array) {
@@ -1665,11 +1665,11 @@ void AstPrinter::print_destructure_pattern(Node *node) {
                 emit("&mutex ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");
-            emit("{}", field_data.binding_name->str);
+            emit_fmt("{}", field_data.binding_name->str);
         }
         emit("]");
     } else {
-        emit("{{");
+        emit("{");
         for (size_t i = 0; i < data.fields.len; i++) {
             if (i > 0)
                 emit(", ");
@@ -1680,20 +1680,20 @@ void AstPrinter::print_destructure_pattern(Node *node) {
                 emit("&mutex ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");
-            emit("{}", field_data.field_name->str);
+            emit_fmt("{}", field_data.field_name->str);
             if (field_data.nested) {
                 emit(": ");
                 print_destructure_pattern(field_data.nested);
             } else if (field_data.binding_name != field_data.field_name) {
-                emit(": {}", field_data.binding_name->str);
+                emit_fmt(": {}", field_data.binding_name->str);
             }
         }
-        emit("}}");
+        emit("}");
     }
 }
 
 void AstPrinter::print_struct_members(StructDecl &data) {
-    emit("{{");
+    emit("{");
     if (data.members.len) {
         emit("\n");
         m_indent++;
@@ -1729,7 +1729,7 @@ void AstPrinter::print_struct_members(StructDecl &data) {
         m_indent--;
         print_indent(m_indent);
     }
-    emit("}}");
+    emit("}");
 }
 
 void AstPrinter::print_declspec(DeclSpec *declspec) {
@@ -1775,7 +1775,7 @@ string AstPrinter::format_node_to_string(Node *node) {
 bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const char *close,
                                    const char *separator, int extra_indent) {
     if (!items || items->len == 0) {
-        emit("{}{}", open, close);
+        emit_fmt("{}{}", open, close);
         return false;
     }
 
@@ -1793,19 +1793,19 @@ bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const
 
     // If it fits on one line, emit inline
     if (total_length < m_max_line_length) {
-        emit("{}", open);
+        emit_fmt("{}", open);
         for (int i = 0; i < items->len; i++) {
             print_node(items->at(i));
             if (i < items->len - 1) {
-                emit("{}", separator);
+                emit_fmt("{}", separator);
             }
         }
-        emit("{}", close);
+        emit_fmt("{}", close);
         return false;
     }
 
     // Otherwise, wrap with proper indentation
-    emit("{}\n", open);
+    emit_fmt("{}\n", open);
     m_indent += extra_indent;
     for (int i = 0; i < items->len; i++) {
         print_indent(m_indent);
@@ -1817,7 +1817,7 @@ bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const
     }
     m_indent -= extra_indent;
     print_indent(m_indent);
-    emit("{}", close);
+    emit_fmt("{}", close);
     return true;
 }
 
@@ -1868,16 +1868,16 @@ void AstPrinter::emit_construct_body(ConstructExpr &data) {
 
     if (total_length < m_max_line_length && total_elements <= 2) {
         // Inline
-        emit("{{");
+        emit("{");
         for (int i = 0; i < total_elements; i++) {
             format_element(i, false);
             if (i < total_elements - 1)
                 emit(", ");
         }
-        emit("}}");
+        emit("}");
     } else {
         // Wrapped
-        emit("{{\n");
+        emit("{\n");
         m_indent++;
         for (int i = 0; i < total_elements; i++) {
             print_indent(m_indent);
@@ -1888,7 +1888,7 @@ void AstPrinter::emit_construct_body(ConstructExpr &data) {
         }
         m_indent--;
         print_indent(m_indent);
-        emit("}}");
+        emit("}");
     }
 }
 
@@ -1946,14 +1946,14 @@ void AstPrinter::flush_comments_before(Pos before_pos) {
 
         if (comment.pos.line == before_pos.line) {
             // Inline comment (same line as the next token) — print inline
-            emit("{} ", comment.text);
+            emit_fmt("{} ", comment.text);
         } else {
             // Own-line comment — print on its own line with indent
             if (last_comment_line >= 0 && comment.pos.line - last_comment_line > 1) {
                 emit("\n");
             }
             print_indent(m_indent);
-            emit("{}\n", comment.text);
+            emit_fmt("{}\n", comment.text);
             last_comment_line = comment.pos.line;
         }
         m_comment_idx++;
@@ -2052,7 +2052,7 @@ void AstPrinter::flush_trailing_comment(Node *node) {
         auto &comment = m_comments->at(m_comment_idx);
         if (comment.pos.line != on_line)
             break;
-        emit(" {}", comment.text);
+        emit_fmt(" {}", comment.text);
         m_comment_idx++;
     }
 }
