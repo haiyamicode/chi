@@ -27,10 +27,18 @@ static ast::Node *get_assignment_expr_node(ast::Node *node);
 static bool expr_creates_direct_borrow(Resolver *resolver, ast::Node *expr, ChiType *from_type,
                                        ChiType *to_type, const ResolveScope *scope);
 static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr);
+
 static bool expr_is_narrowed_from_optional(ast::Node *node, ResolveScope &scope);
 static bool logical_rhs_uses_truthy_narrowing(TokenType op_type);
 static bool is_null_literal(ast::Node *node);
 static ast::Node *find_narrowed_optional_var(ast::Node *node, ResolveScope &scope);
+
+static string resolve_intrinsic_id(ast::Node *node) {
+    if (!node || !node->module || node->name.empty()) {
+        return "";
+    }
+    return fmt::format("{}.{}", node->module->global_id(), node->name);
+}
 
 static bool is_nonowning_alias_decl(ast::Node *node) {
     return node && node->type == NodeType::VarDecl && node->data.var_decl.narrowed_from;
@@ -217,6 +225,37 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
     m_ctx->intrinsic_symbols["std.ops.ListInit"] = IntrinsicSymbol::ListInit;
     m_ctx->intrinsic_symbols["std.mem.AllocInit"] = IntrinsicSymbol::AllocInit;
+    m_ctx->intrinsic_symbols["std.mem.annotate_copy"] = IntrinsicSymbol::AnnotateCopy;
+    m_ctx->intrinsic_symbols["intrinsics.__copy"] = IntrinsicSymbol::MemCopy;
+    m_ctx->intrinsic_symbols["intrinsics.__move"] = IntrinsicSymbol::MemMove;
+    m_ctx->intrinsic_symbols["intrinsics.__destroy"] = IntrinsicSymbol::MemDestroy;
+    m_ctx->intrinsic_symbols["intrinsics.__atomic_load"] = IntrinsicSymbol::AtomicLoad;
+    m_ctx->intrinsic_symbols["intrinsics.__atomic_store"] = IntrinsicSymbol::AtomicStore;
+    m_ctx->intrinsic_symbols["intrinsics.__atomic_compare_exchange"] =
+        IntrinsicSymbol::AtomicCompareExchange;
+    m_ctx->intrinsic_symbols["intrinsics.__atomic_fetch_add"] =
+        IntrinsicSymbol::AtomicFetchAdd;
+    m_ctx->intrinsic_symbols["intrinsics.__atomic_fetch_sub"] =
+        IntrinsicSymbol::AtomicFetchSub;
+    m_ctx->intrinsic_symbols["intrinsics.__reflect_dyn_elem"] =
+        IntrinsicSymbol::ReflectDynElem;
+    m_ctx->intrinsic_symbols["std.mem.__copy"] = IntrinsicSymbol::MemCopy;
+    m_ctx->intrinsic_symbols["std.mem.__move"] = IntrinsicSymbol::MemMove;
+    m_ctx->intrinsic_symbols["std.mem.__destroy"] = IntrinsicSymbol::MemDestroy;
+    m_ctx->intrinsic_symbols["runtime.__copy"] = IntrinsicSymbol::MemCopy;
+    m_ctx->intrinsic_symbols["runtime.__move"] = IntrinsicSymbol::MemMove;
+    m_ctx->intrinsic_symbols["runtime.__destroy"] = IntrinsicSymbol::MemDestroy;
+    m_ctx->intrinsic_symbols["std.json.__move"] = IntrinsicSymbol::MemMove;
+    m_ctx->intrinsic_symbols["std.atomic.__atomic_load"] = IntrinsicSymbol::AtomicLoad;
+    m_ctx->intrinsic_symbols["std.atomic.__atomic_store"] = IntrinsicSymbol::AtomicStore;
+    m_ctx->intrinsic_symbols["std.atomic.__atomic_compare_exchange"] =
+        IntrinsicSymbol::AtomicCompareExchange;
+    m_ctx->intrinsic_symbols["std.atomic.__atomic_fetch_add"] =
+        IntrinsicSymbol::AtomicFetchAdd;
+    m_ctx->intrinsic_symbols["std.atomic.__atomic_fetch_sub"] =
+        IntrinsicSymbol::AtomicFetchSub;
+    m_ctx->intrinsic_symbols["std.reflect.__reflect_dyn_elem"] =
+        IntrinsicSymbol::ReflectDynElem;
     m_ctx->intrinsic_symbols["std.ops.Copy"] = IntrinsicSymbol::Copy;
     m_ctx->intrinsic_symbols["std.ops.NoCopy"] = IntrinsicSymbol::NoCopy;
     m_ctx->intrinsic_symbols["std.ops.Display"] = IntrinsicSymbol::Display;
@@ -832,6 +871,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::FnDef: {
         auto &data = node->data.fn_def;
+        resolve_intrinsic_symbol(node);
         if (data.decl_spec) {
             if (data.decl_spec->has_flag(ast::DECL_MUTEX) &&
                 data.decl_spec->has_flag(ast::DECL_MUTABLE)) {
@@ -992,6 +1032,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
+        resolve_intrinsic_symbol(node);
         auto is_fn_decl = flags & IS_FN_DECL_PROTO;
         auto is_lambda = flags & IS_FN_LAMBDA;
 
@@ -3419,6 +3460,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto &fn = fn_type->data.fn;
         auto fn_decl = data.fn_ref_expr->get_decl();
+        auto fn_symbol =
+            fn_decl ? resolve_intrinsic_symbol(fn_decl) : IntrinsicSymbol::None;
 
         // Unsafe functions cannot be called in safe mode (unless inside an unsafe block)
         if (fn_decl && fn_decl->type == NodeType::FnDef &&
@@ -3429,19 +3472,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
 
-        // __move(dest, src, size): sink the source variable so it's not destroyed at scope exit
-        if (fn_decl && fn_decl->name == "__move" && data.args.len == 3 &&
-            scope.parent_fn_node) {
+        // mem move intrinsic: sink the source variable so it's not destroyed at scope exit
+        if (fn_symbol == IntrinsicSymbol::MemMove && scope.parent_fn_node) {
+            assert(data.args.len > 1 && "intrinsic mem move missing source argument");
             auto *src_decl = find_root_decl(data.args[1]);
             if (src_decl) {
                 scope.parent_fn_def()->add_sink_edge(src_decl, node);
             }
         }
 
-        // __lifetime_copy_into(&owner as *void, &value as *void): compiler-only marker that the
-        // owner copies the borrow dependencies of value into itself. No runtime effect.
-        if (fn_decl && fn_decl->name == "__lifetime_copy_into" && data.args.len == 2 &&
-            scope.parent_fn_node) {
+        // std/mem.annotate_copy:
+        // compiler-only marker that the owner copies the borrow dependencies of value into itself.
+        // No runtime effect.
+        if (fn_symbol == IntrinsicSymbol::AnnotateCopy && scope.parent_fn_node) {
+            assert(data.args.len > 1 && "intrinsic annotate_copy missing argument");
             auto *owner_expr = unwrap_lifetime_copy_intrinsic_arg(data.args[0]);
             auto *value_expr = unwrap_lifetime_copy_intrinsic_arg(data.args[1]);
             auto *owner_root = owner_expr ? find_root_decl(owner_expr) : nullptr;
@@ -6343,6 +6387,41 @@ void Resolver::context_init_builtins(ast::Module *builtin_module) {
     }
 }
 
+void Resolver::register_intrinsic_decls(ast::Module *module) {
+    if (!module || !module->root) {
+        return;
+    }
+
+    auto register_decl = [&](ast::Node *decl) {
+        if (!decl || decl->type != NodeType::FnDef) {
+            return;
+        }
+        auto symbol = resolve_intrinsic_symbol(decl);
+        if (symbol == IntrinsicSymbol::None) {
+            return;
+        }
+        m_ctx->intrinsic_decls[symbol] = decl;
+    };
+
+    for (auto *decl : module->root->data.root.top_level_decls) {
+        if (!decl) {
+            continue;
+        }
+        if (decl->type == NodeType::ExternDecl) {
+            for (auto *member : decl->data.extern_decl.members) {
+                register_decl(member);
+            }
+            continue;
+        }
+        register_decl(decl);
+    }
+}
+
+ast::Node *Resolver::get_intrinsic_decl(IntrinsicSymbol symbol) {
+    auto decl_p = m_ctx->intrinsic_decls.get(symbol);
+    return decl_p ? *decl_p : nullptr;
+}
+
 string Resolver::resolve_term_string(ast::Node *term) {
     switch (term->type) {
     case NodeType::Identifier:
@@ -6831,8 +6910,12 @@ IntrinsicSymbol Resolver::resolve_intrinsic_symbol(ast::Node *node) {
         return node->symbol;
     }
 
-    auto sym_p = m_ctx->intrinsic_symbols.get(resolve_global_id(node));
+    auto sym_p = m_ctx->intrinsic_symbols.get(resolve_intrinsic_id(node));
     if (sym_p) {
+        node->symbol = *sym_p;
+        if (node->type == NodeType::FnDef && !m_ctx->intrinsic_decls.get(*sym_p)) {
+            m_ctx->intrinsic_decls[*sym_p] = node;
+        }
         return *sym_p;
     }
 
@@ -9057,6 +9140,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                                    NodeList *args, ast::Node *fn_decl) {
     auto n_args = args->len;
     auto n_params = fn->params.len;
+    auto intrinsic_symbol = fn_decl ? resolve_intrinsic_symbol(fn_decl) : IntrinsicSymbol::None;
 
     // Count required parameters (those without defaults, excluding variadic)
     size_t params_required = n_params - (fn->is_variadic ? 1 : 0);
@@ -9083,6 +9167,17 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, params_required, n_args);
         }
         return fn->return_type;
+    }
+
+    if (intrinsic_symbol != IntrinsicSymbol::None) {
+        auto *intrinsic_decl = get_intrinsic_decl(intrinsic_symbol);
+        auto *intrinsic_type = intrinsic_decl ? intrinsic_decl->resolved_type : nullptr;
+        auto *callee_type = fn_decl ? fn_decl->resolved_type : nullptr;
+        if (intrinsic_type && callee_type) {
+            assert(can_assign_fn(callee_type, intrinsic_type) &&
+                   can_assign_fn(intrinsic_type, callee_type) &&
+                   "intrinsic call does not match canonical prototype");
+        }
     }
 
     // Default values for missing arguments are handled by codegen

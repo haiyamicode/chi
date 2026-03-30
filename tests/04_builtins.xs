@@ -112,6 +112,23 @@ func test_nested_shared() {
     println("");
 }
 
+func annotate_copy(owner: *void, value: *void) {
+    println("user annotate_copy");
+}
+
+func __move(dest: *void, src: *void, size: uint32) {
+    println("user __move");
+}
+
+func test_annotate_copy_name_collision() {
+    println("testing annotate_copy name collision:");
+    unsafe {
+        annotate_copy(null, null);
+        __move(null, null, 0);
+    }
+    println("");
+}
+
 func test_string() {
     println("testing string:");
     var s1 = "Hello";
@@ -332,6 +349,7 @@ func main() {
     test_map_lifecycle();
     test_shared();
     test_nested_shared();
+    test_annotate_copy_name_collision();
     test_string();
     test_box();
     test_named_field_construct();

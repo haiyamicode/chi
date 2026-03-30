@@ -21,7 +21,6 @@ extern "C" {
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
     unsafe func __move(dest: *void, src: *void, size: uint32);
     unsafe func __destroy(ptr: *void);
-    unsafe func __lifetime_copy_into(dest: *void, src: *void);
     unsafe func cx_runtime_start(stack: *void);
     unsafe func cx_set_program_args(argc: int32, argv: *void);
     unsafe func cx_set_program_vtable(ptr: *void);
@@ -386,7 +385,7 @@ export struct Array<T> {
 
     mutex func push(item: T) {
         unsafe {
-            __lifetime_copy_into(&this as *void, &item as *void);
+            mem.annotate_copy(&this, &item);
         }
         this.reserve(1);
         unsafe {
@@ -1335,7 +1334,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
 
     mut func set(key: K, value: V) {
         unsafe {
-            __lifetime_copy_into(&this as *void, &value as *void);
+            mem.annotate_copy(&this, &value);
         }
         var h = key.hash();
         var idx = (h % (this.capacity as uint64)) as uint32;

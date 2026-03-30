@@ -40,6 +40,8 @@ struct CompilationContext : public Context {
     // default packages
     ast::Package *stdlib_package = nullptr;
     ast::Package *rt_package = nullptr;
+    ast::Module *rt_module = nullptr;
+    ast::Module *intrinsics_module = nullptr;
 
     explicit CompilationContext();
 

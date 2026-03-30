@@ -409,6 +409,9 @@ class Compiler {
 
     ChiType *eval_type(ChiType *type);
     ChiType *get_chitype(ast::Node *node);
+    ast::Node *unwrap_cast_exprs(ast::Node *node);
+    ChiType *find_nonvoid_pointee_type(ast::Node *node);
+    ChiType *get_dyn_elem_value_type(ast::Node *node);
 
     llvm::Type *_compile_type(ChiType *type);
     llvm::DISubroutineType *compile_di_fn_type(Function *fn);
@@ -426,6 +429,8 @@ class Compiler {
     void call_vtable_copier(Function *fn, llvm::Value *vtable_ptr, llvm::Value *dest_data,
                             llvm::Value *src_data);
     llvm::Value *find_interface_vtable(Function *fn, ChiType *iface_type);
+    llvm::Value *load_runtime_type_info_from_vtable(llvm::Value *vtable_ptr);
+    llvm::Value *load_runtime_type_info_from_fat_ptr(llvm::Value *fat_ptr);
     llvm::Value *load_typesize_from_vtable(llvm::Value *vtable_ptr);
     llvm::ConstantPointerNull *get_null_ptr();
     llvm::StructType *get_typeinfo_llvm_type();
@@ -751,6 +756,7 @@ class Compiler {
     llvm::Value *compile_interface_type_match(Function *fn, llvm::Value *fat_ptr, ChiType *iface_type,
                                               ChiType *concrete_type);
     llvm::Value *extract_interface_data_ptr(llvm::Value *fat_ptr);
+    llvm::Value *extract_interface_vtable_ptr(llvm::Value *fat_ptr);
     void emit_cleanup_owners(Function *fn);
     llvm::Value *compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
                                              llvm::Value *dest = nullptr);

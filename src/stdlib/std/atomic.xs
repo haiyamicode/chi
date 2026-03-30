@@ -26,14 +26,14 @@ export struct Atomic<T: ops.Int> {
     func load() T {
         unsafe {
             var result: T = undefined;
-            __atomic_load(&this.value as *T as *void, &result as *T as *void);
+            __atomic_load(&this.value, &result);
             return move result;
         }
     }
 
     mut func store(value: T) {
         unsafe {
-            __atomic_store(&mut this.value as *T as *void, &value as *T as *void);
+            __atomic_store(&mut this.value, &value);
         }
     }
 
@@ -42,10 +42,10 @@ export struct Atomic<T: ops.Int> {
             var old_value: T = undefined;
             var ok = false;
             __atomic_compare_exchange(
-                &mut this.value as *T as *void,
-                &expected as *T as *void,
-                &desired as *T as *void,
-                &old_value as *T as *void,
+                &mut this.value,
+                &expected,
+                &desired,
+                &old_value,
                 &ok
             );
             return (move old_value, ok);
@@ -55,11 +55,7 @@ export struct Atomic<T: ops.Int> {
     mut func fetch_add(value: T) T {
         unsafe {
             var old_value: T = undefined;
-            __atomic_fetch_add(
-                &mut this.value as *T as *void,
-                &value as *T as *void,
-                &old_value as *T as *void
-            );
+            __atomic_fetch_add(&mut this.value, &value, &old_value);
             return move old_value;
         }
     }
@@ -67,11 +63,7 @@ export struct Atomic<T: ops.Int> {
     mut func fetch_sub(value: T) T {
         unsafe {
             var old_value: T = undefined;
-            __atomic_fetch_sub(
-                &mut this.value as *T as *void,
-                &value as *T as *void,
-                &old_value as *T as *void
-            );
+            __atomic_fetch_sub(&mut this.value, &value, &old_value);
             return move old_value;
         }
     }

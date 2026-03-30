@@ -47,6 +47,18 @@ static ast::Node *find_gc_allocator_decl(ast::Module *module) {
     return find_imported_module_member(module, "mem", "GC_ALLOCATOR");
 }
 
+static ast::Node *unwrap_cast_exprs(ast::Node *node) {
+    while (node && node->type == ast::NodeType::CastExpr) {
+        node = node->data.cast_expr.expr;
+    }
+    return node;
+}
+
+static bool is_ref_unary_op(TokenType op_type) {
+    return op_type == TokenType::AND || op_type == TokenType::MUTREF ||
+           op_type == TokenType::MUTEXREF || op_type == TokenType::MOVEREF;
+}
+
 void Compiler::emit_default_field_initializer(Function *fn, llvm::Value *dest,
                                               ChiType *container_type,
                                               ChiStructMember *field) {
@@ -315,6 +327,43 @@ ChiType *Compiler::get_chitype(ast::Node *node) {
         return cr ? cr->get_elem() : eval_type(node->resolved_type);
     }
     return eval_type(node->resolved_type);
+}
+
+ast::Node *Compiler::unwrap_cast_exprs(ast::Node *node) {
+    while (node && node->type == ast::NodeType::CastExpr) {
+        node = node->data.cast_expr.expr;
+    }
+    return node;
+}
+
+ChiType *Compiler::find_nonvoid_pointee_type(ast::Node *node) {
+    for (auto *current = node; current; ) {
+        auto *type = get_chitype(current);
+        if (type && type->is_pointer_like()) {
+            auto *elem = type->get_elem();
+            if (elem && elem->kind != TypeKind::Void) {
+                return elem;
+            }
+        }
+
+        if (current->type != ast::NodeType::CastExpr) {
+            break;
+        }
+        current = current->data.cast_expr.expr;
+    }
+    return nullptr;
+}
+
+ChiType *Compiler::get_dyn_elem_value_type(ast::Node *node) {
+    auto *value_expr = unwrap_cast_exprs(node);
+    if (value_expr && value_expr->type == ast::NodeType::UnaryOpExpr) {
+        auto &unary = value_expr->data.unary_op_expr;
+        if (is_ref_unary_op(unary.op_type)) {
+            value_expr = unary.op1;
+        }
+    }
+
+    return value_expr ? eval_type(get_chitype(value_expr)) : nullptr;
 }
 
 llvm::DICompileUnit *Compiler::get_module_cu(ast::Module *module) {
@@ -4757,13 +4806,26 @@ llvm::Value *Compiler::extract_interface_data_ptr(llvm::Value *fat_ptr) {
     return m_ctx->llvm_builder->CreateExtractValue(fat_ptr, {0}, "iface_data_ptr");
 }
 
+llvm::Value *Compiler::extract_interface_vtable_ptr(llvm::Value *fat_ptr) {
+    return m_ctx->llvm_builder->CreateExtractValue(fat_ptr, {1}, "iface_vtable_ptr");
+}
+
+llvm::Value *Compiler::load_runtime_type_info_from_vtable(llvm::Value *vtable_ptr) {
+    auto ptr_type = get_llvm_ptr_type();
+    return m_ctx->llvm_builder->CreateLoad(ptr_type, vtable_ptr, "runtime_ti");
+}
+
+llvm::Value *Compiler::load_runtime_type_info_from_fat_ptr(llvm::Value *fat_ptr) {
+    auto vtable_ptr = extract_interface_vtable_ptr(fat_ptr);
+    return load_runtime_type_info_from_vtable(vtable_ptr);
+}
+
 llvm::Value *Compiler::compile_interface_type_match(Function *fn, llvm::Value *fat_ptr,
                                                     ChiType *iface_type,
                                                     ChiType *concrete_type) {
     auto &builder = *m_ctx->llvm_builder;
     auto ptr_type = get_llvm_ptr_type();
-    auto vtable_ptr = builder.CreateExtractValue(fat_ptr, {1}, "iface_vtable_ptr");
-    auto runtime_ti = builder.CreateLoad(ptr_type, vtable_ptr, "runtime_ti");
+    auto runtime_ti = load_runtime_type_info_from_fat_ptr(fat_ptr);
 
     auto impl = concrete_type->data.struct_.interface_table[iface_type];
     assert(impl);
@@ -8303,49 +8365,24 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
     if (!callee_decl)
         return nullptr;
 
-    auto atomic_element_type_from_arg = [&](ast::Node *arg) -> ChiType * {
-        auto *node = arg;
-        while (node && node->type == ast::NodeType::CastExpr) {
-            auto *inner = node->data.cast_expr.expr;
-            auto *inner_type = get_chitype(inner);
-            if (inner_type && inner_type->is_pointer_like() && inner_type->get_elem() &&
-                inner_type->get_elem()->kind != TypeKind::Void) {
-                return inner_type->get_elem();
-            }
-            node = inner;
-        }
-
-        auto *type = get_chitype(arg);
-        return type && type->is_pointer_like() ? type->get_elem() : nullptr;
-    };
-
-    auto dyn_elem_value_type_from_arg = [&](ast::Node *arg) -> ChiType * {
-        auto *node = arg;
-        while (node && node->type == ast::NodeType::CastExpr) {
-            node = node->data.cast_expr.expr;
-        }
-        if (node && node->type == ast::NodeType::UnaryOpExpr) {
-            auto &unary = node->data.unary_op_expr;
-            if (unary.op_type == TokenType::AND || unary.op_type == TokenType::MUTREF ||
-                unary.op_type == TokenType::MUTEXREF ||
-                unary.op_type == TokenType::MOVEREF) {
-                node = unary.op1;
-            }
-        }
-        auto *type = get_chitype(node);
-        return type ? eval_type(type) : nullptr;
+    auto get_required_const_bool_arg = [&](ast::Node *arg) {
+        auto value = get_resolver()->resolve_constant_value(arg);
+        assert(value.has_value() && holds_alternative<const_int_t>(*value) &&
+               "intrinsic bool argument must be a compile-time constant");
+        return get<const_int_t>(*value) != 0;
     };
 
     auto atomic_order = llvm::AtomicOrdering::SequentiallyConsistent;
     auto ptr_type = get_llvm_ptr_type();
-
-    if (callee_decl->name == "__reflect_dyn_elem" && data.args.len == 2) {
+    switch (callee_decl->symbol) {
+    case IntrinsicSymbol::ReflectDynElem: {
         if (handled) {
             *handled = true;
         }
 
         auto value_ptr = compile_expr(fn, data.args[1]);
-        auto value_type = dyn_elem_value_type_from_arg(data.args[1]);
+        auto value_type = get_dyn_elem_value_type(data.args[1]);
+        value_type = value_type ? eval_type(value_type) : nullptr;
         if (!value_type) {
             return get_null_ptr();
         }
@@ -8361,7 +8398,7 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
             if (elem_type && ChiTypeStruct::is_interface(elem_type)) {
                 auto fat_ptr_type_l = compile_type(value_type);
                 auto fat_ptr = builder.CreateLoad(fat_ptr_type_l, value_ptr, "dyn_elem_fat_ptr");
-                auto vtable_ptr = builder.CreateExtractValue(fat_ptr, {1}, "dyn_elem_vtable_ptr");
+                auto vtable_ptr = extract_interface_vtable_ptr(fat_ptr);
                 auto vtable_is_null = builder.CreateICmpEQ(vtable_ptr, get_null_ptr());
 
                 auto bb_runtime = fn->new_label("dyn_elem_runtime");
@@ -8370,7 +8407,7 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
                 builder.CreateCondBr(vtable_is_null, bb_done, bb_runtime);
 
                 fn->use_label(bb_runtime);
-                auto runtime_ti = builder.CreateLoad(ptr_type, vtable_ptr, "dyn_elem_runtime_ti");
+                auto runtime_ti = load_runtime_type_info_from_vtable(vtable_ptr);
                 builder.CreateBr(bb_done);
                 auto runtime_bb = builder.GetInsertBlock();
 
@@ -8388,9 +8425,7 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
 
         return get_null_ptr();
     }
-
-    // __copy(dest, src, destruct_old) — deep copy via copy constructor
-    if (callee_decl->name == "__copy" && data.args.len == 3) {
+    case IntrinsicSymbol::MemCopy: {
         if (handled) {
             *handled = true;
         }
@@ -8398,11 +8433,7 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         auto src_ptr = compile_expr(fn, data.args[1]);
         auto elem_type = get_chitype(data.args[0])->get_elem();
         assert(elem_type && "first arg of __copy must be a pointer type");
-        bool destruct_old = true;
-        if (data.args[2]->type == ast::NodeType::LiteralExpr &&
-            data.args[2]->token->type == TokenType::BOOL) {
-            destruct_old = data.args[2]->token->val.b;
-        }
+        bool destruct_old = get_required_const_bool_arg(data.args[2]);
         if (ChiTypeStruct::is_interface(elem_type)) {
             auto dest_data = builder.CreateExtractValue(dest_ptr, {0}, "dest_data");
             auto src_data = builder.CreateExtractValue(src_ptr, {0}, "src_data");
@@ -8412,33 +8443,24 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
             compile_copy_with_ref(fn, RefValue::from_address(src_ptr), dest_ptr, elem_type,
                                   nullptr, destruct_old);
         }
-        // Intrinsics can't throw — no invoke needed, just continue linearly
         return nullptr;
     }
-
-    // __lifetime_copy_into(dest, src) — compiler-only lifetime marker, no runtime effect
-    if (callee_decl->name == "__lifetime_copy_into" && data.args.len == 2) {
+    case IntrinsicSymbol::AnnotateCopy:
         if (handled) {
             *handled = true;
         }
         return nullptr;
-    }
-
-    // __destroy(ptr) — compiler-only destruction intrinsic for element cleanup
-    if (callee_decl->name == "__destroy" && data.args.len == 1) {
+    case IntrinsicSymbol::MemDestroy: {
         if (handled) {
             *handled = true;
         }
         auto dest_ptr = compile_expr(fn, data.args[0]);
-        auto elem_type = atomic_element_type_from_arg(data.args[0]);
+        auto elem_type = find_nonvoid_pointee_type(data.args[0]);
         assert(elem_type && "first arg of destroy must be a typed pointer");
         compile_destruction_for_type(fn, dest_ptr, elem_type);
         return nullptr;
     }
-
-    // __move(dest, src, size) — raw memcpy + zero source, no destruction on either side
-    // Used for placement stores into uninitialized memory.
-    if (callee_decl->name == "__move" && data.args.len == 3) {
+    case IntrinsicSymbol::MemMove: {
         if (handled) {
             *handled = true;
         }
@@ -8447,17 +8469,15 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         auto size = compile_expr(fn, data.args[2]);
         builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), src_ptr, llvm::MaybeAlign(), size);
         builder.CreateMemSet(src_ptr, builder.getInt8(0), size, llvm::MaybeAlign());
-        // Intrinsics can't throw — no invoke needed, just continue linearly
         return nullptr;
     }
-
-    if (callee_decl->name == "__atomic_load" && data.args.len == 2) {
+    case IntrinsicSymbol::AtomicLoad: {
         if (handled) {
             *handled = true;
         }
         auto ptr = compile_expr(fn, data.args[0]);
         auto out_ptr = compile_expr(fn, data.args[1]);
-        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        auto elem_type = find_nonvoid_pointee_type(data.args[1]);
         assert(elem_type && "could not recover atomic load element type");
         auto elem_type_l = compile_type(elem_type);
         auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
@@ -8466,14 +8486,13 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         builder.CreateStore(load, out_ptr);
         return nullptr;
     }
-
-    if (callee_decl->name == "__atomic_store" && data.args.len == 2) {
+    case IntrinsicSymbol::AtomicStore: {
         if (handled) {
             *handled = true;
         }
         auto ptr = compile_expr(fn, data.args[0]);
         auto value_ptr = compile_expr(fn, data.args[1]);
-        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        auto elem_type = find_nonvoid_pointee_type(data.args[1]);
         assert(elem_type && "could not recover atomic store element type");
         auto elem_type_l = compile_type(elem_type);
         auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
@@ -8482,8 +8501,7 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         store->setAtomic(atomic_order);
         return nullptr;
     }
-
-    if (callee_decl->name == "__atomic_compare_exchange" && data.args.len == 5) {
+    case IntrinsicSymbol::AtomicCompareExchange: {
         if (handled) {
             *handled = true;
         }
@@ -8492,7 +8510,7 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         auto desired_ptr = compile_expr(fn, data.args[2]);
         auto out_old_ptr = compile_expr(fn, data.args[3]);
         auto out_ok_ptr = compile_expr(fn, data.args[4]);
-        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        auto elem_type = find_nonvoid_pointee_type(data.args[1]);
         assert(elem_type && "could not recover atomic compare_exchange element type");
         auto elem_type_l = compile_type(elem_type);
         auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
@@ -8507,15 +8525,14 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         builder.CreateStore(ok_value, out_ok_ptr);
         return nullptr;
     }
-
-    if (callee_decl->name == "__atomic_fetch_add" && data.args.len == 3) {
+    case IntrinsicSymbol::AtomicFetchAdd: {
         if (handled) {
             *handled = true;
         }
         auto ptr = compile_expr(fn, data.args[0]);
         auto value_ptr = compile_expr(fn, data.args[1]);
         auto out_old_ptr = compile_expr(fn, data.args[2]);
-        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        auto elem_type = find_nonvoid_pointee_type(data.args[1]);
         assert(elem_type && "could not recover atomic fetch_add element type");
         auto elem_type_l = compile_type(elem_type);
         auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
@@ -8525,15 +8542,14 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         builder.CreateStore(old_value, out_old_ptr);
         return nullptr;
     }
-
-    if (callee_decl->name == "__atomic_fetch_sub" && data.args.len == 3) {
+    case IntrinsicSymbol::AtomicFetchSub: {
         if (handled) {
             *handled = true;
         }
         auto ptr = compile_expr(fn, data.args[0]);
         auto value_ptr = compile_expr(fn, data.args[1]);
         auto out_old_ptr = compile_expr(fn, data.args[2]);
-        auto elem_type = atomic_element_type_from_arg(data.args[1]);
+        auto elem_type = find_nonvoid_pointee_type(data.args[1]);
         assert(elem_type && "could not recover atomic fetch_sub element type");
         auto elem_type_l = compile_type(elem_type);
         auto align = m_ctx->llvm_module->getDataLayout().getABITypeAlign(elem_type_l);
@@ -8542,6 +8558,9 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
                                                   atomic_order);
         builder.CreateStore(old_value, out_old_ptr);
         return nullptr;
+    }
+    default:
+        break;
     }
 
     return nullptr;
@@ -12189,9 +12208,8 @@ Function *Compiler::get_system_fn(const string &name) {
     if (m_ctx->system_functions.has_key(name)) {
         return m_ctx->system_functions.at(name);
     }
-    auto runtime_pkg = m_ctx->compilation_ctx->rt_package;
-    auto module = runtime_pkg->modules[0].get();
-    auto list = module->scope->get_all();
+    auto module = m_ctx->compilation_ctx->rt_module;
+    assert(module && "runtime module not initialized");
     auto node = module->scope->find_one(name);
     if (!node) {
         panic("system function not found: {}", name);

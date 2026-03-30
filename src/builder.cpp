@@ -111,8 +111,15 @@ ast::Module *Builder::build_runtime() {
     resolver.context_init_primitives();
 
     auto rt_file_path = m_ctx.init_rt_stdlib();
+    auto intrinsics_path = m_ctx.get_stdlib_path("intrinsics.xs");
+    auto intrinsics_source = io::Buffer::from_file(intrinsics_path);
+    auto intrinsics_module = process_source(m_ctx.rt_package, &intrinsics_source, intrinsics_path);
+    m_ctx.intrinsics_module = intrinsics_module;
+    resolver.register_intrinsic_decls(intrinsics_module);
+
     auto rt_source = io::Buffer::from_file(rt_file_path);
     auto module = process_source(m_ctx.rt_package, &rt_source, rt_file_path);
+    m_ctx.rt_module = module;
     resolver.resolve(module);  // Resolve the runtime module to process extern blocks
     resolver.context_init_builtins(module);
     return module;

@@ -322,7 +322,7 @@ export struct Type {
 
     func dyn_elem<T: ops.Unsized>(value: &T) ?Type {
         unsafe {
-            let raw = __reflect_dyn_elem(this.raw, &value as *void);
+            let raw = __reflect_dyn_elem(this.raw, &value);
             if !raw {
                 return null;
             }

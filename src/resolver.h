@@ -119,6 +119,7 @@ struct ResolveContext {
     map<ChiType *, ChiType *> shared_of = {};
     map<string, ChiType *> tuple_types = {};
     map<string, IntrinsicSymbol> intrinsic_symbols = {};
+    map<IntrinsicSymbol, ast::Node *> intrinsic_decls = {};
     ChiType *rt_array_type = nullptr;
     ChiType *rt_span_type = nullptr;
     ChiType *rt_promise_type = nullptr;
@@ -319,7 +320,6 @@ class Resolver {
     ast::Node *add_primitive(const string &name, ChiType *type);
 
     bool can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit = false);
-    bool can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit = false);
 
     TypeKind get_sigil_type_kind(ast::SigilKind sigil);
     bool type_needs_first_ref_lifetime(ChiType *type);
@@ -417,6 +417,7 @@ class Resolver {
     bool is_borrowing_type(ChiType *type);
     bool type_needs_destruction(ChiType *type);
     bool is_non_copyable(ChiType *type);
+    bool can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit = false);
 
     // Active where-clause trait bounds for placeholders (scoped, not mutated)
     map<ChiType *, array<ChiType *>> m_where_traits;
@@ -433,6 +434,8 @@ class Resolver {
                                        ChiType *preferred_type = nullptr);
     bool use_implicit_owning_coercion(ChiType *from_type, ChiType *to_type);
     bool can_forward_variadic_pack_directly(ChiType *arg_type, ChiType *param_type);
+    void register_intrinsic_decls(ast::Module *module);
+    ast::Node *get_intrinsic_decl(IntrinsicSymbol symbol);
 
     void context_init_primitives();
     void context_init_builtins(ast::Module *builtin_module);

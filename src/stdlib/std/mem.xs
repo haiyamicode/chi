@@ -10,7 +10,6 @@ extern "C" {
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
     unsafe func __move(dest: *void, src: *void, size: uint32);
-    unsafe func __lifetime_copy_into(dest: *void, src: *void);
     unsafe func __destroy(ptr: *void);
 }
 
@@ -79,7 +78,7 @@ export unsafe func alloc<T>() &move T {
 export func copy<T: ops.Unsized>(val: &T) &move T {
     unsafe {
         var ref = cx_malloc(sizeof val, null) as *T as &move T;
-        __copy(ref as *T, val as *T, false);
+        __copy(ref, val, false);
         return ref;
     }
 }
@@ -93,7 +92,7 @@ export unsafe func memset(address: *void, v: uint8, n: uint32) {
 }
 
 export unsafe func write<T>(dest: *T, value: T) {
-    __move(dest as *void, &value, sizeof T);
+    __move(dest, &value, sizeof T);
 }
 
 export unsafe func transmute<TFrom: ops.Unsized, TTo: ops.Unsized>(ptr: *TFrom) TTo {
@@ -102,4 +101,10 @@ export unsafe func transmute<TFrom: ops.Unsized, TTo: ops.Unsized>(ptr: *TFrom) 
 
 export unsafe func destroy<T: ops.Unsized>(ptr: *T) {
     __destroy(ptr);
+}
+
+// Compiler-recognized lifetime annotation.
+// This records a copy operation from value to owner in our lifetime analysis.
+export unsafe func annotate_copy(owner: *void, value: *void) {
+    // Intentionally left blank. Lowered directly by the compiler.
 }
