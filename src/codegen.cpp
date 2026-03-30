@@ -9302,6 +9302,9 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     if (scope->branched) {
         return;
     }
+    if (!stmt->analysis.is_enabled) {
+        return;
+    }
 
     switch (stmt->type) {
     case ast::NodeType::DestructureDecl: {

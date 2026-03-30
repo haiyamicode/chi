@@ -140,6 +140,7 @@ void Parser::unexpected(Token *token) {
 // Error recovery mechanisms
 bool Parser::is_statement_start(TokenType type) {
     switch (type) {
+    case TokenType::AT:
     case TokenType::KW_VAR:
     case TokenType::KW_LET:
     case TokenType::KW_IF:
@@ -416,15 +417,49 @@ void Parser::parse_attributes(NodeList *attributes) {
 Node *Parser::parse_attribute() {
     auto at = expect(TokenType::AT);
     expect(TokenType::LBRACK);
-    auto iden = expect(TokenType::IDEN);
-    auto term = create_identifier_node(iden, nullptr);
-    while (next_is(TokenType::DOT)) {
-        term = parse_dot_expr(term);
-    }
-    auto node = create_node(NodeType::DeclAttribute, iden);
+    auto term = parse_attribute_term();
+    auto node = create_node(NodeType::DeclAttribute, at);
     node->data.decl_attribute.term = term;
     expect(TokenType::RBRACK);
     return node;
+}
+
+Node *Parser::parse_attribute_term() {
+    auto token = get();
+    if (token->type != TokenType::IDEN && token->type != TokenType::KW_IF) {
+        unexpected(token);
+        return create_error_node();
+    }
+
+    auto term = create_node(NodeType::Identifier, token);
+    if (token->type == TokenType::KW_IF) {
+        term->name = "if";
+    } else {
+        term->name = token->get_name();
+    }
+    term->data.identifier.kind = IdentifierKind::Value;
+    consume();
+
+    while (next_is(TokenType::DOT)) {
+        term = parse_dot_expr(term);
+    }
+
+    if (next_is(TokenType::LPAREN)) {
+        auto call = create_node(NodeType::FnCallExpr, token);
+        call->data.fn_call_expr.fn_ref_expr = term;
+        expect(TokenType::LPAREN);
+        while (!next_is(TokenType::RPAREN) && !next_is(TokenType::END)) {
+            call->data.fn_call_expr.args.add(parse_attribute_term());
+            if (!next_is(TokenType::COMMA)) {
+                break;
+            }
+            consume();
+        }
+        expect(TokenType::RPAREN);
+        return call;
+    }
+
+    return term;
 }
 
 Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
@@ -1527,14 +1562,27 @@ static bool switch_expr_returns_value(ast::Node *node) {
 }
 
 Node *Parser::parse_stmt(bool *as_expr) {
+    array<Node *> stmt_attrs;
+    while (next_is(TokenType::AT)) {
+        stmt_attrs.add(parse_attribute());
+    }
+
     auto token = get();
+    auto attach_stmt_attrs = [&](Node *stmt) {
+        if (stmt) {
+            for (auto attr : stmt_attrs) {
+                stmt->attributes.add(attr);
+            }
+        }
+        return stmt;
+    };
     switch (token->type) {
     case TokenType::KW_IF: {
         auto node = parse_if_expr(false);
         // If-expression: only when every branch is syntactically value-producing.
         if (next_is(TokenType::RBRACE) && if_expr_returns_value(node))
             *as_expr = true;
-        return node;
+        return attach_stmt_attrs(node);
     }
 
     case TokenType::KW_SWITCH: {
@@ -1546,14 +1594,14 @@ Node *Parser::parse_stmt(bool *as_expr) {
             *as_expr = true;
         }
         // Otherwise: no semicolon needed (statement form)
-        return node;
+        return attach_stmt_attrs(node);
     }
 
     case TokenType::KW_FOR:
-        return parse_for_stmt();
+        return attach_stmt_attrs(parse_for_stmt());
 
     case TokenType::KW_WHILE:
-        return parse_while_stmt();
+        return attach_stmt_attrs(parse_while_stmt());
 
     case TokenType::KW_TRY: {
         auto expr = parse_expr();
@@ -1573,7 +1621,7 @@ Node *Parser::parse_stmt(bool *as_expr) {
                 *as_expr = true;
             }
         }
-        return expr;
+        return attach_stmt_attrs(expr);
     }
 
     case TokenType::KW_VAR:
@@ -1619,38 +1667,38 @@ Node *Parser::parse_stmt(bool *as_expr) {
     }
 
     case TokenType::KW_RETURN:
-        return parse_return_stmt();
+        return attach_stmt_attrs(parse_return_stmt());
 
     case TokenType::KW_THROW: {
         auto token = expect(TokenType::KW_THROW);
         auto node = create_node(NodeType::ThrowStmt, token);
         node->data.throw_stmt.expr = parse_child_expr_construct(false, node);
         expect(TokenType::SEMICOLON);
-        return node;
+        return attach_stmt_attrs(node);
     }
 
     case TokenType::KW_CONTINUE:
     case TokenType::KW_BREAK:
-        return parse_branch_stmt();
+        return attach_stmt_attrs(parse_branch_stmt());
 
     case TokenType::LBRACE:
-        return parse_block();
+        return attach_stmt_attrs(parse_block());
 
     case TokenType::KW_UNSAFE: {
         consume();
         auto block = parse_block();
         block->data.block.is_unsafe = true;
-        return block;
+        return attach_stmt_attrs(block);
     }
 
     case TokenType::SEMICOLON:
         consume();
-        return create_node(NodeType::EmptyStmt, token);
+        return attach_stmt_attrs(create_node(NodeType::EmptyStmt, token));
 
     default:
         unexpected(token);
         recover_to_statement_boundary();
-        return create_error_node();
+        return attach_stmt_attrs(create_error_node());
     }
 }
 

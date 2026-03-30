@@ -13,6 +13,16 @@ CompilationContext::CompilationContext() : resolve_ctx(this) {
         root_path = rootenv;
     }
     auto root_src_path = (fs::path(root_path) / "src/stdlib").string();
+    init_platform_tags();
+}
+
+void CompilationContext::init_platform_tags() {
+    for (auto tag : get_known_platform_tags()) {
+        platform_tags[tag] = false;
+    }
+    for (auto tag : get_active_platform_tags()) {
+        platform_tags[tag] = true;
+    }
 }
 
 ast::Module *CompilationContext::module_from_path(ast::Package *package, const string &path,

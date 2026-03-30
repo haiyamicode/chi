@@ -487,10 +487,26 @@ void AstPrinter::print_node(Node *node) {
                 if (prev_stmt && has_blank_line_between(prev_stmt, stmt)) {
                     emit("\n");
                 }
+                bool printed_indent = false;
+                for (auto attr : stmt->attributes) {
+                    auto *ft_attr = first_token(attr);
+                    if (ft_attr) {
+                        flush_comments_before(ft_attr->pos);
+                    }
+                    if (!printed_indent) {
+                        print_indent(m_indent);
+                        printed_indent = true;
+                    }
+                    emit("@[");
+                    print_node(attr->data.decl_attribute.term);
+                    emit("] ");
+                }
                 auto *ft = first_token(stmt);
                 if (ft)
                     flush_comments_before(ft->pos);
-                print_indent(m_indent);
+                if (!printed_indent) {
+                    print_indent(m_indent);
+                }
                 bool wrap_value_construct = !data.is_arrow && is_value_context(node) &&
                                             !data.return_expr && data.statements.len == 1 &&
                                             stmt->type == NodeType::ConstructExpr &&

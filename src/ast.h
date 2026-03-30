@@ -713,6 +713,7 @@ struct CapturePath {
 struct SemanticAnalysis {
     bool escaped = false;
     bool moved = false;
+    bool is_enabled = true;
     ConversionType conversion_type = ConversionType::None;
     array<CapturePath> capture_path = {}; // Path from original declaration to current context
 
@@ -803,6 +804,7 @@ struct Node {
     uint32_t id = 0;
     int index = 0;
     Node *parent = nullptr;
+    array<Node *> attributes = {};
     Token *start_token = nullptr;
     Token *end_token = nullptr;
     string global_id = "";
@@ -954,6 +956,7 @@ struct Node {
         b->parent_fn = parent_fn;
         b->index = index;
         b->parent = parent;
+        b->attributes = attributes;
 
         switch (type) {
             _AST_CASE_CLONE_FIELD(root, Root)

@@ -5707,12 +5707,42 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
     }
 }
 
+static bool has_conditional_compile_attrs(ast::Node *node);
+
 ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags) {
     if (!node)
         return nullptr;
     auto cached = node_get_type(node);
     if (cached) {
         return cached;
+    }
+
+    if (has_conditional_compile_attrs(node)) {
+        if (node->type != NodeType::Block) {
+            error(node, "conditional compilation attributes are only supported on blocks");
+            node->analysis.is_enabled = false;
+            node->resolved_type = get_system_types()->void_;
+            return node->resolved_type;
+        }
+
+        bool is_enabled = true;
+        for (auto attr : node->attributes) {
+            auto enabled =
+                resolve_conditional_platform_term(attr ? attr->data.decl_attribute.term : nullptr);
+            if (!enabled.has_value()) {
+                error(attr ? attr : node, "invalid conditional compilation attribute");
+                node->analysis.is_enabled = false;
+                node->resolved_type = get_system_types()->void_;
+                return node->resolved_type;
+            }
+            is_enabled = is_enabled && *enabled;
+        }
+
+        node->analysis.is_enabled = is_enabled;
+        if (!is_enabled) {
+            node->resolved_type = get_system_types()->void_;
+            return node->resolved_type;
+        }
     }
 
     auto result = _resolve(node, scope, flags);
@@ -6430,9 +6460,53 @@ string Resolver::resolve_term_string(ast::Node *term) {
         return resolve_term_string(term->data.dot_expr.effective_expr()) + "." +
                term->data.dot_expr.field->get_name();
     default:
-        panic("unhandled term node: {}", PRINT_ENUM(term->type));
+        return "";
     }
     return "";
+}
+
+optional<bool> Resolver::resolve_conditional_platform_term(ast::Node *term) {
+    if (!term || term->type != NodeType::FnCallExpr) {
+        return std::nullopt;
+    }
+
+    auto &call = term->data.fn_call_expr;
+    if (!call.fn_ref_expr || call.fn_ref_expr->type != NodeType::Identifier ||
+        call.fn_ref_expr->name != "if" || call.args.len != 1) {
+        return std::nullopt;
+    }
+
+    auto platform_term = resolve_term_string(call.args[0]);
+    if (platform_term.empty()) {
+        return std::nullopt;
+    }
+
+    auto &tags = m_ctx->allocator->get_platform_tags();
+    auto enabled_p = tags.get(platform_term);
+    if (!enabled_p) {
+        return std::nullopt;
+    }
+
+    return {*enabled_p};
+}
+
+static bool has_conditional_compile_attrs(ast::Node *node) {
+    if (!node) {
+        return false;
+    }
+    for (auto attr : node->attributes) {
+        if (!attr || attr->type != NodeType::DeclAttribute) {
+            continue;
+        }
+        auto term = attr->data.decl_attribute.term;
+        if (term && term->type == NodeType::FnCallExpr &&
+            term->data.fn_call_expr.fn_ref_expr &&
+            term->data.fn_call_expr.fn_ref_expr->type == NodeType::Identifier &&
+            term->data.fn_call_expr.fn_ref_expr->name == "if") {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void add_unique_node(array<ast::Node *> &nodes, ast::Node *node) {

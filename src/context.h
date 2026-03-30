@@ -31,6 +31,7 @@ struct CompilationContext : public Context {
     string root_path = "";
     array<box<ast::Package>> packages = {};
     map<string, ast::Package *> package_map = {};
+    map<string, bool> platform_tags = {};
     ResolveContext resolve_ctx;
     map<string, ast::Module *> module_map = {};
     map<string, ast::Module *> source_modules = {}; // absolute path → parsed module (dedup)
@@ -67,6 +68,8 @@ struct CompilationContext : public Context {
     }
 
     string init_rt_stdlib();
+    void init_platform_tags();
+    const map<string, bool> &get_platform_tags() override { return platform_tags; }
 
     Resolver create_resolver() { return {&resolve_ctx}; }
 

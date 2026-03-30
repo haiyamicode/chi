@@ -7,6 +7,7 @@ extern "C" {
     unsafe func __cx_getcwd() *byte;
     unsafe func __cx_system(command: *byte) int32;
     unsafe func __cx_command(args: *void) int32;
+    unsafe func __cx_platform_tags(result: *void);
     unsafe func __cx_strlen(s: *byte) uint32;
 }
 
@@ -53,4 +54,12 @@ export func command(args: &[string]) int32 {
     unsafe {
         return __cx_command(&args);
     }
+}
+
+export func platform_tags() Array<string> {
+    var result: Array<string> = [];
+    unsafe {
+        __cx_platform_tags(&result);
+    }
+    return result;
 }

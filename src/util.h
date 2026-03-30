@@ -266,10 +266,57 @@ template <typename K, typename V> struct map {
         }
     }
 
+    const V *get(const K &key) const {
+        auto iter = data.find(key);
+        if (iter != data.end()) {
+            return &iter->second;
+        } else {
+            return nullptr;
+        }
+    }
+
     void clear() { data.clear(); }
     size_t size() { return data.size(); }
     Map get() { return data; }
 };
+
+static inline array<string> get_known_platform_tags() {
+    return {
+        "platform.windows",
+        "platform.linux",
+        "platform.macos",
+        "platform.unix",
+        "arch.x64",
+        "arch.arm64",
+        "arch.x86",
+        "arch.arm",
+    };
+}
+
+static inline array<string> get_active_platform_tags() {
+    array<string> tags = {};
+#if defined(_WIN32)
+    tags.add("platform.windows");
+#elif defined(__APPLE__)
+    tags.add("platform.macos");
+    tags.add("platform.unix");
+#elif defined(__linux__)
+    tags.add("platform.linux");
+    tags.add("platform.unix");
+#endif
+
+#if defined(__x86_64__) || defined(_M_X64)
+    tags.add("arch.x64");
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    tags.add("arch.arm64");
+#elif defined(__i386__) || defined(_M_IX86)
+    tags.add("arch.x86");
+#elif defined(__arm__) || defined(_M_ARM)
+    tags.add("arch.arm");
+#endif
+
+    return tags;
+}
 
 static inline array<string> string_split(string str, string sep) {
     char *cstr = const_cast<char *>(str.c_str());

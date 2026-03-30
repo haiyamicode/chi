@@ -2059,4 +2059,14 @@ int32_t __cx_glob(const char *base, const char *pattern, CxArray *result) {
         }
     });
 }
+
+void __cx_platform_tags(CxArray *result) {
+    auto tags = get_active_platform_tags();
+    for (auto &tag : tags) {
+        CxString s;
+        cx_string_from_chars(tag.c_str(), (uint32_t)tag.size(), &s);
+        CxString *slot = (CxString *)cx_array_add(result, sizeof(CxString));
+        *slot = s;
+    }
+}
 }

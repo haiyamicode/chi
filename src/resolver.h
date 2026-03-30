@@ -38,6 +38,7 @@ struct Context {
                                                       const string &base_path = "") = 0;
     virtual string get_stdlib_path(string path) = 0;
     virtual ast::Package *get_or_create_package(const string &id_path) = 0;
+    virtual const map<string, bool> &get_platform_tags() = 0;
 };
 
 struct SystemTypes {
@@ -439,6 +440,7 @@ class Resolver {
 
     void context_init_primitives();
     void context_init_builtins(ast::Module *builtin_module);
+    optional<bool> resolve_conditional_platform_term(ast::Node *term);
 
     ast::Node *get_builtin(const string &name);
 

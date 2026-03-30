@@ -136,6 +136,7 @@ class Parser {
 
     void parse_attributes(NodeList *attributes);
     Node *parse_attribute();
+    Node *parse_attribute_term();
 
     Node *parse_top_level_decl(DeclSpec *decl_spec = nullptr);
 
