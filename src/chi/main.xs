@@ -38,6 +38,30 @@ struct CliApp {
         throw new CliError{detail: move message};
     }
 
+    func log_verbose(match: &args.Matches, message: string) {
+        if match.flag("verbose") {
+            println(message);
+        }
+    }
+
+    func format_command(cmd: &[string]) string {
+        var result = "";
+        for part, i in cmd {
+            if i > 0 {
+                result += " ";
+            }
+            result += part;
+        }
+        return result;
+    }
+
+    func run_command(match: &args.Matches, cmd: &[string]) int32 {
+        if match.flag("verbose") {
+            println(this.format_command(cmd));
+        }
+        return os.command(cmd);
+    }
+
     func resolve_search_path(input: string) string {
         if filepath.is_absolute(input) {
             return input;
@@ -135,7 +159,9 @@ struct CliApp {
         command.flag({name: "debug", short: "d", help: "Enable debug compiler output"});
         command.flag({name: "release", short: "r", help: "Build with release optimizations"});
         command.flag({name: "strip", help: "Strip debug info from the final binary"});
-        command.flag({name: "verbose", short: "v", help: "Enable verbose lifetime output"});
+        command.flag({name: "verbose", short: "v", help: "Print resolved compiler and output paths"});
+        command.flag({name: "verbose-lifetimes", help: "Enable verbose lifetime analysis output"});
+        command.flag({name: "verbose-generics", help: "Enable verbose generics output"});
         command.positional({name: "package", help: "Package directory", required: false});
         return command;
     }
@@ -303,8 +329,6 @@ struct CliApp {
                 this.fail(err.message());
             };
         }
-
-        println("installed source " + dest);
     }
 
     func install_named_source(match: &args.Matches, package_root: string) {
@@ -315,6 +339,7 @@ struct CliApp {
         }
 
         let working_dir = this.resolve_working_dir(match, package_root);
+        this.log_verbose(match, "source install dir " + this.require_source_install_dir(package_name));
         this.install_package_source(package_root, working_dir, package_name, install_config.include);
     }
 
@@ -326,6 +351,11 @@ struct CliApp {
     ) int32 {
         let chic = this.require_chi_compiler();
         let working_dir = this.resolve_working_dir(match, package_root);
+
+        this.log_verbose(match, "compiler " + chic);
+        this.log_verbose(match, "package root " + package_root);
+        this.log_verbose(match, "working dir " + working_dir);
+        this.log_verbose(match, "output " + output);
 
         var cmd = [chic, "-p", package_root, "-o", output, "-w", working_dir];
         let debug = match.flag("debug");
@@ -339,10 +369,13 @@ struct CliApp {
         if match.flag("strip") {
             cmd.push("--strip");
         }
-        if match.flag("verbose") {
-            cmd.push("-v");
+        if match.flag("verbose-lifetimes") {
+            cmd.push("--verbose-lifetimes");
         }
-        return os.command(cmd.span());
+        if match.flag("verbose-generics") {
+            cmd.push("--verbose-generics");
+        }
+        return this.run_command(match, cmd.span());
     }
 
     func require_install_dir() string {
@@ -370,6 +403,7 @@ struct CliApp {
     func run_install_inner(match: &args.Matches) int32 {
         let package_root = this.canonical_package_root(this.require_package_root(match));
         let bin_dir = this.require_install_dir();
+        this.log_verbose(match, "install dir " + bin_dir);
         try fs.mkdir_all(bin_dir) catch fs.FileError as err {
             this.fail(err.message());
         };
@@ -380,7 +414,6 @@ struct CliApp {
             return status;
         }
         this.install_named_source(match, package_root);
-        println("installed " + output);
         return 0;
     }
 

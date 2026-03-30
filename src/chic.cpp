@@ -15,7 +15,8 @@ using namespace cx;
 
 MAKE_ENUM(FlagType, String, Bool);
 MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Release, Strip, Output, Ast, Format,
-          FormatterNoSemantic, WorkingDir, Analyzer, Safe, Verbose, Help);
+          FormatterNoSemantic, WorkingDir, Analyzer, Safe, VerboseLifetimes, VerboseGenerics,
+          Help);
 MAKE_ENUM(InputMode, File, Package)
 MAKE_ENUM(ProcessingMode, Build, Analyzer, Format)
 
@@ -44,7 +45,8 @@ void init_flags() {
     flags.add({FlagId::WorkingDir, "w", "working-dir", FlagType::String});
     flags.add({FlagId::Analyzer, "analyzer", "analyzer", FlagType::Bool});
     flags.add({FlagId::Safe, "s", "safe", FlagType::Bool});
-    flags.add({FlagId::Verbose, "v", "verbose", FlagType::Bool});
+    flags.add({FlagId::VerboseLifetimes, "", "verbose-lifetimes", FlagType::Bool});
+    flags.add({FlagId::VerboseGenerics, "", "verbose-generics", FlagType::Bool});
     flags.add({FlagId::Help, "h", "help", FlagType::Bool});
 
     for (auto &f : flags) {
@@ -85,7 +87,8 @@ int main(int argc, char *argv[]) {
         print("  -w --working-dir <dir>: working directory\n");
         print("  --analyzer: analyzer mode\n");
         print("  -s --safe: safe mode (enable managed memory for .xs files)\n");
-        print("  -v --verbose: verbose mode (print lifetime analysis details)\n");
+        print("  --verbose-lifetimes: print lifetime analysis details\n");
+        print("  --verbose-generics: print generic instantiation debug details\n");
         print("  -h --help: help\n");
     };
 
@@ -131,8 +134,11 @@ int main(int argc, char *argv[]) {
         case FlagId::Safe:
             // Safe mode is now automatic for .xs files
             break;
-        case FlagId::Verbose:
-            bld.verbose = true;
+        case FlagId::VerboseLifetimes:
+            bld.verbose_lifetimes = true;
+            break;
+        case FlagId::VerboseGenerics:
+            bld.verbose_generics = true;
             break;
         case FlagId::Help:
             print_help();

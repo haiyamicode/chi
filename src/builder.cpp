@@ -96,6 +96,17 @@ Builder::Builder() : m_ctx(), m_codegen_ctx(nullptr) {
     m_codegen_ctx.reset(new codegen::CodegenContext(&m_ctx));
 }
 
+uint32_t Builder::get_extra_lang_flags() const {
+    uint32_t flags = 0;
+    if (verbose_lifetimes) {
+        flags |= LANG_FLAG_VERBOSE_LIFETIMES;
+    }
+    if (verbose_generics) {
+        flags |= LANG_FLAG_VERBOSE_GENERICS;
+    }
+    return flags;
+}
+
 ast::Module *Builder::process_source(ast::Package *package, io::Buffer *src,
                                      const string &file_name) {
     return m_ctx.process_source(package, src, file_name);
@@ -131,7 +142,7 @@ void Builder::build_single_file(const string &file_name) {
     auto package = add_package(".");
     package->name = "__main";
 
-    if (verbose) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_VERBOSE;
+    m_ctx.resolve_ctx.lang_flags |= get_extra_lang_flags();
     auto module = process_file(package, file_name);
     if (m_ctx.flags & FLAG_PRINT_AST) {
         return;
@@ -318,7 +329,7 @@ void Builder::build_package(const string &package_dir) {
     package->name = "__main";
     package->config = config_ptr;  // Store parsed config in package
 
-    if (verbose) m_ctx.resolve_ctx.lang_flags |= LANG_FLAG_VERBOSE;
+    m_ctx.resolve_ctx.lang_flags |= get_extra_lang_flags();
     auto module = process_file(package, entry_file_path.string());
     if (m_ctx.flags & FLAG_PRINT_AST) {
         return;

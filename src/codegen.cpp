@@ -623,7 +623,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
                 if (auto entry =
                         get_resolver()->get_generics()->struct_envs.get(subtype->global_id)) {
                     fn->type_env = &entry->subs;
-                } else if (getenv("DUMP_GENERICS")) {
+                } else if (is_verbose_generics()) {
                     print("WARNING: No TypeEnv found for struct method, struct: {}\n",
                           subtype->global_id);
                 }
@@ -11647,7 +11647,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
     if (auto entry = get_resolver()->get_generics()->fn_envs.get(fn_id)) {
         new_fn->type_env = &entry->subs;
-    } else if (subtype && getenv("DUMP_GENERICS")) {
+    } else if (subtype && is_verbose_generics()) {
         print("WARNING: No TypeEnv found for function: {}\n", fn_id);
     }
 
@@ -12052,7 +12052,7 @@ void Compiler::emit_runtime_assert(Function *fn, llvm::Value *cond, llvm::Value 
 }
 
 void Compiler::dump_generics_comparison() {
-    if (!getenv("DUMP_GENERICS")) {
+    if (!is_verbose_generics()) {
         return;
     }
 

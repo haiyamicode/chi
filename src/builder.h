@@ -25,7 +25,8 @@ class Builder {
     string output_file_name;
     string working_dir;
     bool debug_mode = false;
-    bool verbose = false;
+    bool verbose_lifetimes = false;
+    bool verbose_generics = false;
     bool strip_symbols = false;
     BuildMode build_mode = BuildMode::Run;
     codegen::CompilationProfile profile = codegen::CompilationProfile::Debug;
@@ -50,6 +51,7 @@ class Builder {
 
   private:
     string get_tmp_file_path(const string &filename);
+    uint32_t get_extra_lang_flags() const;
 };
 
 } // namespace cx

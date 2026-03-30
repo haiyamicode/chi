@@ -345,7 +345,7 @@ void Resolver::resolve(ast::Module *module) {
     }
 
     // Dump generic instantiations if requested (for debugging)
-    if (getenv("DUMP_GENERICS")) {
+    if (has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE_GENERICS)) {
         m_ctx->generics.dump(this);
     }
 
@@ -12625,7 +12625,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
     if (flow.terminals.len == 0 && flow.ref_edges.data.size() == 0 && flow.copy_edges.data.size() == 0)
         return;
     bool is_safe = has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE);
-    bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE);
+    bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE_LIFETIMES);
 
     auto fn_name = fn_def->fn_proto ? fn_def->fn_proto->name : "<lambda>";
 

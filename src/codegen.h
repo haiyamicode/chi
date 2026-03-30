@@ -772,6 +772,9 @@ class Compiler {
     CodegenContext *get_context() { return m_ctx; }
     CompilationSettings *get_settings() { return &m_ctx->settings; }
     bool is_managed() { return has_lang_flag(get_settings()->lang_flags, LANG_FLAG_MANAGED); }
+    bool is_verbose_generics() {
+        return has_lang_flag(get_settings()->lang_flags, LANG_FLAG_VERBOSE_GENERICS);
+    }
     // True only when the current function's module is managed (.x), not for .xs modules in a .x program
     bool is_fn_managed(Function *fn) {
         if (!is_managed()) return false;
