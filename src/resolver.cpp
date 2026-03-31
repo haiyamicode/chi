@@ -9217,6 +9217,9 @@ bool Resolver::is_friend_struct(ChiType *a, ChiType *b) {
 
 ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiTypeFn *fn,
                                    NodeList *args, ast::Node *fn_decl) {
+    if (!fn || !args) {
+        return nullptr;
+    }
     auto n_args = args->len;
     auto n_params = fn->params.len;
     auto intrinsic_symbol = fn_decl ? resolve_intrinsic_symbol(fn_decl) : IntrinsicSymbol::None;
