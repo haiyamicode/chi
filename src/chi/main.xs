@@ -55,11 +55,24 @@ struct CliApp {
         return result;
     }
 
+    func print_command_output(result: &os.CommandResult) {
+        if !result.stdout.is_empty() {
+            printf("{}", result.stdout);
+        }
+        if !result.stderr.is_empty() {
+            printf("{}", result.stderr);
+        }
+    }
+
     func run_command(match: &args.Matches, cmd: &[string]) int32 {
         if match.flag("verbose") {
             println(this.format_command(cmd));
         }
-        return os.command(cmd);
+        let result = os.command(cmd);
+        if match.flag("verbose") || result.exit_code != 0 {
+            this.print_command_output(&result);
+        }
+        return result.exit_code;
     }
 
     func resolve_search_path(input: string) string {

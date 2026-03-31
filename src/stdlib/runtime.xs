@@ -1284,13 +1284,17 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    mut func new() {
+    private mut func init_buckets() {
         this.capacity = 16;
         unsafe {
             var size = 8 * (this.capacity as uint32);
             this.buckets = this.allocator.alloc(size) as **MapNode<K, V>;
             cx_memset(this.buckets as *void, 0, size);
         }
+    }
+
+    mut func new() {
+        this.init_buckets();
     }
 
     mut func delete() {
@@ -1342,7 +1346,8 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
             var node = this.buckets[idx];
             while node != null {
                 if node.hash == h && node.key == key {
-                    node.value = value;
+                    mem.destroy((&mut node.value) as *V);
+                    mem.write((&mut node.value) as *V, move value);
                     return;
                 }
                 node = node.next;
@@ -1444,7 +1449,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
     impl ops.Copy {
         mut func copy(source: &This) {
             this.allocator = source.allocator;
-            this.new();
+            this.init_buckets();
             var ks = source.keys();
             for k in ks {
                 var v = source.get(k);

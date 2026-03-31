@@ -22,15 +22,28 @@ namespace fs = std::filesystem;
 
 namespace {
 
-string runtime_library_search_flags(const CompilationContext &ctx) {
-    if (ctx.root_path.empty()) {
-        return "";
+string runtime_library_search_flags(const CompilationContext &ctx, const string &runtime_library_name) {
+    string flags = "";
+    auto lib_file = fmt::format("lib{}.a", runtime_library_name);
+    auto add_dir_if_has_runtime = [&](const string &dir) {
+        if (dir.empty()) {
+            return;
+        }
+        auto lib_path = fs::path(dir) / lib_file;
+        if (fs::exists(lib_path)) {
+            flags += fmt::format("-L{} ", dir);
+        }
+    };
+
+    string root_lib_dir;
+    if (!ctx.root_path.empty()) {
+        root_lib_dir = (fs::path(ctx.root_path) / "lib").string();
     }
-    auto lib_dir = fs::path(ctx.root_path) / "lib";
-    if (!fs::exists(lib_dir)) {
-        return "";
+    add_dir_if_has_runtime(root_lib_dir);
+    if (root_lib_dir != "/usr/local/lib") {
+        add_dir_if_has_runtime("/usr/local/lib");
     }
-    return fmt::format("-L{} ", lib_dir.string());
+    return flags;
 }
 
 string c_compiler_mode_flags(codegen::CompilationProfile profile) {
@@ -161,9 +174,10 @@ void Builder::build_single_file(const string &file_name) {
     compiler.emit_output();
 
     // produce executable
-    auto cmd = fmt::format("c++ {} {} -o {} {}-lchrt", settings->output_obj_to_file,
+    auto cmd = fmt::format("c++ {} {} -o {} {}-l{}", settings->output_obj_to_file,
                            linker_mode_flags(profile), output_file_name,
-                           runtime_library_search_flags(m_ctx));
+                           runtime_library_search_flags(m_ctx, runtime_library_name),
+                           runtime_library_name);
 
     if (debug_mode) {
         print("running: {}\n", cmd);
@@ -424,9 +438,9 @@ void Builder::build_package(const string &package_dir) {
         library_flags += fmt::format("-l{} ", lib);
     }
 
-    auto cmd = fmt::format("c++ {} {} -o {} {}{}-lchrt {}", obj_files, linker_mode_flags(profile),
-                           output_file_name, runtime_library_search_flags(m_ctx),
-                           library_path_flags, library_flags);
+    auto cmd = fmt::format("c++ {} {} -o {} {}{}-l{} {}", obj_files, linker_mode_flags(profile),
+                           output_file_name, runtime_library_search_flags(m_ctx, runtime_library_name),
+                           library_path_flags, runtime_library_name, library_flags);
 
     if (debug_mode) {
         print("running: {}\n", cmd);

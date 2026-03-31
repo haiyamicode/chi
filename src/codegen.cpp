@@ -1510,30 +1510,69 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
     return value;
 }
 
-llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type) {
+ast::Node *Compiler::create_cleanup_temp_var(Function *fn, ast::Node *expr, ChiType *type,
+                                             ast::Block *cleanup_block, const string &name) {
+    auto *temp = get_resolver()->get_dummy_var(name);
+    temp->resolved_type = type;
+    temp->token = expr && expr->token ? expr->token : (fn && fn->node ? fn->node->token : nullptr);
+    temp->module = expr && expr->module ? expr->module : (fn && fn->node ? fn->node->module : nullptr);
+    assert(temp->module && "cleanup temp var must have a module");
+    if (cleanup_block && get_resolver()->should_destroy(temp, type)) {
+        get_resolver()->add_cleanup_var(cleanup_block, temp);
+    }
+    return temp;
+}
+
+void Compiler::push_cleanup_block(Function *fn, ast::Block &block) {
+    fn->push_scope();
+    fn->active_blocks.push_back(&block);
+}
+
+void Compiler::pop_cleanup_block(Function *fn, ast::Block &block) {
+    auto &builder = *m_ctx->llvm_builder.get();
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        compile_block_cleanup(fn, &block, nullptr, block.exit_flow);
+    }
+    fn->active_blocks.pop_back();
+    fn->pop_scope();
+}
+
+llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type,
+                                            ast::Block *cleanup_block,
+                                            std::vector<ast::Node *> *transferred_cleanup_vars) {
     auto &builder = *m_ctx->llvm_builder;
     auto src_type = get_chitype(expr);
     if (needs_implicit_owning_conversion(expr)) {
-        auto arg_tmp = fn->entry_alloca(compile_type(param_type),
-                                        param_type->kind == TypeKind::Any ? "_arg_any"
-                                                                          : "_arg_wrap");
-        compile_implicit_owning_conversion_to_ptr(fn, expr, arg_tmp, param_type);
-        return builder.CreateLoad(compile_type(param_type), arg_tmp);
+        auto *temp_var = create_cleanup_temp_var(
+            fn, expr, param_type, cleanup_block,
+            param_type->kind == TypeKind::Any ? "_arg_any" : "_arg_wrap");
+        auto *temp_ptr = compile_alloc(fn, temp_var, false, param_type);
+        add_var(temp_var, temp_ptr);
+        compile_implicit_owning_conversion_to_ptr(fn, expr, temp_ptr, param_type);
+        if (transferred_cleanup_vars) {
+            transferred_cleanup_vars->push_back(temp_var);
+        }
+        return builder.CreateLoad(compile_type(param_type), temp_ptr);
     }
-    auto arg_value = compile_assignment_to_type(fn, expr, param_type);
 
     // Caller-side copy: for non-moved args (named vars) passed to by-value
     // params, do copy here since the callee only does a bitwise store.
     // Moved args (rvalues) are already fresh values — ownership transfers.
     if (!expr->analysis.moved && param_type && !param_type->is_reference() &&
         get_resolver()->type_needs_destruction(param_type)) {
-        auto tmp = fn->entry_alloca(compile_type(param_type), "_arg_copy");
+        auto *temp_var = create_cleanup_temp_var(fn, expr, param_type, cleanup_block, "_arg_copy");
+        auto *temp_ptr = compile_alloc(fn, temp_var, false, param_type);
+        add_var(temp_var, temp_ptr);
         emit_dbg_location(expr);
-        compile_copy(fn, arg_value, tmp, param_type, expr);
-        arg_value = builder.CreateLoad(compile_type(param_type), tmp);
+        auto src_ref = compile_expr_ref(fn, expr);
+        compile_ref_value_to_ptr(fn, src_ref, src_type, temp_ptr, param_type);
+        if (transferred_cleanup_vars) {
+            transferred_cleanup_vars->push_back(temp_var);
+        }
+        return builder.CreateLoad(compile_type(param_type), temp_ptr);
     }
 
-    return arg_value;
+    return compile_assignment_to_type(fn, expr, param_type);
 }
 
 llvm::Value *Compiler::compile_extern_variadic_arg(Function *fn, ast::Node *expr) {
@@ -1959,6 +1998,9 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
     if (effective_expr->type == ast::NodeType::ConstructExpr &&
         get_resolver()->is_same_type(src_type, dest_type) &&
         !effective_expr->data.construct_expr.is_new) {
+        if (destruct_old) {
+            compile_destruction_for_type(fn, dest, dest_type);
+        }
         compile_construction(fn, dest, dest_type, effective_expr);
         effective_expr->resolved_outlet = saved_outlet;
         return;
@@ -1975,6 +2017,14 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
             effective_expr->resolved_outlet = saved_outlet;
             return;
         }
+    }
+    if (!effective_expr->analysis.moved && dest_type &&
+        get_resolver()->type_needs_destruction(dest_type) &&
+        get_resolver()->is_same_type(src_type, dest_type)) {
+        auto src_ref = compile_expr_ref(fn, effective_expr);
+        compile_copy_with_ref(fn, src_ref, dest, dest_type, effective_expr, destruct_old);
+        effective_expr->resolved_outlet = saved_outlet;
+        return;
     }
     auto value = compile_assignment_to_type(fn, effective_expr, dest_type,
                                             allow_saved_owning_conversion);
@@ -4883,7 +4933,6 @@ llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call
     invoke.normal = nullptr;
     auto ret = compile_fn_call(fn, call_expr, &invoke, dest);
     if (invoke.used) {
-        fn->use_label(invoke.normal);
         fn->has_cleanup_invoke = true;
     }
     if (dest) {
@@ -6893,6 +6942,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     auto &builder = *m_ctx->llvm_builder;
     assert(src.value || src.address);
     auto dbg_node = expr ? expr : fn->node;
+    llvm::Value *owned_copy_src = nullptr;
 
     // Lazy load: derive value from address when needed
     auto ensure_value = [&]() {
@@ -6900,6 +6950,22 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             src.value = builder.CreateLoad(compile_type(type), src.address);
         }
         return src.value;
+    };
+
+    auto get_copy_source_address = [&](const char *tmp_name) -> llvm::Value * {
+        if (src.address) {
+            return src.address;
+        }
+        auto *from_address = builder.CreateAlloca(compile_type(type), nullptr, tmp_name);
+        builder.CreateStore(ensure_value(), from_address);
+        owned_copy_src = from_address;
+        return from_address;
+    };
+
+    auto destroy_copy_source_temp = [&]() {
+        if (owned_copy_src && src.owns_value && get_resolver()->type_needs_destruction(type)) {
+            compile_destruction_for_type(fn, owned_copy_src, type);
+        }
     };
 
     auto resolved_type = type;
@@ -6919,11 +6985,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                 compile_destruction_for_type(fn, dest, type);
             }
             auto opt_type_l = compile_type(type);
-            auto from_address = src.address;
-            if (!from_address) {
-                from_address = builder.CreateAlloca(opt_type_l, nullptr, "_opt_copy_src");
-                builder.CreateStore(ensure_value(), from_address);
-            }
+            auto from_address = get_copy_source_address("_opt_copy_src");
             // Copy has_value (field 0)
             auto src_hv = builder.CreateStructGEP(opt_type_l, from_address, 0);
             auto dst_hv = builder.CreateStructGEP(opt_type_l, dest, 0);
@@ -6938,11 +7000,12 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             builder.SetCurrentDebugLocation(saved_loc);
             auto src_val = builder.CreateStructGEP(opt_type_l, from_address, 1);
             auto dst_val = builder.CreateStructGEP(opt_type_l, dest, 1);
-            auto inner = builder.CreateLoad(compile_type(elem_type), src_val);
-            compile_copy(fn, inner, dst_val, elem_type, expr);
+            compile_copy_with_ref(fn, RefValue::from_address(src_val), dst_val, elem_type, expr,
+                                  false);
             builder.CreateBr(bb_done);
             fn->use_label(bb_done);
             builder.SetCurrentDebugLocation(saved_loc);
+            destroy_copy_source_temp();
             return;
         }
         // For Optional with trivially-copyable inner type, fall through to default
@@ -6959,12 +7022,9 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             if (destruct_old) {
                 compile_destruction_for_type(fn, dest, type);
             }
-            auto from_address = src.address;
-            if (!from_address) {
-                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_enum_copy_src");
-                builder.CreateStore(ensure_value(), from_address);
-            }
+            auto from_address = get_copy_source_address("_enum_copy_src");
             builder.CreateCall(copier->llvm_fn, {dest, from_address});
+            destroy_copy_source_temp();
             return;
         }
         // No copier needed — fall through to default bitwise store
@@ -6972,15 +7032,12 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
 
     switch (type->kind) {
     case TypeKind::String: {
-        auto from_address = src.address ? src.address : nullptr;
-        if (!from_address) {
-            from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_str_copy");
-            builder.CreateStore(ensure_value(), from_address);
-        }
+        auto from_address = get_copy_source_address("_op_str_copy");
         auto copy_fn = get_system_fn("cx_string_copy");
         auto call = builder.CreateCall(copy_fn->llvm_fn, {dest, from_address});
         call->setDebugLoc(m_ctx->llvm_builder->getCurrentDebugLocation());
         emit_dbg_location(dbg_node);
+        destroy_copy_source_temp();
         return;
     }
     case TypeKind::FnLambda: {
@@ -7076,11 +7133,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
         auto copy_fn_p = sty->member_intrinsics.get(IntrinsicSymbol::Copy);
         if (copy_fn_p) {
             auto copy_fn = *copy_fn_p;
-            auto from_address = src.address ? src.address : nullptr;
-            if (!from_address) {
-                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_op_copy");
-                builder.CreateStore(ensure_value(), from_address);
-            }
+            auto from_address = get_copy_source_address("_op_copy");
             if (destruct_old) {
                 compile_destruction_for_type(fn, dest, type);
             }
@@ -7102,6 +7155,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                                                                           });
             call->setDebugLoc(loc);
             emit_dbg_location(dbg_node);
+            destroy_copy_source_temp();
             return;
         }
 
@@ -7123,12 +7177,7 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                 if (destruct_old) {
                     compile_destruction_for_type(fn, dest, type);
                 }
-                auto from_address = src.address;
-                if (!from_address) {
-                    from_address =
-                        builder.CreateAlloca(compile_type(type), nullptr, "_struct_copy_src");
-                    builder.CreateStore(ensure_value(), from_address);
-                }
+                auto from_address = get_copy_source_address("_struct_copy_src");
 
                 auto llvm_type = compile_type(type);
                 for (auto field : own) {
@@ -7136,10 +7185,10 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
                         builder.CreateStructGEP(llvm_type, from_address, field->field_index);
                     auto field_dest_gep =
                         builder.CreateStructGEP(llvm_type, dest, field->field_index);
-                    auto field_llvm_type = compile_type(field->resolved_type);
-                    auto field_value = builder.CreateLoad(field_llvm_type, field_src_gep);
-                    compile_copy(fn, field_value, field_dest_gep, field->resolved_type, expr);
+                    compile_copy_with_ref(fn, RefValue::from_address(field_src_gep), field_dest_gep,
+                                          field->resolved_type, expr, false);
                 }
+                destroy_copy_source_temp();
                 return;
             }
         }
@@ -7151,12 +7200,9 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             if (destruct_old) {
                 compile_destruction_for_type(fn, dest, type);
             }
-            auto from_address = src.address;
-            if (!from_address) {
-                from_address = builder.CreateAlloca(compile_type(type), nullptr, "_fa_copy_src");
-                builder.CreateStore(ensure_value(), from_address);
-            }
+            auto from_address = get_copy_source_address("_fa_copy_src");
             builder.CreateCall(copier->llvm_fn, {dest, from_address});
+            destroy_copy_source_temp();
             return;
         }
         // Trivially-copyable elements: fall through to default store
@@ -7385,11 +7431,16 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
                                  : base_constructor_fn;
             auto constructor_type_l = (llvm::FunctionType *)compile_type(constructor_fn->fn_type);
             auto args = std::vector<llvm::Value *>{dest};
+            ast::Block arg_cleanup_block = {};
+            std::vector<ast::Node *> transferred_cleanup_vars = {};
+            push_cleanup_block(fn, arg_cleanup_block);
             NodeList ctor_items = {};
             if (!use_list_init) {
                 ctor_items = expr->data.construct_expr.items;
             }
-            auto remaining_args = compile_fn_args(fn, constructor_fn, ctor_items, expr);
+            auto remaining_args =
+                compile_fn_args(fn, constructor_fn, ctor_items, expr, &arg_cleanup_block,
+                                &transferred_cleanup_vars);
             args.insert(args.end(), remaining_args.begin(), remaining_args.end());
 
             // Compile default args for missing params (e.g. = {} on generic field)
@@ -7400,10 +7451,16 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
                     if (!default_val)
                         break;
                     auto param_type = constructor_fn->fn_type->data.fn.get_param_at(i);
-                    args.push_back(compile_arg_for_call(fn, default_val, param_type));
+                    args.push_back(compile_arg_for_call(fn, default_val, param_type,
+                                                        &arg_cleanup_block,
+                                                        &transferred_cleanup_vars));
                 }
             }
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
+            for (auto *var : transferred_cleanup_vars) {
+                arg_cleanup_block.exit_flow.add_sink_edge(var, expr);
+            }
+            pop_cleanup_block(fn, arg_cleanup_block);
             emit_dbg_location(expr);
         }
 
@@ -7418,10 +7475,18 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto list_init_fn = *list_init_entry;
             auto list_init_type_l = (llvm::FunctionType *)compile_type(list_init_type);
             auto args = std::vector<llvm::Value *>{dest};
-            auto remaining_args =
-                compile_fn_args(fn, list_init_fn, expr->data.construct_expr.items, expr);
+            ast::Block arg_cleanup_block = {};
+            std::vector<ast::Node *> transferred_cleanup_vars = {};
+            push_cleanup_block(fn, arg_cleanup_block);
+            auto remaining_args = compile_fn_args(fn, list_init_fn, expr->data.construct_expr.items,
+                                                  expr, &arg_cleanup_block,
+                                                  &transferred_cleanup_vars);
             args.insert(args.end(), remaining_args.begin(), remaining_args.end());
             builder.CreateCall(list_init_type_l, list_init_fn->llvm_fn, args);
+            for (auto *var : transferred_cleanup_vars) {
+                arg_cleanup_block.exit_flow.add_sink_edge(var, expr);
+            }
+            pop_cleanup_block(fn, arg_cleanup_block);
             emit_dbg_location(expr);
             return;
         }
@@ -7465,7 +7530,9 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             assert(field);
             auto field_gep = builder.CreateStructGEP(compile_type(type), dest, field->field_index);
             data.compiled_field_address = field_gep;
-            compile_assignment_to_ptr(fn, data.value, field_gep, field->resolved_type);
+            bool destroys_old = field->node && field->node->data.var_decl.expr;
+            compile_assignment_to_ptr(fn, data.value, field_gep, field->resolved_type,
+                                      destroys_old);
         }
         break;
     }
@@ -8026,7 +8093,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         case TokenType::KW_MOVE:
         case TokenType::SUB:
             // These produce rvalues - return value only
-            return RefValue::from_value(compile_expr(fn, expr));
+            return RefValue::from_owned_value(compile_expr(fn, expr));
         default:
             panic("compile_expr_ref UnaryOpExpr not implemented: {}", PRINT_ENUM(data.op_type));
         }
@@ -8109,7 +8176,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         if (it != m_async_await_refs.end()) {
             return it->second;
         }
-        return RefValue::from_value(compile_expr(fn, expr));
+        return RefValue::from_owned_value(compile_expr(fn, expr));
     }
     case ast::NodeType::CastExpr: {
         auto &data = expr->data.cast_expr;
@@ -8120,7 +8187,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         if (it != m_async_await_refs.end()) {
             return it->second;
         }
-        return RefValue::from_value(compile_expr(fn, expr));
+        return RefValue::from_owned_value(compile_expr(fn, expr));
     }
     default:
         panic("compile_expr_ref not implemented: {}", PRINT_ENUM(expr->type));
@@ -8199,7 +8266,7 @@ RefValue Compiler::compile_iden_ref(Function *fn, ast::Node *iden) {
         // If the identifier type is a lambda, we need to create a lambda struct
         if (iden_type->kind == TypeKind::FnLambda) {
             auto lambda_value = compile_lambda_alloc(fn, iden_type, fn_obj->llvm_fn, nullptr);
-            return RefValue::from_value(lambda_value);
+            return RefValue::from_owned_value(lambda_value);
         }
 
         // Otherwise, return the raw function pointer
@@ -8250,8 +8317,9 @@ normal:
     return RefValue::from_address(get_var(data.decl));
 }
 
-std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *callee,
-                                                     array<ast::Node *> args, ast::Node *fn_call) {
+std::vector<llvm::Value *> Compiler::compile_fn_args(
+    Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call,
+    ast::Block *cleanup_block, std::vector<ast::Node *> *transferred_cleanup_vars) {
     std::vector<llvm::Value *> call_args = {};
     auto &fn_spec = callee->fn_type->data.fn;
     auto va_start = fn_spec.get_va_start();
@@ -8272,7 +8340,8 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(Function *fn, Function *cal
 
         // For C variadic args (param_type is nullptr), compile the expression directly
         if (param_type) {
-            call_args.push_back(compile_arg_for_call(fn, arg_node, param_type));
+            call_args.push_back(compile_arg_for_call(fn, arg_node, param_type, cleanup_block,
+                                                     transferred_cleanup_vars));
         } else {
             call_args.push_back(compile_expr(fn, arg_node));
         }
@@ -8588,6 +8657,9 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto bound_fn_type_l =
             (llvm::FunctionType *)compile_type(lambda_type->data.fn_lambda.bound_fn);
         std::vector<llvm::Value *> args = {};
+        ast::Block arg_cleanup_block = {};
+        std::vector<ast::Node *> transferred_cleanup_vars = {};
+        push_cleanup_block(fn, arg_cleanup_block);
 
         // __CxLambda is no longer generic, so just use it directly
         auto struct_type = lambda_type->data.fn_lambda.internal;
@@ -8627,7 +8699,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             // User arguments always start from parameter index 1 (after binding struct)
             int param_index = i + 1;
             auto param_type = fn_spec.get_param_at(param_index);
-            args.push_back(compile_arg_for_call(fn, arg, param_type));
+            args.push_back(compile_arg_for_call(fn, arg, param_type, &arg_cleanup_block,
+                                                &transferred_cleanup_vars));
         }
 
         llvm::FunctionCallee callee(bound_fn_type_l, fn_ptr);
@@ -8644,10 +8717,19 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 invoke->sret = sret_var;
                 invoke->sret_type = compile_type(return_type);
             }
+            fn->use_label(invoke->normal);
+            for (auto *var : transferred_cleanup_vars) {
+                arg_cleanup_block.exit_flow.add_sink_edge(var, data.fn_ref_expr);
+            }
+            pop_cleanup_block(fn, arg_cleanup_block);
             // Invoke is a terminator - return value will be loaded by caller if needed
             return ret;
         } else {
             ret = builder.CreateCall(callee, args);
+            for (auto *var : transferred_cleanup_vars) {
+                arg_cleanup_block.exit_flow.add_sink_edge(var, data.fn_ref_expr);
+            }
+            pop_cleanup_block(fn, arg_cleanup_block);
             // For sret, load and return the struct value
             if (use_sret) {
                 if (sret_dest) {
@@ -8732,6 +8814,9 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto va_start = fn_spec.get_va_start();
 
     std::vector<llvm::Value *> args;
+    ast::Block arg_cleanup_block = {};
+    std::vector<ast::Node *> transferred_cleanup_vars = {};
+    push_cleanup_block(fn, arg_cleanup_block);
 
     llvm::FunctionCallee callee;
     llvm::Value *ctn_ptr = nullptr;
@@ -8850,7 +8935,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             continue;
         }
 
-        args.push_back(compile_arg_for_call(fn, arg, param_type));
+        args.push_back(compile_arg_for_call(fn, arg, param_type, &arg_cleanup_block,
+                                            &transferred_cleanup_vars));
     }
     // Compile default values for missing arguments
     if (fn_decl->type == ast::NodeType::FnDef) {
@@ -8860,7 +8946,8 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
             if (!default_val)
                 break;
             auto param_type = fn_spec.get_param_at(i);
-            args.push_back(compile_arg_for_call(fn, default_val, param_type));
+            args.push_back(compile_arg_for_call(fn, default_val, param_type, &arg_cleanup_block,
+                                                &transferred_cleanup_vars));
         }
     }
 
@@ -8873,6 +8960,13 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto return_type = fn_type->data.fn.return_type;
     auto sret_type = fn_type->data.fn.should_use_sret() ? compile_type(return_type) : nullptr;
     auto result = create_fn_call_invoke(callee, args, sret_type, invoke, sret_dest);
+    if (invoke && invoke->used) {
+        fn->use_label(invoke->normal);
+    }
+    for (auto *var : transferred_cleanup_vars) {
+        arg_cleanup_block.exit_flow.add_sink_edge(var, expr);
+    }
+    pop_cleanup_block(fn, arg_cleanup_block);
 
     return result;
 }

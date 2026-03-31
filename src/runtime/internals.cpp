@@ -13,14 +13,23 @@
 #include <cstring>
 #include <exception>
 #include <type_traits>
+#include <algorithm>
+#include <atomic>
 #include <unistd.h>
 #include <sstream>
 #include <vector>
+#include <string>
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/select.h>
 #include <dirent.h>
 #include <uv.h>
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#elif defined(__linux__)
+#include <malloc.h>
+#endif
 #if __has_include(<ptrauth.h>)
 #include <ptrauth.h>
 #endif
@@ -57,6 +66,47 @@ struct StackTrace {
     uint32_t error_type_id = 0;       // ChiType::id for downcast matching
 };
 
+namespace {
+#if CHI_DEBUG_ALLOCATOR_RUNTIME
+std::atomic<bool> g_debug_allocator_enabled = false;
+std::atomic<uint64_t> g_debug_live_bytes = 0;
+std::atomic<uint64_t> g_debug_peak_live_bytes = 0;
+std::atomic<uint64_t> g_debug_live_alloc_count = 0;
+std::atomic<uint64_t> g_debug_peak_live_alloc_count = 0;
+std::atomic<uint64_t> g_debug_alloc_count = 0;
+std::atomic<uint64_t> g_debug_free_count = 0;
+
+static uint64_t alloc_usable_size_or_zero(void *address) {
+    if (!address) return 0;
+#if defined(__APPLE__)
+    return malloc_size(address);
+#elif defined(__linux__)
+    return malloc_usable_size(address);
+#else
+    return 0;
+#endif
+}
+
+static void update_debug_peak(uint64_t live_bytes) {
+    auto peak = g_debug_peak_live_bytes.load(std::memory_order_relaxed);
+    while (live_bytes > peak &&
+           !g_debug_peak_live_bytes.compare_exchange_weak(
+               peak, live_bytes, std::memory_order_relaxed, std::memory_order_relaxed
+           )) {
+    }
+}
+
+static void update_debug_alloc_peak(uint64_t live_alloc_count) {
+    auto peak = g_debug_peak_live_alloc_count.load(std::memory_order_relaxed);
+    while (live_alloc_count > peak &&
+           !g_debug_peak_live_alloc_count.compare_exchange_weak(
+               peak, live_alloc_count, std::memory_order_relaxed, std::memory_order_relaxed
+           )) {
+    }
+}
+#endif
+} // namespace
+
 struct CxCapture {
     uint32_t ref_count;
     uint32_t payload_size;
@@ -71,6 +121,151 @@ static int32_t program_argc = 0;
 static char **program_argv = nullptr;
 
 namespace {
+
+void set_command_result_error(CxCommandResult *result, int32_t exit_code, const char *message) {
+    if (!result) return;
+    result->exit_code = exit_code;
+    result->stdout_text = {};
+    result->stderr_text = {};
+    if (message) {
+        cx_string_from_chars(message, (uint32_t)strlen(message), &result->stderr_text);
+    }
+}
+
+void init_command_result(CxCommandResult *result) {
+    if (!result) return;
+    result->exit_code = -1;
+    result->stdout_text = {};
+    result->stderr_text = {};
+}
+
+int32_t decode_wait_status(int status) {
+    if (status == -1) {
+        return -1;
+    }
+#ifdef WIFEXITED
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+#endif
+    return status;
+}
+
+int read_chunk_from_fd(int fd, string &output) {
+    char buf[4096];
+    while (true) {
+        ssize_t n = read(fd, buf, sizeof(buf));
+        if (n > 0) {
+            output.append(buf, (size_t)n);
+            return 1;
+        }
+        if (n == 0) {
+            return 0;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        return -1;
+    }
+}
+
+template <typename ExecFn>
+void run_child_command(ExecFn exec_child, CxCommandResult *result) {
+    init_command_result(result);
+
+    int stdout_pipe[2];
+    int stderr_pipe[2];
+    if (pipe(stdout_pipe) == -1) {
+        set_command_result_error(result, -1, strerror(errno));
+        return;
+    }
+    if (pipe(stderr_pipe) == -1) {
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        set_command_result_error(result, -1, strerror(errno));
+        return;
+    }
+
+    auto pid = fork();
+    if (pid == -1) {
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        close(stderr_pipe[0]);
+        close(stderr_pipe[1]);
+        set_command_result_error(result, -1, strerror(errno));
+        return;
+    }
+
+    if (pid == 0) {
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        dup2(stderr_pipe[1], STDERR_FILENO);
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        close(stderr_pipe[0]);
+        close(stderr_pipe[1]);
+        exec_child();
+        _exit(127);
+    }
+
+    close(stdout_pipe[1]);
+    close(stderr_pipe[1]);
+
+    struct StreamCapture {
+        int fd;
+        string text;
+        bool open = true;
+    };
+    StreamCapture captures[2] = {{stdout_pipe[0]}, {stderr_pipe[0]}};
+
+    while (captures[0].open || captures[1].open) {
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        int max_fd = -1;
+        for (auto &cap : captures) {
+            if (cap.open) {
+                FD_SET(cap.fd, &rfds);
+                max_fd = std::max(max_fd, cap.fd);
+            }
+        }
+
+        if (select(max_fd + 1, &rfds, nullptr, nullptr, nullptr) == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+
+        for (auto &cap : captures) {
+            if (cap.open && FD_ISSET(cap.fd, &rfds)) {
+                if (read_chunk_from_fd(cap.fd, cap.text) <= 0) {
+                    cap.open = false;
+                    close(cap.fd);
+                }
+            }
+        }
+    }
+
+    for (auto &cap : captures) {
+        if (cap.open) {
+            close(cap.fd);
+        }
+    }
+
+    auto &stdout_text = captures[0].text;
+    auto &stderr_text = captures[1].text;
+
+    int status = 0;
+    while (waitpid(pid, &status, 0) == -1) {
+        if (errno != EINTR) {
+            status = -1;
+            break;
+        }
+    }
+
+    result->exit_code = decode_wait_status(status);
+    cx_string_from_chars(stdout_text.data(), (uint32_t)stdout_text.size(), &result->stdout_text);
+    cx_string_from_chars(stderr_text.data(), (uint32_t)stderr_text.size(), &result->stderr_text);
+}
 
 struct MainThreadUvTask {
     MainThreadUvTask *next = nullptr;
@@ -1037,11 +1232,116 @@ void *cx_gc_realloc(void *address, uint32_t size, void *_ignored) {
 
 void cx_gc_free(void *address) { tgc_free(&gc, address); }
 
+#if CHI_DEBUG_ALLOCATOR_RUNTIME
+void cx_debug_allocator_set_enabled(bool enabled) {
+    g_debug_allocator_enabled.store(enabled, std::memory_order_relaxed);
+}
+
+bool cx_debug_allocator_is_enabled() {
+    return g_debug_allocator_enabled.load(std::memory_order_relaxed);
+}
+
+void cx_debug_allocator_reset() {
+    g_debug_live_bytes.store(0, std::memory_order_relaxed);
+    g_debug_peak_live_bytes.store(0, std::memory_order_relaxed);
+    g_debug_live_alloc_count.store(0, std::memory_order_relaxed);
+    g_debug_peak_live_alloc_count.store(0, std::memory_order_relaxed);
+    g_debug_alloc_count.store(0, std::memory_order_relaxed);
+    g_debug_free_count.store(0, std::memory_order_relaxed);
+}
+
+void *cx_malloc(uint32_t size, void *_ignored) {
+    if (!g_debug_allocator_enabled.load(std::memory_order_relaxed)) {
+        return malloc(size);
+    }
+    auto address = malloc(size);
+    if (!address) {
+        return nullptr;
+    }
+    auto actual = alloc_usable_size_or_zero(address);
+    g_debug_alloc_count.fetch_add(1, std::memory_order_relaxed);
+    auto live_alloc_count =
+        g_debug_live_alloc_count.fetch_add(1, std::memory_order_relaxed) + 1;
+    auto live = g_debug_live_bytes.fetch_add(actual, std::memory_order_relaxed) + actual;
+    update_debug_peak(live);
+    update_debug_alloc_peak(live_alloc_count);
+    return address;
+}
+
+void *cx_realloc(void *address, uint32_t size, void *_ignored) {
+    if (!g_debug_allocator_enabled.load(std::memory_order_relaxed)) {
+        return realloc(address, size);
+    }
+    auto old_size = alloc_usable_size_or_zero(address);
+    bool had_old = address != nullptr;
+    auto new_address = realloc(address, size);
+    if (had_old && !new_address && size != 0) {
+        return nullptr;
+    }
+    auto new_size = alloc_usable_size_or_zero(new_address);
+    if (!had_old && new_address) {
+        g_debug_alloc_count.fetch_add(1, std::memory_order_relaxed);
+        auto live_alloc_count =
+            g_debug_live_alloc_count.fetch_add(1, std::memory_order_relaxed) + 1;
+        auto live = g_debug_live_bytes.fetch_add(new_size, std::memory_order_relaxed) + new_size;
+        update_debug_peak(live);
+        update_debug_alloc_peak(live_alloc_count);
+        return new_address;
+    }
+    if (had_old && !new_address) {
+        g_debug_free_count.fetch_add(1, std::memory_order_relaxed);
+        g_debug_live_alloc_count.fetch_sub(1, std::memory_order_relaxed);
+        g_debug_live_bytes.fetch_sub(old_size, std::memory_order_relaxed);
+        return new_address;
+    }
+    auto live =
+        g_debug_live_bytes.fetch_sub(old_size, std::memory_order_relaxed) - old_size + new_size;
+    g_debug_live_bytes.store(live, std::memory_order_relaxed);
+    update_debug_peak(live);
+    return new_address;
+}
+
+void cx_free(void *address) {
+    if (!g_debug_allocator_enabled.load(std::memory_order_relaxed)) {
+        free(address);
+        return;
+    }
+    if (!address) {
+        return;
+    }
+    auto actual = alloc_usable_size_or_zero(address);
+    g_debug_free_count.fetch_add(1, std::memory_order_relaxed);
+    g_debug_live_alloc_count.fetch_sub(1, std::memory_order_relaxed);
+    g_debug_live_bytes.fetch_sub(actual, std::memory_order_relaxed);
+    free(address);
+}
+
+uint64_t cx_debug_live_bytes() { return g_debug_live_bytes.load(std::memory_order_relaxed); }
+uint64_t cx_debug_peak_live_bytes() {
+    return g_debug_peak_live_bytes.load(std::memory_order_relaxed);
+}
+uint64_t cx_debug_live_alloc_count() {
+    return g_debug_live_alloc_count.load(std::memory_order_relaxed);
+}
+uint64_t cx_debug_peak_live_alloc_count() {
+    return g_debug_peak_live_alloc_count.load(std::memory_order_relaxed);
+}
+uint64_t cx_debug_alloc_count() { return g_debug_alloc_count.load(std::memory_order_relaxed); }
+uint64_t cx_debug_free_count() { return g_debug_free_count.load(std::memory_order_relaxed); }
+#else
+void cx_debug_allocator_set_enabled(bool enabled) { (void)enabled; }
+bool cx_debug_allocator_is_enabled() { return false; }
+void cx_debug_allocator_reset() {}
 void *cx_malloc(uint32_t size, void *_ignored) { return malloc(size); }
-
 void *cx_realloc(void *address, uint32_t size, void *_ignored) { return realloc(address, size); }
-
-void cx_free(void *address) { return free(address); }
+void cx_free(void *address) { free(address); }
+uint64_t cx_debug_live_bytes() { return 0; }
+uint64_t cx_debug_peak_live_bytes() { return 0; }
+uint64_t cx_debug_live_alloc_count() { return 0; }
+uint64_t cx_debug_peak_live_alloc_count() { return 0; }
+uint64_t cx_debug_alloc_count() { return 0; }
+uint64_t cx_debug_free_count() { return 0; }
+#endif
 
 void cx_debug(void *ptr) {
     auto p = (CxAny *)ptr;
@@ -1647,23 +1947,22 @@ char *__cx_getcwd(void) {
     return (char *)"";
 }
 
-int32_t __cx_system(const char *command) {
-    auto status = system(command);
-    if (status == -1) {
-        return -1;
-    }
-#ifdef WIFEXITED
-    if (WIFEXITED(status)) {
-        return WEXITSTATUS(status);
-    }
-#endif
-    return status;
+void __cx_system(const char *command, CxCommandResult *result) {
+    run_child_command(
+        [command]() {
+            execl("/bin/sh", "sh", "-c", command, (char *)nullptr);
+            perror("sh");
+        },
+        result
+    );
 }
 
-int32_t __cx_command(void *args_ptr) {
+void __cx_command(void *args_ptr, CxCommandResult *result) {
+    init_command_result(result);
     auto *args = (CxSlice *)args_ptr;
     if (!args || args->size == 0) {
-        return -1;
+        set_command_result_error(result, -1, "empty command");
+        return;
     }
 
     auto *items = (CxString *)args->data;
@@ -1674,40 +1973,19 @@ int32_t __cx_command(void *args_ptr) {
     }
     argv.push_back(nullptr);
 
-    auto pid = fork();
-    if (pid == -1) {
-        for (auto *arg : argv) {
-            if (arg) {
-                free(arg);
-            }
-        }
-        return -1;
-    }
-
-    if (pid == 0) {
-        execvp(argv[0], argv.data());
-        _exit(127);
-    }
+    run_child_command(
+        [&argv]() {
+            execvp(argv[0], argv.data());
+            perror(argv[0]);
+        },
+        result
+    );
 
     for (auto *arg : argv) {
         if (arg) {
             free(arg);
         }
     }
-
-    int status = 0;
-    while (waitpid(pid, &status, 0) == -1) {
-        if (errno != EINTR) {
-            return -1;
-        }
-    }
-
-#ifdef WIFEXITED
-    if (WIFEXITED(status)) {
-        return WEXITSTATUS(status);
-    }
-#endif
-    return status;
 }
 
 int32_t __cx_argc(void) { return program_argc; }

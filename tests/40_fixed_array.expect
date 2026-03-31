@@ -75,10 +75,11 @@ Traced(2) created
 iterating...
 Traced(1) copied
 item: 1
+Traced(1) destroyed
 Traced(2) copied
 item: 2
-before scope exit
 Traced(2) destroyed
+before scope exit
 Traced(2) destroyed
 Traced(1) destroyed
 === ref iteration ===
@@ -94,4 +95,4 @@ Traced(1) destroyed
 0
 0
 0
-0 0
+0 0 

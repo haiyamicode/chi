@@ -381,9 +381,13 @@ enum ArrayFlag { None, Static };
 struct RefValue {
     llvm::Value *address = nullptr;
     llvm::Value *value = nullptr;
+    bool owns_value = false;
 
-    static RefValue from_value(llvm::Value *value) { return {nullptr, value}; }
-    static RefValue from_address(llvm::Value *address) { return {address, nullptr}; }
+    static RefValue from_value(llvm::Value *value, bool owns_value = false) {
+        return {nullptr, value, owns_value};
+    }
+    static RefValue from_owned_value(llvm::Value *value) { return {nullptr, value, true}; }
+    static RefValue from_address(llvm::Value *address) { return {address, nullptr, false}; }
 };
 
 struct CompiledVtable {
@@ -523,7 +527,9 @@ class Compiler {
     RefValue compile_iden_ref(Function *fn, ast::Node *iden);
 
     std::vector<llvm::Value *> compile_fn_args(
-        Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call);
+        Function *fn, Function *callee, array<ast::Node *> args, ast::Node *fn_call,
+        ast::Block *cleanup_block = nullptr,
+        std::vector<ast::Node *> *transferred_cleanup_vars = nullptr);
     llvm::Value *compile_fn_call(Function *fn, ast::Node *fn_call, InvokeInfo *invoke = nullptr,
                                  llvm::Value *sret_dest = nullptr);
     llvm::Value *compile_intrinsic(Function *fn, ast::Node *expr, InvokeInfo *invoke,
@@ -541,7 +547,13 @@ class Compiler {
 
     llvm::Value *compile_assignment_to_type(Function *fn, ast::Node *expr, ChiType *dest_type,
                                             bool allow_saved_owning_conversion = true);
-    llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type);
+    ast::Node *create_cleanup_temp_var(Function *fn, ast::Node *expr, ChiType *type,
+                                       ast::Block *cleanup_block, const string &name);
+    void push_cleanup_block(Function *fn, ast::Block &block);
+    void pop_cleanup_block(Function *fn, ast::Block &block);
+    llvm::Value *compile_arg_for_call(Function *fn, ast::Node *expr, ChiType *param_type,
+                                      ast::Block *cleanup_block = nullptr,
+                                      std::vector<ast::Node *> *transferred_cleanup_vars = nullptr);
     llvm::Value *compile_extern_variadic_arg(Function *fn, ast::Node *expr);
     llvm::Value *compile_direct_call_arg(Function *fn, ast::Node *expr, ChiType *param_type);
     llvm::Value *build_span_value(ChiType *span_type, llvm::Value *data_ptr, llvm::Value *length);

@@ -52,6 +52,12 @@ struct CxRefc {
     int32_t *refcnt;
 };
 
+struct CxCommandResult {
+    int32_t exit_code;
+    CxString stdout_text;
+    CxString stderr_text;
+};
+
 // Mirrors the Chi __CxLambda struct layout: { fn_ptr, length, captures }
 struct CxLambda {
     void *fn_ptr;
@@ -147,6 +153,15 @@ CHI_RT_EXPORT void cx_gc_free(void *address);
 CHI_RT_EXPORT void *cx_malloc(uint32_t size, void *ignored = NULL);
 CHI_RT_EXPORT void *cx_realloc(void *address, uint32_t size, void *ignored = NULL);
 CHI_RT_EXPORT void cx_free(void *address);
+CHI_RT_EXPORT void cx_debug_allocator_set_enabled(bool enabled);
+CHI_RT_EXPORT bool cx_debug_allocator_is_enabled();
+CHI_RT_EXPORT void cx_debug_allocator_reset();
+CHI_RT_EXPORT uint64_t cx_debug_live_bytes();
+CHI_RT_EXPORT uint64_t cx_debug_peak_live_bytes();
+CHI_RT_EXPORT uint64_t cx_debug_live_alloc_count();
+CHI_RT_EXPORT uint64_t cx_debug_peak_live_alloc_count();
+CHI_RT_EXPORT uint64_t cx_debug_alloc_count();
+CHI_RT_EXPORT uint64_t cx_debug_free_count();
 CHI_RT_EXPORT void cx_memset(void *dest, uint8_t value, uint32_t size);
 
 CHI_RT_EXPORT void cx_runtime_start(void *stack);
@@ -204,8 +219,8 @@ CHI_RT_EXPORT void __cx_platform_tags(CxArray *result);
 CHI_RT_EXPORT const char *__cx_getenv(const char *key);
 CHI_RT_EXPORT void __cx_setenv(const char *key, const char *value);
 CHI_RT_EXPORT char *__cx_getcwd(void);
-CHI_RT_EXPORT int32_t __cx_system(const char *command);
-CHI_RT_EXPORT int32_t __cx_command(void *args);
+CHI_RT_EXPORT void __cx_system(const char *command, CxCommandResult *result);
+CHI_RT_EXPORT void __cx_command(void *args, CxCommandResult *result);
 CHI_RT_EXPORT int32_t __cx_argc(void);
 CHI_RT_EXPORT const char *__cx_argv(int32_t index);
 

@@ -4762,6 +4762,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::ForStmt: {
         auto &data = node->data.for_stmt;
+        auto body_block_scope = scope.set_block(&data.body->data.block);
 
         // Try to infer loop variable type from condition (e.g., `for var i=0; i<len; i++`)
         ChiType *loop_var_hint = nullptr;
@@ -4808,7 +4809,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 check_assignment(range.end, end_type, start_type, &scope);
                 data.resolved_kind = ast::ForLoopKind::IntRange;
                 if (data.bind) {
-                    auto bind_scope = scope.set_value_type(start_type);
+                    auto bind_scope = body_block_scope.set_value_type(start_type);
                     resolve(data.bind, bind_scope);
                 }
             } else {
@@ -4838,11 +4839,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         default:
                             break;
                         }
-                        auto bind_scope = scope.set_value_type(value_type);
+                        auto bind_scope = body_block_scope.set_value_type(value_type);
                         resolve(data.bind, bind_scope);
                     }
                     if (data.index_bind) {
-                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        auto idx_scope =
+                            body_block_scope.set_value_type(get_system_types()->uint32);
                         resolve(data.index_bind, idx_scope);
                     }
                     auto loop_scope = scope.set_parent_loop(node);
@@ -4867,11 +4869,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         default:
                             break;
                         }
-                        auto bind_scope = scope.set_value_type(value_type);
+                        auto bind_scope = body_block_scope.set_value_type(value_type);
                         resolve(data.bind, bind_scope);
                     }
                     if (data.index_bind) {
-                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        auto idx_scope =
+                            body_block_scope.set_value_type(get_system_types()->uint32);
                         resolve(data.index_bind, idx_scope);
                     }
                     auto loop_scope = scope.set_parent_loop(node);
@@ -4908,11 +4911,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         default:
                             break;
                         }
-                        auto bind_scope = scope.set_value_type(value_type);
+                        auto bind_scope = body_block_scope.set_value_type(value_type);
                         resolve(data.bind, bind_scope);
                     }
                     if (data.index_bind) {
-                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        auto idx_scope =
+                            body_block_scope.set_value_type(get_system_types()->uint32);
                         resolve(data.index_bind, idx_scope);
                     }
                 } else if (sty->member_intrinsics.get(IntrinsicSymbol::MutIterable)) {
@@ -4940,11 +4944,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         // next() returns ?&mut T — unwrap optional to get &mut T
                         auto opt_type = (*next_fn)->resolved_type->data.fn.return_type;
                         auto value_type = opt_type->get_elem(); // ?&mut T → &mut T
-                        auto bind_scope = scope.set_value_type(value_type);
+                        auto bind_scope = body_block_scope.set_value_type(value_type);
                         resolve(data.bind, bind_scope);
                     }
                     if (data.index_bind) {
-                        auto idx_scope = scope.set_value_type(get_system_types()->uint32);
+                        auto idx_scope =
+                            body_block_scope.set_value_type(get_system_types()->uint32);
                         resolve(data.index_bind, idx_scope);
                     }
                 } else {

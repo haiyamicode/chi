@@ -40,8 +40,14 @@ test: test_compiler
 test_compiler: build
 	(cd tests; make test)
 
-stress: build
-	(cd tests; make stress N=$(or $(N),1000))
+stress: build install
+	(cd tests; make stress)
+
+compile_stress: build install
+	$(CHIC) --debug-allocator-runtime -o /tmp/lifecycle_fuzz -c tests/fuzz/lifecycle_mega_fuzz.xs
+
+run_stress: compile_stress
+	/tmp/lifecycle_fuzz
 
 analyzer_test: build
 	(cd analyzer_tests; make test)

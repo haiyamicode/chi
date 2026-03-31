@@ -644,6 +644,17 @@ struct HoldsVal {
     }
 }
 
+struct HoldsValArray {
+    items: Array<TrackedVal> = [];
+}
+
+func make_holds_val_array(a: int, b: int) HoldsValArray {
+    var items: Array<TrackedVal> = [];
+    items.push(TrackedVal{a});
+    items.push(TrackedVal{b});
+    return {items: items};
+}
+
 func test_temp_move_semantics() {
     println("=== Test 14: Temp move semantics (no unnecessary copies) ===");
 
@@ -713,6 +724,76 @@ func test_temp_move_semantics() {
     println("--- scope exit ---");
 }
 
+func test_map_set_replacement_cleanup() {
+    println("=== Test 15: Map.set replacement destroys old value ===");
+    var m = Map<int, TrackedVal>{};
+    m.set(1, TrackedVal{201});
+    m.set(1, TrackedVal{202});
+    println("--- scope exit ---");
+}
+
+func consume_holds_val_array(value: HoldsValArray) {
+    printf("  consumed.len={}\n", value.items.length);
+}
+
+func test_by_value_nested_array_param_cleanup() {
+    println("=== Test 16: by-value nested array param owns its own copy ===");
+    var value = make_holds_val_array(211, 212);
+    consume_holds_val_array(value);
+    println("--- scope exit ---");
+}
+
+func test_array_copy_nested_array_cleanup() {
+    println("=== Test 17: Array.copy handles nested array values ===");
+    var values: Array<HoldsValArray> = [];
+    values.push(make_holds_val_array(301, 302));
+    values.push(make_holds_val_array(303, 304));
+    var copied = values;
+    printf("  copied.len={}\n", copied.length);
+    println("--- scope exit ---");
+}
+
+struct TrackedInitField {
+    id: int = 0;
+
+    mut func new(id: int) {
+        this.id = id;
+        printf("  TrackedInitField.new({})\n", id);
+    }
+
+    mut func delete() {
+        printf("  TrackedInitField.delete({})\n", this.id);
+    }
+
+    impl ops.Copy {
+        mut func copy(source: &This) {
+            this.id = source.id;
+        }
+    }
+}
+
+struct HoldsTrackedInitField {
+    item: TrackedInitField = {410};
+}
+
+func test_construct_field_initializer_cleanup() {
+    println("=== Test 18: explicit field init destroys default field value ===");
+    var value = HoldsTrackedInitField{item: {420}};
+    printf("  value.item.id={}\n", value.item.id);
+    println("--- scope exit ---");
+}
+
+struct HoldsTrackedNoDefaultField {
+    item: TrackedInitField;
+}
+
+func test_construct_field_initializer_without_default() {
+    println("=== Test 19: explicit field init without default does not destroy garbage ===");
+    var value = HoldsTrackedNoDefaultField{item: {430}};
+    printf("  value.item.id={}\n", value.item.id);
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -728,5 +809,10 @@ func main() {
     test_fn_arg_copy_semantics();
     test_method_param_cleanup();
     test_temp_move_semantics();
+    test_map_set_replacement_cleanup();
+    test_by_value_nested_array_param_cleanup();
+    test_array_copy_nested_array_cleanup();
+    test_construct_field_initializer_cleanup();
+    test_construct_field_initializer_without_default();
     println("All tests completed!");
 }

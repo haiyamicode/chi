@@ -507,18 +507,38 @@ formatter_semantic_collapse_test:
 	rm -f $(TMP).formatter_semantic_collapse.fmt; \
 	echo "formatter semantic collapse test passed"
 
-# Stress test: run all tests N times to catch non-deterministic bugs
-# Usage: make stress N=1000
-N ?= 1000
-STRESS_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test 18_gc_escape.test,$(TESTS_LIST)))
+# Dedicated heavy lifecycle stress suite. Keep it out of TESTS_LIST.
 stress:
-	@echo "Stress testing ($(N) iterations)..."
-	@for i in $$(seq 1 $(N)); do \
-		for t in $(STRESS_TESTS); do \
-			src=$$t.xs; [ -f $$src ] || src=$$t.x; \
-			$(CHIC) -o $(TMP).$$t -c $$src && $(TMP).$$t >$(TMP).$$t.out 2>&1 || { echo "FAIL $$t at iteration $$i (compile/run)"; exit 1; }; \
-			diff -qbu $$t.expect $(TMP).$$t.out >/dev/null || { echo "FAIL $$t at iteration $$i (output mismatch)"; diff -u $$t.expect $(TMP).$$t.out; exit 1; }; \
-		done; \
-		if [ $$((i % 100)) -eq 0 ]; then echo "  $$i/$(N) OK"; fi; \
-	done; \
-	echo "Stress test: $(N)/$(N) PASSED"
+	@echo "Test: fuzz/lifecycle_mega_fuzz..."
+	@tmp_base=$$(mktemp /tmp/chitests.lifecycle_mega_fuzz.XXXXXX); \
+	bin="$${tmp_base}.bin"; \
+	out="$${tmp_base}.out"; \
+	$(CHIC) --debug-allocator-runtime -o "$$bin" -c fuzz/lifecycle_mega_fuzz.xs || exit $$?; \
+	"$$bin" > "$$out" 2>&1; \
+	status=$$?; \
+	if [ $$status -ne 0 ]; then \
+		echo "error in test fuzz/lifecycle_mega_fuzz (compile/run)"; \
+		cat "$$out"; \
+		rm -f "$$bin" "$$out"; \
+		exit $$status; \
+	fi; \
+	if [ ! -f "$$out" ]; then \
+		echo "error in test fuzz/lifecycle_mega_fuzz (missing output file)"; \
+		rm -f "$$bin"; \
+		exit 1; \
+	fi; \
+	checkpoints=$$(grep -c '^checkpoint ' "$$out" 2>/dev/null || true); \
+	if [ $$checkpoints -ne 10 ]; then \
+		echo "error in test fuzz/lifecycle_mega_fuzz (missing checkpoints)"; \
+		cat "$$out"; \
+		rm -f "$$bin" "$$out"; \
+		exit 1; \
+	fi; \
+	if ! diff -qbu fuzz/lifecycle_mega_fuzz.expect "$$out" >/dev/null; then \
+		echo "error in test fuzz/lifecycle_mega_fuzz (output mismatch)"; \
+		diff -u fuzz/lifecycle_mega_fuzz.expect "$$out"; \
+		rm -f "$$bin" "$$out"; \
+		exit 1; \
+	fi; \
+	rm -f "$$bin" "$$out"; \
+	echo "fuzz allocator tracking ok"

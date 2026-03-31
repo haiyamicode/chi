@@ -7,6 +7,15 @@ extern "C" {
     unsafe func cx_malloc(size: uint32, ignored: *void) *void;
     unsafe func cx_realloc(address: *void, size: uint32, ignored: *void) *void;
     unsafe func cx_free(address: *void);
+    unsafe func cx_debug_allocator_set_enabled(enabled: bool);
+    unsafe func cx_debug_allocator_is_enabled() bool;
+    unsafe func cx_debug_allocator_reset();
+    unsafe func cx_debug_live_bytes() uint64;
+    unsafe func cx_debug_peak_live_bytes() uint64;
+    unsafe func cx_debug_live_alloc_count() uint64;
+    unsafe func cx_debug_peak_live_alloc_count() uint64;
+    unsafe func cx_debug_alloc_count() uint64;
+    unsafe func cx_debug_free_count() uint64;
     unsafe func cx_memset(address: *void, v: uint8, n: uint32);
     unsafe func __copy(dest: *void, src: *void, destruct_old: bool);
     unsafe func __move(dest: *void, src: *void, size: uint32);
@@ -85,6 +94,48 @@ export func copy<T: ops.Unsized>(val: &T) &move T {
 
 export unsafe func free(address: *void) {
     cx_free(address);
+}
+
+export struct DebugAllocatorStats {
+    live_bytes: uint64 = 0;
+    peak_live_bytes: uint64 = 0;
+    live_alloc_count: uint64 = 0;
+    peak_live_alloc_count: uint64 = 0;
+    alloc_count: uint64 = 0;
+    free_count: uint64 = 0;
+}
+
+export struct DebugAllocator {
+    static func set_enabled(enabled: bool) {
+        unsafe {
+            cx_debug_allocator_set_enabled(enabled);
+        }
+    }
+
+    static func is_enabled() bool {
+        unsafe {
+            return cx_debug_allocator_is_enabled();
+        }
+    }
+
+    static func reset() {
+        unsafe {
+            cx_debug_allocator_reset();
+        }
+    }
+
+    static func stats() DebugAllocatorStats {
+        unsafe {
+            return DebugAllocatorStats{
+                live_bytes: cx_debug_live_bytes(),
+                peak_live_bytes: cx_debug_peak_live_bytes(),
+                live_alloc_count: cx_debug_live_alloc_count(),
+                peak_live_alloc_count: cx_debug_peak_live_alloc_count(),
+                alloc_count: cx_debug_alloc_count(),
+                free_count: cx_debug_free_count()
+            };
+        }
+    }
 }
 
 export unsafe func memset(address: *void, v: uint8, n: uint32) {

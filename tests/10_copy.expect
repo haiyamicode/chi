@@ -159,6 +159,7 @@ MoveOnly(30) destroyed
 === Test 18: Optional-chain conversion matrix ===
 -- optional chain field --
 Traced(50) created
+Traced(50) copied
 scope a
 -- optional chain call --
 MoveOnly(60) created
@@ -168,6 +169,7 @@ Traced(70) created
 scope c
 Traced(70) destroyed
 MoveOnly(60) destroyed
+Traced(50) destroyed
 Traced(50) destroyed
 deleting direct
 deleting local_b

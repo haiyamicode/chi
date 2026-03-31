@@ -1,3 +1,11 @@
 env(CHI_TEST_VAR) = hello_chi
 env(NONEXISTENT_XYZ_123) = null
 cwd is non-empty = true
+system exit = 7
+system ok = false
+system stdout = sysout
+system stderr = syserr
+command exit = 5
+command ok = false
+command stdout = cmdout
+command stderr = cmderr

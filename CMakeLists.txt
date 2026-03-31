@@ -97,8 +97,9 @@ function(bundle_static_library tgt_name bundled_tgt_name)
     message(FATAL_ERROR "Unknown bundle scenario: " ${CMAKE_CXX_COMPILER_ID})
   endif()
 
-  add_custom_target(bundling_target ALL DEPENDS ${bundled_tgt_full_name})
-  add_dependencies(bundling_target ${tgt_name})
+  set(bundle_target_name ${bundled_tgt_name}_bundling_target)
+  add_custom_target(${bundle_target_name} ALL DEPENDS ${bundled_tgt_full_name})
+  add_dependencies(${bundle_target_name} ${tgt_name})
   install(FILES ${bundled_tgt_full_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
 
   add_library(${bundled_tgt_name} STATIC IMPORTED)
@@ -108,7 +109,7 @@ function(bundle_static_library tgt_name bundled_tgt_name)
     IMPORTED_LOCATION ${bundled_tgt_full_name}
     INTERFACE_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:${tgt_name},INTERFACE_INCLUDE_DIRECTORIES>)
 
-  add_dependencies(${bundled_tgt_name} bundling_target)
+  add_dependencies(${bundled_tgt_name} ${bundle_target_name})
 endfunction()
 
 include_directories("${PROJECT_SOURCE_DIR}/src")

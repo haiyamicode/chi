@@ -1,12 +1,22 @@
 // std/os — operating system utilities
 
+export struct CommandResult {
+    exit_code: int32 = -1;
+    stdout: string = "";
+    stderr: string = "";
+
+    func is_ok() bool {
+        return this.exit_code == 0;
+    }
+}
+
 extern "C" {
     unsafe func __cx_getenv(key: *byte) *byte;
     unsafe func __cx_setenv(key: *byte, value: *byte);
     unsafe func __cx_exit(code: int);
     unsafe func __cx_getcwd() *byte;
-    unsafe func __cx_system(command: *byte) int32;
-    unsafe func __cx_command(args: *void) int32;
+    unsafe func __cx_system(command: *byte, result: *CommandResult);
+    unsafe func __cx_command(args: *void, result: *CommandResult);
     unsafe func __cx_platform_tags(result: *void);
     unsafe func __cx_strlen(s: *byte) uint32;
 }
@@ -43,17 +53,21 @@ export func cwd() string {
     }
 }
 
-export func system(command: string) int32 {
+export func system(command: string) CommandResult {
     var cs = command.to_cstring();
+    var result = CommandResult{};
     unsafe {
-        return __cx_system(cs.as_ptr());
+        __cx_system(cs.as_ptr(), &result);
     }
+    return result;
 }
 
-export func command(args: &[string]) int32 {
+export func command(args: &[string]) CommandResult {
+    var result = CommandResult{};
     unsafe {
-        return __cx_command(&args);
+        __cx_command(&args, &result);
     }
+    return result;
 }
 
 export func platform_tags() Array<string> {

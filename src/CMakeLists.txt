@@ -39,6 +39,13 @@ target_link_libraries(rt PUBLIC fmt backtrace uv)
 target_link_libraries(rt PRIVATE ${PKG_LIBS})
 bundle_static_library(rt chrt)
 
+add_library(rt_debug STATIC ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
+target_include_directories(rt_debug PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${PROJECT_BINARY_DIR})
+target_link_libraries(rt_debug PUBLIC fmt backtrace uv)
+target_link_libraries(rt_debug PRIVATE ${PKG_LIBS})
+target_compile_definitions(rt_debug PRIVATE CHI_DEBUG_ALLOCATOR_RUNTIME=1)
+bundle_static_library(rt_debug chrt_debug)
+
 # Compiler executable
 add_executable(chic chic.cpp ${SOURCE_FILES})
 install(TARGETS chic)
