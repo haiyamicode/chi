@@ -1,4 +1,6 @@
 import "std/mem" as mem;
+import "std/math" as math;
+import "std/time" as time;
 
 func make_text(seed: int, slot: int) string {
     return stringf(
@@ -43,6 +45,11 @@ func make_mega_record(seed: int, slot: int) MegaRecord {
 func run_workload(iteration: int) {
     let base = iteration * 1000;
 
+    // Randomize array sizes (20-60 elements)
+    let size = math.random_int(20, 60);
+    // Random batch size for nested operations (5-15)
+    let batch_size = math.random_int(5, 15);
+
     var values: Array<MegaRecord> = [];
     var value_map = Map<int, MegaRecord>{};
     var shareds: Array<Shared<string>> = [];
@@ -50,27 +57,33 @@ func run_workload(iteration: int) {
     var texts: Array<string> = [];
     var text_map = Map<int, string>{};
 
-    for slot in 0..40 {
+    for slot in 0..size {
         let key = slot as int;
 
         values.push(make_mega_record(base, key));
         value_map.set(key, make_mega_record(base + 10000, key));
-        if slot % 3 == 0 {
+        // Random overwrite (30% chance)
+        if math.random() < 0.3 {
             value_map.set(key, make_mega_record(base + 20000, key));
         }
 
         var shared = Shared<string>.from_value(make_text(base + 60000, key));
         shareds.push(shared);
         shared_map.set(key, shared);
-        if slot % 5 == 0 {
-            shared_map.set(1000 + key, shared);
-            shared_map.remove(1000 + key);
+        // Random extra reference then remove (20% chance)
+        if math.random() < 0.2 {
+            let extra_key = 1000 + key + math.random_int(0, 100);
+            shared_map.set(extra_key, shared);
+            if math.random() < 0.5 {
+                shared_map.remove(extra_key);
+            }
         }
 
         let text = make_text(base + 80000, key);
         texts.push(text);
         text_map.set(key, make_text(base + 81000, key));
-        if slot % 3 == 1 {
+        // Random alias (40% chance)
+        if math.random() < 0.4 {
             text_map.set(key, text);
         }
     }
@@ -79,22 +92,41 @@ func run_workload(iteration: int) {
     var shareds_copy = shareds;
     var texts_copy = texts;
 
-    value_map.set(-1, values_copy[0]);
-    shared_map.set(-1, shareds_copy[0]);
-    text_map.set(-1, texts_copy[0]);
+    // Randomly copy to negative key or not
+    if math.random() < 0.7 {
+        value_map.set(-1, values_copy[0]);
+        shared_map.set(-1, shareds_copy[0]);
+        text_map.set(-1, texts_copy[0]);
+    }
 
-    value_map.remove(0);
-    shared_map.remove(2);
-    text_map.remove(3);
+    // Random removals
+    let remove_idx1 = math.random_int(0, values.length);
+    let remove_idx2 = math.random_int(0, shareds.length);
+    let remove_idx3 = math.random_int(0, texts.length);
+    value_map.remove(remove_idx1);
+    shared_map.remove(remove_idx2);
+    text_map.remove(remove_idx3);
+
+    // Random batch nested operations
+    for i in 0..batch_size {
+        if math.random() < 0.5 {
+            let idx = math.random_int(0, size);
+            value_map.remove(idx);
+        }
+    }
 
     values.clear();
     shareds.clear();
     texts.clear();
 
-    if iteration % 2 == 0 {
-        value_map.remove(3);
-        shared_map.remove(5);
-        text_map.remove(6);
+    // Random final cleanup (50% chance)
+    if math.random() < 0.5 {
+        let cleanup_size = math.random_int(3, 10);
+        for i in 0..cleanup_size {
+            value_map.remove(i);
+            shared_map.remove(i);
+            text_map.remove(i);
+        }
     }
 }
 
@@ -111,9 +143,13 @@ func assert_no_live_allocations(checkpoint: int) {
 }
 
 func main() {
+    // Seed RNG with current time for different test patterns each run
+    math.random_seed(time.now());
+
     println("mega lifecycle fuzz:");
-    let checkpoint_every = 100 as int;
-    let checkpoint_count = 10 as int;
+    let checkpoint_every = 100;
+    let checkpoint_count = 10;
+
     mem.DebugAllocator.set_enabled(true);
     mem.DebugAllocator.reset();
     for i in 0..(checkpoint_every * checkpoint_count) {
