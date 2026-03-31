@@ -16,6 +16,8 @@ extern "C" {
     func __cx_round(x: float64) float64;
     func __cx_fabs(x: float64) float64;
     func __cx_fmod(x: float64, y: float64) float64;
+    func __cx_random() float64;
+    func __cx_random_seed(seed: uint64);
 }
 
 export let PI: float64 = 3.141592653589793;
@@ -113,4 +115,24 @@ export func is_nan(x: float64) bool {
 
 export func is_inf(x: float64) bool {
     return x == INF || x == -INF;
+}
+
+// Returns a random float64 in the range [0.0, 1.0)
+export func random() float64 {
+    return __cx_random();
+}
+
+// Seeds the random number generator
+export func random_seed(seed: uint64) {
+    __cx_random_seed(seed);
+}
+
+// Returns a random integer in the range [min, max)
+export func random_int(min: int, max: int) int {
+    return min + (random() * (max - min) as float64) as int;
+}
+
+// Returns a random float64 in the range [min, max)
+export func random_float(min: float64, max: float64) float64 {
+    return min + random() * (max - min);
 }

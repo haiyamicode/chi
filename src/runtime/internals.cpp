@@ -1911,6 +1911,79 @@ double __cx_round(double x) { return round(x); }
 double __cx_fabs(double x) { return fabs(x); }
 double __cx_fmod(double x, double y) { return fmod(x, y); }
 
+// Random number generation (xoshiro256**)
+// Thread-local state
+static thread_local uint64_t xoshiro_state[4];
+static thread_local bool xoshiro_initialized = false;
+
+// SplitMix64 for seeding
+static uint64_t splitmix64(uint64_t &x) {
+    x += 0x9e3779b97f4a7c15;
+    uint64_t z = x;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111eb;
+    return z ^ (z >> 31);
+}
+
+static void xoshiro_init(uint64_t seed) {
+    uint64_t sm = seed;
+    xoshiro_state[0] = splitmix64(sm);
+    xoshiro_state[1] = splitmix64(sm);
+    xoshiro_state[2] = splitmix64(sm);
+    xoshiro_state[3] = splitmix64(sm);
+    xoshiro_initialized = true;
+}
+
+static inline uint64_t rotl(const uint64_t x, int k) {
+    return (x << k) | (x >> (64 - k));
+}
+
+static uint64_t xoshiro_next(void) {
+    const uint64_t result = rotl(xoshiro_state[1] * 5, 7) * 9;
+    const uint64_t t = xoshiro_state[1] << 17;
+    xoshiro_state[2] ^= xoshiro_state[0];
+    xoshiro_state[3] ^= xoshiro_state[1];
+    xoshiro_state[1] ^= xoshiro_state[2];
+    xoshiro_state[0] ^= xoshiro_state[3];
+    xoshiro_state[2] ^= t;
+    xoshiro_state[3] = rotl(xoshiro_state[3], 45);
+    return result;
+}
+
+// Get high-quality seed from OS
+static uint64_t get_seed(void) {
+#if defined(__APPLE__)
+    uint64_t seed;
+    arc4random_buf(&seed, sizeof(seed));
+    return seed;
+#elif defined(__linux__)
+    uint64_t seed;
+    if (getentropy(&seed, sizeof(seed)) == 0) {
+        return seed;
+    }
+    // Fallback: mix time and pid
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec) ^ (getpid() * 0x9e3779b97f4a7c15ULL);
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ((uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec) ^ (getpid() * 0x9e3779b97f4a7c15ULL);
+#endif
+}
+
+double __cx_random(void) {
+    if (!xoshiro_initialized) {
+        xoshiro_init(get_seed());
+    }
+    // Convert to [0.0, 1.0)
+    return (xoshiro_next() >> 11) * (1.0 / (1ULL << 53));
+}
+
+void __cx_random_seed(uint64_t seed) {
+    xoshiro_init(seed);
+}
+
 // std/conv helpers
 // Returns 1 on success (result written to *out), 0 on failure
 int32_t __cx_parse_int(const char *str, int64_t *out) {

@@ -194,6 +194,9 @@ CHI_RT_EXPORT void cx_file_read(CxString *path, CxString *result);
 CHI_RT_EXPORT uint64_t __cx_time_now(void);
 CHI_RT_EXPORT uint64_t __cx_time_monotonic(void);
 
+CHI_RT_EXPORT double __cx_random(void);
+CHI_RT_EXPORT void __cx_random_seed(uint64_t seed);
+
 CHI_RT_EXPORT int32_t __cx_fs_error_kind(int32_t uv_err);
 CHI_RT_EXPORT int32_t __cx_fs_flags(int32_t which);
 CHI_RT_EXPORT int32_t __cx_path_separator(void);

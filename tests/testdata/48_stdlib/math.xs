@@ -19,4 +19,26 @@ func main() {
     printf("is_nan(NAN) = {}\n", math.is_nan(math.NAN));
     printf("is_inf(INF) = {}\n", math.is_inf(math.INF));
     printf("mod(10.0, 3.0) = {}\n", math.mod(10.0, 3.0));
+
+    // Test random functions
+    // random() should return values in [0.0, 1.0)
+    let r1 = math.random();
+    let r2 = math.random();
+    printf("random() in range [0,1): {}\n", r1 >= 0.0 && r1 < 1.0);
+    printf("random() produces different values: {}\n", r1 != r2);
+
+    // random_seed() should produce reproducible sequences
+    math.random_seed(12345);
+    let seeded1 = math.random();
+    math.random_seed(12345);
+    let seeded2 = math.random();
+    printf("random_seed() reproducible: {}\n", seeded1 == seeded2);
+
+    // random_int() should return values in [min, max)
+    let ri = math.random_int(10, 20);
+    printf("random_int(10, 20) in range: {}\n", ri >= 10 && ri < 20);
+
+    // random_float() should return values in [min, max)
+    let rf = math.random_float(5.0, 10.0);
+    printf("random_float(5.0, 10.0) in range: {}\n", rf >= 5.0 && rf < 10.0);
 }
