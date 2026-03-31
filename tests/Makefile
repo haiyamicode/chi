@@ -508,37 +508,42 @@ formatter_semantic_collapse_test:
 	echo "formatter semantic collapse test passed"
 
 # Dedicated heavy lifecycle stress suite. Keep it out of TESTS_LIST.
-stress:
-	@echo "Test: fuzz/collection_memory_leak_stress..."
-	@tmp_base=$$(mktemp /tmp/chitests.collection_memory_leak_stress.XXXXXX); \
+define STRESS_TEST
+	@echo "Test: fuzz/$(1)..."
+	@tmp_base=$$(mktemp /tmp/chitests.$(1).XXXXXX); \
 	bin="$${tmp_base}.bin"; \
 	out="$${tmp_base}.out"; \
-	$(CHIC) --debug-allocator-runtime -o "$$bin" -c fuzz/collection_memory_leak_stress.xs || exit $$?; \
+	$(CHIC) --debug-allocator-runtime -o "$$bin" -c fuzz/$(1).xs || exit $$?; \
 	"$$bin" > "$$out" 2>&1; \
 	status=$$?; \
 	if [ $$status -ne 0 ]; then \
-		echo "error in test fuzz/collection_memory_leak_stress (compile/run)"; \
+		echo "error in test fuzz/$(1) (compile/run)"; \
 		cat "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit $$status; \
 	fi; \
 	if [ ! -f "$$out" ]; then \
-		echo "error in test fuzz/collection_memory_leak_stress (missing output file)"; \
+		echo "error in test fuzz/$(1) (missing output file)"; \
 		rm -f "$$bin"; \
 		exit 1; \
 	fi; \
 	checkpoints=$$(grep -c '^checkpoint ' "$$out" 2>/dev/null || true); \
 	if [ $$checkpoints -ne 10 ]; then \
-		echo "error in test fuzz/collection_memory_leak_stress (missing checkpoints)"; \
+		echo "error in test fuzz/$(1) (missing checkpoints)"; \
 		cat "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit 1; \
 	fi; \
-	if ! diff -qbu fuzz/collection_memory_leak_stress.expect "$$out" >/dev/null; then \
-		echo "error in test fuzz/collection_memory_leak_stress (output mismatch)"; \
-		diff -u fuzz/collection_memory_leak_stress.expect "$$out"; \
+	if ! diff -qbu fuzz/$(1).expect "$$out" >/dev/null; then \
+		echo "error in test fuzz/$(1) (output mismatch)"; \
+		diff -u fuzz/$(1).expect "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit 1; \
 	fi; \
-	rm -f "$$bin" "$$out"; \
-	echo "fuzz allocator tracking ok"
+	rm -f "$$bin" "$$out"
+endef
+
+stress:
+	$(call STRESS_TEST,collection_memory_leak_stress)
+	$(call STRESS_TEST,lambda_error_recovery_stress)
+	@echo "fuzz allocator tracking ok"
