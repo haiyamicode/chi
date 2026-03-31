@@ -509,34 +509,34 @@ formatter_semantic_collapse_test:
 
 # Dedicated heavy lifecycle stress suite. Keep it out of TESTS_LIST.
 stress:
-	@echo "Test: fuzz/lifecycle_mega_fuzz..."
-	@tmp_base=$$(mktemp /tmp/chitests.lifecycle_mega_fuzz.XXXXXX); \
+	@echo "Test: fuzz/collection_memory_leak_stress..."
+	@tmp_base=$$(mktemp /tmp/chitests.collection_memory_leak_stress.XXXXXX); \
 	bin="$${tmp_base}.bin"; \
 	out="$${tmp_base}.out"; \
-	$(CHIC) --debug-allocator-runtime -o "$$bin" -c fuzz/lifecycle_mega_fuzz.xs || exit $$?; \
+	$(CHIC) --debug-allocator-runtime -o "$$bin" -c fuzz/collection_memory_leak_stress.xs || exit $$?; \
 	"$$bin" > "$$out" 2>&1; \
 	status=$$?; \
 	if [ $$status -ne 0 ]; then \
-		echo "error in test fuzz/lifecycle_mega_fuzz (compile/run)"; \
+		echo "error in test fuzz/collection_memory_leak_stress (compile/run)"; \
 		cat "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit $$status; \
 	fi; \
 	if [ ! -f "$$out" ]; then \
-		echo "error in test fuzz/lifecycle_mega_fuzz (missing output file)"; \
+		echo "error in test fuzz/collection_memory_leak_stress (missing output file)"; \
 		rm -f "$$bin"; \
 		exit 1; \
 	fi; \
 	checkpoints=$$(grep -c '^checkpoint ' "$$out" 2>/dev/null || true); \
 	if [ $$checkpoints -ne 10 ]; then \
-		echo "error in test fuzz/lifecycle_mega_fuzz (missing checkpoints)"; \
+		echo "error in test fuzz/collection_memory_leak_stress (missing checkpoints)"; \
 		cat "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit 1; \
 	fi; \
-	if ! diff -qbu fuzz/lifecycle_mega_fuzz.expect "$$out" >/dev/null; then \
-		echo "error in test fuzz/lifecycle_mega_fuzz (output mismatch)"; \
-		diff -u fuzz/lifecycle_mega_fuzz.expect "$$out"; \
+	if ! diff -qbu fuzz/collection_memory_leak_stress.expect "$$out" >/dev/null; then \
+		echo "error in test fuzz/collection_memory_leak_stress (output mismatch)"; \
+		diff -u fuzz/collection_memory_leak_stress.expect "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit 1; \
 	fi; \

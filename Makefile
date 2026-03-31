@@ -44,10 +44,10 @@ stress: build install
 	(cd tests; make stress)
 
 compile_stress: build install
-	$(CHIC) --debug-allocator-runtime -o /tmp/lifecycle_fuzz -c tests/fuzz/lifecycle_mega_fuzz.xs
+	$(CHIC) --debug-allocator-runtime -o /tmp/collection_memory_leak_stress -c tests/fuzz/collection_memory_leak_stress.xs
 
 run_stress: compile_stress
-	/tmp/lifecycle_fuzz
+	/tmp/collection_memory_leak_stress
 
 analyzer_test: build
 	(cd analyzer_tests; make test)

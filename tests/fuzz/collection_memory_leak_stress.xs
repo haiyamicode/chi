@@ -146,7 +146,7 @@ func main() {
     // Seed RNG with current time for different test patterns each run
     math.random_seed(time.now());
 
-    println("mega lifecycle fuzz:");
+    println("collection memory leak stress:");
     let checkpoint_every = 100;
     let checkpoint_count = 10;
 
@@ -164,5 +164,5 @@ func main() {
         }
     }
     mem.DebugAllocator.set_enabled(false);
-    println("mega lifecycle fuzz ok");
+    println("collection memory leak stress ok");
 }
