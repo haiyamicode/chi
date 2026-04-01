@@ -3837,23 +3837,9 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
         auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
         landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
 
-        auto thrown_ptr = builder.CreateExtractValue(landing, {0}, "thrown_ptr");
-        auto is_typed = builder.CreateICmpNE(
-            thrown_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()), "is_typed_error");
-
-        auto typed_error_b = state_fn->new_label("_try_catch_typed");
-        auto panic_b = state_fn->new_label("_try_catch_panic");
-        builder.CreateCondBr(is_typed, typed_error_b, panic_b);
-
-        // Panic: re-throw (unrecoverable)
-        state_fn->use_label(panic_b);
-        builder.CreateResume(landing);
-
-        // Typed error: transition to the catch state
-        state_fn->use_label(typed_error_b);
+        emit_async_landing_pad(state_fn, landing);
         builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
         emit_async_state_transition(state_fn, machine, saved_try_catch_id);
-        // emit_async_state_transition already calls CreateRetVoid()
     }
 
     // Restore try_block_landing
@@ -4802,31 +4788,15 @@ void Compiler::compile_async_try_recursive(Function *fn, AsyncStateMachine &mach
     }
     fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
     fn->use_label(landing_b);
-    auto caught_type_l = m_ctx->get_caught_result_type();
-    auto landing = builder.CreateLandingPad(caught_type_l, 1);
-    landing->addClause(llvm::ConstantPointerNull::get(
-        llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)));
+    auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+    landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
 
-    auto thrown_ptr = builder.CreateExtractValue(landing, {0}, "thrown_ptr");
-    auto is_typed = builder.CreateICmpNE(
-        thrown_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()), "is_typed_error");
-
-    auto typed_error_b = fn->new_label("_async_try_typed_error");
-    auto panic_b = fn->new_label("_async_try_panic");
-    builder.CreateCondBr(is_typed, typed_error_b, panic_b);
-
-    // Panic: re-throw
-    fn->use_label(panic_b);
-    builder.CreateResume(landing);
-
-    // Typed error: transition to catch state (error stays in TLS)
-    fn->use_label(typed_error_b);
+    emit_async_landing_pad(fn, landing);
     if (data.catch_block) {
-        // Don't extract/clear error — catch state will do that
         builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
         emit_async_state_transition(fn, machine, catch_state_id);
     } else {
-        // No catch block: reject the promise
+        // No catch block (result mode): reject the promise
         auto error_data = builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {});
         auto error_vtable = builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {});
         builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
@@ -5135,11 +5105,11 @@ void Compiler::compile_async_fn_body(Function *fn) {
     builder.CreateBr(fn->return_label);
 }
 
-void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing) {
+// Emits the common landing pad logic: extract thrown_ptr, check is_typed,
+// panic path (resume), and leaves insert point at the typed-error block.
+void Compiler::emit_async_landing_pad(Function *fn, llvm::Value *landing) {
     auto &builder = *m_ctx->llvm_builder;
-    auto &llvm_ctx = *m_ctx->llvm_ctx;
 
-    // Distinguish panic (null thrown_ptr) vs typed error
     auto thrown_ptr = builder.CreateExtractValue(landing, {0}, "thrown_ptr");
     auto is_typed = builder.CreateICmpNE(
         thrown_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()), "is_typed_error");
@@ -5148,12 +5118,18 @@ void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing)
     auto panic_b = fn->new_label("_async_panic");
     builder.CreateCondBr(is_typed, typed_error_b, panic_b);
 
-    // Panic path: re-throw (unrecoverable)
+    // Panic: re-throw (unrecoverable)
     fn->use_label(panic_b);
     builder.CreateResume((llvm::LandingPadInst *)landing);
 
-    // Typed error path: catch and reject the promise
+    // Insert point is now at the typed-error block
     fn->use_label(typed_error_b);
+}
+
+void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    emit_async_landing_pad(fn, landing);
 
     auto error_data = builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {}, "error_data");
     auto error_vtable =

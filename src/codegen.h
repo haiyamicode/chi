@@ -780,6 +780,7 @@ class Compiler {
                                         const AsyncResumePoint *resume_point = nullptr,
                                         int continue_state_id = -1);
     void compile_async_fn_body(Function *fn);
+    void emit_async_landing_pad(Function *fn, llvm::Value *landing);
     void emit_async_reject_landing_pad(Function *fn, llvm::Value *landing);
     void emit_async_promise_reject(Function *fn, llvm::Value *data_ptr, llvm::Value *vtable_ptr);
     void emit_async_promise_reject_shared(Function *fn, llvm::Value *shared_error);
