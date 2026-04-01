@@ -4073,12 +4073,80 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
     bool is_index_range = fixed_array_loop || kind == ast::ForLoopKind::Range;
     bool is_iter_loop = kind == ast::ForLoopKind::Iter;
 
-    if (!is_int_range && !is_index_range && !is_iter_loop) {
-        compile_stmt(fn, for_stmt);
+    if (kind == ast::ForLoopKind::Ternary) {
+        // Ternary for loop: for init; cond; post { body }
+        bool loop_resume = resume_point && resume_point->is_loop_head &&
+                           resume_point->block == parent_block &&
+                           resume_point->stmt_index == stmt_index && !resume_point->resume_stmt;
+        if (!loop_resume) {
+            if (data.init) {
+                compile_stmt(fn, data.init);
+            }
+        }
+
+        auto loop_head_state_id = get_async_loop_head_state(fn, machine, for_stmt, parent_block,
+                                                             stmt_index);
+        auto resolved = get_async_resolved_awaits(resume_point, for_stmt);
+        if (data.condition && contains_unresolved_await(data.condition, resolved)) {
+            auto site = find_unresolved_await_site(data.condition, resolved);
+            auto promise_expr = site.await_expr;
+            auto settled_type =
+                get_async_resume_value_type(for_stmt, promise_expr, site.resume_expr);
+            auto next = build_async_resume_point(parent_block, stmt_index, for_stmt, resume_point,
+                                                 promise_expr, nullptr, -1, -1);
+            next.loop_stack = snapshot_async_loop_stack(fn);
+            auto state_id = register_async_resume_state(fn, machine, next);
+            emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
+            return;
+        }
+
+        auto post_state_id = register_async_custom_state(
+            fn, machine, "for_post",
+            [&](Function *state_fn) {
+                auto &post_builder = *m_ctx->llvm_builder;
+                state_fn->push_scope();
+                if (data.post) {
+                    compile_stmt(state_fn, data.post);
+                }
+                state_fn->pop_scope();
+                emit_async_state_transition(state_fn, machine, loop_head_state_id);
+            });
+
+        auto cond = data.condition
+                        ? compile_assignment_to_type(fn, data.condition, get_system_types()->bool_)
+                        : builder.getTrue();
+        auto body_b = fn->new_label("_async_for_body");
+        auto end_b = fn->new_label("_async_for_end");
+        auto done_b = fn->new_label("_async_for_done");
+        builder.CreateCondBr(cond, body_b, end_b);
+
+        fn->use_label(body_b);
+        auto body_locals = local_vars;
+        const AsyncResumePoint *body_resume =
+            (resume_point && resume_point->block == data.body) ? resume_point : nullptr;
+        auto loop = fn->push_loop();
+        loop->async_continue_state_id = post_state_id;
+        loop->async_break_block = parent_block;
+        loop->async_break_stmt_index = next_stmt_index;
+        compile_async_block_recursive(fn, machine, data.body,
+                                      body_resume ? body_resume->stmt_index : 0, body_locals,
+                                      result_promise_ptr, body_resume, nullptr, -1, post_state_id,
+                                      nullptr);
+        fn->pop_loop();
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            emit_async_state_transition(fn, machine, post_state_id);
+        }
+
+        fn->use_label(end_b);
         if (!builder.GetInsertBlock()->getTerminator()) {
             compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
                                           result_promise_ptr, nullptr, nullptr, -1, -1, nullptr);
+            if (!builder.GetInsertBlock()->getTerminator()) {
+                builder.CreateBr(done_b);
+            }
         }
+
+        fn->use_label(done_b);
         return;
     }
 

@@ -792,6 +792,64 @@ func test_iter_for_await() {
     run_iter_for_await_cases();
 }
 
+// --- Await: ternary for loop control flow ---
+
+async func do_ternary_for_plain(limit: int) Promise<int> {
+    var sum = 0;
+    for var i = 0; i < limit; i++ {
+        sum = sum + await delayed_number(i + 1);
+    }
+    return sum;
+}
+
+async func do_ternary_for_return(limit: int) Promise<int> {
+    for var i = 0; i < limit; i++ {
+        if await delayed_flag(i == 1, 243) {
+            return await delayed_number(100 + i);
+        }
+    }
+    return -1;
+}
+
+async func do_ternary_for_control(limit: int) Promise<int> {
+    var sum = 0;
+    for var i = 0; i < limit; i++ {
+        if await delayed_flag(i == 2, 244) {
+            continue;
+        }
+        sum = sum + await double_it(i + 1);
+        if await delayed_flag(i == 3, 245) {
+            break;
+        }
+    }
+    return sum;
+}
+
+async func do_ternary_for_try(limit: int) Promise<int> {
+    var sum = 0;
+    for var i = 0; i < limit; i++ {
+        sum = sum + try await settle_resolves_after_delay() catch {
+            return -1000;
+        };
+        if await delayed_flag(i == 1, 246) {
+            break;
+        }
+    }
+    return sum;
+}
+
+async func run_ternary_for_await_cases() Promise {
+    printf("ternary plain={}\n", await do_ternary_for_plain(4));
+    printf("ternary return={}\n", await do_ternary_for_return(4));
+    printf("ternary control={}\n", await do_ternary_for_control(6));
+    printf("ternary try={}\n", await do_ternary_for_try(4));
+}
+
+func test_ternary_for_await() {
+    println("=== Ternary for await ===");
+    run_ternary_for_await_cases();
+}
+
 // --- Await: bare then logic ---
 
 async func do_bare_then_logic() Promise {
@@ -1691,6 +1749,9 @@ async func run_async_tail() Promise {
 
     println("=== Iterator for await ===");
     await run_iter_for_await_cases();
+
+    println("=== Ternary for await ===");
+    await run_ternary_for_await_cases();
 
     println("=== Switch await ===");
     await run_switch_await_cases();
