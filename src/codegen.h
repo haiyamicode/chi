@@ -311,6 +311,17 @@ struct AsyncStateMachine {
 
 };
 
+struct AsyncWorkerContext {
+    int state_id = -1;
+    Function *state_fn = nullptr;
+    llvm::Function *worker_llvm_fn = nullptr;
+    llvm::Value *result_promise_ptr = nullptr;
+    llvm::IRBuilderBase::InsertPoint saved_ip;
+    llvm::Value *previous_frame_ptr = nullptr;
+    map<ast::Node *, llvm::Value *> shadowed_vars;
+    std::set<ast::Node *> had_shadowed_binding;
+};
+
 struct TypeInfoWorkItem {
     ChiType *reflect_type = nullptr;
     ChiType *final_type = nullptr;
@@ -782,6 +793,13 @@ class Compiler {
     void compile_async_fn_body(Function *fn);
     void emit_async_landing_pad(Function *fn, llvm::Value *landing);
     void emit_async_reject_landing_pad(Function *fn, llvm::Value *landing);
+    void emit_async_cleanup_landing_pad(Function *fn, llvm::Function *worker_llvm_fn);
+    std::pair<llvm::Value *, llvm::Value *> extract_tls_error(Function *fn);
+    llvm::Value *init_async_worker_frame(Function *fn, AsyncStateMachine &machine,
+                                         llvm::Function *worker_llvm_fn);
+    AsyncWorkerContext begin_async_worker_state(Function *fn, AsyncStateMachine &machine,
+                                                const string &name_suffix, int forced_state_id);
+    void end_async_worker_state(AsyncStateMachine &machine, AsyncWorkerContext &ctx);
     void emit_async_promise_reject(Function *fn, llvm::Value *data_ptr, llvm::Value *vtable_ptr);
     void emit_async_promise_reject_shared(Function *fn, llvm::Value *shared_error);
     llvm::Value *compile_shared_new(Function *fn, ChiType *shared_type, llvm::Value *owned_value);

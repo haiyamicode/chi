@@ -3723,44 +3723,12 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
                                           const AsyncResumePoint &resume_point,
                                           int forced_state_id) {
     auto &builder = *m_ctx->llvm_builder;
-    auto &llvm_ctx = *m_ctx->llvm_ctx;
-    auto &llvm_module = *m_ctx->llvm_module;
+    auto ctx = begin_async_worker_state(fn, machine, "", forced_state_id);
+    auto state_fn = ctx.state_fn;
+    auto result_promise_ptr = ctx.result_promise_ptr;
 
-    int state_id = forced_state_id >= 0 ? forced_state_id : machine.next_state_id++;
-    if (forced_state_id >= 0 && machine.next_state_id <= forced_state_id) {
-        machine.next_state_id = forced_state_id + 1;
-    }
+    machine.states.push_back({ctx.state_id, resume_point, ctx.worker_llvm_fn});
 
-    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
-    auto worker_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
-    auto worker_name = fmt::format("{}__async_state_{}", fn->qualified_name, state_id);
-    auto worker_llvm_fn = llvm::Function::Create(
-        worker_type, llvm::Function::PrivateLinkage, worker_name, llvm_module);
-    auto state_fn = new Function(m_ctx, worker_llvm_fn, fn->node);
-    state_fn->qualified_name = worker_name;
-
-    machine.states.push_back({state_id, resume_point, worker_llvm_fn});
-
-    auto saved_ip = builder.saveIP();
-
-    auto dispatch_case_b =
-        llvm::BasicBlock::Create(llvm_ctx, fmt::format("_state_{}", state_id), machine.dispatcher_fn);
-    machine.dispatcher_switch->addCase(builder.getInt32(state_id), dispatch_case_b);
-    builder.SetInsertPoint(dispatch_case_b);
-    auto dispatch_data_arg = machine.dispatcher_fn->getArg(0);
-    builder.CreateCall(worker_llvm_fn, {dispatch_data_arg});
-    builder.CreateRetVoid();
-
-    auto entry_b = state_fn->new_label("_entry");
-    state_fn->use_label(entry_b);
-
-    auto data_arg = worker_llvm_fn->getArg(0);
-    auto previous_frame_ptr = machine.frame_ptr;
-    machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
-    auto result_promise_ptr =
-        builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
-    state_fn->async_reject_promise_ptr = result_promise_ptr;
-    state_fn->async_promise_type = machine.promise_type;
     state_fn->default_method_struct = fn->default_method_struct;
     if (machine.frame_bind_index >= 0 && machine.bind_type) {
         auto bind_slot =
@@ -3775,22 +3743,14 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
     int saved_try_catch_id = -1;
     if (machine.active_try_catch_state_id >= 0) {
         try_catch_landing_b = state_fn->new_label("_async_try_catch_landing");
-        // Set try_block_landing so calls within this resumed state use invoke
         state_fn->try_block_landing = try_catch_landing_b;
         saved_try_catch_id = machine.active_try_catch_state_id;
     }
 
+    // Build resumed_locals on top of vars already bound by begin_async_worker_state
     map<ast::Node *, llvm::Value *> resumed_locals;
-    map<ast::Node *, llvm::Value *> shadowed_vars;
-    std::set<ast::Node *> had_shadowed_binding;
     for (auto var : machine.frame_vars) {
-        if (m_ctx->var_table.has_key(var)) {
-            shadowed_vars[var] = get_var(var);
-            had_shadowed_binding.insert(var);
-        }
-        auto frame_ptr = get_async_frame_field_ptr(state_fn, machine, var);
-        resumed_locals[var] = frame_ptr;
-        add_var(var, frame_ptr);
+        resumed_locals[var] = get_var(var);
         state_fn->async_frame_owned_vars.insert(var);
     }
 
@@ -3814,136 +3774,39 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
                                           resume_point.continue_stmt_index, resumed_locals,
                                           result_promise_ptr, nullptr, nullptr, -1, -1);
         }
-        if (!builder.GetInsertBlock()->getTerminator()) {
-            builder.CreateRetVoid();
-        }
-    }
-
-    if (state_fn->cleanup_landing_label) {
-        worker_llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
-        state_fn->use_label(state_fn->cleanup_landing_label);
-        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
-        landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
-        emit_async_reject_landing_pad(state_fn, landing);
-        builder.CreateRetVoid();
     }
 
     // If inside a try-block, add the try-catch landing pad that transitions to catch state
     if (try_catch_landing_b && try_catch_landing_b->getParent()) {
-        if (!worker_llvm_fn->hasPersonalityFn()) {
-            worker_llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+        if (!ctx.worker_llvm_fn->hasPersonalityFn()) {
+            ctx.worker_llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
         }
         state_fn->use_label(try_catch_landing_b);
         auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
         landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
-
         emit_async_landing_pad(state_fn, landing);
         builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
         emit_async_state_transition(state_fn, machine, saved_try_catch_id);
     }
 
-    // Restore try_block_landing
     state_fn->try_block_landing = nullptr;
-
     m_async_await_refs = previous_await_refs;
-    for (auto &kv : resumed_locals.data) {
-        if (had_shadowed_binding.count(kv.first)) {
-            m_ctx->var_table[kv.first] = shadowed_vars[kv.first];
-        } else {
-            m_ctx->var_table.unset(kv.first);
-        }
-    }
     for (size_t i = 0; i < resume_point.loop_stack.size(); i++) {
         state_fn->pop_loop();
     }
 
-    llvm::verifyFunction(*worker_llvm_fn);
-    machine.frame_ptr = previous_frame_ptr;
-    builder.restoreIP(saved_ip);
-    return state_id;
+    end_async_worker_state(machine, ctx);
+    return ctx.state_id;
 }
 
 int Compiler::register_async_custom_state(Function *fn, AsyncStateMachine &machine,
                                           const string &name_suffix,
                                           const std::function<void(Function *)> &emit_body,
                                           int forced_state_id) {
-    auto &builder = *m_ctx->llvm_builder;
-    auto &llvm_ctx = *m_ctx->llvm_ctx;
-    auto &llvm_module = *m_ctx->llvm_module;
-
-    int state_id = forced_state_id >= 0 ? forced_state_id : machine.next_state_id++;
-    if (forced_state_id >= 0 && machine.next_state_id <= forced_state_id) {
-        machine.next_state_id = forced_state_id + 1;
-    }
-
-    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
-    auto worker_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
-    auto worker_name = fmt::format("{}__async_state_{}_{}", fn->qualified_name, state_id, name_suffix);
-    auto worker_llvm_fn = llvm::Function::Create(
-        worker_type, llvm::Function::PrivateLinkage, worker_name, llvm_module);
-    auto state_fn = new Function(m_ctx, worker_llvm_fn, fn->node);
-    state_fn->qualified_name = worker_name;
-
-    auto saved_ip = builder.saveIP();
-
-    auto dispatch_case_b =
-        llvm::BasicBlock::Create(llvm_ctx, fmt::format("_state_{}", state_id), machine.dispatcher_fn);
-    machine.dispatcher_switch->addCase(builder.getInt32(state_id), dispatch_case_b);
-    builder.SetInsertPoint(dispatch_case_b);
-    auto dispatch_data_arg = machine.dispatcher_fn->getArg(0);
-    builder.CreateCall(worker_llvm_fn, {dispatch_data_arg});
-    builder.CreateRetVoid();
-
-    auto entry_b = state_fn->new_label("_entry");
-    state_fn->use_label(entry_b);
-
-    auto data_arg = worker_llvm_fn->getArg(0);
-    auto previous_frame_ptr = machine.frame_ptr;
-    machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
-    auto result_promise_ptr =
-        builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
-    state_fn->async_reject_promise_ptr = result_promise_ptr;
-    state_fn->async_promise_type = machine.promise_type;
-
-    map<ast::Node *, llvm::Value *> shadowed_vars;
-    std::set<ast::Node *> had_shadowed_binding;
-    for (auto var : machine.frame_vars) {
-        if (m_ctx->var_table.has_key(var)) {
-            shadowed_vars[var] = get_var(var);
-            had_shadowed_binding.insert(var);
-        }
-        auto frame_ptr = get_async_frame_field_ptr(state_fn, machine, var);
-        add_var(var, frame_ptr);
-    }
-
-    emit_body(state_fn);
-
-    if (!builder.GetInsertBlock()->getTerminator()) {
-        builder.CreateRetVoid();
-    }
-
-    if (state_fn->cleanup_landing_label) {
-        worker_llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
-        state_fn->use_label(state_fn->cleanup_landing_label);
-        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
-        landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
-        emit_async_reject_landing_pad(state_fn, landing);
-        builder.CreateRetVoid();
-    }
-
-    for (auto &kv : shadowed_vars.data) {
-        m_ctx->var_table[kv.first] = kv.second;
-    }
-    for (auto var : machine.frame_vars) {
-        if (!had_shadowed_binding.count(var)) {
-            m_ctx->var_table.unset(var);
-        }
-    }
-
-    llvm::verifyFunction(*worker_llvm_fn);
-    machine.frame_ptr = previous_frame_ptr;
-    builder.restoreIP(saved_ip);
-    return state_id;
+    auto ctx = begin_async_worker_state(fn, machine, name_suffix, forced_state_id);
+    emit_body(ctx.state_fn);
+    end_async_worker_state(machine, ctx);
+    return ctx.state_id;
 }
 
 void Compiler::compile_async_if_recursive(Function *fn, AsyncStateMachine &machine,
@@ -4650,11 +4513,7 @@ void Compiler::compile_async_try_recursive(Function *fn, AsyncStateMachine &mach
 
             // --- Path 1: Error from TLS (sync throw via landing pad) ---
             state_fn->use_label(from_tls_b);
-            auto tls_error_data =
-                builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {}, "error_data");
-            auto tls_error_vtable =
-                builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {}, "error_vtable");
-            builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
+            auto [tls_error_data, tls_error_vtable] = extract_tls_error(state_fn);
             auto tls_fat_iface_type_l = compile_type(
                 get_resolver()->get_pointer_type(error_iface, TypeKind::MoveRef));
             llvm::Value *tls_fat_ptr = llvm::UndefValue::get(tls_fat_iface_type_l);
@@ -4797,9 +4656,7 @@ void Compiler::compile_async_try_recursive(Function *fn, AsyncStateMachine &mach
         emit_async_state_transition(fn, machine, catch_state_id);
     } else {
         // No catch block (result mode): reject the promise
-        auto error_data = builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {});
-        auto error_vtable = builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {});
-        builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
+        auto [error_data, error_vtable] = extract_tls_error(fn);
         emit_async_promise_reject(fn, error_data, error_vtable);
         builder.CreateRetVoid();
     }
@@ -5127,15 +4984,123 @@ void Compiler::emit_async_landing_pad(Function *fn, llvm::Value *landing) {
 }
 
 void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing) {
-    auto &builder = *m_ctx->llvm_builder;
-
     emit_async_landing_pad(fn, landing);
+    auto [error_data, error_vtable] = extract_tls_error(fn);
+    emit_async_promise_reject(fn, error_data, error_vtable);
+}
 
+void Compiler::emit_async_cleanup_landing_pad(Function *fn, llvm::Function *worker_llvm_fn) {
+    if (!fn->cleanup_landing_label) return;
+    auto &builder = *m_ctx->llvm_builder;
+    worker_llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+    fn->use_label(fn->cleanup_landing_label);
+    auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+    landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
+    emit_async_reject_landing_pad(fn, landing);
+    builder.CreateRetVoid();
+}
+
+std::pair<llvm::Value *, llvm::Value *> Compiler::extract_tls_error(Function *fn) {
+    auto &builder = *m_ctx->llvm_builder;
     auto error_data = builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {}, "error_data");
     auto error_vtable =
         builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {}, "error_vtable");
     builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
-    emit_async_promise_reject(fn, error_data, error_vtable);
+    return {error_data, error_vtable};
+}
+
+llvm::Value *Compiler::init_async_worker_frame(Function *fn, AsyncStateMachine &machine,
+                                                llvm::Function *worker_llvm_fn) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto data_arg = worker_llvm_fn->getArg(0);
+    machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
+    auto result_promise_ptr =
+        builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
+    fn->async_reject_promise_ptr = result_promise_ptr;
+    fn->async_promise_type = machine.promise_type;
+    return result_promise_ptr;
+}
+
+AsyncWorkerContext Compiler::begin_async_worker_state(Function *fn, AsyncStateMachine &machine,
+                                                      const string &name_suffix,
+                                                      int forced_state_id) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &llvm_module = *m_ctx->llvm_module;
+
+    int state_id = forced_state_id >= 0 ? forced_state_id : machine.next_state_id++;
+    if (forced_state_id >= 0 && machine.next_state_id <= forced_state_id) {
+        machine.next_state_id = forced_state_id + 1;
+    }
+
+    auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
+    auto worker_type = llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto worker_name = name_suffix.empty()
+                           ? fmt::format("{}__async_state_{}", fn->qualified_name, state_id)
+                           : fmt::format("{}__async_state_{}_{}", fn->qualified_name, state_id,
+                                         name_suffix);
+    auto worker_llvm_fn = llvm::Function::Create(worker_type, llvm::Function::PrivateLinkage,
+                                                  worker_name, llvm_module);
+    auto state_fn = new Function(m_ctx, worker_llvm_fn, fn->node);
+    state_fn->qualified_name = worker_name;
+
+    auto saved_ip = builder.saveIP();
+
+    auto dispatch_case_b =
+        llvm::BasicBlock::Create(llvm_ctx, fmt::format("_state_{}", state_id), machine.dispatcher_fn);
+    machine.dispatcher_switch->addCase(builder.getInt32(state_id), dispatch_case_b);
+    builder.SetInsertPoint(dispatch_case_b);
+    auto dispatch_data_arg = machine.dispatcher_fn->getArg(0);
+    builder.CreateCall(worker_llvm_fn, {dispatch_data_arg});
+    builder.CreateRetVoid();
+
+    auto entry_b = state_fn->new_label("_entry");
+    state_fn->use_label(entry_b);
+
+    auto previous_frame_ptr = machine.frame_ptr;
+    auto result_promise_ptr = init_async_worker_frame(state_fn, machine, worker_llvm_fn);
+
+    map<ast::Node *, llvm::Value *> shadowed_vars;
+    std::set<ast::Node *> had_shadowed_binding;
+    for (auto var : machine.frame_vars) {
+        if (m_ctx->var_table.has_key(var)) {
+            shadowed_vars[var] = get_var(var);
+            had_shadowed_binding.insert(var);
+        }
+        auto frame_ptr = get_async_frame_field_ptr(state_fn, machine, var);
+        add_var(var, frame_ptr);
+    }
+
+    return {state_id,
+            state_fn,
+            worker_llvm_fn,
+            result_promise_ptr,
+            saved_ip,
+            previous_frame_ptr,
+            std::move(shadowed_vars),
+            std::move(had_shadowed_binding)};
+}
+
+void Compiler::end_async_worker_state(AsyncStateMachine &machine, AsyncWorkerContext &ctx) {
+    auto &builder = *m_ctx->llvm_builder;
+
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        builder.CreateRetVoid();
+    }
+
+    emit_async_cleanup_landing_pad(ctx.state_fn, ctx.worker_llvm_fn);
+
+    for (auto var : machine.frame_vars) {
+        if (ctx.had_shadowed_binding.count(var)) {
+            m_ctx->var_table[var] = ctx.shadowed_vars[var];
+        } else {
+            m_ctx->var_table.unset(var);
+        }
+    }
+
+    llvm::verifyFunction(*ctx.worker_llvm_fn);
+    machine.frame_ptr = ctx.previous_frame_ptr;
+    builder.restoreIP(ctx.saved_ip);
 }
 
 void Compiler::emit_async_promise_reject(Function *fn, llvm::Value *data_ptr,
