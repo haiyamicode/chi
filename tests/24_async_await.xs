@@ -1117,6 +1117,146 @@ func add_one_sync(x: int) int {
     return x + 1;
 }
 
+// --- Try block with await ---
+
+async func try_block_await_ok() Promise<int> {
+    var result = 0;
+    try {
+        var v = await settle_resolves_after_delay();
+        result = v;
+    } catch {
+        result = -1;
+    };
+    return result;
+}
+
+async func try_block_await_err() Promise<int> {
+    var result = 0;
+    try {
+        var v = await settle_outer_throws();
+        result = v;
+    } catch {
+        result = -7;
+    };
+    return result;
+}
+
+async func try_block_await_typed_match() Promise<int> {
+    var result = 0;
+    try {
+        var v = await settle_typed_throws();
+        result = v;
+    } catch TestError as err {
+        printf("try block typed saw: {}\n", err.message());
+        result = -17;
+    };
+    return result;
+}
+
+async func try_block_await_typed_mismatch() Promise<int> {
+    try {
+        var v = await settle_other_throws();
+        return v;
+    } catch TestError {
+        return -999;
+    };
+    return -2;
+}
+
+async func try_block_await_if_throw() Promise<int> {
+    var result = 0;
+    try {
+        if await delayed_flag(true, 260) {
+            throw new TestError{code: 88};
+        }
+        var v = await settle_resolves_after_delay();
+        result = v;
+    } catch {
+        result = -88;
+    };
+    return result;
+}
+
+async func try_block_await_if_ok() Promise<int> {
+    var result = 0;
+    try {
+        if await delayed_flag(true, 261) {
+            var v = await settle_resolves_after_delay();
+            result = v + 100;
+        }
+    } catch {
+        result = -1;
+    };
+    return result;
+}
+
+async func try_block_await_while() Promise<int> {
+    var result = 0;
+    try {
+        var i = 0;
+        while i < 3 {
+            if i == 1 {
+                throw new TestError{code: 77};
+            }
+            var v = await settle_resolves_after_delay();
+            result = result + v;
+            i = i + 1;
+        }
+    } catch {
+        result = result + 1000;
+    };
+    return result;
+}
+
+async func try_block_await_for_ok() Promise<int> {
+    var sum = 0;
+    try {
+        for i in 0..3 {
+            var v = await delayed_number(10);
+            sum = sum + v;
+        }
+    } catch {
+        sum = -1;
+    };
+    return sum;
+}
+
+async func try_block_await_sequential() Promise<int> {
+    var sum = 0;
+    try {
+        var a = await delayed_number(10);
+        var b = await delayed_number(20);
+        var c = await delayed_number(30);
+        sum = a + b + c;
+    } catch {
+        sum = -1;
+    };
+    return sum;
+}
+
+async func try_block_await_result_ok() Promise<int> {
+    var r = try {
+        var v = await settle_resolves_after_delay();
+        v + 1
+    } catch TestError;
+    return r.value()!;
+}
+
+async func try_block_await_result_err() Promise<string> {
+    var r = try {
+        var v = await settle_typed_throws();
+        v
+    } catch TestError;
+    return r.error()!.message();
+}
+
+async func try_block_await_result_void() Promise<int> {
+    var r = try {
+        var y = await time.sleep(1);
+    } catch TestError;
+    return switch r { Ok => 1, Err => 0 };
+}
+
 // --- Await: switch control flow ---
 
 async func switch_expr_await(tag: int, flip: bool) Promise<int> {
@@ -1804,6 +1944,25 @@ async func run_async_tail() Promise {
     await run_try_await_pathological_cases();
     printf("trace lifecycle={}\n", await trace_async_lifecycle_probe());
     printf("trace loop={}\n", await trace_async_value_loop());
+
+    println("=== try block await ===");
+    printf("try block ok={}\n", await try_block_await_ok());
+    printf("try block err={}\n", await try_block_await_err());
+    printf("try block typed={}\n", await try_block_await_typed_match());
+    let _try_block_mismatch = await try_block_await_typed_mismatch().catch(
+        func (err: Shared<Error>) int {
+            printf("try block mismatch: {}\n", err.message());
+            return -1;
+        }
+    );
+    printf("try block if throw={}\n", await try_block_await_if_throw());
+    printf("try block if ok={}\n", await try_block_await_if_ok());
+    printf("try block while={}\n", await try_block_await_while());
+    printf("try block for ok={}\n", await try_block_await_for_ok());
+    printf("try block sequential={}\n", await try_block_await_sequential());
+    printf("try block result ok={}\n", await try_block_await_result_ok());
+    printf("try block result err={}\n", await try_block_await_result_err());
+    printf("try block result void={}\n", await try_block_await_result_void());
 
     test_reject_after_resolve();
     test_resolve_after_reject();

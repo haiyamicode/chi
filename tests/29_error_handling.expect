@@ -42,6 +42,25 @@ fallback = -1
 success = 42
 handling: bad
 typed fallback = 0
+=== try block catch-all ===
+block caught
+block ok = 42
+=== try block typed ===
+block typed: typed block
+mismatch propagated: mismatch
+block return = -1
+=== try block destructor ===
+after block unwind
+=== try block result mode ===
+ok = 42
+err = result block
+mismatch = mismatch
+=== try block sequential ===
+caught first
+caught second
+success = 42
+caught third
+all done
 === rethrow ===
 caught: original
 re-caught: error code 42

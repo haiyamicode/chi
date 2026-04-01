@@ -1940,21 +1940,18 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
 
     case TokenType::KW_TRY: {
         consume();
-        // Check for unsupported try-block syntax: try { ... }
-        if (next_is(TokenType::LBRACE)) {
-            error(get(), "try blocks are not supported; use 'try expression catch {{ ... }}' instead");
-            // Continue parsing to skip the try block and catch block to avoid cascading errors
-            parse_block();
-            if (next_is(TokenType::KW_CATCH)) {
-                consume();
-                if (next_is(TokenType::LBRACE)) {
-                    parse_block();
-                }
-            }
-            return create_error_node();
-        }
         auto node = create_node(NodeType::TryExpr, token);
-        node->data.try_expr.expr = parse_binary_expr(lhs, parent, UNARY_PREC);
+
+        // Check for try-block syntax: try { ... }
+        if (next_is(TokenType::LBRACE)) {
+            // Parse the try block (parse_block handles its own scoping)
+            node->data.try_expr.expr = parse_block();
+        } else {
+            // try expression() - parse as binary expression
+            node->data.try_expr.expr = parse_binary_expr(lhs, parent, UNARY_PREC);
+        }
+
+        // Parse optional catch clause
         if (next_is(TokenType::KW_CATCH)) {
             consume();
             if (next_is(TokenType::LBRACE)) {

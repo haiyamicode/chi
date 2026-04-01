@@ -96,6 +96,7 @@ struct Function {
     bool has_cleanup_invoke = false;
     llvm::Value *async_reject_promise_ptr = nullptr; // non-null in async: landing pad rejects promise
     ChiType *async_promise_type = nullptr;           // Promise<T> type for reject call
+    label_t *try_block_landing = nullptr;  // set during try-block compilation: all calls use invoke to this landing
 
     // Parameter information
     std::vector<ParameterInfo> parameter_info;
@@ -299,6 +300,15 @@ struct AsyncStateMachine {
     std::map<ast::Node *, int> frame_await_alive_index = {};
     std::map<ast::Node *, ChiType *> frame_await_types = {};
     std::map<ast::Node *, int> loop_head_state_ids = {};
+
+    // Frame slot for Shared<Error> passed from rejection forwarder to catch state
+    int async_error_index = -1;
+    int async_error_alive_index = -1;
+
+    // Active try-catch context (set during async try-block compilation)
+    int active_try_catch_state_id = -1;
+    ast::Node *active_try_stmt = nullptr;
+
 };
 
 struct TypeInfoWorkItem {
@@ -717,7 +727,8 @@ class Compiler {
                                     llvm::Value *result_promise_ptr);
     void emit_async_state_transition(Function *fn, AsyncStateMachine &machine, int state_id);
     int get_async_loop_head_state(Function *fn, AsyncStateMachine &machine, ast::Node *while_stmt,
-                                  ast::Node *parent_block, int stmt_index);
+                                  ast::Node *parent_block, int stmt_index,
+                                  int continue_state_id = -1);
     int register_async_resume_state(Function *fn, AsyncStateMachine &machine,
                                     const AsyncResumePoint &resume_point,
                                     int forced_state_id = -1);
@@ -744,13 +755,22 @@ class Compiler {
                                        int stmt_index, int next_stmt_index,
                                        map<ast::Node *, llvm::Value *> &local_vars,
                                        llvm::Value *result_promise_ptr,
-                                       const AsyncResumePoint *resume_point = nullptr);
+                                       const AsyncResumePoint *resume_point = nullptr,
+                                       int continue_state_id = -1);
     void compile_async_for_recursive(Function *fn, AsyncStateMachine &machine,
                                      ast::Node *for_stmt, ast::Node *parent_block,
                                      int stmt_index, int next_stmt_index,
                                      map<ast::Node *, llvm::Value *> &local_vars,
                                      llvm::Value *result_promise_ptr,
-                                     const AsyncResumePoint *resume_point = nullptr);
+                                     const AsyncResumePoint *resume_point = nullptr,
+                                     int continue_state_id = -1);
+    void compile_async_try_recursive(Function *fn, AsyncStateMachine &machine,
+                                     ast::Node *try_stmt, ast::Node *parent_block,
+                                     int next_stmt_index,
+                                     map<ast::Node *, llvm::Value *> &local_vars,
+                                     llvm::Value *result_promise_ptr,
+                                     const AsyncResumePoint *resume_point,
+                                     int continue_state_id);
     void compile_async_switch_recursive(Function *fn, AsyncStateMachine &machine,
                                         ast::Node *stmt, ast::Node *switch_expr,
                                         ast::Node *parent_block, int stmt_index,

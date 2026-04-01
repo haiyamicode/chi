@@ -2197,9 +2197,60 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::TryExpr: {
         auto &data = node->data.try_expr;
+
         auto expr_type = resolve(data.expr, scope);
         bool is_try_await = contains_await(data.expr);
         auto try_value_type = expr_type;
+
+        // Transform: try { block_with_await } catch [Type] → try await (async { block })() catch [Type]
+        // This allows the existing try-await codegen to handle Result wrapping naturally.
+        if (is_try_await && !data.catch_block && data.expr->type == NodeType::Block) {
+            auto block_type = (expr_type->kind == TypeKind::Void) ? get_system_types()->unit : expr_type;
+            auto promise_type = get_promise_type(block_type);
+
+            // Create: async func() Promise<T> { block }
+            auto decl_spec = get_allocator()->create_decl_spec();
+            decl_spec->flags = ast::DECL_ASYNC;
+
+            auto fn_proto = create_node(NodeType::FnProto);
+            fn_proto->token = data.expr->token;
+            fn_proto->module = node->module;
+
+            auto fn_def = create_node(NodeType::FnDef);
+            fn_def->token = data.expr->token;
+            fn_def->module = node->module;
+            fn_def->data.fn_def.fn_proto = fn_proto;
+            fn_def->data.fn_def.body = data.expr;
+            fn_def->data.fn_def.fn_kind = ast::FnKind::Lambda;
+            fn_def->data.fn_def.is_generated = true;
+            fn_def->data.fn_def.decl_spec = decl_spec;
+            fn_def->data.fn_def.has_try = scope.parent_fn_def()->has_try;
+            fn_proto->data.fn_proto.fn_def_node = fn_def;
+            fn_def->parent_fn = scope.parent_fn_node;
+            fn_def->name = fmt::format("{}__try_lambda_{}", scope.parent_fn_node->name, node->id);
+
+            auto fn_type = create_type(TypeKind::Fn);
+            fn_type->data.fn.return_type = promise_type;
+            fn_def->resolved_type = fn_type;
+            fn_proto->resolved_type = fn_type;
+
+            // Create: lambda()
+            auto call_expr = create_node(NodeType::FnCallExpr);
+            call_expr->token = data.expr->token;
+            call_expr->module = node->module;
+            call_expr->data.fn_call_expr.fn_ref_expr = fn_def;
+            call_expr->resolved_type = promise_type;
+
+            // Create: await lambda()
+            auto await_expr = create_node(NodeType::AwaitExpr);
+            await_expr->token = data.expr->token;
+            await_expr->module = node->module;
+            await_expr->data.await_expr.expr = call_expr;
+            await_expr->resolved_type = block_type;
+
+            data.expr = await_expr;
+            try_value_type = block_type;
+        }
         auto resolve_catch_type = [&]() -> ChiType * {
             if (!data.catch_expr) {
                 return nullptr;
@@ -2216,7 +2267,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             error(data.catch_expr, errors::CATCH_NOT_ERROR, format_type_display(catch_type));
             return nullptr;
         };
-        if (!is_try_await && data.expr->type != NodeType::FnCallExpr) {
+        if (!is_try_await && data.expr->type != NodeType::FnCallExpr && data.expr->type != NodeType::Block) {
             error(data.expr, errors::TRY_NOT_CALL);
         }
         scope.parent_fn_def()->has_try = true;

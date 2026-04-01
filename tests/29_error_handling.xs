@@ -291,6 +291,131 @@ func test_catch_block() {
     printf("typed fallback = {}\n", z);
 }
 
+// --- Try blocks: try { ... } catch { ... } ---
+
+func test_try_block_catch_all() {
+    println("=== try block catch-all ===");
+
+    // Block throws, catch-all handles it
+    try {
+        fail_with("block throw");
+    } catch {
+        println("block caught");
+    };
+
+    // Block succeeds, catch not entered
+    try {
+        var v = succeed();
+        printf("block ok = {}\n", v);
+    } catch {
+        println("should not reach");
+    };
+}
+
+func test_try_block_typed() {
+    println("=== try block typed ===");
+
+    // Typed catch inside try-block
+    try {
+        fail_with("typed block");
+    } catch MyError as err {
+        printf("block typed: {}\n", err.message());
+    };
+
+    // Typed catch mismatch falls through
+    var result = try {
+        fail_with("mismatch");
+    } catch OtherError;
+    switch result {
+        Err(err) => printf("mismatch propagated: {}\n", err.message()),
+        Ok => println("should not reach")
+    }
+}
+
+func test_try_block_return() int {
+    try {
+        fail_with("bail");
+    } catch {
+        return -1;
+    };
+    return 99;
+}
+
+func test_try_block_destructor() {
+    println("=== try block destructor ===");
+    try {
+        var r = Resource{name: "inner"};
+        fail_with("unwind block");
+    } catch {
+        println("after block unwind");
+    };
+}
+
+// Result mode: try { ... } catch [Type] → Result<T, Shared<Error>>
+
+func test_try_block_result_mode() {
+    println("=== try block result mode ===");
+
+    // Success path → Ok
+    var ok_result = try {
+        succeed()
+    } catch MyError;
+    switch ok_result {
+        Ok(v) => printf("ok = {}\n", v),
+        Err => println("should not reach")
+    }
+
+    // Error matches filter → Err
+    var err_result = try {
+        fail_with("result block");
+    } catch MyError;
+    switch err_result {
+        Err(err) => printf("err = {}\n", err.message()),
+        Ok => println("should not reach")
+    }
+
+    // Error doesn't match filter → still Err (wrapped Shared<Error>)
+    var mismatch_result = try {
+        fail_with("mismatch");
+    } catch OtherError;
+    switch mismatch_result {
+        Err(err) => printf("mismatch = {}\n", err.message()),
+        Ok => println("should not reach")
+    }
+}
+
+// Multiple sequential try blocks in one function
+func test_try_block_sequential() {
+    println("=== try block sequential ===");
+
+    try {
+        fail_with("first");
+    } catch {
+        println("caught first");
+    };
+
+    try {
+        fail_with("second");
+    } catch {
+        println("caught second");
+    };
+
+    // Success in middle
+    try {
+        var v = succeed();
+        printf("success = {}\n", v);
+    } catch {
+        println("should not reach");
+    };
+
+    try {
+        fail_with("third");
+    } catch {
+        println("caught third");
+    };
+    println("all done");
+}
+
 // Re-throw: catch one error, throw a different one
 func test_rethrow() {
     println("=== rethrow ===");
@@ -333,6 +458,12 @@ func main() {
     test_result_mode();
     test_typed_result();
     test_catch_block();
+    test_try_block_catch_all();
+    test_try_block_typed();
+    printf("block return = {}\n", test_try_block_return());
+    test_try_block_destructor();
+    test_try_block_result_mode();
+    test_try_block_sequential();
 
     // Re-throw propagates out — catch it here
     var rethrow_result = try test_rethrow() catch OtherError;

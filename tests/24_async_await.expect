@@ -183,6 +183,22 @@ TraceAsyncValue.copy(2)
 TraceAsyncValue.delete(2)
 TraceAsyncValue.got(2)
 trace loop=3
+=== try block await ===
+TraceAsyncValue.delete(2)
+TraceAsyncValue.delete(2)
+try block ok=55
+try block err=-7
+try block typed saw: error 67
+try block typed=-17
+try block mismatch: other 77
+try block if throw=-88
+try block if ok=155
+try block while=1055
+try block for ok=30
+try block sequential=60
+try block result ok=56
+try block result err=error 67
+try block result void=1
 === reject after resolve ===
 is_resolved: true
 is_rejected: false
@@ -195,8 +211,6 @@ rejected: true
 caught: error 10
 === async throw after delay ===
 immediate rejected: false
-TraceAsyncValue.delete(2)
-TraceAsyncValue.delete(2)
 delayed caught: error 20
 === async called throws ===
 called caught: error 42

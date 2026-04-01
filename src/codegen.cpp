@@ -2999,6 +2999,16 @@ void Compiler::initialize_async_frame(Function *fn, AsyncStateMachine &machine, 
         }
     }
 
+    // Shared<Error> slot for async try-catch: rejection forwarder stores error here
+    // Only allocate when the function actually contains a try block
+    if (fn->get_def()->has_try) {
+        auto shared_error_type = get_resolver()->get_shared_type(get_resolver()->get_context()->rt_error_type);
+        machine.async_error_index = (int)frame_types.size();
+        frame_types.push_back(compile_type(shared_error_type));
+        machine.async_error_alive_index = (int)frame_types.size();
+        frame_types.push_back(builder.getInt1Ty());
+    }
+
     machine.frame_struct_type = llvm::StructType::get(llvm_ctx, frame_types);
     auto frame_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(machine.frame_struct_type);
     auto null_ti = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
@@ -3143,6 +3153,16 @@ Function *Compiler::generate_async_frame_destructor(Function *fn, AsyncStateMach
             alive_ptr = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr, alive_it->second);
         }
         destroy_async_frame_slot_if_alive(dtor_fn, slot, alive_ptr, var_type);
+    }
+
+    // Destroy async error slot (Shared<Error>) if alive
+    if (machine.async_error_index >= 0) {
+        auto shared_error_type = get_resolver()->get_shared_type(get_resolver()->get_context()->rt_error_type);
+        auto err_slot = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr,
+                                                machine.async_error_index);
+        auto alive_ptr = builder.CreateStructGEP(machine.frame_struct_type, frame_ptr,
+                                                  machine.async_error_alive_index);
+        destroy_async_frame_slot_if_alive(dtor_fn, err_slot, alive_ptr, shared_error_type);
     }
 
     if (get_resolver()->type_needs_destruction(machine.promise_type)) {
@@ -3375,10 +3395,32 @@ AsyncLambdaValue Compiler::build_async_rejection_forwarder_lambda(Function *fn,
     auto err_arg = fwd_llvm_fn->getArg(1);
     auto previous_frame_ptr = machine.frame_ptr;
     machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
-    auto promise_ptr =
-        builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
-    emit_dbg_location(fn->node);
-    builder.CreateCall(reject_shared_fn->llvm_fn, {promise_ptr, err_arg});
+
+    if (machine.active_try_catch_state_id >= 0 && machine.async_error_index >= 0) {
+        // Inside a try-block: store the Shared<Error> in the frame error slot
+        // and transition to the catch state instead of rejecting the promise
+        auto err_slot = builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
+                                                machine.async_error_index);
+        builder.CreateStore(err_arg, err_slot);
+        // Mark the error slot as alive
+        auto alive_slot = builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
+                                                   machine.async_error_alive_index);
+        builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), alive_slot);
+        // Transition to catch state
+        auto state_ptr = get_async_frame_state_ptr(fwd_fn, machine);
+        builder.CreateStore(
+            llvm::ConstantInt::get(builder.getInt32Ty(), machine.active_try_catch_state_id),
+            state_ptr);
+        emit_dbg_location(fn->node);
+        auto frame_data_ptr =
+            builder.CreateBitCast(machine.frame_ptr, llvm::PointerType::get(llvm_ctx, 0));
+        builder.CreateCall(machine.dispatcher_fn, {frame_data_ptr});
+    } else {
+        auto promise_ptr =
+            builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
+        emit_dbg_location(fn->node);
+        builder.CreateCall(reject_shared_fn->llvm_fn, {promise_ptr, err_arg});
+    }
     builder.CreateRetVoid();
 
     llvm::verifyFunction(*fwd_llvm_fn);
@@ -3604,7 +3646,7 @@ void Compiler::emit_async_state_transition(Function *fn, AsyncStateMachine &mach
 
 int Compiler::get_async_loop_head_state(Function *fn, AsyncStateMachine &machine,
                                         ast::Node *while_stmt, ast::Node *parent_block,
-                                        int stmt_index) {
+                                        int stmt_index, int continue_state_id) {
     auto existing = machine.loop_head_state_ids.find(while_stmt);
     if (existing != machine.loop_head_state_ids.end()) {
         return existing->second;
@@ -3618,6 +3660,7 @@ int Compiler::get_async_loop_head_state(Function *fn, AsyncStateMachine &machine
     head.stmt_index = stmt_index;
     head.resume_stmt = nullptr;
     head.is_loop_head = true;
+    head.continue_state_id = continue_state_id;
     register_async_resume_state(fn, machine, head, state_id);
     return state_id;
 }
@@ -3727,6 +3770,16 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
 
     restore_async_loop_stack(state_fn, resume_point.loop_stack);
 
+    // If we're inside an async try-block, set up landing pad for the resumed state
+    label_t *try_catch_landing_b = nullptr;
+    int saved_try_catch_id = -1;
+    if (machine.active_try_catch_state_id >= 0) {
+        try_catch_landing_b = state_fn->new_label("_async_try_catch_landing");
+        // Set try_block_landing so calls within this resumed state use invoke
+        state_fn->try_block_landing = try_catch_landing_b;
+        saved_try_catch_id = machine.active_try_catch_state_id;
+    }
+
     map<ast::Node *, llvm::Value *> resumed_locals;
     map<ast::Node *, llvm::Value *> shadowed_vars;
     std::set<ast::Node *> had_shadowed_binding;
@@ -3774,6 +3827,37 @@ int Compiler::register_async_resume_state(Function *fn, AsyncStateMachine &machi
         emit_async_reject_landing_pad(state_fn, landing);
         builder.CreateRetVoid();
     }
+
+    // If inside a try-block, add the try-catch landing pad that transitions to catch state
+    if (try_catch_landing_b && try_catch_landing_b->getParent()) {
+        if (!worker_llvm_fn->hasPersonalityFn()) {
+            worker_llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+        }
+        state_fn->use_label(try_catch_landing_b);
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+        landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
+
+        auto thrown_ptr = builder.CreateExtractValue(landing, {0}, "thrown_ptr");
+        auto is_typed = builder.CreateICmpNE(
+            thrown_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()), "is_typed_error");
+
+        auto typed_error_b = state_fn->new_label("_try_catch_typed");
+        auto panic_b = state_fn->new_label("_try_catch_panic");
+        builder.CreateCondBr(is_typed, typed_error_b, panic_b);
+
+        // Panic: re-throw (unrecoverable)
+        state_fn->use_label(panic_b);
+        builder.CreateResume(landing);
+
+        // Typed error: transition to the catch state
+        state_fn->use_label(typed_error_b);
+        builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
+        emit_async_state_transition(state_fn, machine, saved_try_catch_id);
+        // emit_async_state_transition already calls CreateRetVoid()
+    }
+
+    // Restore try_block_landing
+    state_fn->try_block_landing = nullptr;
 
     m_async_await_refs = previous_await_refs;
     for (auto &kv : resumed_locals.data) {
@@ -3955,7 +4039,8 @@ void Compiler::compile_async_while_recursive(Function *fn, AsyncStateMachine &ma
                                              int stmt_index, int next_stmt_index,
                                              map<ast::Node *, llvm::Value *> &local_vars,
                                              llvm::Value *result_promise_ptr,
-                                             const AsyncResumePoint *resume_point) {
+                                             const AsyncResumePoint *resume_point,
+                                             int continue_state_id) {
     auto &builder = *m_ctx->llvm_builder;
     auto &data = while_stmt->data.while_stmt;
 
@@ -3963,13 +4048,14 @@ void Compiler::compile_async_while_recursive(Function *fn, AsyncStateMachine &ma
         compile_stmt(fn, while_stmt);
         if (!builder.GetInsertBlock()->getTerminator()) {
             compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
-                                          result_promise_ptr, nullptr, nullptr, -1, -1);
+                                          result_promise_ptr, nullptr, nullptr, -1,
+                                          continue_state_id);
         }
         return;
     }
 
     auto loop_head_state_id = get_async_loop_head_state(fn, machine, while_stmt, parent_block,
-                                                        stmt_index);
+                                                        stmt_index, continue_state_id);
     auto resolved = get_async_resolved_awaits(resume_point, while_stmt);
     if (data.condition && contains_unresolved_await(data.condition, resolved)) {
         auto site = find_unresolved_await_site(data.condition, resolved);
@@ -4011,7 +4097,8 @@ void Compiler::compile_async_while_recursive(Function *fn, AsyncStateMachine &ma
     fn->use_label(end_b);
     if (!builder.GetInsertBlock()->getTerminator()) {
         compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
-                                      result_promise_ptr, nullptr, nullptr, -1, -1);
+                                      result_promise_ptr, nullptr, nullptr, -1,
+                                      continue_state_id);
         if (!builder.GetInsertBlock()->getTerminator()) {
             builder.CreateBr(done_b);
         }
@@ -4025,7 +4112,8 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
                                            int stmt_index, int next_stmt_index,
                                            map<ast::Node *, llvm::Value *> &local_vars,
                                            llvm::Value *result_promise_ptr,
-                                           const AsyncResumePoint *resume_point) {
+                                           const AsyncResumePoint *resume_point,
+                                           int continue_state_id) {
     auto &builder = *m_ctx->llvm_builder;
     auto &data = for_stmt->data.for_stmt;
 
@@ -4033,7 +4121,8 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
         compile_stmt(fn, for_stmt);
         if (!builder.GetInsertBlock()->getTerminator()) {
             compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
-                                          result_promise_ptr, nullptr, nullptr, -1, -1, nullptr);
+                                          result_promise_ptr, nullptr, nullptr, -1,
+                                          continue_state_id, nullptr);
         }
         return;
     }
@@ -4085,7 +4174,7 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
         }
 
         auto loop_head_state_id = get_async_loop_head_state(fn, machine, for_stmt, parent_block,
-                                                             stmt_index);
+                                                             stmt_index, continue_state_id);
         auto resolved = get_async_resolved_awaits(resume_point, for_stmt);
         if (data.condition && contains_unresolved_await(data.condition, resolved)) {
             auto site = find_unresolved_await_site(data.condition, resolved);
@@ -4223,7 +4312,8 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
         }
     }
 
-    auto loop_head_state_id = get_async_loop_head_state(fn, machine, for_stmt, parent_block, stmt_index);
+    auto loop_head_state_id = get_async_loop_head_state(fn, machine, for_stmt, parent_block,
+                                                        stmt_index, continue_state_id);
     auto post_state_id = register_async_custom_state(
         fn, machine, "for_post",
         [&](Function *state_fn) {
@@ -4365,7 +4455,8 @@ void Compiler::compile_async_for_recursive(Function *fn, AsyncStateMachine &mach
     fn->use_label(end_b);
     if (!builder.GetInsertBlock()->getTerminator()) {
         compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
-                                      result_promise_ptr, nullptr, nullptr, -1, -1, nullptr);
+                                      result_promise_ptr, nullptr, nullptr, -1,
+                                      continue_state_id, nullptr);
         if (!builder.GetInsertBlock()->getTerminator()) {
             builder.CreateBr(done_b);
         }
@@ -4527,6 +4618,223 @@ void Compiler::compile_async_switch_recursive(Function *fn, AsyncStateMachine &m
     fn->use_label(done_label);
 }
 
+void Compiler::compile_async_try_recursive(Function *fn, AsyncStateMachine &machine,
+                                           ast::Node *try_stmt, ast::Node *parent_block,
+                                           int next_stmt_index,
+                                           map<ast::Node *, llvm::Value *> &local_vars,
+                                           llvm::Value *result_promise_ptr,
+                                           const AsyncResumePoint *resume_point,
+                                           int continue_state_id) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto &data = try_stmt->data.try_expr;
+    auto resolved = get_async_resolved_awaits(resume_point, try_stmt);
+
+    // Non-block try expression or no await: let compile_expr handle it synchronously
+    if (data.expr->type != ast::NodeType::Block ||
+        !contains_unresolved_await(try_stmt, resolved)) {
+        compile_stmt(fn, try_stmt);
+        if (!builder.GetInsertBlock()->getTerminator()) {
+            compile_async_block_recursive(fn, machine, parent_block, next_stmt_index, local_vars,
+                                          result_promise_ptr, nullptr, nullptr, -1,
+                                          continue_state_id, nullptr);
+        }
+        return;
+    }
+
+    // --- Async try-block with await ---
+
+    // 1. Register a catch state that will handle errors from any state within the try block.
+    //    The catch state extracts the error from TLS and compiles the catch block.
+    int catch_state_id = -1;
+    if (data.catch_block) {
+        auto try_stmt_ref = try_stmt;
+        catch_state_id = register_async_custom_state(fn, machine, "try_catch", [&](Function *state_fn) {
+            auto error_iface = get_resolver()->get_context()->rt_error_type;
+            auto shared_error_type = get_resolver()->get_shared_type(error_iface);
+            auto shared_error_type_l = compile_type(shared_error_type);
+
+            auto err_alive_slot = builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
+                                                          machine.async_error_alive_index);
+            auto err_alive = builder.CreateLoad(builder.getInt1Ty(), err_alive_slot, "_err_from_frame");
+
+            auto from_tls_b = state_fn->new_label("_catch_from_tls");
+            auto from_frame_b = state_fn->new_label("_catch_from_frame");
+            builder.CreateCondBr(err_alive, from_frame_b, from_tls_b);
+
+            // --- Path 1: Error from TLS (sync throw via landing pad) ---
+            state_fn->use_label(from_tls_b);
+            auto tls_error_data =
+                builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {}, "error_data");
+            auto tls_error_vtable =
+                builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {}, "error_vtable");
+            builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
+            auto tls_fat_iface_type_l = compile_type(
+                get_resolver()->get_pointer_type(error_iface, TypeKind::MoveRef));
+            llvm::Value *tls_fat_ptr = llvm::UndefValue::get(tls_fat_iface_type_l);
+            tls_fat_ptr = builder.CreateInsertValue(tls_fat_ptr, tls_error_data, {0});
+            tls_fat_ptr = builder.CreateInsertValue(tls_fat_ptr, tls_error_vtable, {1});
+            auto tls_shared_error = compile_shared_new(state_fn, shared_error_type, tls_fat_ptr);
+            auto merge_b = state_fn->new_label("_catch_merge");
+            builder.CreateBr(merge_b);
+
+            // --- Path 2: Error from frame slot (async rejection) ---
+            state_fn->use_label(from_frame_b);
+            auto frame_err_slot = builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
+                                                          machine.async_error_index);
+            auto frame_shared_error = builder.CreateLoad(shared_error_type_l, frame_err_slot, "_frame_err");
+            // Clear alive flag (we've consumed the error)
+            builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), err_alive_slot);
+            builder.CreateBr(merge_b);
+
+            // --- Merge ---
+            state_fn->use_label(merge_b);
+            auto shared_error = builder.CreatePHI(shared_error_type_l, 2, "_shared_error");
+            cast<llvm::PHINode>(shared_error)->addIncoming(tls_shared_error, from_tls_b);
+            cast<llvm::PHINode>(shared_error)->addIncoming(frame_shared_error, from_frame_b);
+            // Shared.ref() expects a pointer (self) — spill the PHI value to a slot
+            auto shared_error_ptr = state_fn->entry_alloca(shared_error_type_l, "_shared_error_slot");
+            builder.CreateStore(shared_error, shared_error_ptr);
+
+            // Type check for typed catch
+            if (data.catch_expr) {
+                auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
+                auto error_iface_ref = compile_shared_ref(state_fn, shared_error_ptr, shared_error_type);
+                auto type_matches = compile_interface_type_match(
+                    state_fn, error_iface_ref, error_iface, catch_type);
+
+                auto match_b = state_fn->new_label("_catch_type_match");
+                auto nomatch_b = state_fn->new_label("_catch_type_nomatch");
+                builder.CreateCondBr(type_matches, match_b, nomatch_b);
+
+                // Type doesn't match: reject promise (re-throw)
+                state_fn->use_label(nomatch_b);
+                emit_async_promise_reject_shared(state_fn, shared_error);
+                builder.CreateRetVoid();
+
+                state_fn->use_label(match_b);
+            }
+
+            // Set up error binding variable
+            if (data.catch_err_var) {
+                auto err_var = compile_alloc(state_fn, data.catch_err_var);
+                add_var(data.catch_err_var, err_var);
+                if (data.catch_expr) {
+                    // Typed catch: extract data ptr from Shared<Error>
+                    auto ref = compile_shared_ref(state_fn, shared_error_ptr, shared_error_type);
+                    auto raw_data = extract_interface_data_ptr(ref);
+                    builder.CreateStore(raw_data, err_var);
+                } else {
+                    // Untyped catch: store Shared<Error> directly
+                    builder.CreateStore(shared_error, err_var);
+                }
+                data.catch_block->data.block.implicit_vars.len = 0;
+            }
+
+            // Compile catch block (may contain awaits — handled by async lowering)
+            auto saved_try_id = machine.active_try_catch_state_id;
+            auto saved_try_stmt = machine.active_try_stmt;
+            machine.active_try_catch_state_id = -1;
+            machine.active_try_stmt = nullptr;
+
+            map<ast::Node *, llvm::Value *> catch_locals;
+            compile_async_block_recursive(state_fn, machine, data.catch_block, 0, catch_locals,
+                                          state_fn->async_reject_promise_ptr, nullptr, parent_block,
+                                          next_stmt_index, continue_state_id, nullptr);
+
+            // After catch, continue with parent's remaining statements
+            if (!builder.GetInsertBlock()->getTerminator()) {
+                compile_async_block_recursive(state_fn, machine, parent_block, next_stmt_index,
+                                              catch_locals, state_fn->async_reject_promise_ptr, nullptr,
+                                              nullptr, -1, continue_state_id, nullptr);
+            }
+
+            machine.active_try_catch_state_id = saved_try_id;
+            machine.active_try_stmt = saved_try_stmt;
+
+            if (!builder.GetInsertBlock()->getTerminator()) {
+                builder.CreateRetVoid();
+            }
+        });
+    }
+
+    // 2. Register a post-try continuation state that handles parent_block[next_stmt_index:]
+    //    Uses register_async_resume_state (not custom state) to get full context:
+    //    bind_ptr, default_method_struct, loop stack, try-block landing.
+    AsyncResumePoint post_try_point = {};
+    post_try_point.block = parent_block;
+    post_try_point.stmt_index = next_stmt_index;
+    post_try_point.continue_state_id = continue_state_id;
+    post_try_point.loop_stack = snapshot_async_loop_stack(fn);
+    int post_try_state_id = register_async_resume_state(fn, machine, post_try_point);
+
+    int try_body_continue_id = post_try_state_id;
+
+    // 3. Set try-catch context on the state machine (propagates to resumed states)
+    auto saved_try_id = machine.active_try_catch_state_id;
+    auto saved_try_stmt = machine.active_try_stmt;
+    machine.active_try_catch_state_id = catch_state_id;
+    machine.active_try_stmt = try_stmt;
+
+    // 4. Set up landing pad for throws in the current worker function
+    auto landing_b = fn->new_label("_async_try_landing");
+    auto saved_landing = fn->try_block_landing;
+    fn->try_block_landing = landing_b;
+
+    // 5. Compile try block body — async lowering handles awaits, return, break, continue
+    compile_async_block_recursive(fn, machine, data.expr, 0, local_vars,
+                                  result_promise_ptr, resume_point,
+                                  nullptr, -1, try_body_continue_id, nullptr);
+
+    // 6. Restore context
+    fn->try_block_landing = saved_landing;
+    machine.active_try_catch_state_id = saved_try_id;
+    machine.active_try_stmt = saved_try_stmt;
+
+    // 7. Normal completion: transition to Ok-wrapping state (result mode) or post-try state
+    if (!builder.GetInsertBlock()->getTerminator()) {
+        emit_async_state_transition(fn, machine, try_body_continue_id);
+    }
+
+    // 8. Landing pad for throws in the current worker function
+    if (!landing_b->getParent()) {
+        return; // No invokes used this landing pad
+    }
+    fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+    fn->use_label(landing_b);
+    auto caught_type_l = m_ctx->get_caught_result_type();
+    auto landing = builder.CreateLandingPad(caught_type_l, 1);
+    landing->addClause(llvm::ConstantPointerNull::get(
+        llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)));
+
+    auto thrown_ptr = builder.CreateExtractValue(landing, {0}, "thrown_ptr");
+    auto is_typed = builder.CreateICmpNE(
+        thrown_ptr, llvm::ConstantPointerNull::get(builder.getPtrTy()), "is_typed_error");
+
+    auto typed_error_b = fn->new_label("_async_try_typed_error");
+    auto panic_b = fn->new_label("_async_try_panic");
+    builder.CreateCondBr(is_typed, typed_error_b, panic_b);
+
+    // Panic: re-throw
+    fn->use_label(panic_b);
+    builder.CreateResume(landing);
+
+    // Typed error: transition to catch state (error stays in TLS)
+    fn->use_label(typed_error_b);
+    if (data.catch_block) {
+        // Don't extract/clear error — catch state will do that
+        builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
+        emit_async_state_transition(fn, machine, catch_state_id);
+    } else {
+        // No catch block: reject the promise
+        auto error_data = builder.CreateCall(get_system_fn("cx_get_error_data")->llvm_fn, {});
+        auto error_vtable = builder.CreateCall(get_system_fn("cx_get_error_vtable")->llvm_fn, {});
+        builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
+        emit_async_promise_reject(fn, error_data, error_vtable);
+        builder.CreateRetVoid();
+    }
+}
+
 void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &machine,
                                              ast::Node *block, int stmt_index,
                                              map<ast::Node *, llvm::Value *> &local_vars,
@@ -4589,14 +4897,23 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
         }
         if (stmt->type == ast::NodeType::WhileStmt) {
             compile_async_while_recursive(fn, machine, stmt, block, i, i + 1, local_vars,
-                                          result_promise_ptr, current_resume);
+                                          result_promise_ptr, current_resume,
+                                          continue_state_id);
             fn->active_blocks.pop_back();
             fn->pop_scope();
             return;
         }
         if (stmt->type == ast::NodeType::ForStmt) {
             compile_async_for_recursive(fn, machine, stmt, block, i, i + 1, local_vars,
-                                        result_promise_ptr, current_resume);
+                                        result_promise_ptr, current_resume,
+                                        continue_state_id);
+            fn->active_blocks.pop_back();
+            fn->pop_scope();
+            return;
+        }
+        if (stmt->type == ast::NodeType::TryExpr) {
+            compile_async_try_recursive(fn, machine, stmt, block, i + 1, local_vars,
+                                        result_promise_ptr, current_resume, continue_state_id);
             fn->active_blocks.pop_back();
             fn->pop_scope();
             return;
@@ -4709,7 +5026,7 @@ void Compiler::compile_async_block_recursive(Function *fn, AsyncStateMachine &ma
         compile_block_cleanup(fn, &data, nullptr, data.exit_flow);
     }
 
-    if (!data.return_expr && !continue_block && !builder.GetInsertBlock()->getTerminator()) {
+    if (!data.return_expr && !continue_block && continue_state_id < 0 && !builder.GetInsertBlock()->getTerminator()) {
         auto inner_type = get_resolver()->get_promise_value_type(machine.promise_type);
         if (inner_type && inner_type->kind == TypeKind::Unit) {
             auto promise_struct = get_resolver()->resolve_struct_type(machine.promise_type);
@@ -4801,6 +5118,8 @@ void Compiler::compile_async_fn_body(Function *fn) {
     initialize_async_dispatcher(fn, machine);
 
     auto initial_state = AsyncResumePoint{body, 0, nullptr, {}};
+    // Set tail_return_expr_parent so the body's trailing expression resolves the promise
+    initial_state.tail_return_expr_parent = fn->node;
     register_async_resume_state(fn, machine, initial_state, 0);
 
     auto state_ptr = get_async_frame_state_ptr(fn, machine);
@@ -4991,10 +5310,17 @@ llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call
                                                    llvm::Value *dest) {
     auto &builder = *m_ctx->llvm_builder.get();
     InvokeInfo invoke;
-    if (!fn->cleanup_landing_label) {
-        fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
+    if (fn->try_block_landing) {
+        // Inside a try-block: route exceptions to the try-block landing pad so
+        // they are caught rather than cleaned-up-and-re-thrown (which would exit
+        // the function before the catch block runs).
+        invoke.landing = fn->try_block_landing;
+    } else {
+        if (!fn->cleanup_landing_label) {
+            fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
+        }
+        invoke.landing = fn->cleanup_landing_label;
     }
-    invoke.landing = fn->cleanup_landing_label;
     // Don't create normal label eagerly — the invoke sites create it on-demand.
     // This avoids orphaned blocks when compile_fn_call bypasses invoke
     // (e.g., builtin trait calls like int.hash() that can't throw).
@@ -6224,7 +6550,31 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         InvokeInfo invoke = {};
         invoke.normal = normal_b;
         invoke.landing = landing_b;
-        auto value = compile_fn_call(fn, data.expr, &invoke);
+
+        llvm::Value *value = nullptr;
+        // For block try in result mode, we need a separate temp to capture the block's
+        // return value (T), since result_var holds Result<T,E> not T.
+        llvm::Value *block_val_var = nullptr;
+        ChiType *block_val_type = nullptr;
+        if (data.expr->type == ast::NodeType::Block) {
+            // try { block } — compile the block with invoke context set
+            auto saved_landing = fn->try_block_landing;
+            fn->try_block_landing = landing_b;
+            if (!data.catch_block && !is_void) {
+                // Result mode: store block value into a separate temp (T*), not result_var (Result*)
+                block_val_type = get_chitype(data.expr);
+                if (block_val_type && block_val_type->kind != TypeKind::Void) {
+                    block_val_var = fn->entry_alloca(compile_type(block_val_type), "block_val");
+                }
+                compile_block(fn, data.expr, data.expr, normal_b, block_val_var);
+            } else {
+                // Catch-block mode: result_var is T*, pass directly
+                compile_block(fn, expr, data.expr, normal_b, result_var);
+            }
+            fn->try_block_landing = saved_landing;
+        } else {
+            value = compile_fn_call(fn, data.expr, &invoke);
+        }
 
         // === LANDING PAD (error path) ===
         fn->use_label(invoke.landing);
@@ -6375,9 +6725,20 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 auto nomatch_b = fn->new_label("_try_type_nomatch");
                 builder.CreateCondBr(type_matches, match_b, nomatch_b);
 
-                // Type doesn't match: re-throw
+                // Type doesn't match: re-throw for non-block try; wrap in Err for block try.
+                // For block try, re-throwing would cause _cleanup_landing to catch the resume
+                // and loop, so we wrap unmatched errors in Shared<Error> instead.
                 fn->use_label(nomatch_b);
-                builder.CreateResume(landing);
+                if (data.expr->type == ast::NodeType::Block) {
+                    init_result_variant("Err", [&](ChiType *, llvm::Value *payload_ptr) {
+                        auto shared_error = make_shared_error_value();
+                        builder.CreateStore(shared_error, payload_ptr);
+                    });
+                    builder.CreateCall(clear_loc_fn->llvm_fn, {});
+                    builder.CreateBr(continue_b);
+                } else {
+                    builder.CreateResume(landing);
+                }
 
                 // Type matches: populate Result.Err(Shared<Error>)
                 fn->use_label(match_b);
@@ -6417,6 +6778,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     builder.CreateStore(sret_loaded, payload_ptr);
                 } else if (value && !value->getType()->isVoidTy()) {
                     builder.CreateStore(value, payload_ptr);
+                } else if (block_val_var) {
+                    // Block try result mode: load block's return value from temp
+                    auto loaded = builder.CreateLoad(compile_type(block_val_type), block_val_var);
+                    builder.CreateStore(loaded, payload_ptr);
                 }
             });
         }
@@ -8705,6 +9070,13 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
 
 llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo *invoke,
                                        llvm::Value *sret_dest) {
+    // If inside a try-block, create invoke with the block's landing pad
+    InvokeInfo try_block_invoke;
+    if (!invoke && fn->try_block_landing) {
+        try_block_invoke.landing = fn->try_block_landing;
+        invoke = &try_block_invoke;
+    }
+
     auto &data = expr->data.fn_call_expr;
     auto &builder = *m_ctx->llvm_builder.get();
 
@@ -8790,6 +9162,11 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
                 arg_cleanup_block.exit_flow.add_sink_edge(var, data.fn_ref_expr);
             }
             pop_cleanup_block(fn, arg_cleanup_block);
+            // For scalar sret_dest, store result now (mirrors non-invoke path)
+            if (!use_sret && sret_dest) {
+                builder.CreateStore(ret, sret_dest);
+                return nullptr;
+            }
             // Invoke is a terminator - return value will be loaded by caller if needed
             return ret;
         } else {
@@ -9030,6 +9407,12 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     auto result = create_fn_call_invoke(callee, args, sret_type, invoke, sret_dest);
     if (invoke && invoke->used) {
         fn->use_label(invoke->normal);
+        // create_fn_call_invoke returns the invoke instr for scalar+sret_dest so
+        // we can store it after switching to the normal block (invoke is a terminator)
+        if (result && sret_dest && !sret_type) {
+            builder.CreateStore(result, sret_dest);
+            result = nullptr;
+        }
     }
     for (auto *var : transferred_cleanup_vars) {
         arg_cleanup_block.exit_flow.add_sink_edge(var, expr);
@@ -9469,6 +9852,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
     }
 
     switch (stmt->type) {
+    case ast::NodeType::EmptyStmt:
+        break;
     case ast::NodeType::DestructureDecl: {
         auto &data = stmt->data.destructure_decl;
         auto &builder = *m_ctx->llvm_builder.get();
@@ -9697,7 +10082,17 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         assert(vtable);
         auto type_info = compile_type_info(elem_type);
 
-        if (fn->async_reject_promise_ptr) {
+        if (fn->try_block_landing) {
+            // Inside a try-block: invoke cx_throw so the landing pad catches it
+            auto throw_fn = get_system_fn("cx_throw");
+            auto type_id =
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
+            auto unreachable_b = fn->new_label("_throw_unreachable");
+            llvm_builder.CreateInvoke(throw_fn->llvm_fn, unreachable_b, fn->try_block_landing,
+                                      {type_info, error_ref, vtable, type_id});
+            fn->use_label(unreachable_b);
+            llvm_builder.CreateUnreachable();
+        } else if (fn->async_reject_promise_ptr) {
             // In async context: convert throw to promise.reject() instead of cx_throw
             emit_async_promise_reject(fn, error_ref, vtable);
             llvm_builder.CreateCall(get_system_fn("cx_clear_panic_location")->llvm_fn, {});
