@@ -13,6 +13,8 @@ enum ProcessingFlags : uint32_t {
     FLAG_SAVE_TOKENS = 1 << 2
 };
 
+bool is_relative_path(const string &path);
+
 struct CompilationContext : public Context {
     CompilationContext(const CompilationContext &) = delete;
     CompilationContext &operator=(const CompilationContext &) = delete;

@@ -10,6 +10,8 @@
 
 using namespace cx;
 
+bool cx::is_relative_path(const string &path) { return path.size() && path[0] == '.'; }
+
 CompilationContext::CompilationContext() : resolve_ctx(this) {
     auto rootenv = std::getenv("CHI_ROOT");
     if (rootenv) {
@@ -64,7 +66,7 @@ optional<ModulePathInfo> CompilationContext::find_module_path(const string &path
     string package_id_path = "";
 
     // relative import
-    if (base_path.size() && path.size() && path[0] == '.') {
+    if (is_relative_path(path)) {
         fs_path = fs::path(base_path) / path;
         package_id_path = ".";
         is_relative = true;
@@ -72,6 +74,21 @@ optional<ModulePathInfo> CompilationContext::find_module_path(const string &path
         auto [package_path, module_path] = parse_import_path(path);
         auto package_p = package_map.get(package_path);
         if (!package_p) {
+            // Auto-discover installed packages from {root_path}/src/
+            if (!root_path.empty()) {
+                auto candidate = fs::path(root_path) / "src" / package_path;
+                if (fs::is_directory(candidate)) {
+                    auto package = add_package(package_path);
+                    package->src_path = candidate.string();
+                    package_p = &package_map[package_path];
+                }
+            }
+            if (!package_p) {
+                return std::nullopt;
+            }
+        }
+        // Non-std packages only allow package-level imports (via _index.xs)
+        if (package_path != "std" && module_path.size()) {
             return std::nullopt;
         }
         auto package = *package_p;

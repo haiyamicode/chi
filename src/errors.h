@@ -60,6 +60,7 @@ constexpr auto THROW_NOT_ERROR = "throw expression type '{}' must implement the 
 constexpr auto THROW_NOT_REFERENCE = "throw expression must be a reference type";
 constexpr auto MODULE_NOT_FOUND = "module '{}' not found";
 constexpr auto MODULE_INDEX_NOT_FOUND = "module '{}' has no index file (_index.xs or _index.x)";
+constexpr auto DIRECT_MODULE_IMPORT = "cannot import module '{}' directly from package '{}'; import the package instead";
 constexpr auto INVALID_ATTRIBUTE_TERM = "invalid attribute term '{}'";
 constexpr auto IMPLEMENT_NOT_MATCH = "member '{}' does not match definition from interface of {}";
 constexpr auto FOR_EXPR_NOT_ITERABLE = "for expression must be an iterable, got {}";

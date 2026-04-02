@@ -5223,6 +5223,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             module = *virtual_mod;
             // Note: Virtual modules are pre-resolved, no need to resolve again
         } else {
+            // Check for direct module import into non-std package
+            auto *comp_ctx = static_cast<CompilationContext *>(m_ctx->allocator);
+            auto [pkg_path, mod_path] = comp_ctx->parse_import_path(data.path->str);
+            if (pkg_path != "std" && mod_path.size() && !is_relative_path(data.path->str)) {
+                error(node, errors::DIRECT_MODULE_IMPORT, data.path->str, pkg_path);
+                return nullptr;
+            }
+
             // Regular file-based module lookup
             auto path_info = m_ctx->allocator->find_module_path(data.path->str, scope.module->path);
             if (!path_info) {

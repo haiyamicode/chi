@@ -62,7 +62,8 @@ TESTS_LIST = 00_fib.test \
 		57_managed_lowlevel_custom_ctor_array_escape.test \
 		58_managed_lowlevel_custom_ctor_map_escape.test \
 		59_contextual_variant_shorthand.test \
-		60_conditional_compilation.test
+		60_conditional_compilation.test \
+		61_package_import.test
 TESTS ?= $(TESTS_LIST)
 CHIC = $(abspath $(BUILD_DIR)/src/bin/chic)
 CHI = $(abspath $(BUILD_DIR)/src/bin/chi)
@@ -460,6 +461,33 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	rm -rf /tmp/chitest_chi_package_build /tmp/chitest_chi_package_build.dSYM /tmp/chitest_chi_package_path_build /tmp/chitest_chi_package_path_build.dSYM /tmp/chitest_chi_package_release_build /tmp/chitest_chi_package_release_build.dSYM /tmp/chitest_chi_package_src_build /tmp/chitest_chi_package_src_build.dSYM /tmp/chitest_chi_install_build /tmp/chitest_chi_install_build.dSYM /tmp/chitest_chi_install_bin /tmp/chitest_chi_install_src; \
 	rm -f testdata/15_package/15_package
 
+# Package import test: uses temp CHI_HOME to test package registry auto-discovery
+61_package_import.test: 61_package_import.expect
+	echo Test: 61_package_import...
+	@PKG_HOME=/tmp/chitest_pkg_home; \
+	rm -rf $$PKG_HOME; \
+	mkdir -p $$PKG_HOME/src/stdlib; \
+	cp -r $(ROOT_DIR)/src/stdlib/* $$PKG_HOME/src/stdlib/; \
+	mkdir -p $$PKG_HOME/src/test_registry/mylib; \
+	cp -r testdata/61_package_import/test_registry/mylib/* $$PKG_HOME/src/test_registry/mylib/; \
+	CHI_ROOT=$$PKG_HOME $(CHIC) -o $(TMP).61_package_import -c 61_package_import.xs && \
+	$(TMP).61_package_import 2>&1 >61_package_import.output; \
+	if [ "x`diff -qbu 61_package_import.expect 61_package_import.output`" != "x" ]; then \
+		echo "error in test 61_package_import"; \
+		diff -u 61_package_import.expect 61_package_import.output; \
+		rm -rf $$PKG_HOME $(TMP).61_package_import 61_package_import.output; \
+		exit 1; \
+	fi; \
+	echo "  - package import: OK"; \
+	echo "  - testing direct module import is rejected..."; \
+	if CHI_ROOT=$$PKG_HOME $(CHIC) -o $(TMP).61_pkg_direct -c testdata/61_package_import/reject_direct_import.xs 2>/dev/null; then \
+		echo "error: direct module import should have been rejected"; \
+		rm -rf $$PKG_HOME $(TMP).61_package_import $(TMP).61_pkg_direct 61_package_import.output; \
+		exit 1; \
+	fi; \
+	echo "  - direct module import correctly rejected: OK"; \
+	rm -rf $$PKG_HOME $(TMP).61_package_import $(TMP).61_pkg_direct 61_package_import.output
+
 all: test
 
 test: $(TESTS)
@@ -467,7 +495,7 @@ test: $(TESTS)
 
 # Formatter idempotency test: verify format(file) == file for all test sources
 # Excludes 15_package (uses -p flag, no single source file)
-FORMAT_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test 42_construct_expr.test 48_stdlib.test 53_panic.test,$(TESTS_LIST)))
+FORMAT_TESTS = $(patsubst %.test,%,$(filter-out 15_package.test 42_construct_expr.test 48_stdlib.test 53_panic.test 61_package_import.test,$(TESTS_LIST)))
 test_formatter:
 	@echo "Formatter idempotency test..."
 	@fail=0; \

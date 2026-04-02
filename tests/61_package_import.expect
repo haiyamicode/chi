@@ -1,0 +1,7 @@
+package import test
+hello from mylib
+count: 0
+count: 1
+count: 2
+hello from world
+hello from named import
