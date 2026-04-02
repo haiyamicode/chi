@@ -14,7 +14,9 @@ using namespace cx;
 extern "C" {
 #endif
 
+#ifndef CHI_RT_EXPORT
 #include "generated/rt_export.h"
+#endif
 
 struct CxString {
     char *data;
@@ -219,7 +221,7 @@ CHI_RT_EXPORT void __cx_uv_strerror(int32_t errnum, CxString *result);
 CHI_RT_EXPORT int32_t __cx_list_dir(const char *path, CxArray *result);
 CHI_RT_EXPORT int32_t __cx_glob(const char *base, const char *pattern, CxArray *result);
 CHI_RT_EXPORT void __cx_platform_tags(CxArray *result);
-CHI_RT_EXPORT const char *__cx_default_chi_root(void);
+CHI_RT_EXPORT const char *__cx_default_chi_home(void);
 CHI_RT_EXPORT const char *__cx_getenv(const char *key);
 CHI_RT_EXPORT void __cx_setenv(const char *key, const char *value);
 CHI_RT_EXPORT char *__cx_getcwd(void);

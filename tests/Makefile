@@ -1,7 +1,8 @@
-SHELL=/bin/bash 
+SHELL=/bin/bash
 BASE=..
 ROOT_DIR=$(abspath $(BASE))
 BUILD_DIR=$(BASE)/build
+export CHI_ROOT=$(ROOT_DIR)
 TESTS_LIST = 00_fib.test \
     01_fib_struct.test \
     02_generics.test \

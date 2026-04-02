@@ -220,7 +220,18 @@ static void init_analyzer(cx::Analyzer &analyzer, const boost::json::object &inp
 static cx::ast::Module* process_source(cx::Analyzer &analyzer, const std::string &input_file,
                                        cx::io::Buffer *src) {
     auto rt_path = analyzer.get_context()->get_stdlib_path("runtime.xs");
-    if (input_file == rt_path) {
+    bool is_runtime = false;
+    std::error_code ec;
+    if (fs::exists(input_file) && fs::exists(rt_path)) {
+        auto canon_input = fs::canonical(input_file, ec);
+        if (!ec) {
+            auto canon_rt = fs::canonical(rt_path, ec);
+            if (!ec) {
+                is_runtime = canon_input == canon_rt;
+            }
+        }
+    }
+    if (is_runtime) {
         return analyzer.build_runtime_from_source(src);
     }
 

@@ -11,6 +11,7 @@
 #include "ast_printer.h"
 #include "builder.h"
 #include "c_importer.h"
+#include "generated/package_schema_embed.h"
 #include "package_config.h"
 #include "parser.h"
 #include "util.h"
@@ -35,14 +36,11 @@ string runtime_library_search_flags(const CompilationContext &ctx, const string 
         }
     };
 
-    string root_lib_dir;
     if (!ctx.root_path.empty()) {
-        root_lib_dir = (fs::path(ctx.root_path) / "lib").string();
+        add_dir_if_has_runtime((fs::path(ctx.root_path) / "lib").string());
+        add_dir_if_has_runtime((fs::path(ctx.root_path) / "build").string());
     }
-    add_dir_if_has_runtime(root_lib_dir);
-    if (root_lib_dir != "/usr/local/lib") {
-        add_dir_if_has_runtime("/usr/local/lib");
-    }
+    add_dir_if_has_runtime("/usr/local/lib");
     return flags;
 }
 
@@ -247,13 +245,10 @@ void Builder::build_package(const string &package_dir) {
         exit(1);
     }
 
-    // Load and validate against JSON schema first
-    string schema_path = fs::path(m_ctx.root_path) / "src" / "package_schema.json";
-    auto schema_content = io::Buffer::from_file(schema_path);
-    auto schema_str = schema_content.read_all();
+    // Validate against embedded JSON schema
     boost::json::value schema_json;
     std::error_code schema_ec;
-    schema_json = boost::json::parse(schema_str, schema_ec);
+    schema_json = boost::json::parse(PACKAGE_SCHEMA_JSON, schema_ec);
 
     if (schema_ec) {
         print("error: failed to parse package schema: {}\n", schema_ec.message());

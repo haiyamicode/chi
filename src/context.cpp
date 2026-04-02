@@ -1,7 +1,9 @@
 #include "context.h"
 #include "ast_printer.h"
 #include "parser.h"
+#ifndef CHI_NO_RUNTIME
 #include "runtime/internals.h"
+#endif
 #include "util.h"
 #include <filesystem>
 #include <functional>
@@ -13,10 +15,18 @@ CompilationContext::CompilationContext() : resolve_ctx(this) {
     if (rootenv) {
         root_path = rootenv;
     } else {
-        auto default_root = __cx_default_chi_root();
-        if (default_root) {
-            root_path = default_root;
+        auto home_env = std::getenv("CHI_HOME");
+        if (home_env) {
+            root_path = home_env;
         }
+#ifndef CHI_NO_RUNTIME
+        else {
+            auto default_home = __cx_default_chi_home();
+            if (default_home) {
+                root_path = default_home;
+            }
+        }
+#endif
     }
     init_platform_tags();
 }

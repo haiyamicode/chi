@@ -46,8 +46,21 @@ target_link_libraries(rt_debug PRIVATE ${PKG_LIBS})
 target_compile_definitions(rt_debug PRIVATE CHI_DEBUG_ALLOCATOR_RUNTIME=1)
 bundle_static_library(rt_debug chrt_debug)
 
+# Generate embedded package schema header from JSON
+set(PACKAGE_SCHEMA_INPUT ${CMAKE_CURRENT_SOURCE_DIR}/package_schema.json)
+set(PACKAGE_SCHEMA_OUTPUT ${CMAKE_BINARY_DIR}/generated/package_schema_embed.h)
+add_custom_command(
+    OUTPUT ${PACKAGE_SCHEMA_OUTPUT}
+    COMMAND ${CMAKE_COMMAND}
+        -DINPUT_FILE=${PACKAGE_SCHEMA_INPUT}
+        -DOUTPUT_FILE=${PACKAGE_SCHEMA_OUTPUT}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/embed_file.cmake
+    DEPENDS ${PACKAGE_SCHEMA_INPUT} ${CMAKE_CURRENT_SOURCE_DIR}/embed_file.cmake
+    COMMENT "Embedding package_schema.json"
+    VERBATIM)
+
 # Compiler executable
-add_executable(chic chic.cpp ${SOURCE_FILES})
+add_executable(chic chic.cpp ${SOURCE_FILES} ${PACKAGE_SCHEMA_OUTPUT})
 install(TARGETS chic)
 target_include_directories(chic PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${LLVM_INCLUDE_DIRS} ${PROJECT_BINARY_DIR})
 

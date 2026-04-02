@@ -16,7 +16,7 @@
         "src",
         "<!(echo ${LLVM_DIR:-NOT_SET}/include)",
     ],
-    "defines": ["FMT_HEADER_ONLY", "HAVE_LIBCLANG"],
+    "defines": ["FMT_HEADER_ONLY", "HAVE_LIBCLANG", "CHI_RT_EXPORT=", "CHI_NO_RUNTIME"],
     "libraries": ["-lclang"],
     "library_dirs": [
         "<!(echo ${LLVM_DIR:-NOT_SET}/lib)",

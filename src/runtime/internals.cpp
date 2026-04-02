@@ -2002,7 +2002,7 @@ uint32_t __cx_strlen(const char *s) {
 }
 
 // std/os helpers
-const char *__cx_default_chi_root() {
+const char *__cx_default_chi_home() {
 #ifdef _WIN32
     auto local = getenv("LOCALAPPDATA");
     if (local) {

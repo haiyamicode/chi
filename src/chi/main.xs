@@ -5,13 +5,13 @@ import "std/json" as json;
 import "std/os" as os;
 
 extern "C" {
-    unsafe func __cx_default_chi_root() *byte;
+    unsafe func __cx_default_chi_home() *byte;
     unsafe func __cx_strlen(s: *byte) uint32;
 }
 
-func default_chi_root() ?string {
+func default_chi_home() ?string {
     unsafe {
-        var result = __cx_default_chi_root();
+        var result = __cx_default_chi_home();
         if result == null {
             return null;
         }
@@ -45,7 +45,9 @@ struct CliApp {
         this.cwd = os.cwd();
         this.path_env = os.env("PATH");
         this.chi_path_dir = this.resolve_env_path("CHI_PATH");
-        this.chi_root_dir = this.resolve_env_path("CHI_ROOT") ?? default_chi_root();
+        this.chi_root_dir = this.resolve_env_path("CHI_ROOT")
+            ?? this.resolve_env_path("CHI_HOME")
+            ?? default_chi_home();
         this.chi_src_dir = this.resolve_env_path("CHI_SRC");
     }
 
