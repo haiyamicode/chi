@@ -20,6 +20,7 @@ class AstPrinter {
     bool m_suppress_func_keyword = false;
     bool m_suppress_construct_type = false;
     bool m_strip_arrow_return = false;
+    bool m_in_else_if = false;
     Node *m_fn_return_type = nullptr;
     array<Comment> *m_comments = nullptr;
     size_t m_comment_idx = 0;
@@ -103,7 +104,7 @@ class AstPrinter {
 
     bool should_arrow_body_use_block_form(Node *value);
     bool should_suppress_construct_type_in_value_context(Node *value);
-    void print_arrow_body_value(Node *value);
+    void print_arrow_body_value(Node *value, bool wrap_parens = true);
 
     bool should_semantically_shorthand_construct_type(Node *node);
     bool should_semantically_collapse_case_clause(Node *node);

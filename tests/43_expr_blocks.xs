@@ -2,7 +2,7 @@
 
 func if_expr(x: int) int {
     // if-else as expression (both branches return a value)
-    var result = if x > 0 => 1 else => -1;
+    var result = x > 0 ? 1 : -1;
     return result;
 }
 
@@ -43,7 +43,7 @@ func switch_stmt(x: int) {
 
 func nested_if_expr(x: int) int {
     // nested if-else expression
-    return if x > 0 => if x > 10 => 2 else => 1 else => 0;
+    return x > 0 ? (x > 10 ? 2 : 1) : 0;
 }
 
 func if_in_unsafe() {

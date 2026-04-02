@@ -5455,8 +5455,11 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
                 llvm::CmpInst::Predicate::ICMP_NE, value,
                 llvm::ConstantPointerNull::get((llvm::PointerType *)compile_type(from_type)));
         }
-        default:
-            return builder.CreateIntCast(value, compile_type(to_type), false);
+        default: {
+            // For numbers, compare to zero.
+            auto *zero = llvm::ConstantInt::get(value->getType(), 0);
+            return builder.CreateICmpNE(value, zero);
+        }
         }
         break;
     }
@@ -11223,7 +11226,7 @@ Function *Compiler::generate_any_destructor(ChiType *type) {
 }
 
 Function *Compiler::generate_any_copier(ChiType *type) {
-    // Check if type needs non-trivial copy (has destructor, CopyFrom, string, lambda, etc.)
+    // Check if type needs non-trivial copy (has destructor, Copy, string, lambda, etc.)
     bool needs_copier = get_resolver()->type_needs_destruction(type);
     if (!needs_copier && type->kind == TypeKind::Struct) {
         auto sty = get_resolver()->resolve_struct_type(eval_type(type));
@@ -11497,10 +11500,10 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
     auto enum_ = resolved_type->data.enum_value.parent_enum();
     auto bvs = enum_->base_value_type->data.enum_value.resolved_struct;
 
-    // Check if any field needs deep copy (destructor OR CopyFrom)
+    // Check if any field needs deep copy (destructor OR Copy)
     bool needs_copier = get_resolver()->type_needs_destruction(resolved_type);
     if (!needs_copier) {
-        // Also check if any field has CopyFrom (copy semantics without destructor)
+        // Also check if any field has Copy (copy semantics without destructor)
         auto check_field_copier = [&](ChiType *field_type) -> bool {
             auto sty = get_resolver()->resolve_struct_type(eval_type(field_type));
             return sty && sty->member_intrinsics.get(IntrinsicSymbol::Copy);
@@ -11578,7 +11581,7 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
         }
     }
 
-    // Helper: check if a field type needs deep copy (destructor or CopyFrom)
+    // Helper: check if a field type needs deep copy (destructor or Copy)
     auto field_needs_deep_copy = [&](ChiType *field_type) -> bool {
         if (get_resolver()->type_needs_destruction(field_type))
             return true;

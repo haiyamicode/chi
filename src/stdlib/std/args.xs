@@ -387,7 +387,7 @@ func help_for(cmd: &Command, name: string) string {
     var flag_lines: Array<string> = [];
     flag_lines.push("-h, --help - Show help");
     for flag in cmd.flags {
-        let names = if flag.short.is_empty() => stringf("--{}", flag.name) else => stringf(
+        let names = flag.short.is_empty() ? stringf("--{}", flag.name) : stringf(
             "-{}, --{}",
             flag.short,
             flag.name
@@ -401,11 +401,7 @@ func help_for(cmd: &Command, name: string) string {
 
     var option_lines: Array<string> = [];
     for option in cmd.options {
-        let names = if option.short.is_empty() => stringf(
-            "--{} <{}>",
-            option.name,
-            option.value_name
-        ) else => stringf(
+        let names = option.short.is_empty() ? stringf("--{} <{}>", option.name, option.value_name) : stringf(
             "-{} <{}>, --{} <{}>",
             option.short,
             option.value_name,

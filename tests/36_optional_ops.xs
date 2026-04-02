@@ -369,16 +369,16 @@ func test_implicit_narrow() {
 func test_optional_inference() {
     println("test_optional_inference:");
 
-    let explicit_if_left: ?Point = if true => (Point{x: 10, y: 11}) else => null;
+    let explicit_if_left: ?Point = true ? (Point{x: 10, y: 11}) : null;
     printf("explicit ?T if T/null = ({}, {})\n", explicit_if_left!.x, explicit_if_left!.y);
 
-    let explicit_if_right: ?Point = if false => null else => (Point{x: 12, y: 13});
+    let explicit_if_right: ?Point = false ? null : (Point{x: 12, y: 13});
     printf("explicit ?T if null/T = ({}, {})\n", explicit_if_right!.x, explicit_if_right!.y);
 
-    var inferred_if_left = if true => (Point{x: 1, y: 2}) else => null;
+    var inferred_if_left = true ? (Point{x: 1, y: 2}) : null;
     printf("if T/null = ({}, {})\n", inferred_if_left!.x, inferred_if_left!.y);
 
-    var inferred_if_right = if false => null else => (Point{x: 3, y: 4});
+    var inferred_if_right = false ? null : (Point{x: 3, y: 4});
     printf("if null/T = ({}, {})\n", inferred_if_right!.x, inferred_if_right!.y);
 
     var inferred_switch_left = switch 1 {
@@ -398,8 +398,8 @@ func test_optional_inference() {
     var nested3: ???int = nested2;
     printf("direct ?T/??T/???T = {} {} {}\n", nested!, nested2!!, nested3!!!);
 
-    var inferred_nested_if = if true => nested else => null;
-    var inferred_deeper_if = if true => nested2 else => null;
+    var inferred_nested_if = true ? nested : null;
+    var inferred_deeper_if = true ? nested2 : null;
     printf(
         "if ?T/null preserves = {} / if ??T/null preserves = {}\n",
         inferred_nested_if!,

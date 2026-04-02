@@ -1780,6 +1780,42 @@ Node *Parser::parse_binary_expr(bool lhs, Node *parent, int prec) {
             op1 = node;
             continue;
         }
+        // Ternary: cond ? then_expr : else_expr → IfExpr with is_ternary flag
+        if (op_token->type == TokenType::QUES && lookahead(1)->type != TokenType::DOT) {
+            if (prec > 1) {
+                return op1; // ternary has precedence 1 (below LOR)
+            }
+            consume(); // consume ?
+
+            auto node = create_node(NodeType::IfExpr, op_token);
+            auto if_scope = m_ctx->resolver->push_scope(node);
+
+            auto then_expr = parse_child_expr_construct(false, node);
+            expect(TokenType::COLON);
+            auto else_expr = parse_child_expr_construct(false, node);
+
+            // Wrap then/else expressions as arrow blocks
+            auto then_block = create_node(NodeType::Block, then_expr->token);
+            then_block->data.block.is_arrow = true;
+            then_block->data.block.return_expr = then_expr;
+            then_block->data.block.scope = m_ctx->resolver->push_scope(then_block);
+            m_ctx->resolver->pop_scope();
+
+            auto else_block = create_node(NodeType::Block, else_expr->token);
+            else_block->data.block.is_arrow = true;
+            else_block->data.block.return_expr = else_expr;
+            else_block->data.block.scope = m_ctx->resolver->push_scope(else_block);
+            m_ctx->resolver->pop_scope();
+
+            node->data.if_expr.condition = op1;
+            node->data.if_expr.then_block = then_block;
+            node->data.if_expr.else_node = else_block;
+            node->data.if_expr.is_ternary = true;
+
+            m_ctx->resolver->pop_scope(); // pop if_scope
+            op1 = node;
+            continue;
+        }
         auto op_prec = get_op_precedence(tok_type);
         if (op_prec < prec) {
             return op1;

@@ -293,11 +293,11 @@ export func parse_raw(str: string, options: ?ParseOptions) Value {
         ok = cx_parse_json(&str, parse_options.jsonc, &result, &error);
     }
     if !ok {
-        let location = if error.has_location => (ParseLocation{
+        let location = error.has_location ? ParseLocation{
             offset: error.offset,
             line: error.line,
             column: error.column
-        } as ?ParseLocation) else => null;
+        } : null;
         throw new ParseError{
             detail: move error.detail,
             path: null,
@@ -594,7 +594,7 @@ func json_encode_string(buf: &mutex Buffer, value: string) {
 }
 
 func encode_type_error(path: string, ty: reflect.Type, detail: string) never {
-    let err_path = if path.is_empty() => (null as ?string) else => path as ?string;
+    let err_path = path.nonempty();
     throw new EncodeError{:detail, path: err_path};
 }
 

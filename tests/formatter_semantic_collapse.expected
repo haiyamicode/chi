@@ -40,7 +40,7 @@ func make_point() Point {
 }
 
 func choose_point(flag: bool) Point {
-    return if flag => ({15, 16}) else => ({17, 18});
+    return flag ? {15, 16} : {17, 18};
 }
 
 func choose_parse(flag: bool) Parse<int, string> {
@@ -55,19 +55,19 @@ func apply_point(f: func () Point) Point {
 }
 
 func choose_point_multiline(flag: bool) Point {
-    return if flag => ({x: 30, y: 31}) else => ({x: 32, y: 33});
+    return flag ? {x: 30, y: 31} : {x: 32, y: 33};
 }
 
 func choose_long_point(flag: bool) LongPoint {
-    return if flag => ({
+    return flag ? {
         extremely_long_field_name_alpha_component: 1000,
         extremely_long_field_name_beta_component: 2000,
         extremely_long_field_name_gamma_component: 3000
-    }) else => ({
+    } : {
         extremely_long_field_name_alpha_component: 4000,
         extremely_long_field_name_beta_component: 5000,
         extremely_long_field_name_gamma_component: 6000
-    });
+    };
 }
 
 func choose_long_point_switch(flag: bool) LongPoint {
@@ -86,7 +86,7 @@ func choose_long_point_switch(flag: bool) LongPoint {
 }
 
 func collapse_brace_if(flag: bool) Point {
-    return if flag => ({x: 40, y: 41}) else => ({x: 42, y: 43});
+    return flag ? {x: 40, y: 41} : {x: 42, y: 43};
 }
 
 func collapse_brace_switch(flag: bool) Parse<int, string> {

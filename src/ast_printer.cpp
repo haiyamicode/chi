@@ -170,8 +170,8 @@ bool AstPrinter::should_suppress_construct_type_in_value_context(Node *value) {
     return m_fn_return_type && types_match(m_fn_return_type, data.type);
 }
 
-void AstPrinter::print_arrow_body_value(Node *value) {
-    bool wrap_construct = value && value->type == NodeType::ConstructExpr;
+void AstPrinter::print_arrow_body_value(Node *value, bool wrap_parens) {
+    bool wrap_construct = wrap_parens && value && value->type == NodeType::ConstructExpr;
     bool suppress_construct = should_suppress_construct_type_in_value_context(value);
     if (wrap_construct) {
         emit("(");
@@ -1003,6 +1003,43 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::IfExpr: {
         auto &data = node->data.if_expr;
+
+        // Collapse simple if-else to ternary, or print existing ternary
+        auto can_ternary = [](IfExpr &d) {
+            if (d.binding_decl || !d.else_node || d.else_node->type == NodeType::IfExpr)
+                return false;
+            auto is_single_expr = [](Node *block) {
+                if (!block || block->type != NodeType::Block ||
+                    block->data.block.statements.len != 0 ||
+                    !block->data.block.return_expr)
+                    return false;
+                auto *ret = block->data.block.return_expr;
+                // Allow ternary IfExpr (will be parenthesized), reject if-else
+                if (ret->type == NodeType::IfExpr && !ret->data.if_expr.is_ternary)
+                    return false;
+                return true;
+            };
+            return is_single_expr(d.then_block) && is_single_expr(d.else_node);
+        };
+
+        if (data.is_ternary || (!m_in_else_if && can_ternary(data))) {
+            auto *cond = data.condition;
+            if (cond && cond->type == NodeType::ParenExpr)
+                cond = cond->data.child_expr;
+            print_node(cond);
+            emit(" ? ");
+            auto emit_ternary_branch = [&](Node *expr) {
+                bool parens = expr && expr->type == NodeType::IfExpr;
+                if (parens) emit("(");
+                print_arrow_body_value(expr, false);
+                if (parens) emit(")");
+            };
+            emit_ternary_branch(data.then_block->data.block.return_expr);
+            emit(" : ");
+            emit_ternary_branch(data.else_node->data.block.return_expr);
+            break;
+        }
+
         emit("if ");
         if (data.binding_decl) {
             auto kind = data.binding_decl->type == NodeType::DestructureDecl
@@ -1050,7 +1087,9 @@ void AstPrinter::print_node(Node *node) {
             emit(" else");
             if (data.else_node->type == NodeType::IfExpr) {
                 emit(" ");
+                m_in_else_if = true;
                 print_node(data.else_node);
+                m_in_else_if = false;
             } else {
                 bool collapse_else = can_collapse(data.else_node);
                 if (collapse_else) {

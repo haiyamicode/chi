@@ -1264,12 +1264,12 @@ async func try_block_await_result_void() Promise<int> {
 
 async func switch_expr_await(tag: int, flip: bool) Promise<int> {
     return switch await double_it(tag) {
-        2 => if await double_it(if flip => 50 else => 49) == 100 => 100 else => 101,
+        2 => await double_it(flip ? 50 : 49) == 100 ? 100 : 101,
         4 => add_one_sync(await double_it(10)),
         6 => try add_one_sync(await async_throw_immediate()) catch {
             -7
         },
-        else => switch await double_it(if flip => 2 else => 3) {
+        else => switch await double_it(flip ? 2 : 3) {
             4 => 400,
             else => 500
         }
@@ -1279,7 +1279,7 @@ async func switch_expr_await(tag: int, flip: bool) Promise<int> {
 async func switch_stmt_await(tag: int, flip: bool) Promise<int> {
     switch await double_it(tag) {
         2 => {
-            if await double_it(if flip => 1 else => 0) == 2 {
+            if await double_it(flip ? 1 : 0) == 2 {
                 return 10;
             }
             return 11;
@@ -1294,7 +1294,7 @@ async func switch_stmt_await(tag: int, flip: bool) Promise<int> {
             };
         },
         else => {
-            if await double_it(if flip => 2 else => 3) == 4 {
+            if await double_it(flip ? 2 : 3) == 4 {
                 return 40;
             }
             return 50;

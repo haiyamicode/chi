@@ -28,7 +28,7 @@ func test_if_expr() {
     println("=== if expression ===");
 
     // basic if expression
-    var x = if true => 1 else => 2;
+    var x = true ? 1 : 2;
     println(x);
 
     // if-else-if chain
@@ -37,7 +37,7 @@ func test_if_expr() {
     println(s);
 
     // arrow syntax
-    var a = if true => 10 else => 20;
+    var a = true ? 10 : 20;
     println(a);
 
     // arrow with else-if
@@ -45,10 +45,10 @@ func test_if_expr() {
     println(b);
 
     // in function argument
-    printf("val: {}\n", if 1 > 0 => "yes" else => "no");
+    printf("val: {}\n", 1 > 0 ? "yes" : "no");
 
     // nested
-    var c = if true => if false => 1 else => 2 else => 3;
+    var c = true ? (false ? 1 : 2) : 3;
     println(c);
 }
 

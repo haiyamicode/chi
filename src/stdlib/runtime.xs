@@ -614,6 +614,10 @@ struct __CxString {
         return this.length == 0;
     }
 
+    func nonempty() ?string {
+        return this.length == 0 ? null : this;
+    }
+
     func to_cstring() CString {
         unsafe {
             return {cx_string_to_cstring(&this as *string)};
@@ -1037,7 +1041,7 @@ export struct Buffer {
                 return 0;
             }
             var available = this.length - this.read_pos;
-            var n = if buf.length < available => buf.length else => available;
+            var n = buf.length < available ? buf.length : available;
             var i: uint32 = 0;
             while i < n {
                 buf[i] = this.bytes[this.read_pos + i];

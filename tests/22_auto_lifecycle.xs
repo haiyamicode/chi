@@ -401,7 +401,7 @@ func test_temp_cleanup() {
     println("after orphaned TrackedVar construct");
 
     println("--- if expr as fn arg ---");
-    consume_tracked(if true => make_tracked("if-true") else => make_tracked("if-false"));
+    consume_tracked(true ? make_tracked("if-true") : make_tracked("if-false"));
     println("after consume(if ...)");
 }
 
@@ -498,7 +498,7 @@ func test_fn_arg_copy_semantics() {
     // Named var in loop: alloca reuse, correct copies each iteration
     println("--- named var in loop ---");
     for var i: uint32 = 0; i < 2; i++ {
-        var h = TrackedVar{if i == 0 => "loop-0" else => "loop-1"};
+        var h = TrackedVar{i == 0 ? "loop-0" : "loop-1"};
         consume_tracked(h);
     }
     println("  after loop");

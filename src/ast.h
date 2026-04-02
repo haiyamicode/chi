@@ -468,6 +468,7 @@ struct IfExpr {
     Node *then_block = nullptr;
     Node *else_node = nullptr; // can be null, block node, or another if node
     array<Node *> post_narrow_vars = {}; // narrowed vars emitted after guard clause
+    bool is_ternary = false; // parsed from cond ? then : else syntax
 };
 
 struct StructDecl {
