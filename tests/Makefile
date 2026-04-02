@@ -267,6 +267,16 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 			echo "error: $$name wrong panic output (expected '$$expected')"; \
 			cat $(TMP).53_panic_$$name.out; \
 			failed=1; \
+		else \
+			grep '// expect-output:' $$f | sed 's/.*expect-output: *//' > $(TMP).53_panic_$$name.patterns; \
+			while IFS= read -r line; do \
+				if ! grep -q "$$line" $(TMP).53_panic_$$name.out; then \
+					echo "error: $$name missing expected output '$$line'"; \
+					cat $(TMP).53_panic_$$name.out; \
+					failed=1; \
+				fi; \
+			done < $(TMP).53_panic_$$name.patterns; \
+			rm -f $(TMP).53_panic_$$name.patterns; \
 		fi; \
 		rm -f $(TMP).53_panic_$$name.out /tmp/chitest_panic_compile_$$name.out; \
 	done; \
@@ -478,14 +488,11 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		rm -rf $$PKG_HOME $(TMP).61_package_import 61_package_import.output; \
 		exit 1; \
 	fi; \
-	echo "  - package import: OK"; \
-	echo "  - testing direct module import is rejected..."; \
-	if CHI_ROOT=$$PKG_HOME $(CHIC) -o $(TMP).61_pkg_direct -c testdata/61_package_import/reject_direct_import.xs 2>/dev/null; then \
+	if CHI_ROOT=$$PKG_HOME $(CHIC) -o $(TMP).61_pkg_direct -c testdata/61_package_import/reject_direct_import.xs >/dev/null 2>&1; then \
 		echo "error: direct module import should have been rejected"; \
 		rm -rf $$PKG_HOME $(TMP).61_package_import $(TMP).61_pkg_direct 61_package_import.output; \
 		exit 1; \
 	fi; \
-	echo "  - direct module import correctly rejected: OK"; \
 	rm -rf $$PKG_HOME $(TMP).61_package_import $(TMP).61_pkg_direct 61_package_import.output
 
 all: test

@@ -13,6 +13,8 @@ bool init_backtrace(const char *filename);
 void backtrace();
 void set_bt_output_file(FILE *file);
 bool cx_backtrace_pcinfo(uintptr_t pc, cx_backtrace_pcinfo_callback_t callback, void *data);
+void write_fault_message(const char *msg);
+void write_fault_backtrace(void *ucontext);
 
 #ifdef __cplusplus
 }

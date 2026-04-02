@@ -12189,6 +12189,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
                                        m_ctx->llvm_module.get());
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
                               llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
+    fn_l->addFnAttr("frame-pointer", "all");
 
     Function *new_fn = nullptr;
     if (register_global) {
