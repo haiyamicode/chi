@@ -1876,13 +1876,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 return nullptr;
             }
             auto elem_type = t1->get_elem();
-            data.op2->analysis.conversion_type = resolve_conversion_type(t2, elem_type);
+            bool rhs_optional = t2->kind == TypeKind::Optional &&
+                                is_same_type(t2->get_elem(), elem_type);
+            auto target_type = rhs_optional ? t1 : elem_type;
+            data.op2->analysis.conversion_type = resolve_conversion_type(t2, target_type);
             mark_temp_moved_if_needed(data.op2, t2);
             if (data.op2->analysis.moved) {
                 node->analysis.moved = true;
             }
-            check_assignment(data.op2, t2, elem_type, &scope);
-            return elem_type;
+            check_assignment(data.op2, t2, target_type, &scope);
+            return target_type;
         }
         default: {
             // Pointer arithmetic (requires unsafe)

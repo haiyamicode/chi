@@ -5516,12 +5516,6 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             // null -> null optional
             return llvm::ConstantAggregateZero::get(compile_type(to_type));
         }
-        if (get_resolver()->type_needs_destruction(from_type)) {
-            panic("naive value conversion is forbidden for non-trivial type {} -> {} in function {}",
-                  get_resolver()->format_type_display(from_type),
-                  get_resolver()->format_type_display(to_type),
-                  fn && fn->node ? fn->node->name : "<null>");
-        }
         if (get_resolver()->is_same_type(from_type, to_type)) {
             return value;
         }
@@ -6031,6 +6025,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::QUES: {
             auto result_type = get_chitype(expr);
             auto result_type_l = compile_type(result_type);
+            auto lhs_type = get_chitype(data.op1);
+            // Rewrap only when LHS and result are the same optional type (?T ?? ?T -> ?T).
+            // For ??T ?? ?T -> ?T, the unwrapped LHS is already ?T, no rewrap needed.
+            bool rewrap = result_type->kind == TypeKind::Optional &&
+                          get_resolver()->is_same_type(lhs_type, result_type);
             if (get_resolver()->type_needs_destruction(result_type)) {
                 llvm::Value *var = nullptr;
                 if (expr->resolved_outlet) {
@@ -6041,8 +6040,16 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 return compile_optional_branch(
                     fn, data.op1, result_type_l, "coalesce",
                     [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
-                        compile_copy_with_ref(fn, RefValue::from_address(unwrapped_ptr), var,
-                                              result_type, data.op1, false);
+                        if (rewrap) {
+                            auto has_p = builder.CreateStructGEP(result_type_l, var, 0);
+                            builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), has_p);
+                            auto val_p = builder.CreateStructGEP(result_type_l, var, 1);
+                            compile_copy_with_ref(fn, RefValue::from_address(unwrapped_ptr), val_p,
+                                                  result_type->get_elem(), data.op1, false);
+                        } else {
+                            compile_copy_with_ref(fn, RefValue::from_address(unwrapped_ptr), var,
+                                                  result_type, data.op1, false);
+                        }
                         return nullptr;
                     },
                     [&]() -> llvm::Value * {
@@ -6050,6 +6057,22 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         return nullptr;
                     },
                     var);
+            }
+            if (rewrap) {
+                auto elem_type = result_type->get_elem();
+                auto elem_type_l = compile_type(elem_type);
+                return compile_optional_branch(
+                    fn, data.op1, result_type_l, "coalesce",
+                    [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
+                        auto val = builder.CreateLoad(elem_type_l, unwrapped_ptr);
+                        auto opt_ptr = builder.CreateAlloca(result_type_l, nullptr, "rewrap");
+                        auto has_p = builder.CreateStructGEP(result_type_l, opt_ptr, 0);
+                        builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), has_p);
+                        auto val_p = builder.CreateStructGEP(result_type_l, opt_ptr, 1);
+                        builder.CreateStore(val, val_p);
+                        return builder.CreateLoad(result_type_l, opt_ptr);
+                    },
+                    [&]() { return compile_assignment_to_type(fn, data.op2, result_type); });
             }
             return compile_optional_branch(
                 fn, data.op1, result_type_l, "coalesce",

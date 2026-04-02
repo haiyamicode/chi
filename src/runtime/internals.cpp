@@ -2002,6 +2002,23 @@ uint32_t __cx_strlen(const char *s) {
 }
 
 // std/os helpers
+const char *__cx_default_chi_root() {
+#ifdef _WIN32
+    auto local = getenv("LOCALAPPDATA");
+    if (local) {
+        static std::string path = (fs::path(local) / "chi").string();
+        return path.c_str();
+    }
+#else
+    auto home = getenv("HOME");
+    if (home) {
+        static std::string path = (fs::path(home) / ".chi").string();
+        return path.c_str();
+    }
+#endif
+    return nullptr;
+}
+
 const char *__cx_getenv(const char *key) {
     return getenv(key);
 }

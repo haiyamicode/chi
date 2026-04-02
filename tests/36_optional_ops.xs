@@ -423,6 +423,73 @@ func test_optional_inference() {
     println("");
 }
 
+func get_opt_none() ?string {
+    return null;
+}
+
+func get_opt_some() ?string {
+    return "found";
+}
+
+func get_opt2_none() ??string {
+    return null;
+}
+
+func get_opt2_some() ??string {
+    return get_opt_some();
+}
+
+func get_opt2_inner_null() ??string {
+    var x: ?string = null;
+    return x;
+}
+
+func test_coalesce_chainable() {
+    println("test_coalesce_chainable:");
+
+    // ?T ?? ?T -> ?T
+    var a = get_opt_none() ?? get_opt_none();
+    printf("none ?? none = {}\n", a ?? "nil");
+    var b = get_opt_none() ?? get_opt_some();
+    printf("none ?? some = {}\n", b ?? "nil");
+    var c = get_opt_some() ?? get_opt_none();
+    printf("some ?? none = {}\n", c ?? "nil");
+
+    // ?T ?? ?T ?? T -> T
+    var d = get_opt_none() ?? get_opt_none() ?? "default";
+    printf("none ?? none ?? default = {}\n", d);
+
+    // ??T ?? ??T -> ??T
+    var e = get_opt2_none() ?? get_opt2_none();
+    printf("??none ?? ??none is null = {}\n", e == null);
+    var f = get_opt2_none() ?? get_opt2_some();
+    if let f_val = f {
+        printf("??none ?? ??some = {}\n", f_val ?? "inner_nil");
+    } else {
+        println("??none ?? ??some = null");
+    }
+
+    // ??T ?? ?T -> ?T (unwrap one level)
+    var g = get_opt2_none() ?? get_opt_some();
+    printf("??none ?? ?some = {}\n", g ?? "nil");
+    var h = get_opt2_some() ?? get_opt_some();
+    printf("??some ?? ?some = {}\n", h ?? "nil");
+
+    // ??T with inner null ?? ?T -> ?T
+    var i = get_opt2_inner_null() ?? get_opt_some();
+    printf("??inner_null ?? ?some = {}\n", i ?? "nil");
+
+    // ???T chaining
+    var x: ???string = null;
+    var y: ???string = get_opt2_some();
+    var z = x ?? y;
+    printf("???null ?? ???some is null = {}\n", z == null);
+    var w = x ?? y ?? get_opt2_some();
+    printf("???null ?? ???some ?? ??some is null = {}\n", w == null);
+
+    println("");
+}
+
 func main() {
     test_null_coalescing();
     test_construct_operand_postfix();
@@ -436,4 +503,5 @@ func main() {
     test_implicit_narrow();
     test_optional_inference();
     test_if_let_enum_pattern();
+    test_coalesce_chainable();
 }

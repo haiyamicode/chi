@@ -1,6 +1,7 @@
 #include "context.h"
 #include "ast_printer.h"
 #include "parser.h"
+#include "runtime/internals.h"
 #include "util.h"
 #include <filesystem>
 #include <functional>
@@ -11,8 +12,12 @@ CompilationContext::CompilationContext() : resolve_ctx(this) {
     auto rootenv = std::getenv("CHI_ROOT");
     if (rootenv) {
         root_path = rootenv;
+    } else {
+        auto default_root = __cx_default_chi_root();
+        if (default_root) {
+            root_path = default_root;
+        }
     }
-    auto root_src_path = (fs::path(root_path) / "src/stdlib").string();
     init_platform_tags();
 }
 
