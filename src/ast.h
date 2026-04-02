@@ -445,6 +445,7 @@ struct TryExpr {
     Node *catch_expr = nullptr;    // catch type (FileError) — null for catch-all
     Node *catch_block = nullptr;   // the { ... } block — null means no catch (Result mode)
     Node *catch_err_var = nullptr; // implicit VarDecl for err binding
+    Node *resolved_expr = nullptr; // async IIFE rewrite for codegen
 };
 
 struct AwaitExpr {

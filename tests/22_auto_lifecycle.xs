@@ -650,9 +650,9 @@ struct HoldsValArray {
 
 func make_holds_val_array(a: int, b: int) HoldsValArray {
     var items: Array<TrackedVal> = [];
-    items.push(TrackedVal{a});
-    items.push(TrackedVal{b});
-    return {items: items};
+    items.push({a});
+    items.push({b});
+    return {:items};
 }
 
 func test_temp_move_semantics() {
@@ -727,8 +727,8 @@ func test_temp_move_semantics() {
 func test_map_set_replacement_cleanup() {
     println("=== Test 15: Map.set replacement destroys old value ===");
     var m = Map<int, TrackedVal>{};
-    m.set(1, TrackedVal{201});
-    m.set(1, TrackedVal{202});
+    m.set(1, {201});
+    m.set(1, {202});
     println("--- scope exit ---");
 }
 

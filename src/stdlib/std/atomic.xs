@@ -41,13 +41,7 @@ export struct Atomic<T: ops.Int> {
         unsafe {
             var old_value: T = undefined;
             var ok = false;
-            __atomic_compare_exchange(
-                &mut this.value,
-                &expected,
-                &desired,
-                &old_value,
-                &ok
-            );
+            __atomic_compare_exchange(&mut this.value, &expected, &desired, &old_value, &ok);
             return (move old_value, ok);
         }
     }

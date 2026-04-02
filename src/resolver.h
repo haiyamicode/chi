@@ -216,11 +216,13 @@ static bool visit_async_children(ast::Node *node, bool include_try_catch, F &&vi
     };
 
     switch (node->type) {
-    case ast::NodeType::TryExpr:
-        if (visit_one(node->data.try_expr.expr)) {
+    case ast::NodeType::TryExpr: {
+        auto try_expr = node->data.try_expr.resolved_expr ? node->data.try_expr.resolved_expr : node->data.try_expr.expr;
+        if (visit_one(try_expr)) {
             return true;
         }
         return include_try_catch && visit_one(node->data.try_expr.catch_block);
+    }
     case ast::NodeType::DestructureDecl:
         return visit_one(node->data.destructure_decl.expr);
     case ast::NodeType::VarDecl:

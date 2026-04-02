@@ -147,5 +147,5 @@ func main() {
     printf("shared refs after: {}\n", shared.ref_count());
 
     // User-defined Copy/delete through ...T -> ...any should link and clean up correctly
-    forward_tracked_any(TrackedAny{1}, TrackedAny{2});
+    forward_tracked_any({1}, {2});
 }

@@ -126,7 +126,7 @@ export struct DebugAllocator {
 
     static func stats() DebugAllocatorStats {
         unsafe {
-            return DebugAllocatorStats{
+            return {
                 live_bytes: cx_debug_live_bytes(),
                 peak_live_bytes: cx_debug_peak_live_bytes(),
                 live_alloc_count: cx_debug_live_alloc_count(),
@@ -156,6 +156,5 @@ export unsafe func destroy<T: ops.Unsized>(ptr: *T) {
 
 // Compiler-recognized lifetime annotation.
 // This records a copy operation from value to owner in our lifetime analysis.
-export unsafe func annotate_copy(owner: *void, value: *void) {
-    // Intentionally left blank. Lowered directly by the compiler.
-}
+export unsafe func annotate_copy(owner: *void, value: *void) {}
+// Intentionally left blank. Lowered directly by the compiler.

@@ -14,7 +14,7 @@ The analyzer testing framework tests the parser's resilience against:
 ## Running Analyzer Tests
 
 ```bash
-make analyzer_test
+make test_analyzer
 ```
 
 ## Test Cases

@@ -796,15 +796,15 @@ func test_iter_for_await() {
 
 async func do_ternary_for_plain(limit: int) Promise<int> {
     var sum = 0;
-    for var i = 0; i < limit; i++ {
+    for var i = 0; i < limit; i += 2 {
         sum = sum + await delayed_number(i + 1);
     }
     return sum;
 }
 
 async func do_ternary_for_return(limit: int) Promise<int> {
-    for var i = 0; i < limit; i++ {
-        if await delayed_flag(i == 1, 243) {
+    for var i = 0; i < limit; i += 2 {
+        if await delayed_flag(i == 2, 243) {
             return await delayed_number(100 + i);
         }
     }
@@ -813,12 +813,12 @@ async func do_ternary_for_return(limit: int) Promise<int> {
 
 async func do_ternary_for_control(limit: int) Promise<int> {
     var sum = 0;
-    for var i = 0; i < limit; i++ {
-        if await delayed_flag(i == 2, 244) {
+    for var i = 0; i < limit; i += 2 {
+        if await delayed_flag(i == 4, 244) {
             continue;
         }
         sum = sum + await double_it(i + 1);
-        if await delayed_flag(i == 3, 245) {
+        if await delayed_flag(i == 6, 245) {
             break;
         }
     }
@@ -827,11 +827,11 @@ async func do_ternary_for_control(limit: int) Promise<int> {
 
 async func do_ternary_for_try(limit: int) Promise<int> {
     var sum = 0;
-    for var i = 0; i < limit; i++ {
+    for var i = 0; i < limit; i += 2 {
         sum = sum + try await settle_resolves_after_delay() catch {
             return -1000;
         };
-        if await delayed_flag(i == 1, 246) {
+        if await delayed_flag(i == 2, 246) {
             break;
         }
     }
@@ -839,10 +839,10 @@ async func do_ternary_for_try(limit: int) Promise<int> {
 }
 
 async func run_ternary_for_await_cases() Promise {
-    printf("ternary plain={}\n", await do_ternary_for_plain(4));
-    printf("ternary return={}\n", await do_ternary_for_return(4));
-    printf("ternary control={}\n", await do_ternary_for_control(6));
-    printf("ternary try={}\n", await do_ternary_for_try(4));
+    printf("ternary plain={}\n", await do_ternary_for_plain(8));
+    printf("ternary return={}\n", await do_ternary_for_return(8));
+    printf("ternary control={}\n", await do_ternary_for_control(12));
+    printf("ternary try={}\n", await do_ternary_for_try(6));
 }
 
 func test_ternary_for_await() {
@@ -1254,7 +1254,10 @@ async func try_block_await_result_void() Promise<int> {
     var r = try {
         var y = await time.sleep(1);
     } catch TestError;
-    return switch r { Ok => 1, Err => 0 };
+    return switch r {
+        Ok => 1,
+        Err => 0
+    };
 }
 
 // --- Await: switch control flow ---

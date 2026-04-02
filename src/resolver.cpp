@@ -2248,7 +2248,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             await_expr->data.await_expr.expr = call_expr;
             await_expr->resolved_type = block_type;
 
-            data.expr = await_expr;
+            data.resolved_expr = await_expr;
             try_value_type = block_type;
         }
         auto resolve_catch_type = [&]() -> ChiType * {
@@ -10599,7 +10599,8 @@ AwaitSite Resolver::find_await_site(ast::Node *node) {
     }
 
     if (node->type == NodeType::TryExpr) {
-        auto site = find_await_site(node->data.try_expr.expr);
+        auto try_expr = node->data.try_expr.resolved_expr ? node->data.try_expr.resolved_expr : node->data.try_expr.expr;
+        auto site = find_await_site(try_expr);
         if (site.await_expr && site.resume_expr &&
             site.resume_expr->type != NodeType::TryExpr) {
             site.resume_expr = node;

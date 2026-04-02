@@ -87,9 +87,9 @@ iter control=8
 iter indexed=16
 iter try=540
 === Ternary for await ===
-ternary plain=10
-ternary return=101
-ternary control=14
+ternary plain=16
+ternary return=102
+ternary control=22
 ternary try=110
 === Switch await ===
 expr1t=100

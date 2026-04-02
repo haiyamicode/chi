@@ -2736,7 +2736,8 @@ AwaitSite Compiler::find_unresolved_await_site(ast::Node *node,
         return {node, node};
     }
     if (node->type == ast::NodeType::TryExpr) {
-        auto site = find_unresolved_await_site(node->data.try_expr.expr, resolved);
+        auto try_expr = node->data.try_expr.resolved_expr ? node->data.try_expr.resolved_expr : node->data.try_expr.expr;
+        auto site = find_unresolved_await_site(try_expr, resolved);
         if (site.await_expr && site.resume_expr &&
             site.resume_expr->type != ast::NodeType::TryExpr) {
             site.resume_expr = node;
@@ -2769,7 +2770,8 @@ ChiType *Compiler::get_async_resume_value_type(ast::Node *root, ast::Node *await
             return get_chitype(await_expr);
         }
         if (node->type == ast::NodeType::TryExpr) {
-            return find_type(node->data.try_expr.expr, true);
+            auto try_expr = node->data.try_expr.resolved_expr ? node->data.try_expr.resolved_expr : node->data.try_expr.expr;
+            return find_type(try_expr, true);
         }
         ChiType *found = nullptr;
         cx::visit_async_children(node, false, [&](ast::Node *child) {
@@ -6255,12 +6257,13 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.try_expr;
         auto &builder = *m_ctx->llvm_builder.get();
         auto &llvm_ctx = *m_ctx->llvm_ctx.get();
-        auto try_expr_type = get_chitype(data.expr);
+        auto effective_expr = data.resolved_expr ? data.resolved_expr : data.expr;
+        auto try_expr_type = get_chitype(effective_expr);
 
-        auto try_site = get_resolver()->find_await_site(data.expr);
+        auto try_site = get_resolver()->find_await_site(effective_expr);
         auto try_it = try_site.await_expr ? m_async_await_refs.find(try_site.await_expr)
                                           : m_async_await_refs.end();
-        if (try_it != m_async_await_refs.end() && get_resolver()->contains_await(data.expr)) {
+        if (try_it != m_async_await_refs.end() && get_resolver()->contains_await(effective_expr)) {
             auto site = try_site;
             assert(site.await_expr && "async try must contain a resumed await site");
 
@@ -6442,18 +6445,18 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             } else {
                 m_async_await_refs[site.await_expr] = RefValue{};
             }
-            auto ok_value = compile_expr(fn, data.expr);
+            auto ok_value = compile_expr(fn, effective_expr);
             m_async_await_refs = prev_async_refs;
 
             if (!data.catch_block) {
                 init_result_variant("Ok", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
                     if (ok_value) {
-                        compile_store_or_copy(fn, ok_value, payload_ptr, payload_type, data.expr);
+                        compile_store_or_copy(fn, ok_value, payload_ptr, payload_type, effective_expr);
                     }
                 });
             } else {
                 if (ok_value) {
-                    compile_store_or_copy(fn, ok_value, result_var, result_type, data.expr);
+                    compile_store_or_copy(fn, ok_value, result_var, result_type, effective_expr);
                 }
             }
             compile_destruction_for_type(fn, settled_var, settled_type);

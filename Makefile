@@ -49,17 +49,17 @@ compile_stress: build install
 run_stress: compile_stress
 	/tmp/collection_memory_leak_stress
 
-analyzer_test: build
+test_analyzer: build
 	(cd analyzer_tests; make test)
 
-formatter_test: build
-	(cd tests; make formatter_test)
+test_formatter: build
+	(cd tests; make test_formatter)
 	(cd tests; make formatter_collapse_test)
 	(cd tests; make formatter_semantic_collapse_test)
 
 test_all: build
 	(cd tests; make test)
-	(cd tests; make formatter_test)
+	(cd tests; make test_formatter)
 	(cd tests; make formatter_collapse_test)
 	(cd tests; make formatter_semantic_collapse_test)
 	(cd analyzer_tests; make test)
