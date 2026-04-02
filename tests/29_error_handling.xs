@@ -384,6 +384,44 @@ func test_try_block_result_mode() {
     }
 }
 
+// Bare catch-all: try { ... } without catch → Result<T, Shared<Error>>
+func test_try_block_bare_catchall() {
+    println("=== try block bare catch-all ===");
+
+    var ok_result = try {
+        succeed()
+    };
+    switch ok_result {
+        Ok(v) => printf("ok = {}\n", v),
+        Err => println("should not reach")
+    }
+
+    var err_result = try {
+        fail_with("bare catch-all");
+        0
+    };
+    switch err_result {
+        Err(err) => printf("err = {}\n", err.message()),
+        Ok => println("should not reach")
+    }
+
+    var void_result = try {
+        fail_with("void bare");
+    };
+    switch void_result {
+        Err(err) => printf("void err = {}\n", err.message()),
+        Ok => println("void ok")
+    }
+
+    var void_ok = try {
+        println("no throw");
+    };
+    switch void_ok {
+        Ok => println("void ok success"),
+        Err => println("should not reach")
+    }
+}
+
 // Multiple sequential try blocks in one function
 func test_try_block_sequential() {
     println("=== try block sequential ===");
@@ -463,6 +501,7 @@ func main() {
     printf("block return = {}\n", test_try_block_return());
     test_try_block_destructor();
     test_try_block_result_mode();
+    test_try_block_bare_catchall();
     test_try_block_sequential();
 
     // Re-throw propagates out — catch it here

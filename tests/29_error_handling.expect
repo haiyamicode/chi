@@ -55,6 +55,12 @@ after block unwind
 ok = 42
 err = result block
 mismatch = mismatch
+=== try block bare catch-all ===
+ok = 42
+err = bare catch-all
+void err = void bare
+no throw
+void ok success
 === try block sequential ===
 caught first
 caught second
