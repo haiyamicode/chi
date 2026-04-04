@@ -5,13 +5,15 @@ find_package(LLVM 17 REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-execute_process(COMMAND llvm-config --libfiles --link-shared OUTPUT_VARIABLE LLVM_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
-message(STATUS "LLVM libs: " ${LLVM_LIBS})
+execute_process(COMMAND llvm-config --libfiles --link-static OUTPUT_VARIABLE LLVM_LIBS_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
+separate_arguments(LLVM_LIBS UNIX_COMMAND "${LLVM_LIBS_RAW}")
+message(STATUS "LLVM libs (static): " ${LLVM_LIBS})
 
-# Find libclang for C interop
+# libclang (C API) — only available as a shared lib in standard distributions
 find_library(LIBCLANG_LIBRARY clang HINTS ${LLVM_LIBRARY_DIRS})
 if(LIBCLANG_LIBRARY)
     message(STATUS "Found libclang: ${LIBCLANG_LIBRARY}")
+    add_definitions(-DHAVE_LIBCLANG)
 else()
     message(WARNING "libclang not found - C interop will be disabled")
 endif()
@@ -23,11 +25,18 @@ set(HEADER_FILES builder.h codegen.h ${RUNTIME_HEADER_FILES} util.h sema.h resol
 set(SOURCE_FILES analyzer.cpp builder.cpp ${RUNTIME_SOURCE_FILES} context.cpp codegen.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast.cpp ast_printer.cpp include/tgc/tgc.c include/hashdict/hashdict.c package_config.cpp c_importer.cpp)
 set(PKG_LIBS CONAN_PKG::fmt CONAN_PKG::libbacktrace CONAN_PKG::libuv CONAN_PKG::valijson)
 set(LIBS ${PKG_LIBS} ${LLVM_LIBS} pthread dl)
-
-# Add libclang if available
 if(LIBCLANG_LIBRARY)
     list(APPEND LIBS ${LIBCLANG_LIBRARY})
-    add_definitions(-DHAVE_LIBCLANG)
+endif()
+
+# System libs required by LLVM/clang static linking
+if(APPLE)
+    set(LIB_ZSTD /opt/homebrew/opt/zstd/lib/libzstd.a)
+    find_library(LIB_CURSES curses REQUIRED)
+    find_library(LIB_XML2 xml2 REQUIRED)
+    list(APPEND LIBS z ${LIB_ZSTD} ${LIB_CURSES} ${LIB_XML2})
+else()
+    list(APPEND LIBS z zstd tinfo rt)
 endif()
 
 # Runtime library

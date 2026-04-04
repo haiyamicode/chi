@@ -219,6 +219,8 @@ static void init_analyzer(cx::Analyzer &analyzer, const boost::json::object &inp
 // Process source through the full compiler pipeline (runtime + resolve + sema)
 static cx::ast::Module* process_source(cx::Analyzer &analyzer, const std::string &input_file,
                                        cx::io::Buffer *src) {
+    if (analyzer.get_context()->root_path.empty())
+        return nullptr;
     auto rt_path = analyzer.get_context()->get_stdlib_path("runtime.xs");
     bool is_runtime = false;
     std::error_code ec;
