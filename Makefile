@@ -52,13 +52,13 @@ stress: build install
 	(cd tests; make stress)
 
 compile_stress: build install
-	$(CHIC) --debug-allocator-runtime -o /tmp/collection_memory_leak_stress -c tests/fuzz/collection_memory_leak_stress.xs
+	$(CHIC) --debug-allocator-runtime -o /tmp/collection_memory_leak_stress -c tests/stress/collection_memory_leak_stress.xs
 
 run_stress: compile_stress
 	/tmp/collection_memory_leak_stress
 
 test_analyzer: build
-	(cd analyzer_tests; make test)
+	(cd tests/analyzer; make test)
 
 test_formatter: build
 	(cd tests; make test_formatter)
@@ -70,7 +70,7 @@ test_all: build
 	(cd tests; make test_formatter)
 	(cd tests; make formatter_collapse_test)
 	(cd tests; make formatter_semantic_collapse_test)
-	(cd analyzer_tests; make test)
+	(cd tests/analyzer; make test)
 
 clean:
 	rm -rf $(BUILD_DIR)/* && mkdir -p $(BUILD_DIR)

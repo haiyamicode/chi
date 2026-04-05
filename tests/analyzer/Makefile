@@ -1,5 +1,5 @@
 MALFORMED_FILES := $(wildcard *.xs)
-CHI_COMPILER := ../build/src/bin/chic
+CHI_COMPILER := ../../build/src/bin/chic
 
 .PHONY: all clean test
 

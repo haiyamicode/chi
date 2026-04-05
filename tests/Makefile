@@ -545,34 +545,34 @@ formatter_semantic_collapse_test:
 
 # Dedicated heavy lifecycle stress suite. Keep it out of TESTS_LIST.
 define STRESS_TEST
-	@echo "Test: fuzz/$(1)..."
+	@echo "Test: stress/$(1)..."
 	@tmp_base=$$(mktemp /tmp/chitests.$(1).XXXXXX); \
 	bin="$${tmp_base}.bin"; \
 	out="$${tmp_base}.out"; \
-	$(CHIC) --debug-allocator-runtime -o "$$bin" -c fuzz/$(1).xs || exit $$?; \
+	$(CHIC) --debug-allocator-runtime -o "$$bin" -c stress/$(1).xs || exit $$?; \
 	"$$bin" > "$$out" 2>&1; \
 	status=$$?; \
 	if [ $$status -ne 0 ]; then \
-		echo "error in test fuzz/$(1) (compile/run)"; \
+		echo "error in test stress/$(1) (compile/run)"; \
 		cat "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit $$status; \
 	fi; \
 	if [ ! -f "$$out" ]; then \
-		echo "error in test fuzz/$(1) (missing output file)"; \
+		echo "error in test stress/$(1) (missing output file)"; \
 		rm -f "$$bin"; \
 		exit 1; \
 	fi; \
 	checkpoints=$$(grep -c '^checkpoint ' "$$out" 2>/dev/null || true); \
 	if [ $$checkpoints -ne 10 ]; then \
-		echo "error in test fuzz/$(1) (missing checkpoints)"; \
+		echo "error in test stress/$(1) (missing checkpoints)"; \
 		cat "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit 1; \
 	fi; \
-	if ! diff -qbu fuzz/$(1).expect "$$out" >/dev/null; then \
-		echo "error in test fuzz/$(1) (output mismatch)"; \
-		diff -u fuzz/$(1).expect "$$out"; \
+	if ! diff -qbu stress/$(1).expect "$$out" >/dev/null; then \
+		echo "error in test stress/$(1) (output mismatch)"; \
+		diff -u stress/$(1).expect "$$out"; \
 		rm -f "$$bin" "$$out"; \
 		exit 1; \
 	fi; \
@@ -582,4 +582,4 @@ endef
 stress:
 	$(call STRESS_TEST,collection_memory_leak_stress)
 	$(call STRESS_TEST,lambda_error_recovery_stress)
-	@echo "fuzz allocator tracking ok"
+	@echo "stress allocator tracking ok"
