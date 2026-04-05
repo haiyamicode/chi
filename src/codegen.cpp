@@ -5863,17 +5863,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             return result;
         }
         case TokenType::KW_MOVE: {
-            // move x — bitwise load + zero source (skip copy)
+            // move x — bitwise load, transfer ownership (skip copy)
             auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
             auto type = get_chitype(data.op1);
             auto type_l = compile_type(type);
             auto value = builder.CreateLoad(type_l, ref.address);
-            auto size = llvm_type_size(type_l);
-            builder.CreateMemSet(
-                ref.address,
-                llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0), size,
-                {});
             // Clear drop flag for maybe-moved variables
             auto *src_decl = data.op1->type == ast::NodeType::Identifier
                                  ? data.op1->data.identifier.decl
