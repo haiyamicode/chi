@@ -433,6 +433,7 @@ unsafe func json_assign_array(path: string, value: Value, ty: reflect.Type, dest
     while i < len {
         let item = value.at(i);
         let slot = cx_array_add(dest, elem_type.size());
+        cx_memset(slot, 0, elem_type.size());
         let item_path = stringf("{}[{}]", path, i);
         json_assign(item_path, item, elem_type, slot);
         i = i + 1;

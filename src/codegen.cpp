@@ -264,12 +264,9 @@ void Function::insn_noop() {
 }
 
 llvm::AllocaInst *Function::entry_alloca(llvm::Type *ty, const string &name) {
-    auto &builder = *ctx->llvm_builder.get();
     auto &block = llvm_fn->getEntryBlock();
     llvm::IRBuilder<> tmp(&block, block.begin());
     auto var = tmp.CreateAlloca(ty, 0, name);
-    tmp.CreateMemSet(var, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*ctx->llvm_ctx), 0),
-                     ctx->llvm_module->getDataLayout().getTypeAllocSize(ty), {});
     return var;
 }
 
@@ -1780,6 +1777,11 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         if (resolver->type_needs_destruction(elem_type)) {
             auto *active_var = fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx),
                                                 "_vararg_fixed.active");
+            {
+                llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
+                tmp.SetInsertPoint(active_var->getNextNode());
+                tmp.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), active_var);
+            }
             builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
             fn->cleanup_owner_vars.push_back({fixed_array_ptr, fixed_array_type, active_var, false});
         }
@@ -1850,6 +1852,11 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
 
         auto *active_var =
             fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), "_vararg_array.active");
+        {
+            llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
+            tmp.SetInsertPoint(active_var->getNextNode());
+            tmp.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), active_var);
+        }
         builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
         fn->cleanup_owner_vars.push_back({array_ptr, array_type, active_var, false});
     }
@@ -4714,7 +4721,16 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
         }
         for (auto var : data.stmt_temp_vars) {
             compile_stmt(fn, var);
-            sync_async_frame_var(fn, machine, var, local_vars);
+            // stmt_temp_vars have no initializer — they are filled at call sites.
+            // Only redirect to frame slot; do NOT load/copy from the uninitialized local.
+            if (machine.frame_var_index.count(var)) {
+                auto frame_ptr = get_async_frame_field_ptr(fn, machine, var);
+                add_var(var, frame_ptr);
+                fn->async_frame_owned_vars.insert(var);
+                local_vars[var] = frame_ptr;
+            } else {
+                local_vars[var] = get_var(var);
+            }
         }
     }
 
@@ -6411,6 +6427,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     compile_copy(fn, shared_error_value, shared_owner_var, shared_error_type, expr);
                     shared_owner_active =
                         fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), "try_await_err_owner.active");
+                    {
+                        llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
+                        tmp.SetInsertPoint(llvm::cast<llvm::Instruction>(shared_owner_active)->getNextNode());
+                        tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_owner_active);
+                    }
                     builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), shared_owner_active);
                     fn->cleanup_owner_vars.push_back(
                         {shared_owner_var, shared_error_type, shared_owner_active, false});
@@ -6620,7 +6641,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // Save error_data pointer for cleanup (initialized to null, set on catch path)
             // This alloca is in the entry block, so it persists for function-level cleanup
             auto error_data_var = fn->entry_alloca(builder.getPtrTy(), "error_owner");
-            builder.CreateStore(llvm::ConstantPointerNull::get(builder.getPtrTy()), error_data_var);
+            {
+                // Initialize in entry block right after alloca, not at current insertion point
+                llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
+                tmp.SetInsertPoint(error_data_var->getNextNode());
+                tmp.CreateStore(llvm::ConstantPointerNull::get(builder.getPtrTy()), error_data_var);
+            }
 
             // Type check if specific catch
             ChiType *catch_type = nullptr;
@@ -7823,6 +7849,14 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         auto &items = expr->data.construct_expr.items;
         auto elem_type = type->data.fixed_array.elem;
         auto arr_type_l = compile_type(type);
+        auto fa_size = type->data.fixed_array.size;
+        if (items.len < fa_size) {
+            auto byte_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(arr_type_l);
+            builder.CreateMemSet(
+                dest,
+                llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
+                byte_size, {});
+        }
         auto i32_ty = llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx);
         auto zero = llvm::ConstantInt::get(i32_ty, 0);
         for (uint32_t i = 0; i < items.len; i++) {
@@ -9927,6 +9961,11 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         // Allocate drop flag for maybe-moved variables
         if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(stmt)) {
             auto flag = fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), stmt->name + ".alive");
+            {
+                llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
+                tmp.SetInsertPoint(flag->getNextNode());
+                tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), flag);
+            }
             llvm_builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), flag);
             m_ctx->drop_flags[stmt] = flag;
         }
