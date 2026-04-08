@@ -1614,17 +1614,26 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
     if (expr->analysis.moved && param_type && !param_type->is_reference()) {
         auto src_ref = compile_expr_ref(fn, expr);
         if (src_ref.address) {
+            // Lvalue move: load bits directly from address. For sync paths the
+            // caller skips block cleanup via compile_block_cleanup's skip_var
+            // and async_frame_owned_vars filter. For async paths the value may
+            // live in a frame slot whose alive flag must be cleared so the
+            // frame destructor doesn't double-destroy it.
             auto arg_value = src_ref.value;
             if (!arg_value) {
                 arg_value = builder.CreateLoad(compile_type(src_type), src_ref.address);
             }
             emit_dbg_location(expr);
             arg_value = compile_conversion(fn, arg_value, src_type, param_type);
-            if (src_type->kind != TypeKind::Undefined && src_type->kind != TypeKind::ZeroInit &&
-                get_resolver()->type_needs_destruction(src_type)) {
-                builder.CreateStore(llvm::Constant::getNullValue(compile_type(src_type)), src_ref.address);
+            if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, src_ref.address)) {
+                builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
             }
             return arg_value;
+        }
+        if (src_ref.value) {
+            // Rvalue move: expression already compiled, use value directly.
+            emit_dbg_location(expr);
+            return compile_conversion(fn, src_ref.value, src_type, param_type);
         }
     }
 
@@ -2924,25 +2933,33 @@ llvm::Value *Compiler::get_async_frame_var_alive_ptr(Function *fn, AsyncStateMac
                                                 it->second);
 }
 
-static bool is_same_async_frame_field_ptr(llvm::Value *ptr, AsyncStateMachine &machine,
-                                          int field_index) {
+// If `ptr` is `getelementptr machine.frame_ptr, 0, N`, return N. Otherwise -1.
+// Used to recognize addresses that point at top-level async frame slots.
+static int async_frame_field_index_of(llvm::Value *ptr, AsyncStateMachine &machine) {
     if (!ptr) {
-        return false;
+        return -1;
     }
     auto stripped = ptr->stripPointerCasts();
     auto gep = llvm::dyn_cast<llvm::GEPOperator>(stripped);
     if (!gep || gep->getPointerOperand() != machine.frame_ptr) {
-        return false;
+        return -1;
     }
     if (gep->getNumIndices() != 2) {
-        return false;
+        return -1;
     }
     auto idx_it = gep->idx_begin();
     auto zero_index = llvm::dyn_cast<llvm::ConstantInt>(idx_it->get());
     ++idx_it;
     auto field = llvm::dyn_cast<llvm::ConstantInt>(idx_it->get());
-    return zero_index && zero_index->isZero() && field &&
-           field->getSExtValue() == field_index;
+    if (!zero_index || !zero_index->isZero() || !field) {
+        return -1;
+    }
+    return (int)field->getSExtValue();
+}
+
+static bool is_same_async_frame_field_ptr(llvm::Value *ptr, AsyncStateMachine &machine,
+                                          int field_index) {
+    return async_frame_field_index_of(ptr, machine) == field_index;
 }
 
 llvm::Value *Compiler::get_async_frame_await_ptr(Function *fn, AsyncStateMachine &machine,
@@ -2957,6 +2974,26 @@ llvm::Value *Compiler::get_async_frame_await_alive_ptr(Function *fn, AsyncStateM
                                                        ast::Node *await_expr) {
     auto it = machine.frame_await_alive_index.find(await_expr);
     if (it == machine.frame_await_alive_index.end()) {
+        return nullptr;
+    }
+    return m_ctx->llvm_builder->CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
+                                                it->second);
+}
+
+llvm::Value *Compiler::async_frame_alive_ptr_for_addr(Function *fn, llvm::Value *addr) {
+    if (!fn->async_machine) {
+        return nullptr;
+    }
+    auto &machine = *fn->async_machine;
+    if (!machine.frame_struct_type || !machine.frame_ptr) {
+        return nullptr;
+    }
+    int field_index = async_frame_field_index_of(addr, machine);
+    if (field_index < 0) {
+        return nullptr;
+    }
+    auto it = machine.alive_index_by_field.find(field_index);
+    if (it == machine.alive_index_by_field.end()) {
         return nullptr;
     }
     return m_ctx->llvm_builder->CreateStructGEP(machine.frame_struct_type, machine.frame_ptr,
@@ -2990,20 +3027,26 @@ void Compiler::initialize_async_frame(Function *fn, AsyncStateMachine &machine, 
         frame_types.push_back(compile_type(machine.bind_type));
     }
     for (auto var : machine.frame_vars) {
-        machine.frame_var_index[var] = (int)frame_types.size();
+        int field_index = (int)frame_types.size();
+        machine.frame_var_index[var] = field_index;
         frame_types.push_back(compile_type(get_async_frame_node_type(var)));
         if (get_resolver()->type_needs_destruction(get_async_frame_node_type(var))) {
-            machine.frame_var_alive_index[var] = (int)frame_types.size();
+            int alive_index = (int)frame_types.size();
+            machine.frame_var_alive_index[var] = alive_index;
+            machine.alive_index_by_field[field_index] = alive_index;
             frame_types.push_back(builder.getInt1Ty());
         }
     }
     for (auto await_expr : machine.frame_awaits) {
         auto await_type = get_async_resume_value_type(body, await_expr);
         machine.frame_await_types[await_expr] = await_type;
-        machine.frame_await_index[await_expr] = (int)frame_types.size();
+        int field_index = (int)frame_types.size();
+        machine.frame_await_index[await_expr] = field_index;
         frame_types.push_back(compile_type(await_type));
         if (get_resolver()->type_needs_destruction(await_type)) {
-            machine.frame_await_alive_index[await_expr] = (int)frame_types.size();
+            int alive_index = (int)frame_types.size();
+            machine.frame_await_alive_index[await_expr] = alive_index;
+            machine.alive_index_by_field[field_index] = alive_index;
             frame_types.push_back(builder.getInt1Ty());
         }
     }
@@ -4990,6 +5033,8 @@ void Compiler::compile_async_fn_body(Function *fn) {
     machine.parent_fn = fn;
     machine.promise_type = return_type;
     machine.promise_struct_type = promise_struct_type_l;
+    auto saved_async_machine = fn->async_machine;
+    fn->async_machine = &machine;
     initialize_async_frame(fn, machine, body);
     initialize_async_dispatcher(fn, machine);
 
@@ -5009,6 +5054,7 @@ void Compiler::compile_async_fn_body(Function *fn) {
                           return_type, fn->node);
     builder.CreateCall(get_system_fn("cx_capture_release")->llvm_fn, {machine.frame_capture_ptr});
     builder.CreateBr(fn->return_label);
+    fn->async_machine = saved_async_machine;
 }
 
 // Emits the common landing pad logic: extract thrown_ptr, check is_typed,
@@ -5067,6 +5113,7 @@ llvm::Value *Compiler::init_async_worker_frame(Function *fn, AsyncStateMachine &
         builder.CreateStructGEP(machine.frame_struct_type, machine.frame_ptr, 0);
     fn->async_reject_promise_ptr = result_promise_ptr;
     fn->async_promise_type = machine.promise_type;
+    fn->async_machine = &machine;
     return result_promise_ptr;
 }
 

@@ -71,6 +71,8 @@ struct BlockScope {
     bool branched = false;
 };
 
+struct AsyncStateMachine;
+
 struct Function {
     string qualified_name = "";
     ast::Node *node = nullptr;
@@ -111,6 +113,7 @@ struct Function {
     };
     std::vector<CleanupOwner> cleanup_owner_vars;
     std::set<ast::Node *> async_frame_owned_vars;
+    AsyncStateMachine *async_machine = nullptr; // active state machine while compiling an async function/state worker
     bool is_compiling_body = false;
     bool body_compiled = false;
 
@@ -300,6 +303,11 @@ struct AsyncStateMachine {
     std::map<ast::Node *, int> frame_await_alive_index = {};
     std::map<ast::Node *, ChiType *> frame_await_types = {};
     std::map<ast::Node *, int> loop_head_state_ids = {};
+    // Reverse lookup: value-slot field index -> alive-flag field index. Populated
+    // alongside frame_var_alive_index / frame_await_alive_index. Lets us clear the
+    // alive flag for any address that GEPs into a top-level frame value slot,
+    // without iterating both per-node maps.
+    std::map<int, int> alive_index_by_field = {};
 
     // Frame slot for Shared<Error> passed from rejection forwarder to catch state
     int async_error_index = -1;
@@ -708,6 +716,10 @@ class Compiler {
     llvm::Value *get_async_frame_await_ptr(Function *fn, AsyncStateMachine &machine, ast::Node *await_expr);
     llvm::Value *get_async_frame_await_alive_ptr(Function *fn, AsyncStateMachine &machine,
                                                  ast::Node *await_expr);
+    // If `addr` is a GEP into the active async frame's value slot (frame_var or
+    // frame_await), return the corresponding alive-flag GEP, otherwise nullptr.
+    // Used to clear the alive flag when a value is moved out of a frame slot.
+    llvm::Value *async_frame_alive_ptr_for_addr(Function *fn, llvm::Value *addr);
     llvm::Value *get_async_frame_state_ptr(Function *fn, AsyncStateMachine &machine);
     AsyncLambdaValue build_async_frame_lambda(Function *fn, AsyncStateMachine &machine,
                                               llvm::Function *target_fn);
