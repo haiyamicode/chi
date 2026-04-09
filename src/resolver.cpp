@@ -769,9 +769,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     switch (node->type) {
     case NodeType::Root: {
         auto &data = node->data.root;
-        // first pass: skip function and struct bodies
+        auto is_module_var = [](ast::Node *decl) {
+            return decl->type == NodeType::VarDecl && !decl->data.var_decl.is_field &&
+                   !decl->data.var_decl.is_embed;
+        };
+
+        // first pass: skip function/struct bodies and module-level vars
         scope.skip_fn_bodies = true;
         for (auto decl : data.top_level_decls) {
+            if (is_module_var(decl)) {
+                continue;
+            }
             resolve(decl, scope);
 
             if (decl->type == NodeType::FnDef && decl->name == "main") {
@@ -791,6 +799,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         for (auto decl : data.top_level_decls) {
             if (decl->type == NodeType::StructDecl || decl->type == NodeType::EnumDecl) {
                 _resolve(decl, scope);
+            }
+        }
+
+        // module-level var initializers: deferred until struct types are complete
+        for (auto decl : data.top_level_decls) {
+            if (is_module_var(decl)) {
+                resolve(decl, scope);
             }
         }
 
@@ -2876,8 +2891,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // lambda that captures the receiver.
         if (member->is_method() && member->resolved_type &&
             member->resolved_type->kind == TypeKind::Fn && !scope.is_fn_call) {
-            assert(member->node && scope.parent_fn_node &&
-                   "method-as-value requires an enclosing function");
+            assert(member->node && "method-as-value requires a method def");
             auto *lambda_def = synthesize_method_lambda(node, member, scope);
             node->resolved_node = lambda_def;
             node->resolved_type = lambda_def->resolved_type;
