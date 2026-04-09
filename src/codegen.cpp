@@ -9047,7 +9047,6 @@ llvm::Value *Compiler::compile_intrinsic(Function *fn, ast::Node *expr, InvokeIn
         auto src_ptr = compile_expr(fn, data.args[1]);
         auto size = compile_expr(fn, data.args[2]);
         builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), src_ptr, llvm::MaybeAlign(), size);
-        builder.CreateMemSet(src_ptr, builder.getInt8(0), size, llvm::MaybeAlign());
         return nullptr;
     }
     case IntrinsicSymbol::AtomicLoad: {
