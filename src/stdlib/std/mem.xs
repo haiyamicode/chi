@@ -65,7 +65,8 @@ export struct GCAllocator {
         }
 
         unsafe func free(address: *void) {
-            cx_gc_free(address);
+            // No-op: the garbage collector reclaims unreachable allocations
+            // via its sweep phase.
         }
     }
 }

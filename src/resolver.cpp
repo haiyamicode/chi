@@ -856,9 +856,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // effect-summary pass: propagate exclusive-access requirements through the call graph
-        compute_exclusive_access_summaries(data.top_level_decls);
-        apply_exclusive_access_effects(data.top_level_decls);
+        // effect-summary pass: propagate exclusive-access requirements through the call graph.
+        // Only applied to low-level modules (.xs); managed mode (.x) relies on the GC to keep
+        // escaped references valid across realloc/rehash, so the exclusive-access rule would
+        // reject code that is actually memory-safe.
+        if (!has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED)) {
+            compute_exclusive_access_summaries(data.top_level_decls);
+            apply_exclusive_access_effects(data.top_level_decls);
+        }
 
         // final pass: finalize placeholder lambdas
         for (auto decl : data.top_level_decls) {
