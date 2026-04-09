@@ -868,7 +868,6 @@ static std::string get_value_display_from_ptr(TypeInfo *type, const void *data_p
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
     case TypeKind::MoveRef: {
         auto ptr = *(void *const *)data_p;
         auto elem_ti = type->data.pointer.elem;

@@ -9,7 +9,7 @@ export struct Inner {
 export struct Holder {
     inner: Inner;
 
-    mutex func new() {
+    mut func new() {
         this.inner = {};
     }
 }

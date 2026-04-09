@@ -1,4 +1,4 @@
-// expect-error: mutex method
+// expect-error: mut method
 
 struct Elem {
     value: int = 0;

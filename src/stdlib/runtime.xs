@@ -108,7 +108,7 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
         }
     }
 
-    mutex func delete() {
+    mut func delete() {
         unsafe {
             this.release();
         }
@@ -351,10 +351,10 @@ export struct Array<T> {
     protected capacity: uint32 = 0;
     protected allocator: &'static mem.Allocator = &mem.SYSTEM_ALLOCATOR;
 
-    mutex func new() {}
+    mut func new() {}
 
     impl ops.ListInit<T> {
-        mutex func list_init(...items: T) {
+        mut func list_init(...items: T) {
             if items.length > 0 {
                 this.reserve(items.length);
                 for item in items {
@@ -365,12 +365,12 @@ export struct Array<T> {
     }
 
     impl mem.AllocInit {
-        mutex func alloc_init(allocator: &'static mem.Allocator) {
+        mut func alloc_init(allocator: &'static mem.Allocator) {
             this.allocator = allocator;
         }
     }
 
-    mutex func delete() {
+    mut func delete() {
         if !this.data {
             return;
         }
@@ -383,7 +383,7 @@ export struct Array<T> {
         }
     }
 
-    mutex func push(item: T) {
+    mut func push(item: T) {
         unsafe {
             mem.annotate_copy(&this, &item);
         }
@@ -395,7 +395,7 @@ export struct Array<T> {
         this.length += 1;
     }
 
-    mutex func reserve(n: uint32) {
+    mut func reserve(n: uint32) {
         let needed = this.length + n;
         if this.capacity >= needed {
             return;
@@ -422,7 +422,7 @@ export struct Array<T> {
         }
     }
 
-    mutex func clear() {
+    mut func clear() {
         unsafe {
             if this.data {
                 for var i: uint32 = 0; i < this.length; i++ {
@@ -439,7 +439,7 @@ export struct Array<T> {
 
     impl where T: ops.Int {
         // Resize to exactly n elements, zero-filling any new space.
-        mutex func resize_fill(n: uint32) {
+        mut func resize_fill(n: uint32) {
             this.reserve(n);
             unsafe {
                 cx_memset(this.data as *void, 0, n * sizeof T);
@@ -448,7 +448,7 @@ export struct Array<T> {
         }
 
         // Shrink length to n without freeing memory.
-        mutex func truncate(n: uint32) {
+        mut func truncate(n: uint32) {
             if n < this.length {
                 unsafe {
                     for i in n..this.length {
@@ -503,7 +503,7 @@ export struct Array<T> {
     }
 
     impl ops.Copy {
-        mutex func copy(source: &This) {
+        mut func copy(source: &This) {
             this.allocator = source.allocator;
             for item in source {
                 this.push(item);
@@ -1013,7 +1013,7 @@ export struct Buffer {
         return buf;
     }
 
-    mutex func write_string(str: string) {
+    mut func write_string(str: string) {
         unsafe {
             cx_array_write_str(&this.bytes, &str);
         }
@@ -1028,7 +1028,7 @@ export struct Buffer {
     }
 
     impl Write {
-        mutex func write(data: &[byte]) {
+        mut func write(data: &[byte]) {
             for b in data {
                 this.bytes.push(b);
             }
@@ -1052,7 +1052,7 @@ export struct Buffer {
         }
     }
 
-    mutex func truncate(n: uint32) {
+    mut func truncate(n: uint32) {
         this.bytes.truncate(n);
     }
 }
@@ -1283,7 +1283,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
     }
 
     impl mem.AllocInit {
-        mutex func alloc_init(allocator: &'static mem.Allocator) {
+        mut func alloc_init(allocator: &'static mem.Allocator) {
             this.allocator = allocator;
         }
     }
@@ -1393,7 +1393,7 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
-    mutex func remove(key: K) {
+    mut func remove(key: K) {
         if this.buckets == null {
             return;
         }

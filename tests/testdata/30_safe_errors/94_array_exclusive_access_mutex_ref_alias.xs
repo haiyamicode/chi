@@ -9,7 +9,7 @@ func main() {
     items.push(Elem{value: 1});
 
     let r = &items[0];
-    let array_ref = &mutex items;
+    let array_ref = &mut items;
     array_ref.push(Elem{value: 2});
     printf("{}\n", r.value);
 }

@@ -171,7 +171,7 @@ func test_optional_ref_if_let_return() {
 struct MutexBuf {
     value: int = 0;
 
-    mutex func grow() {
+    mut func grow() {
         this.value += 1;
     }
 }
@@ -179,7 +179,7 @@ struct MutexBuf {
 struct MutexHolder {
     buf: MutexBuf = {};
 
-    mutex func grow_buf() int {
+    mut func grow_buf() int {
         this.buf.grow();
         return this.buf.value;
     }
@@ -193,29 +193,29 @@ struct MutexElem {
     }
 }
 
-func takes_mutex_elem(r: &mutex MutexElem) int {
+func takes_mutex_elem(r: &mut MutexElem) int {
     return r.read();
 }
 
 func test_mutex_field_method() {
-    printf("=== mutex field method ===\n");
+    printf("=== mut field method ===\n");
     var holder = MutexHolder{};
     printf("value = {}\n", holder.grow_buf());
 }
 
 func test_named_mutex_ref() {
-    printf("=== named mutex ref ===\n");
+    printf("=== named mut ref ===\n");
     var elem = MutexElem{value: 7};
-    let r = &mutex elem;
+    let r = &mut elem;
     printf("call = {}\n", takes_mutex_elem(r));
     printf("after = {}\n", r.read());
 }
 
 func test_mutex_array_ref_index() {
-    printf("=== mutex array ref index ===\n");
+    printf("=== mut array ref index ===\n");
     var items: Array<MutexElem> = [];
     items.push({value: 9});
-    let r = &mutex items;
+    let r = &mut items;
     printf("item = {}\n", r[0].read());
 }
 

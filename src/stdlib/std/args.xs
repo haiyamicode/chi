@@ -131,7 +131,7 @@ export struct Command {
     private command_names: Map<string, bool> = {};
     private optional_positionals_started: bool = false;
 
-    mutex func flag(spec: Flag) {
+    mut func flag(spec: Flag) {
         if this.long_names.get(spec.name) {
             panic(duplicate_schema_text("flag", stringf("--{}", spec.name), this.name));
         }
@@ -145,7 +145,7 @@ export struct Command {
         this.flags.push(move spec);
     }
 
-    mutex func option(spec: Option) {
+    mut func option(spec: Option) {
         if this.long_names.get(spec.name) {
             panic(duplicate_schema_text("option", stringf("--{}", spec.name), this.name));
         }
@@ -159,7 +159,7 @@ export struct Command {
         this.options.push(move spec);
     }
 
-    mutex func positional(spec: Positional) {
+    mut func positional(spec: Positional) {
         if spec.required {
             if this.optional_positionals_started {
                 panic(stringf(ERROR_REQUIRED_POSITIONAL_AFTER_OPTIONAL, spec.name, this.name));
@@ -170,7 +170,7 @@ export struct Command {
         this.positionals.push(move spec);
     }
 
-    mutex func command(spec: Command) {
+    mut func command(spec: Command) {
         if this.command_names.get(spec.name) {
             panic(duplicate_schema_text("command", spec.name, this.name));
         }
@@ -190,7 +190,7 @@ export struct Command {
         var matches = Matches{};
         matches.command = this.name;
         var parser = CommandParser{
-            matches: &mutex matches,
+            matches: &mut matches,
             cmd: &this,
             :argv_values,
             command_name: this.name
@@ -217,7 +217,7 @@ export struct Command {
     }
 }
 
-func append_help_lines(buf: &mutex Buffer, title: string, lines: &[string]) {
+func append_help_lines(buf: &mut Buffer, title: string, lines: &[string]) {
     if lines.length == 0 {
         return;
     }
@@ -427,10 +427,10 @@ func help_for(cmd: &Command, name: string) string {
     if command_lines.length > 0 || flag_lines.length > 0 || option_lines.length > 0 || positional_lines.length > 0 {
         buf.write_string("\n\n");
     }
-    append_help_lines(&mutex buf, "commands", command_lines.span());
-    append_help_lines(&mutex buf, "flags", flag_lines.span());
-    append_help_lines(&mutex buf, "options", option_lines.span());
-    append_help_lines(&mutex buf, "positionals", positional_lines.span());
+    append_help_lines(&mut buf, "commands", command_lines.span());
+    append_help_lines(&mut buf, "flags", flag_lines.span());
+    append_help_lines(&mut buf, "options", option_lines.span());
+    append_help_lines(&mut buf, "positionals", positional_lines.span());
     return buf.to_string().trim_right();
 }
 
@@ -463,7 +463,7 @@ func scan_arg(arg: string, state: ScanState) ArgToken {
 }
 
 struct CommandParser {
-    matches: &mutex Matches;
+    matches: &mut Matches;
     cmd: &Command;
     argv_values: &[string];
     command_name: string = "";
@@ -471,7 +471,7 @@ struct CommandParser {
     state: ScanState = ScanState.Options;
     index: uint32 = 0;
 
-    mutex func add_flag(flag: &Flag) ?string {
+    mut func add_flag(flag: &Flag) ?string {
         if this.matches.flag(flag.name) {
             return stringf(ERROR_DUPLICATE_FLAG, flag.name);
         }
@@ -479,7 +479,7 @@ struct CommandParser {
         return null;
     }
 
-    mutex func add_option(option: &Option, value: string) ?string {
+    mut func add_option(option: &Option, value: string) ?string {
         if !option.multiple && this.matches.option(option.name) {
             return stringf(ERROR_DUPLICATE_OPTION, option.name);
         }
@@ -491,11 +491,11 @@ struct CommandParser {
         return this.positional_index < 1;
     }
 
-    mutex func parse_subcommand(subcommand: &Command) ParseStep {
+    mut func parse_subcommand(subcommand: &Command) ParseStep {
         var child_matches = Matches{};
         child_matches.command = subcommand.name;
         var child_parser = CommandParser{
-            matches: &mutex child_matches,
+            matches: &mut child_matches,
             cmd: subcommand,
             argv_values: this.argv_values,
             command_name: command_path(this.command_name, subcommand.name),
@@ -515,7 +515,7 @@ struct CommandParser {
         return ParseStep.Ok;
     }
 
-    mutex func parse_long_name(name: string) TokenStep {
+    mut func parse_long_name(name: string) TokenStep {
         if name == "help" {
             return {kind: TokenStepKind.Help, text: help_for(this.cmd, this.command_name)};
         }
@@ -558,7 +558,7 @@ struct CommandParser {
         };
     }
 
-    mutex func parse_long_name_value(name: string, value: string) TokenStep {
+    mut func parse_long_name_value(name: string, value: string) TokenStep {
         if name == "help" {
             return {kind: TokenStepKind.Help, text: help_for(this.cmd, this.command_name)};
         }
@@ -592,7 +592,7 @@ struct CommandParser {
         };
     }
 
-    mutex func parse_short_cluster(cluster: string) TokenStep {
+    mut func parse_short_cluster(cluster: string) TokenStep {
         var short_index: uint32 = 0;
         while short_index < cluster.byte_length() {
             let short_name = cluster.byte_slice(short_index, short_index + 1);
@@ -657,7 +657,7 @@ struct CommandParser {
         return {kind: TokenStepKind.Next, next_index: this.index + 1};
     }
 
-    mutex func parse_value_token(value: string) TokenStep {
+    mut func parse_value_token(value: string) TokenStep {
         if this.at_first_positional() {
             if let child_index = find_command_index(this.cmd, value) {
                 let subcommand = &this.cmd.commands[child_index];
@@ -702,7 +702,7 @@ struct CommandParser {
         };
     }
 
-    mutex func parse() ParseStep {
+    mut func parse() ParseStep {
         while this.index < this.argv_values.length {
             let token = scan_arg(this.argv_values[this.index], this.state);
             var step = TokenStep{};

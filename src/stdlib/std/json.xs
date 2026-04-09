@@ -556,7 +556,7 @@ export func parse<T: ops.Construct>(str: string, options: ?ParseOptions) T {
     return result;
 }
 
-func json_encode_hex_byte(buf: &mutex Buffer, value: byte) {
+func json_encode_hex_byte(buf: &mut Buffer, value: byte) {
     let digits = "0123456789abcdef";
     let high = (value / 16) as uint32;
     let low = (value % 16) as uint32;
@@ -564,7 +564,7 @@ func json_encode_hex_byte(buf: &mutex Buffer, value: byte) {
     buf.write_string(digits.byte_slice(low, low + 1));
 }
 
-func json_encode_string(buf: &mutex Buffer, value: string) {
+func json_encode_string(buf: &mut Buffer, value: string) {
     buf.write_string("\"");
     var i: uint32 = 0;
     while i < value.byte_length() {
@@ -599,7 +599,7 @@ func encode_type_error(path: string, ty: reflect.Type, detail: string) never {
     throw new EncodeError{:detail, path: err_path};
 }
 
-unsafe func json_encode_int(ty: reflect.Type, src: *void, buf: &mutex Buffer) {
+unsafe func json_encode_int(ty: reflect.Type, src: *void, buf: &mut Buffer) {
     let bits = ty.int_bits();
     if ty.int_is_unsigned() {
         if bits == 8 {
@@ -629,7 +629,7 @@ unsafe func json_encode_int(ty: reflect.Type, src: *void, buf: &mutex Buffer) {
     }
 }
 
-unsafe func json_encode_float(path: string, ty: reflect.Type, src: *void, buf: &mutex Buffer) {
+unsafe func json_encode_float(path: string, ty: reflect.Type, src: *void, buf: &mut Buffer) {
     var raw: float64 = 0.0;
     if ty.float_bits() == 32 {
         raw = *(src as *float) as float64;
@@ -656,7 +656,7 @@ unsafe func json_encode_index_path(path: string, index: uint32) string {
     return stringf("{}[{}]", path, index);
 }
 
-unsafe func json_encode(path: string, ty: reflect.Type, src: *void, buf: &mutex Buffer) {
+unsafe func json_encode(path: string, ty: reflect.Type, src: *void, buf: &mut Buffer) {
     switch ty.kind() {
         Struct => {
             buf.write_string("{");
@@ -752,7 +752,7 @@ export func encode<T>(value: T) string {
 
     var buf = Buffer{};
     unsafe {
-        json_encode("", value_type, value_ptr, &mutex buf);
+        json_encode("", value_type, value_ptr, &mut buf);
     }
     return buf.to_string();
 }

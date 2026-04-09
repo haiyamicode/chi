@@ -175,7 +175,7 @@ bool Parser::is_declaration_start(TokenType type) {
     case TokenType::KW_PRIVATE:
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
-    case TokenType::KW_MUTEX:
+    case TokenType::KW_MUT:
     case TokenType::KW_ASYNC:
     case TokenType::KW_UNSAFE:
     case TokenType::AT:
@@ -304,7 +304,7 @@ void Parser::parse_top_level_decls(NodeList *decls) {
         // Skip unexpected tokens and recover to declaration boundary
         if (!is_declaration_start(token->type) && token->type != TokenType::KW_INLINE &&
             token->type != TokenType::KW_STATIC &&
-            token->type != TokenType::KW_MUTEX) {
+            token->type != TokenType::KW_MUT) {
             unexpected(token);
             recover_to_declaration_boundary();
             continue;
@@ -378,11 +378,6 @@ DeclSpec *Parser::parse_decl_spec(DeclSpec *spec) {
         case TokenType::KW_MUT: {
             consume();
             spec->flags |= DECL_MUTABLE;
-            break;
-        }
-        case TokenType::KW_MUTEX: {
-            consume();
-            spec->flags |= DECL_MUTEX;
             break;
         }
         case TokenType::KW_STATIC: {
@@ -469,7 +464,6 @@ Node *Parser::parse_top_level_decl(DeclSpec *decl_spec) {
     case TokenType::KW_PRIVATE:
     case TokenType::KW_PROTECTED:
     case TokenType::KW_STATIC:
-    case TokenType::KW_MUTEX:
     case TokenType::KW_ASYNC:
     case TokenType::KW_UNSAFE:
         return parse_top_level_decl(parse_decl_spec());
@@ -587,15 +581,12 @@ optional<SigilKind> Parser::get_sigil_kind(TokenType token_type) {
 
 void Parser::parse_reference_type_prefix(SigilKind &sigil_kind, string &lifetime) {
     if (next_is(TokenType::LPAREN)) {
-        // &(mut, 'this) T  or  &(mutex) T  or  &('this) T  or  &(move) T
+        // &(mut, 'this) T  or  &('this) T  or  &(move) T
         consume();
         for (;;) {
             if (next_is(TokenType::KW_MUT)) {
                 consume();
                 sigil_kind = SigilKind::MutRef;
-            } else if (next_is(TokenType::KW_MUTEX)) {
-                consume();
-                sigil_kind = SigilKind::MutexRef;
             } else if (next_is(TokenType::KW_MOVE)) {
                 consume();
                 sigil_kind = SigilKind::Move;
@@ -613,9 +604,6 @@ void Parser::parse_reference_type_prefix(SigilKind &sigil_kind, string &lifetime
     } else if (next_is(TokenType::KW_MUT)) {
         consume();
         sigil_kind = SigilKind::MutRef;
-    } else if (next_is(TokenType::KW_MUTEX)) {
-        consume();
-        sigil_kind = SigilKind::MutexRef;
     } else if (next_is(TokenType::KW_MOVE)) {
         consume();
         sigil_kind = SigilKind::Move;
@@ -631,12 +619,10 @@ bool Parser::try_parse_reference_type_prefix_lookahead(int &pos, SigilKind &sigi
         pos++;
         for (;;) {
             token = lookahead(pos);
-            if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
+            if (token->type == TokenType::KW_MUT ||
                 token->type == TokenType::KW_MOVE || token->type == TokenType::LIFETIME) {
                 if (token->type == TokenType::KW_MUT) {
                     sigil_kind = SigilKind::MutRef;
-                } else if (token->type == TokenType::KW_MUTEX) {
-                    sigil_kind = SigilKind::MutexRef;
                 } else if (token->type == TokenType::KW_MOVE) {
                     sigil_kind = SigilKind::Move;
                 }
@@ -652,12 +638,10 @@ bool Parser::try_parse_reference_type_prefix_lookahead(int &pos, SigilKind &sigi
         if (lookahead(pos)->type != TokenType::RPAREN)
             return false;
         pos++;
-    } else if (token->type == TokenType::KW_MUT || token->type == TokenType::KW_MUTEX ||
+    } else if (token->type == TokenType::KW_MUT ||
                token->type == TokenType::KW_MOVE) {
         if (token->type == TokenType::KW_MUT) {
             sigil_kind = SigilKind::MutRef;
-        } else if (token->type == TokenType::KW_MUTEX) {
-            sigil_kind = SigilKind::MutexRef;
         } else if (token->type == TokenType::KW_MOVE) {
             sigil_kind = SigilKind::Move;
         }
@@ -1078,9 +1062,6 @@ Node *Parser::parse_destructure_pattern(VarKind kind) {
             if (next_is(TokenType::KW_MUT)) {
                 consume();
                 sigil = SigilKind::MutRef;
-            } else if (next_is(TokenType::KW_MUTEX)) {
-                consume();
-                sigil = SigilKind::MutexRef;
             } else {
                 sigil = SigilKind::Reference;
             }
@@ -1158,9 +1139,6 @@ Node *Parser::parse_sequence_destructure_pattern(VarKind kind, TokenType start,
             if (next_is(TokenType::KW_MUT)) {
                 consume();
                 sigil = SigilKind::MutRef;
-            } else if (next_is(TokenType::KW_MUTEX)) {
-                consume();
-                sigil = SigilKind::MutexRef;
             } else {
                 sigil = SigilKind::Reference;
             }
@@ -1957,9 +1935,6 @@ Node *Parser::parse_unary_expr(bool lhs, Node *parent) {
         if (token->type == TokenType::AND && get()->type == TokenType::KW_MUT) {
             consume();
             node->data.unary_op_expr.op_type = TokenType::MUTREF;
-        } else if (token->type == TokenType::AND && get()->type == TokenType::KW_MUTEX) {
-            consume();
-            node->data.unary_op_expr.op_type = TokenType::MUTEXREF;
         } else if (token->type == TokenType::AND && get()->type == TokenType::KW_MOVE) {
             consume();
             node->data.unary_op_expr.op_type = TokenType::MOVEREF;
@@ -2436,7 +2411,7 @@ bool Parser::try_parse_type_expr_lookahead(int &pos, bool struct_only) {
         }
     }
 
-    // Handle reference sigil: &T, &mut T, &mutex T, &move T, &'a T, &(mut, 'a) T, &[T]
+    // Handle reference sigil: &T, &mut T, &move T, &'a T, &(mut, 'a) T, &[T]
     if (token->type == TokenType::AND) {
         auto span_sigil_kind = SigilKind::Reference;
         pos++;
@@ -2638,9 +2613,6 @@ Node *Parser::parse_for_stmt() {
                 if (next_is(TokenType::KW_MUT)) {
                     consume();
                     node->data.for_stmt.bind_sigil = SigilKind::MutRef;
-                } else if (next_is(TokenType::KW_MUTEX)) {
-                    consume();
-                    node->data.for_stmt.bind_sigil = SigilKind::MutexRef;
                 }
 
                 is_range = true;

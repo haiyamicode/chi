@@ -48,7 +48,6 @@ constexpr auto INVALID_THIS_IN_STATIC =
     "'this' cannot be used in static methods; use 'This' for the type instead";
 constexpr auto STATIC_CONSTRUCTOR_NOT_ALLOWED =
     "static 'new' is not allowed; use 'func new' for constructors";
-constexpr auto MUTEX_REDUNDANT_MUT = "'mutex' already implies mutability; remove 'mut'";
 constexpr auto MUTABLE_FUNCTION_REQUIRES_BODY = "'{}' is only applicable for functions with a body";
 constexpr auto VALUE_NOT_CONSTANT = "const value must be a compile-time constant expression";
 constexpr auto NON_INTERFACE_IMPL_TYPE =
@@ -80,12 +79,10 @@ constexpr auto INVALID_MUT_TYPE = "Mut can only be used for reference type, got 
 constexpr auto ASYNC_MUST_RETURN_PROMISE = "async function must return Promise<T>";
 constexpr auto MUTATING_METHOD_ON_IMMUTABLE_REFERENCE =
     "cannot access mutating method '{}' on immutable reference {}";
-constexpr auto MUTEX_METHOD_WITHOUT_MUTEX_ACCESS =
-    "cannot access mutex method '{}' without mutex access to {}";
-constexpr auto MUTEX_FUNCTION_VALUE_NOT_ALLOWED =
-    "mutex function '{}' cannot be used as a function value; call it directly instead";
-constexpr auto MUTEX_METHOD_VALUE_NOT_ALLOWED =
-    "mutex method '{}' cannot be used as a function value; call it directly instead";
+constexpr auto MUT_METHOD_VALUE_NOT_ALLOWED =
+    "mut method '{}' cannot be used as a function value; call it directly instead";
+constexpr auto MUT_ONLY_ON_INSTANCE_METHOD =
+    "'mut' can only be applied to instance methods that mutate 'this'";
 constexpr auto EXCLUSIVE_ACCESS_CALL_CONFLICT =
     "cannot call this function: it requires exclusive access to '{}', but the same call also passes a borrow from it";
 constexpr auto EXCLUSIVE_ACCESS_CALL_NOTE =

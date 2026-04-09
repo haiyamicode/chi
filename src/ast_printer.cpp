@@ -52,8 +52,6 @@ string get_sigil_symbol(SigilKind sigil) {
         return "&";
     case SigilKind::MutRef:
         return "&mut";
-    case SigilKind::MutexRef:
-        return "&mutex";
     case SigilKind::Move:
         return "&move";
     case SigilKind::FixedArray:
@@ -1190,12 +1188,9 @@ void AstPrinter::print_node(Node *node) {
             break;
         }
         bool has_lifetime = !data.lifetime.empty();
-        bool is_mut = data.sigil == SigilKind::MutRef || data.sigil == SigilKind::MutexRef;
-        bool is_mutex = data.sigil == SigilKind::MutexRef;
+        bool is_mut = data.sigil == SigilKind::MutRef;
         bool is_move = data.sigil == SigilKind::Move;
-        if (has_lifetime && is_mutex) {
-            emit_fmt("&(mutex, '{})", data.lifetime);
-        } else if (has_lifetime && is_mut) {
+        if (has_lifetime && is_mut) {
             emit_fmt("&(mut, '{})", data.lifetime);
         } else if (has_lifetime) {
             emit_fmt("&'{}", data.lifetime);
@@ -1261,8 +1256,6 @@ void AstPrinter::print_node(Node *node) {
         if (!data.is_suffix) {
             if (data.op_type == TokenType::MUTREF) {
                 emit("&mut ");
-            } else if (data.op_type == TokenType::MUTEXREF) {
-                emit("&mutex ");
             } else if (data.op_type == TokenType::MOVEREF) {
                 emit("&move ");
             } else if (data.op_type == TokenType::KW_MOVE) {
@@ -1363,7 +1356,6 @@ void AstPrinter::print_node(Node *node) {
             if (data.bind_sigil != SigilKind::None) {
                 emit_fmt("{}", get_sigil_symbol(data.bind_sigil));
                 if (data.bind_sigil == SigilKind::MutRef ||
-                    data.bind_sigil == SigilKind::MutexRef ||
                     data.bind_sigil == SigilKind::Move) {
                     emit(" ");
                 }
@@ -1699,8 +1691,6 @@ void AstPrinter::print_destructure_pattern(Node *node) {
                 emit("...");
             else if (field_data.sigil == SigilKind::MutRef)
                 emit("&mut ");
-            else if (field_data.sigil == SigilKind::MutexRef)
-                emit("&mutex ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");
             emit_fmt("{}", field_data.binding_name->str);
@@ -1716,8 +1706,6 @@ void AstPrinter::print_destructure_pattern(Node *node) {
                 emit("...");
             else if (field_data.sigil == SigilKind::MutRef)
                 emit("&mut ");
-            else if (field_data.sigil == SigilKind::MutexRef)
-                emit("&mutex ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");
             emit_fmt("{}", field_data.binding_name->str);
@@ -1731,8 +1719,6 @@ void AstPrinter::print_destructure_pattern(Node *node) {
             auto &field_data = data.fields[i]->data.destructure_field;
             if (field_data.sigil == SigilKind::MutRef)
                 emit("&mut ");
-            else if (field_data.sigil == SigilKind::MutexRef)
-                emit("&mutex ");
             else if (field_data.sigil == SigilKind::Reference)
                 emit("&");
             emit_fmt("{}", field_data.field_name->str);
@@ -1806,9 +1792,7 @@ void AstPrinter::print_declspec(DeclSpec *declspec) {
     if (declspec->has_flag(DECL_STATIC)) {
         emit("static ");
     }
-    if (declspec->has_flag(DECL_MUTEX)) {
-        emit("mutex ");
-    } else if (declspec->has_flag(DECL_MUTABLE)) {
+    if (declspec->has_flag(DECL_MUTABLE)) {
         emit("mut ");
     }
     if (declspec->has_flag(DECL_ASYNC)) {

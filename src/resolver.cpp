@@ -475,7 +475,6 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
     case TypeKind::MoveRef: {
         if (from_type->kind == TypeKind::Null) {
             return to_type->kind == TypeKind::Pointer;
@@ -508,33 +507,20 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                         return to_type->kind == TypeKind::MoveRef ||
                                (is_explicit && to_type->is_borrow_reference());
                     }
-                    // MutexRef -> MutRef/Ref is allowed.
-                    if (from_type->kind == TypeKind::MutexRef &&
-                        (to_type->kind == TypeKind::MutRef ||
-                         to_type->kind == TypeKind::Reference)) {
-                        return true;
-                    }
                     // MutRef -> Ref is allowed.
                     if (from_type->kind == TypeKind::MutRef &&
                         to_type->kind == TypeKind::Reference) {
                         return true;
                     }
-                    // Ref -> MutRef/MutexRef is NOT allowed.
+                    // Ref -> MutRef is NOT allowed.
                     if (from_type->kind == TypeKind::Reference &&
-                        (to_type->kind == TypeKind::MutRef ||
-                         to_type->kind == TypeKind::MutexRef)) {
+                        to_type->kind == TypeKind::MutRef) {
                         return false;
                     }
-                    // MutRef -> MutexRef is NOT allowed.
-                    if (from_type->kind == TypeKind::MutRef &&
-                        to_type->kind == TypeKind::MutexRef) {
-                        return false;
-                    }
-                    // Ref/MutRef/MutexRef -> MoveRef is NOT allowed.
+                    // Ref/MutRef -> MoveRef is NOT allowed.
                     if (to_type->kind == TypeKind::MoveRef &&
                         (from_type->kind == TypeKind::Reference ||
-                         from_type->kind == TypeKind::MutRef ||
-                         from_type->kind == TypeKind::MutexRef)) {
+                         from_type->kind == TypeKind::MutRef)) {
                         return false;
                     }
                     // Same kind is allowed
@@ -733,7 +719,7 @@ static bool is_value_borrowing_type(Resolver *resolver, ChiType *type);
 static ChiLifetime *get_param_effective_lifetime(ast::Node *param_node, ChiType *param_type);
 
 static bool is_exclusive_access_borrow_param(ChiType *type, ast::Node *param_node) {
-    return type && type->kind == TypeKind::MutexRef;
+    return type && type->kind == TypeKind::MutRef;
 }
 
 // Does lifetime 'a outlive 'b? True if a == b or 'a: 'b was declared (transitively).
@@ -878,18 +864,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &data = node->data.fn_def;
         resolve_intrinsic_symbol(node);
         if (data.decl_spec) {
-            if (data.decl_spec->has_flag(ast::DECL_MUTEX) &&
-                data.decl_spec->has_flag(ast::DECL_MUTABLE)) {
-                error(node, errors::MUTEX_REDUNDANT_MUT);
-            }
-
             if (data.fn_kind == ast::FnKind::Constructor && data.decl_spec->is_static()) {
                 error(node, errors::STATIC_CONSTRUCTOR_NOT_ALLOWED);
             }
 
             if (!data.body && data.decl_spec->is_mutable()) {
-                error(node, errors::MUTABLE_FUNCTION_REQUIRES_BODY,
-                      data.decl_spec->is_mutex() ? "mutex" : "mut");
+                error(node, errors::MUTABLE_FUNCTION_REQUIRES_BODY, "mut");
+            }
+
+            // `mut` only makes sense on instance methods (it controls exclusive access
+            // to `this`). Reject it on free functions, lambdas, and static methods.
+            if (data.decl_spec->is_mutable() && !data.is_instance_method()) {
+                error(node, errors::MUT_ONLY_ON_INSTANCE_METHOD);
             }
         }
         if (data.fn_kind == ast::FnKind::Lambda) {
@@ -1444,10 +1430,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Convert function to lambda when used as value (not in call context)
         if (data.decl->type == NodeType::FnDef && !scope.is_fn_call && type->kind == TypeKind::Fn) {
-            if (data.decl->declspec().is_mutex()) {
-                error(node, errors::MUTEX_FUNCTION_VALUE_NOT_ALLOWED, data.decl->name);
-                return type;
-            }
             type = get_lambda_for_fn(type);
         }
 
@@ -1987,7 +1969,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
     }
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
-        if (data.op_type == TokenType::MUTREF || data.op_type == TokenType::MUTEXREF) {
+        if (data.op_type == TokenType::MUTREF) {
             scope = scope.set_is_lhs(true);
         }
         // For unary arithmetic operators, don't propagate value_type context to operand
@@ -2123,8 +2105,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             break;
         }
         case TokenType::AND:
-        case TokenType::MUTREF:
-        case TokenType::MUTEXREF: {
+        case TokenType::MUTREF: {
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
@@ -2149,8 +2130,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_pointer_type(t->eval(),
                                     data.op_type == TokenType::MUTREF
                                         ? TypeKind::MutRef
-                                    : data.op_type == TokenType::MUTEXREF
-                                        ? TypeKind::MutexRef
                                         : TypeKind::Reference);
         }
         case TokenType::MOVEREF: {
@@ -2894,8 +2873,12 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Only convert to lambda if we're NOT in a function reference context
         if (member->is_method() && member->resolved_type &&
             member->resolved_type->kind == TypeKind::Fn && !scope.is_fn_call) {
-            if (member->node && member->node->declspec().is_mutex()) {
-                error(node, errors::MUTEX_METHOD_VALUE_NOT_ALLOWED, member->get_name());
+            // mut methods enforce exclusive access to their receiver, which can only be
+            // verified at the call site when the receiver expression is visible. Capturing
+            // the method as a value would let it be invoked elsewhere where exclusive
+            // access cannot be checked, so reject it.
+            if (member->node && member->node->declspec().is_mutable()) {
+                error(node, errors::MUT_METHOD_VALUE_NOT_ALLOWED, member->get_name());
                 return member->resolved_type;
             }
             // Mark this DotExpr as needing method-to-lambda conversion
@@ -3133,7 +3116,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 bool is_heap_type = result_type->is_raw_pointer() ||
                                     result_type->kind == TypeKind::MutRef ||
-                                    result_type->kind == TypeKind::MutexRef ||
                                     result_type->kind == TypeKind::MoveRef;
                 if (data.is_new != is_heap_type) {
                     error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
@@ -4625,7 +4607,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             break;
         case TypeKind::Reference:
         case TypeKind::MutRef:
-        case TypeKind::MutexRef:
         case TypeKind::MoveRef:
         case TypeKind::This:
         case TypeKind::Struct:
@@ -4892,9 +4873,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         case ast::SigilKind::MutRef:
                             value_type = get_pointer_type(value_type, TypeKind::MutRef);
                             break;
-                        case ast::SigilKind::MutexRef:
-                            value_type = get_pointer_type(value_type, TypeKind::MutexRef);
-                            break;
                         default:
                             break;
                         }
@@ -4921,9 +4899,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             break;
                         case ast::SigilKind::MutRef:
                             value_type = get_pointer_type(value_type, TypeKind::MutRef);
-                            break;
-                        case ast::SigilKind::MutexRef:
-                            value_type = get_pointer_type(value_type, TypeKind::MutexRef);
                             break;
                         default:
                             break;
@@ -4963,9 +4938,6 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             break;
                         case ast::SigilKind::MutRef:
                             value_type = get_pointer_type(value_type, TypeKind::MutRef);
-                            break;
-                        case ast::SigilKind::MutexRef:
-                            value_type = get_pointer_type(value_type, TypeKind::MutexRef);
                             break;
                         default:
                             break;
@@ -5771,7 +5743,6 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
     case TypeKind::Reference:
     case TypeKind::Pointer:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
         return resolve_comparator(type->get_elem(), scope);
     default:
@@ -6130,8 +6101,6 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return "&" + format_type(type->get_elem(), for_display);
     case TypeKind::MutRef:
         return "&mut " + format_type(type->get_elem(), for_display);
-    case TypeKind::MutexRef:
-        return "&mutex " + format_type(type->get_elem(), for_display);
     case TypeKind::MoveRef:
         return "&move " + format_type(type->get_elem(), for_display);
     case TypeKind::Optional:
@@ -6310,7 +6279,7 @@ static bool expr_is_direct_borrow_value(ast::Node *expr) {
     switch (expr->type) {
     case ast::NodeType::BinOpExpr: {
         auto op = expr->data.bin_op_expr.op_type;
-        return op == TokenType::AND || op == TokenType::MUTREF || op == TokenType::MUTEXREF;
+        return op == TokenType::AND || op == TokenType::MUTREF;
     }
     case ast::NodeType::CastExpr: {
         auto *inner = expr->data.cast_expr.expr;
@@ -6366,7 +6335,7 @@ static ast::Node *unwrap_lifetime_copy_intrinsic_arg(ast::Node *expr) {
         case ast::NodeType::UnaryOpExpr: {
             auto op = expr->data.unary_op_expr.op_type;
             if (op == TokenType::AND || op == TokenType::MUTREF ||
-                op == TokenType::MUTEXREF || op == TokenType::MOVEREF) {
+                op == TokenType::MOVEREF) {
                 expr = expr->data.unary_op_expr.op1;
                 continue;
             }
@@ -7342,7 +7311,6 @@ bool Resolver::is_borrowing_type(ChiType *type) {
     switch (type->kind) {
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
         return true;
     case TypeKind::Optional:
     case TypeKind::Array:
@@ -7636,7 +7604,6 @@ static bool can_move_unaddressable_expr(ast::Node *expr) {
         case TokenType::MUL:
         case TokenType::AND:
         case TokenType::MUTREF:
-        case TokenType::MUTEXREF:
         case TokenType::MOVEREF:
         case TokenType::KW_MOVE:
             return false;
@@ -7752,7 +7719,6 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Optional: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
@@ -8249,7 +8215,6 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Optional:
     case TypeKind::Array:
@@ -8467,7 +8432,6 @@ bool Resolver::is_struct_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
         return false;
     default:
@@ -8584,18 +8548,6 @@ bool Resolver::is_struct_access_mutable(ChiType *type, ResolveScope *scope) {
     return true;
 }
 
-bool Resolver::is_struct_access_mutex(ChiType *type, ResolveScope *scope) {
-    auto sty = type;
-    if (sty->kind == TypeKind::This) {
-        if (scope && scope->parent_fn_node)
-            return scope->parent_fn_node->declspec().is_mutex();
-        return false;
-    }
-    if (sty->is_pointer_like()) {
-        return sty->kind == TypeKind::MutexRef || sty->kind == TypeKind::MoveRef;
-    }
-    return true;
-}
 
 static ChiType *get_struct_access_root_type(ast::Node *expr) {
     if (!expr) {
@@ -8670,7 +8622,6 @@ ChiType *Resolver::get_enum_type(ChiType *type) {
     case TypeKind::Pointer:
     case TypeKind::Reference:
     case TypeKind::MutRef:
-    case TypeKind::MutexRef:
     case TypeKind::MoveRef:
     case TypeKind::Optional:
         return get_enum_type(current->get_elem());
@@ -8837,7 +8788,6 @@ void Resolver::record_specialized_fn_env(ast::Node *node,
         case TypeKind::Pointer:
         case TypeKind::Reference:
         case TypeKind::MutRef:
-        case TypeKind::MutexRef:
         case TypeKind::MoveRef:
         case TypeKind::Optional:
         case TypeKind::Array:
@@ -9251,14 +9201,8 @@ ChiStructMember *Resolver::get_struct_member_access(ast::Node *node, ChiType *st
     if (field_member->is_method()) {
         auto &member_spec = field_member->node->declspec_ref();
         auto is_mutable = member_spec.has_flag(ast::DECL_MUTABLE);
-        auto is_mutex = member_spec.is_mutex();
         if (is_mutable && !is_struct_access_mutable(mut_check_type, scope)) {
             error(node, errors::MUTATING_METHOD_ON_IMMUTABLE_REFERENCE, field_name,
-                  format_type_display(struct_type));
-            return nullptr;
-        }
-        if (is_mutex && !is_struct_access_mutex(mut_check_type, scope)) {
-            error(node, errors::MUTEX_METHOD_WITHOUT_MUTEX_ACCESS, field_name,
                   format_type_display(struct_type));
             return nullptr;
         }
@@ -9939,8 +9883,6 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
             auto field_type = member->resolved_type;
             var->resolved_type = field_data.sigil == ast::SigilKind::MutRef
                                      ? get_pointer_type(field_type, TypeKind::MutRef)
-                                 : field_data.sigil == ast::SigilKind::MutexRef
-                                     ? get_pointer_type(field_type, TypeKind::MutexRef)
                                  : field_data.sigil == ast::SigilKind::Reference
                                      ? get_pointer_type(field_type, TypeKind::Reference)
                                      : field_type;
@@ -9960,8 +9902,7 @@ void Resolver::resolve_destructure_fields(ast::Node *parent, array<ast::Node *> 
             if (scope.parent_fn_node && !scope.is_unsafe_block) {
                 auto *source = borrow_source ? borrow_source : parent->data.destructure_decl.temp_var;
                 bool is_ref = field_data.sigil == ast::SigilKind::Reference ||
-                              field_data.sigil == ast::SigilKind::MutRef ||
-                              field_data.sigil == ast::SigilKind::MutexRef;
+                              field_data.sigil == ast::SigilKind::MutRef;
                 add_projection_source_edges(*scope.parent_fn_def(), source,
                                             field_data.resolved_field->resolved_type, var, is_ref,
                                             -1, field_data.resolved_field);
@@ -10034,8 +9975,6 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
                             ? get_array_type(elem_type)
                         : field_data.sigil == ast::SigilKind::MutRef
                             ? get_pointer_type(elem_type, TypeKind::MutRef)
-                        : field_data.sigil == ast::SigilKind::MutexRef
-                            ? get_pointer_type(elem_type, TypeKind::MutexRef)
                         : field_data.sigil == ast::SigilKind::Reference
                             ? get_pointer_type(elem_type, TypeKind::Reference)
                             : elem_type;
@@ -10056,8 +9995,7 @@ void Resolver::resolve_array_destructure(ast::Node *parent, array<ast::Node *> &
         if (scope.parent_fn_node && !scope.is_unsafe_block) {
             auto *source = borrow_source ? borrow_source : parent->data.destructure_decl.temp_var;
             bool is_ref = field_data.sigil == ast::SigilKind::Reference ||
-                          field_data.sigil == ast::SigilKind::MutRef ||
-                          field_data.sigil == ast::SigilKind::MutexRef;
+                          field_data.sigil == ast::SigilKind::MutRef;
             add_borrow_source_edges(*scope.parent_fn_def(), source, var, is_ref);
         }
 
@@ -10167,8 +10105,6 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
         var->parent_fn = scope.parent_fn_node;
         auto var_type = field_data.sigil == ast::SigilKind::MutRef
                             ? get_pointer_type(elem_type, TypeKind::MutRef)
-                        : field_data.sigil == ast::SigilKind::MutexRef
-                            ? get_pointer_type(elem_type, TypeKind::MutexRef)
                         : field_data.sigil == ast::SigilKind::Reference
                             ? get_pointer_type(elem_type, TypeKind::Reference)
                             : elem_type;
@@ -11464,8 +11400,6 @@ TypeKind Resolver::get_sigil_type_kind(cx::ast::SigilKind sigil) {
         return TypeKind::Reference;
     case ast::SigilKind::MutRef:
         return TypeKind::MutRef;
-    case ast::SigilKind::MutexRef:
-        return TypeKind::MutexRef;
     case ast::SigilKind::Move:
         return TypeKind::MoveRef;
     case ast::SigilKind::Optional:
@@ -12058,7 +11992,7 @@ void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_
             auto explicit_exclusive_this =
                 call.fn_ref_expr->type == ast::NodeType::DotExpr && callee_decl &&
                 callee_decl->type == ast::NodeType::FnDef && callee_decl->data.fn_def.decl_spec &&
-                callee_decl->data.fn_def.decl_spec->is_mutex();
+                callee_decl->data.fn_def.decl_spec->is_mutable();
 
             if (explicit_exclusive_this) {
                 add_capture_roots_from_expr(call.fn_ref_expr->data.dot_expr.effective_expr(),
@@ -12218,7 +12152,7 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
         auto *callee_decl = get_call_summary_decl(call);
         slot.is_exclusive = callee_decl && callee_decl->type == ast::NodeType::FnDef &&
                             callee_decl->data.fn_def.decl_spec &&
-                            callee_decl->data.fn_def.decl_spec->is_mutex();
+                            callee_decl->data.fn_def.decl_spec->is_mutable();
         slot.exclusive_source = slot.is_exclusive ? callee_decl : nullptr;
         slots.add(slot);
     }
@@ -12295,11 +12229,20 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
     }
 }
 
-void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target) {
+void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call,
+                                     ast::Node *call_node, ast::Node *target) {
     // Signature data comes from the actual resolved callee (including generated specializations).
     ast::FnProto *proto = get_call_signature_proto(call);
     // Body-derived summaries come from the root/original function body.
     ast::FnProto *summary_proto = get_call_effect_proto(call);
+
+    // Borrow edges added here represent the call's return-value borrowing into its inputs.
+    // Mark them as created at (just after) the call's source position so the exclusive-access
+    // validation correctly treats them as fresh borrows produced by this call, not pre-existing
+    // borrows that the call would invalidate.
+    long call_edge_offset = (call_node && call_node->token)
+                                ? static_cast<long>(call_node->token->pos.offset) + 1
+                                : -1;
 
     // Extract return lifetime and per-param lifetimes.
     // Direct calls: read from proto (includes borrowing value params via borrow_lifetime).
@@ -12316,7 +12259,7 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
         if (ret_lt && ret_lt->kind == LifetimeKind::This &&
             call.fn_ref_expr->type == NodeType::DotExpr) {
             add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.effective_expr(),
-                                    target, true);
+                                    target, true, call_edge_offset);
         }
         // By-value return copy summary: result inherits borrow dependencies from `this`
         // and/or parameters through assignments/temps in the callee body.
@@ -12324,13 +12267,13 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
             summary_proto->return_copy_edge_from_this &&
             call.fn_ref_expr->type == NodeType::DotExpr) {
             add_borrow_source_edges(fn_def, call.fn_ref_expr->data.dot_expr.effective_expr(),
-                                    target, false);
+                                    target, false, call_edge_offset);
         }
         if (summary_proto && summary_proto->copy_edge_summary_valid) {
             for (auto idx : summary_proto->return_copy_edge_param_indices) {
                 if (idx >= 0 && idx < (int32_t)call.args.len) {
                     add_borrow_source_edges(fn_def, call.args[static_cast<uint32_t>(idx)], target,
-                                            false);
+                                            false, call_edge_offset);
                 }
             }
         }
@@ -12379,7 +12322,7 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, 
 }
 
 void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
-                                       bool is_ref) {
+                                       bool is_ref, long edge_offset) {
     if (!expr)
         return;
     if (expr->type == NodeType::DotExpr) {
@@ -12408,37 +12351,39 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
             return;
         }
         if (is_ref) {
-            fn_def.add_ref_edge(target, root);
+            fn_def.add_ref_edge(target, root, edge_offset);
         } else {
-            fn_def.copy_ref_edges(target, root, expr_can_fallback_to_borrow_source(expr));
+            fn_def.copy_ref_edges(target, root, expr_can_fallback_to_borrow_source(expr),
+                                  edge_offset);
         }
         return;
     }
     // Otherwise, recurse into compound expressions.
     switch (expr->type) {
     case NodeType::FnCallExpr:
-        add_call_borrow_edges(fn_def, expr->data.fn_call_expr, target);
+        add_call_borrow_edges(fn_def, expr->data.fn_call_expr, expr, target);
         break;
     case NodeType::ConstructExpr:
         // Field inits already set up edges on the ConstructExpr node during resolution.
         // Transitively copy those leaf edges to the target.
         // A value construction is not itself a direct borrow source, so if the
         // construct carries no borrow deps this must remain a no-op.
-        fn_def.copy_ref_edges(target, expr, false);
+        fn_def.copy_ref_edges(target, expr, false, edge_offset);
         break;
     case NodeType::TupleExpr:
-        fn_def.copy_ref_edges(target, expr, false);
+        fn_def.copy_ref_edges(target, expr, false, edge_offset);
         break;
     case NodeType::TryExpr:
-        add_borrow_source_edges(fn_def, expr->data.try_expr.expr, target, is_ref);
+        add_borrow_source_edges(fn_def, expr->data.try_expr.expr, target, is_ref, edge_offset);
         break;
     case NodeType::CastExpr:
-        add_borrow_source_edges(fn_def, expr->data.cast_expr.expr, target, is_ref);
+        add_borrow_source_edges(fn_def, expr->data.cast_expr.expr, target, is_ref, edge_offset);
         break;
     case NodeType::SwitchExpr:
         for (auto scase : expr->data.switch_expr.cases) {
             if (scase) {
-                add_borrow_source_edges(fn_def, scase->data.case_expr.body, target, is_ref);
+                add_borrow_source_edges(fn_def, scase->data.case_expr.body, target, is_ref,
+                                        edge_offset);
             }
         }
         break;
@@ -12447,7 +12392,7 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
         // Transitively copy them to the target.
         // A lambda value is not itself a direct borrow source; only its captured
         // borrow deps should propagate.
-        fn_def.copy_ref_edges(target, expr, false);
+        fn_def.copy_ref_edges(target, expr, false, edge_offset);
         break;
     default:
         break;
@@ -12520,18 +12465,18 @@ static string debug_node_label(ast::Node *n) {
 
 static string describe_exclusive_access_source(ast::Node *n) {
     if (!n) {
-        return "this mutex call";
+        return "this mut call";
     }
     if (n->type == ast::NodeType::FnCallExpr) {
         auto &call = n->data.fn_call_expr;
         auto *decl = get_call_decl(call);
         if (decl && !decl->name.empty()) {
             if (call.fn_ref_expr && call.fn_ref_expr->type == ast::NodeType::DotExpr) {
-                return fmt::format("call to mutex method '{}' requires exclusive access",
+                return fmt::format("call to mut method '{}' requires exclusive access",
                                    decl->name);
             }
             if (decl->type == ast::NodeType::FnDef || decl->type == ast::NodeType::GeneratedFn) {
-                return fmt::format("call to mutex function '{}' requires exclusive access",
+                return fmt::format("call to mut function '{}' requires exclusive access",
                                    decl->name);
             }
             if (decl->type == ast::NodeType::VarDecl && decl->data.var_decl.expr &&
@@ -12541,10 +12486,10 @@ static string describe_exclusive_access_source(ast::Node *n) {
                     decl->name);
             }
         }
-        return "this mutex call requires exclusive access";
+        return "this mut call requires exclusive access";
     }
     if (n->type == ast::NodeType::FnDef && !n->name.empty()) {
-        return fmt::format("function '{}' is declared mutex here", n->name);
+        return fmt::format("function '{}' is declared mut here", n->name);
     }
     return fmt::format("exclusive access originates from {}", node_label(n));
 }
@@ -13059,11 +13004,6 @@ ChiType *Resolver::try_auto_deref(ast::Node *node, ChiType *stype, const string 
         if (resolved_member->is_method()) {
             auto &spec = resolved_member->node->declspec_ref();
             if (spec.is_mutable() && !ChiTypeStruct::is_mutable_pointer(return_type)) {
-                return false;
-            }
-            if (spec.is_mutex() &&
-                !(return_type->kind == TypeKind::MutexRef ||
-                  return_type->kind == TypeKind::MoveRef)) {
                 return false;
             }
         }

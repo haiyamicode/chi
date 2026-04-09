@@ -339,7 +339,6 @@ class Resolver {
     bool is_ref_mutable(ast::Node *node, ResolveScope &scope);
 
     bool is_struct_access_mutable(ChiType *type, ResolveScope *scope = nullptr);
-    bool is_struct_access_mutex(ChiType *type, ResolveScope *scope = nullptr);
 
     void check_cast(ast::Node *value, ChiType *from_type, ChiType *to_type);
 
@@ -613,9 +612,10 @@ class Resolver {
     void copy_projection_summaries(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
                                    ChiType *target_type);
     void compute_return_projection_copy_summaries(ast::FnDef &fn_def);
-    void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *target);
+    void add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call, ast::Node *call_node,
+                               ast::Node *target);
     void add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast::Node *target,
-                                 bool is_ref = false);
+                                 bool is_ref = false, long edge_offset = -1);
     void compute_receiver_copy_edge_summary(ast::FnDef &fn_def);
     void finalize_lifetime_flow(ast::FnDef &fn_def);
     bool apply_receiver_copy_edge_effects(ast::FnDef &fn_def);

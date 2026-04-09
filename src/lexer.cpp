@@ -71,7 +71,6 @@ void Lexer::setup_keywords() {
     s_keywords["implements"] = TokenType::KW_IMPLEMENTS;
     s_keywords["impl"] = TokenType::KW_IMPL;
     s_keywords["mut"] = TokenType::KW_MUT;
-    s_keywords["mutex"] = TokenType::KW_MUTEX;
     s_keywords["move"] = TokenType::KW_MOVE;
     s_keywords["in"] = TokenType::KW_IN;
     s_keywords["undefined"] = TokenType::KW_UNDEFINED;
@@ -973,8 +972,6 @@ string cx::get_token_symbol(TokenType token_type) {
         return "|";
     case TokenType::AND:
         return "&";
-    case TokenType::MUTEXREF:
-        return "&mutex";
     case TokenType::NOT:
         return "~";
     case TokenType::XOR:

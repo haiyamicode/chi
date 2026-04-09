@@ -171,7 +171,6 @@ enum DeclFlag : uint32_t {
     DECL_ASYNC = 1 << 6,
     DECL_UNSAFE = 1 << 7,
     DECL_EXPORTED = 1 << 8,   // explicit `export` keyword on a declaration
-    DECL_MUTEX = 1 << 9,
 };
 
 struct Module {
@@ -261,13 +260,12 @@ struct DeclSpec {
     }
 
     bool is_exported() const { return (flags & DECL_EXPORTED) != 0; }
-    bool is_mutable() const { return has_flag(DECL_MUTABLE) || has_flag(DECL_MUTEX); }
+    bool is_mutable() const { return has_flag(DECL_MUTABLE); }
     bool has_flag(DeclFlag flag) const { return (flags & flag) != 0; }
     bool is_extern() const { return has_flag(DECL_EXTERN); }
     bool is_static() const { return has_flag(DECL_STATIC); }
     bool is_async() const { return has_flag(DECL_ASYNC); }
     bool is_unsafe() const { return has_flag(DECL_UNSAFE); }
-    bool is_mutex() const { return has_flag(DECL_MUTEX); }
 };
 
 struct FnProto {
@@ -324,7 +322,9 @@ struct FnDef {
 
     // Delegation to flow state
     void add_terminal(Node *terminal) { flow.add_terminal(terminal); }
-    void add_ref_edge(Node *from, Node *to) { flow.add_ref_edge(from, to); }
+    void add_ref_edge(Node *from, Node *to, long edge_offset = -1) {
+        flow.add_ref_edge(from, to, edge_offset);
+    }
     void add_sink_edge(Node *from, Node *to, SinkKind kind = SinkKind::Definite) {
         flow.add_sink_edge(from, to, kind);
     }
@@ -333,8 +333,9 @@ struct FnDef {
     Node *sink_target(Node *node) { return flow.sink_target(node); }
     size_t current_edge_offset(Node *node) { return flow.current_edge_offset(node); }
     void bump_edge_offset(Node *node) { flow.bump_edge_offset(node); }
-    void copy_ref_edges(Node *to, Node *from, bool fallback_to_source = true) {
-        flow.copy_ref_edges(to, from, fallback_to_source);
+    void copy_ref_edges(Node *to, Node *from, bool fallback_to_source = true,
+                        long edge_offset = -1) {
+        flow.copy_ref_edges(to, from, fallback_to_source, edge_offset);
     }
 
     bool is_static() { return decl_spec && decl_spec->is_static(); }
@@ -507,7 +508,7 @@ struct FieldInitExpr {
     void *compiled_field_address = nullptr;
 };
 
-MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, MutexRef, Move, FixedArray, Span)
+MAKE_ENUM(SigilKind, None, Pointer, Reference, Optional, MutRef, Move, FixedArray, Span)
 
 struct DestructureField {
     Token *field_name = nullptr;   // struct field to extract

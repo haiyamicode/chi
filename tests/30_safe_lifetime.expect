@@ -13,12 +13,12 @@ ref = 55
 === optional ref if let return ===
 direct = 66
 wrapped = 66
-=== mutex field method ===
+=== mut field method ===
 value = 1
-=== named mutex ref ===
+=== named mut ref ===
 call = 7
 after = 7
-=== mutex array ref index ===
+=== mut array ref index ===
 item = 9
 === recursive this lifetime ===
 child = child

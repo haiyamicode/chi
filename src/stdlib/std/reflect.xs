@@ -14,7 +14,6 @@ export enum Kind {
     Pointer,
     Reference,
     MutRef,
-    MutexRef,
     MoveRef,
     Array,
     FixedArray,
@@ -45,7 +44,6 @@ export enum Kind {
             return switch this {
                 Reference => true,
                 MutRef => true,
-                MutexRef => true,
                 MoveRef => true,
                 else => false
             };
@@ -144,7 +142,6 @@ func kind_name(kind: Kind) string {
         Pointer => "pointer",
         Reference => "ref",
         MutRef => "mutref",
-        MutexRef => "mutexref",
         MoveRef => "moveref",
         Array => "array",
         FixedArray => "fixed_array",
@@ -265,7 +262,7 @@ export struct Type {
 
     func elem() ?Type {
         let kind = this.kind();
-        if kind == Kind.Pointer || kind == Kind.Reference || kind == Kind.MutRef || kind == Kind.MutexRef || kind == Kind.MoveRef || kind == Kind.Optional {
+        if kind == Kind.Pointer || kind == Kind.Reference || kind == Kind.MutRef || kind == Kind.MoveRef || kind == Kind.Optional {
             unsafe {
                 let ptr_data = type_pointer_data(this.raw);
                 if !ptr_data.elem {

@@ -7,7 +7,7 @@ struct Elem {
 struct Holder {
     items: Array<Elem> = [];
 
-    mutex func grow() {
+    mut func grow() {
         this.items.push(Elem{value: 2});
     }
 }
