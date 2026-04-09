@@ -349,6 +349,9 @@ class Resolver {
     ChiStructMember *resolve_struct_member(ChiType *struct_type, ast::Node *node,
                                            ResolveScope &scope);
 
+    ast::Node *synthesize_method_lambda(ast::Node *dot_node, ChiStructMember *member,
+                                        ResolveScope &scope);
+
     IntrinsicSymbol resolve_intrinsic_symbol(ast::Node *node);
 
     void resolve_struct_embed(ChiType *struct_type, ast::Node *base_node,

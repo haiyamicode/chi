@@ -79,8 +79,6 @@ constexpr auto INVALID_MUT_TYPE = "Mut can only be used for reference type, got 
 constexpr auto ASYNC_MUST_RETURN_PROMISE = "async function must return Promise<T>";
 constexpr auto MUTATING_METHOD_ON_IMMUTABLE_REFERENCE =
     "cannot access mutating method '{}' on immutable reference {}";
-constexpr auto MUT_METHOD_VALUE_NOT_ALLOWED =
-    "mut method '{}' cannot be used as a function value; call it directly instead";
 constexpr auto MUT_ONLY_ON_INSTANCE_METHOD =
     "'mut' can only be applied to instance methods that mutate 'this'";
 constexpr auto EXCLUSIVE_ACCESS_CALL_CONFLICT =

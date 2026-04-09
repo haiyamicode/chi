@@ -814,6 +814,7 @@ struct Node {
     IntrinsicSymbol symbol = IntrinsicSymbol::None;
     int32_t decl_order = -1; // declaration order within function (-1 = not a local)
     Node *resolved_outlet = nullptr; // synthetic __tmp that owns this expr's result (for cleanup)
+    Node *resolved_node = nullptr;   // synthesized replacement; codegen redirects here
 
     Node(const Node &) = delete;
     Node &operator=(const Node &) = delete;

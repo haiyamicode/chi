@@ -34,7 +34,7 @@ MAKE_ENUM(Visibility, Public, Private, Protected)
 
 MAKE_ENUM(IntrinsicSymbol, None, Index, IndexMut, IndexMutIterable, Copy, NoCopy, Display, Add, Sub, Mul, Div, Rem, Neg, BitAnd, BitOr, BitXor, BitNot, Shl, Shr, Sized, Unsized, Construct, Unwrap, UnwrapMut, Deref, DerefMut, MutIterator, MutIterable, Slice, Eq, Ord, Hash, EnumName, DiscriminatorName, AsTuple, ListInit, AllocInit, AnnotateCopy, MemCopy, MemMove, MemDestroy, ReflectDynElem, AtomicLoad, AtomicStore, AtomicCompareExchange, AtomicFetchAdd, AtomicFetchSub)
 
-MAKE_ENUM(DotKind, Field, EnumVariant, MethodToLambda, TypeTrait, TupleField);
+MAKE_ENUM(DotKind, Field, EnumVariant, TypeTrait, TupleField);
 
 struct ChiTypeTypeSymbol {
     ChiType *giving_type = nullptr;

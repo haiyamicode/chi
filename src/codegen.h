@@ -685,8 +685,6 @@ class Compiler {
     Function *get_specialized_fn(ast::Node *generic_fn_decl, ChiType *specialized_subtype);
 
     void generate_embed_proxy(Function *proxy_fn, Function *orig_fn, ChiStructMember *member, ChiType *struct_type);
-    llvm::Value *generate_method_proxy_function(Function *fn, ChiStructMember *method_member,
-                                                ChiType *lambda_type);
     llvm::Value *generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
                                                 ChiType *lambda_type, NodeList *captures);
     llvm::Value *compile_void_to_unit_lambda_wrapper(Function *fn, llvm::Value *lambda_value,

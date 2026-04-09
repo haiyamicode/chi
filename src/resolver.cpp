@@ -310,6 +310,9 @@ ast::Node *Resolver::get_builtin(const string &name) {
 }
 
 ChiType *Resolver::node_get_type(ast::Node *node) {
+    if (node->resolved_node && node->resolved_node->resolved_type) {
+        return node->resolved_node->resolved_type;
+    }
     if (!node->resolved_type)
         return nullptr;
     return node->resolved_type;
@@ -2869,75 +2872,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
 
-        // Check if this is a method being accessed as a value (not a function call)
-        // Only convert to lambda if we're NOT in a function reference context
+        // Method accessed as a value (not in a call context): synthesize a
+        // lambda that captures the receiver.
         if (member->is_method() && member->resolved_type &&
             member->resolved_type->kind == TypeKind::Fn && !scope.is_fn_call) {
-            // mut methods enforce exclusive access to their receiver, which can only be
-            // verified at the call site when the receiver expression is visible. Capturing
-            // the method as a value would let it be invoked elsewhere where exclusive
-            // access cannot be checked, so reject it.
-            if (member->node && member->node->declspec().is_mutable()) {
-                error(node, errors::MUT_METHOD_VALUE_NOT_ALLOWED, member->get_name());
-                return member->resolved_type;
-            }
-            // Mark this DotExpr as needing method-to-lambda conversion
-            data.resolved_dot_kind = DotKind::MethodToLambda;
-
-            // Create a method lambda type - we'll generate a proxy function
-            auto lambda_type = create_type(TypeKind::FnLambda);
-            lambda_type->data.fn_lambda.fn = member->resolved_type;
-            lambda_type->is_placeholder = member->resolved_type->is_placeholder;
-
-            // Create a bound function type for the proxy (with binding struct as first param)
-            auto bound_fn = create_type(TypeKind::Fn);
-            auto &bound_fn_data = bound_fn->data.fn;
-            auto &method_fn_data = member->resolved_type->data.fn;
-
-            // Add binding struct as first parameter
-            bound_fn_data.params.add(get_system_types()->void_ref);
-
-            // Add all original method parameters (except 'this' which is handled via binding)
-            for (auto param : method_fn_data.params) {
-                bound_fn_data.params.add(param);
-            }
-
-            bound_fn_data.return_type = method_fn_data.return_type;
-            bound_fn_data.is_variadic = method_fn_data.is_variadic;
-
-            // Create a binding struct to hold the instance pointer
-            auto bind_struct = create_type(TypeKind::Struct);
-            bind_struct->data.struct_.kind = ContainerKind::Struct;
-            bind_struct->name = "MethodLambdaBind";
-
-            // Add the instance pointer as the only field
-            auto instance_type = data.expr->resolved_type;
-            if (!instance_type->is_pointer_like()) {
-                instance_type = get_pointer_type(instance_type);
-            }
-            auto instance_member = bind_struct->data.struct_.add_member(
-                get_allocator(), "instance", get_dummy_var("instance"), instance_type);
-
-            // Set up the lambda type
-            lambda_type->data.fn_lambda.bind_struct = bind_struct;
-            lambda_type->data.fn_lambda.bound_fn = bound_fn;
-
-            // Use __CxLambda directly (no longer generic)
-            auto rt_lambda = m_ctx->rt_lambda_type;
-            assert(rt_lambda && "__CxLambda type not found in runtime");
-
-            // Check if __CxLambda is fully resolved
-            if (rt_lambda->data.struct_.resolve_status < ResolveStatus::MemberTypesKnown) {
-                // Not resolved yet - defer
-                lambda_type->data.fn_lambda.internal = nullptr;
-                lambda_type->is_placeholder = true;
-            } else {
-                // Use __CxLambda directly
-                lambda_type->data.fn_lambda.internal = to_value_type(rt_lambda);
-            }
-            lambda_type->data.fn_lambda.captures.add(instance_type);
-
-            return lambda_type;
+            assert(member->node && scope.parent_fn_node &&
+                   "method-as-value requires an enclosing function");
+            auto *lambda_def = synthesize_method_lambda(node, member, scope);
+            node->resolved_node = lambda_def;
+            node->resolved_type = lambda_def->resolved_type;
+            return lambda_def->resolved_type;
         }
 
         auto result_type = member->resolved_type;
@@ -5789,7 +5733,13 @@ ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags)
     }
 
     auto result = _resolve(node, scope, flags);
-    node->resolved_type = result;
+    // If _resolve installed a synthesized resolved_node, it has already
+    // pre-seeded node->resolved_type to the type the synthesized body wants
+    // (e.g. method-as-value pre-seeds the raw fn type so the inner call can
+    // dispatch). Don't clobber it with the outer wrapper type.
+    if (!node->resolved_node) {
+        node->resolved_type = result;
+    }
     if (!node->name.empty()) {
         node->global_id = resolve_global_id(node);
     }
@@ -6929,6 +6879,9 @@ static ast::Node *get_summary_decl(ast::Node *decl) {
         if (expr && expr->type == ast::NodeType::FnDef) {
             return expr;
         }
+        if (expr && expr->resolved_node) {
+            return expr->resolved_node;
+        }
     }
     return decl;
 }
@@ -6969,7 +6922,15 @@ static void collect_fn_nodes_from_decl(ast::Node *decl, array<ast::Node *> &out)
     if (!decl) {
         return;
     }
+    if (decl->resolved_node) {
+        collect_fn_nodes_from_decl(decl->resolved_node, out);
+    }
     if (decl->type == ast::NodeType::FnDef) {
+        for (auto *existing : out) {
+            if (existing == decl) {
+                return;
+            }
+        }
         add_unique_node(out, decl);
         if (decl->data.fn_def.body) {
             visit_async_children(decl->data.fn_def.body, true, [&](ast::Node *child) {
@@ -7110,6 +7071,100 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         }
     }
     return member;
+}
+
+ast::Node *Resolver::synthesize_method_lambda(ast::Node *dot_node, ChiStructMember *member,
+                                              ResolveScope &scope) {
+    auto &dot = dot_node->data.dot_expr;
+    auto &orig_proto = member->node->data.fn_def.fn_proto->data.fn_proto;
+    auto &method_fn = member->resolved_type->data.fn;
+
+    auto make = [&](ast::NodeType type, ast::Node *src = nullptr) {
+        auto *n = create_node(type);
+        n->token = src ? src->token : dot_node->token;
+        n->module = dot_node->module;
+        return n;
+    };
+
+    auto *lambda_proto = make(ast::NodeType::FnProto);
+    auto *lambda_def = make(ast::NodeType::FnDef);
+    lambda_def->name = fmt::format("__method_lambda_{}_{}", member->get_name(), dot_node->id);
+    lambda_def->parent_fn = scope.parent_fn_node;
+    lambda_def->data.fn_def.fn_proto = lambda_proto;
+    lambda_def->data.fn_def.fn_kind = ast::FnKind::Lambda;
+    lambda_def->data.fn_def.is_generated = true;
+    lambda_def->data.fn_def.decl_spec = get_allocator()->create_decl_spec();
+    lambda_proto->data.fn_proto.fn_def_node = lambda_def;
+    lambda_proto->data.fn_proto.return_type = orig_proto.return_type;
+
+    // Build params with pre-seeded resolved types — for generic methods the
+    // original type expression refers to type params (T) that wouldn't
+    // substitute in the lambda's scope; pre-seeding short-circuits resolution.
+    array<ast::Node *> arg_idents;
+    for (size_t i = 0; i < orig_proto.params.len; i++) {
+        auto *orig = orig_proto.params[i];
+        auto *param = make(ast::NodeType::ParamDecl, orig);
+        param->name = orig->name;
+        param->parent_fn = lambda_def;
+        param->data.param_decl.is_variadic = orig->data.param_decl.is_variadic;
+        param->resolved_type = i < method_fn.params.len ? method_fn.params[i] : nullptr;
+        lambda_proto->data.fn_proto.params.add(param);
+
+        auto *ident = make(ast::NodeType::Identifier, orig);
+        ident->name = orig->name;
+        ident->parent_fn = lambda_def;
+        ident->data.identifier.kind = ast::IdentifierKind::Value;
+        ident->data.identifier.decl = param;
+        arg_idents.add(ident);
+    }
+
+    // Body: fresh DotExpr sharing the receiver subtree (so capture registration
+    // runs during re-resolution), wrapped in a fresh FnCallExpr. A new dot node
+    // is used so it doesn't carry a resolved_node redirect back to the lambda.
+    auto clear_cache = [](ast::Node *root) {
+        auto impl = [](auto &self, ast::Node *n) -> void {
+            if (!n) return;
+            n->resolved_type = nullptr;
+            n->analysis = {};
+            visit_async_children(n, true, [&](ast::Node *child) {
+                self(self, child);
+                return false;
+            });
+        };
+        impl(impl, root);
+    };
+    clear_cache(dot.expr);
+
+    auto *inner_dot = make(ast::NodeType::DotExpr, dot_node);
+    inner_dot->name = dot_node->name;
+    inner_dot->parent_fn = lambda_def;
+    inner_dot->data.dot_expr.expr = dot.expr;
+    inner_dot->data.dot_expr.field = dot.field;
+    inner_dot->data.dot_expr.is_optional_chain = dot.is_optional_chain;
+
+    auto *inner_call = make(ast::NodeType::FnCallExpr);
+    inner_call->parent_fn = lambda_def;
+    inner_call->data.fn_call_expr.fn_ref_expr = inner_dot;
+    for (auto *a : arg_idents) {
+        inner_call->data.fn_call_expr.args.add(a);
+    }
+
+    auto *body = make(ast::NodeType::Block);
+    body->data.block.scope =
+        m_ctx->allocator->create_scope(scope.block ? scope.block->scope : nullptr);
+    body->data.block.is_arrow = true;
+    if (method_fn.return_type && method_fn.return_type->kind != TypeKind::Void) {
+        auto *ret = make(ast::NodeType::ReturnStmt);
+        ret->parent_fn = lambda_def;
+        ret->data.return_stmt.expr = inner_call;
+        body->data.block.statements.add(ret);
+    } else {
+        body->data.block.statements.add(inner_call);
+    }
+    lambda_def->data.fn_def.body = body;
+
+    resolve(lambda_def, scope);
+    return lambda_def;
 }
 
 void Resolver::resolve_vtable(ChiType *base_type, ChiType *derived_type, ast::Node *base_node,
@@ -12325,6 +12380,10 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
                                        bool is_ref, long edge_offset) {
     if (!expr)
         return;
+    if (expr->resolved_node) {
+        add_borrow_source_edges(fn_def, expr->resolved_node, target, is_ref, edge_offset);
+        return;
+    }
     if (expr->type == NodeType::DotExpr) {
         auto &data = expr->data.dot_expr;
         auto *projection_source = data.narrowed_var ? data.narrowed_var : data.effective_expr();
@@ -12806,7 +12865,7 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                     edge_created_at > target->token->pos.offset) {
                     continue;
                 }
-                if (last_use && target && target->token && *last_use < target->token->pos.offset) {
+                if (last_use && target && target->token && *last_use <= target->token->pos.offset) {
                     continue;
                 }
                 array<Note> notes;
