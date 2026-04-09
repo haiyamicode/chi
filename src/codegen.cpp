@@ -2621,12 +2621,6 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         // Create bind_struct on stack to hold captures
         auto bind_var = builder.CreateAlloca(bstruct_l, nullptr, "bind_struct");
 
-        // Zero-init bind struct before populating
-        auto bind_size_bytes = llvm_type_size(bstruct_l);
-        builder.CreateMemSet(
-            bind_var, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
-            bind_size_bytes, {});
-
         // Store captures into bind_struct
         for (int i = 0; i < captures->len; i++) {
             auto &cap = (*captures)[i];
@@ -3725,11 +3719,6 @@ void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int 
     auto promise_type = get_chitype(await_expr->data.await_expr.expr);
     auto promise_type_l = compile_type(promise_type);
     auto promise_ptr = fn->entry_alloca(promise_type_l, "awaited");
-    auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(promise_type_l);
-    builder.CreateMemSet(
-        promise_ptr,
-        llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
-        size, {});
     if (promise_ref.address) {
         compile_copy_with_ref(fn, promise_ref, promise_ptr, promise_type, promise_expr);
         if (promise_expr->type == ast::NodeType::FnCallExpr) {
@@ -5246,10 +5235,6 @@ llvm::Value *Compiler::compile_shared_new(Function *fn, ChiType *shared_type,
     auto &builder = *m_ctx->llvm_builder;
     auto shared_type_l = compile_type(shared_type);
     auto shared_var = fn->entry_alloca(shared_type_l, "_shared_new");
-    auto size = llvm_type_size(shared_type_l);
-    builder.CreateMemSet(shared_var,
-                         llvm::ConstantInt::get(llvm::Type::getInt8Ty(*m_ctx->llvm_ctx), 0),
-                         size.getFixedValue(), llvm::MaybeAlign());
 
     auto shared_struct = get_resolver()->resolve_struct_type(shared_type);
     assert(shared_struct);
@@ -6388,10 +6373,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto result_type = get_chitype(expr);
             auto result_type_l = compile_type(result_type);
             auto result_var = fn->entry_alloca(result_type_l, "try_await_result");
-            auto result_size = llvm_type_size(result_type_l);
-            builder.CreateMemSet(result_var,
-                                 llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
-                                 result_size.getFixedValue(), llvm::MaybeAlign());
 
             ChiType *result_enum = nullptr;
             if (!data.catch_block) {
@@ -6464,11 +6445,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 if (data.catch_err_var) {
                     auto shared_type_l = compile_type(shared_error_type);
                     shared_owner_var = fn->entry_alloca(shared_type_l, "try_await_err_owner");
-                    auto shared_size = llvm_type_size(shared_type_l);
-                    builder.CreateMemSet(
-                        shared_owner_var,
-                        llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
-                        shared_size.getFixedValue(), llvm::MaybeAlign());
                     compile_copy(fn, shared_error_value, shared_owner_var, shared_error_type, expr);
                     shared_owner_active =
                         fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), "try_await_err_owner.active");
@@ -6562,12 +6538,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         if (!is_void) {
             result_type_l = compile_type(result_type);
             result_var = fn->entry_alloca(result_type_l, "try_result");
-
-            // Zero-initialize the result
-            auto size = llvm_type_size(result_type_l);
-            builder.CreateMemSet(result_var,
-                                 llvm::ConstantInt::get(llvm::Type::getInt8Ty(llvm_ctx), 0),
-                                 size.getFixedValue(), llvm::MaybeAlign());
         }
 
         ChiType *result_enum = nullptr;
@@ -7636,6 +7606,9 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             if (destruct_old) {
                 compile_destruction_for_type(fn, dest, type);
             }
+            // Zero `this` so the user's Copy method sees a fresh slot — matches
+            // the contract that Copy writes into uninitialized memory (e.g.
+            // `Array.copy` calls `push` which reads `length`/`capacity`).
             auto size = llvm_type_size(compile_type(type));
             builder.CreateMemSet(
                 dest, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
@@ -9962,14 +9935,6 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 if (is_async && get_resolver()->is_promise_type(return_type)) {
                 // For async functions, wrap the return value in a resolved Promise
                     auto promise_struct = get_resolver()->resolve_struct_type(return_type);
-                    auto return_type_l = compile_type(return_type);
-
-                    // Zero-initialize return_value before calling Promise.new()
-                    auto size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(return_type_l);
-                    llvm_builder.CreateMemSet(
-                        fn->return_value,
-                        llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
-                        size, {});
 
                     std::optional<TypeId> variant_type_id = std::nullopt;
                     if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
