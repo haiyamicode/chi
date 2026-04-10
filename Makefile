@@ -76,7 +76,7 @@ clean:
 	rm -rf $(BUILD_DIR)/* && mkdir -p $(BUILD_DIR)
 
 compile_example: build install
-	$(CHIC) -c $(INPUT_FILE) -o local/test -w local/build
+	$(CHIC) -c $(INPUT_FILE) -o local/test -w local/build --emit-ir local/test.ll
 
 compile_example_safe: build install
 	$(CHIC) -s -c $(INPUT_FILE) -o local/test -w local/build

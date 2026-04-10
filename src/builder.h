@@ -28,6 +28,7 @@ class Builder {
     bool verbose_lifetimes = false;
     bool verbose_generics = false;
     bool strip_symbols = false;
+    string emit_ir_path;
     string runtime_library_name = "chrt";
     BuildMode build_mode = BuildMode::Run;
     codegen::CompilationProfile profile = codegen::CompilationProfile::Debug;

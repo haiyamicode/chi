@@ -162,7 +162,7 @@ void Builder::build_single_file(const string &file_name) {
     auto compiler = create_codegen_compiler();
     auto settings = compiler.get_settings();
     settings->output_obj_to_file = get_tmp_file_path("main.o");
-    settings->output_ir_to_file = get_tmp_file_path("main.ll");
+    if (!emit_ir_path.empty()) settings->output_ir_to_file = emit_ir_path;
     settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
     settings->profile = profile;
 
@@ -347,7 +347,7 @@ void Builder::build_package(const string &package_dir) {
     auto compiler = create_codegen_compiler();
     auto settings = compiler.get_settings();
     settings->output_obj_to_file = get_tmp_file_path("main.o");
-    settings->output_ir_to_file = get_tmp_file_path("main.ll");
+    if (!emit_ir_path.empty()) settings->output_ir_to_file = emit_ir_path;
     settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
     settings->profile = profile;
 
