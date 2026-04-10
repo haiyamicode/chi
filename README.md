@@ -84,12 +84,12 @@ You control the memory. RAII via constructors and destructors.
 struct BoxInt {
     data: *int = null;
 
-    mutex func new(value: int) {
+    mut func new(value: int) {
         this.data = new int{};
         unsafe { *this.data = value; }
     }
 
-    mutex func delete() {
+    mut func delete() {
         unsafe { delete this.data; }
     }
 
@@ -98,7 +98,7 @@ struct BoxInt {
     }
 
     impl ops.Copy {
-        mutex func copy(source: &This) {
+        mut func copy(source: &This) {
             this.data = new int{};
             unsafe { *this.data = *source.data; }
         }
