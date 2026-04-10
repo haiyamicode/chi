@@ -1274,6 +1274,11 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             builder.CreateStore(llvm_param, var);
             add_var(param, var);
 
+            // Allocate drop flag for maybe-moved parameters
+            if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(param)) {
+                alloc_drop_flag(fn, param, true);
+            }
+
             // debug info
             auto param_line_no = param->token->pos.line_number();
             auto user_param_offset = fn->get_user_param_llvm_offset();
@@ -9510,6 +9515,10 @@ std::optional<TypeId> Compiler::resolve_variant_type_id(Function *fn, ChiType *t
 
     // Only return ID if it's a fully resolved Subtype
     if (type && type->kind == TypeKind::Subtype && !type->is_placeholder) {
+        // Ensure variants are registered before returning the id for lookup.
+        if (!type->data.subtype.final_type) {
+            get_resolver()->resolve_subtype(type);
+        }
         return type->id;
     }
     return std::nullopt;
@@ -9871,14 +9880,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
 
         // Allocate drop flag for maybe-moved variables
         if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(stmt)) {
-            auto flag = fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), stmt->name + ".alive");
-            {
-                llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
-                tmp.SetInsertPoint(flag->getNextNode());
-                tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), flag);
-            }
-            llvm_builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), flag);
-            m_ctx->drop_flags[stmt] = flag;
+            alloc_drop_flag(fn, stmt, false);
+            set_drop_flag_alive(stmt, true);
         }
 
         if (data.expr) {
@@ -10147,6 +10150,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 item_var =
                     fn->entry_alloca(compile_type(data.bind->resolved_type), "_bind_item_var");
                 add_var(data.bind, item_var);
+                // Allocate drop flag for maybe-moved bind variables
+                if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(data.bind)) {
+                    alloc_drop_flag(fn, data.bind, false);
+                }
             }
             llvm::Value *index_var = nullptr;
             if (data.index_bind) {
@@ -10186,6 +10193,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     compile_copy_with_ref(fn, RefValue{elem_ptr, value}, item_var,
                                           get_chitype(data.bind));
                 }
+                // Mark bind alive after value write (for maybe-moved drop flag)
+                set_drop_flag_alive(data.bind, true);
             }
             compile_block(fn, stmt, data.body, loop_post);
 
@@ -10215,6 +10224,10 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 item_var =
                     fn->entry_alloca(compile_type(data.bind->resolved_type), "_bind_item_var");
                 add_var(data.bind, item_var);
+                // Allocate drop flag for maybe-moved bind variables
+                if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(data.bind)) {
+                    alloc_drop_flag(fn, data.bind, false);
+                }
             }
             llvm::Value *index_var = nullptr;
             if (data.index_bind) {
@@ -10264,6 +10277,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                     compile_copy_with_ref(fn, RefValue{item_ref, value}, item_var,
                                           get_chitype(data.bind));
                 }
+                // Mark bind alive after value write (for maybe-moved drop flag)
+                set_drop_flag_alive(data.bind, true);
             }
             compile_block(fn, stmt, data.body, loop_post);
 
@@ -10308,11 +10323,16 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             auto next_llvm_fn = get_fn(next_fn->node)->llvm_fn;
             bool next_uses_sret = next_fn_type->data.fn.should_use_sret();
 
+            auto &llvm_ctx = *m_ctx->llvm_ctx.get();
             llvm::Value *item_var = nullptr;
             if (data.bind) {
                 item_var =
                     fn->entry_alloca(compile_type(data.bind->resolved_type), "_bind_item_var");
                 add_var(data.bind, item_var);
+                // Allocate drop flag for maybe-moved bind variables
+                if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(data.bind)) {
+                    alloc_drop_flag(fn, data.bind, false);
+                }
             }
             auto idx_type = llvm::Type::getInt32Ty(m_ctx->llvm_module->getContext());
             llvm::Value *index_var = nullptr;
@@ -10339,8 +10359,7 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             }
             // Check has_value (field 0)
             auto has_value_p = builder.CreateStructGEP(next_ret_type_l, opt_alloca, 0);
-            auto has_value = builder.CreateLoad(
-                llvm::Type::getInt1Ty(m_ctx->llvm_module->getContext()), has_value_p);
+            auto has_value = builder.CreateLoad(llvm::Type::getInt1Ty(llvm_ctx), has_value_p);
             builder.CreateCondBr(has_value, loop_main, loop->end);
 
             fn->use_label(loop_main);
@@ -10352,6 +10371,8 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto value = builder.CreateLoad(compile_type(data.bind->resolved_type), value_p,
                                                 "_iter_item");
                 builder.CreateStore(value, item_var);
+                // Mark bind alive after value write (for maybe-moved drop flag)
+                set_drop_flag_alive(data.bind, true);
             }
             compile_block(fn, stmt, data.body, loop_post);
 
@@ -10481,6 +10502,28 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
         } else {
             compile_destruction(fn, get_var(var), var);
         }
+    }
+}
+
+void Compiler::alloc_drop_flag(Function *fn, ast::Node *node, bool initial_alive) {
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto flag = fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), node->name + ".alive");
+    {
+        llvm::IRBuilder<> tmp(llvm_ctx);
+        tmp.SetInsertPoint(flag->getNextNode());
+        auto init = initial_alive ? llvm::ConstantInt::getTrue(llvm_ctx)
+                                  : llvm::ConstantInt::getFalse(llvm_ctx);
+        tmp.CreateStore(init, flag);
+    }
+    m_ctx->drop_flags[node] = flag;
+}
+
+void Compiler::set_drop_flag_alive(ast::Node *node, bool alive) {
+    if (auto *flag = m_ctx->drop_flags.get(node)) {
+        auto &llvm_ctx = *m_ctx->llvm_ctx;
+        auto val = alive ? llvm::ConstantInt::getTrue(llvm_ctx)
+                         : llvm::ConstantInt::getFalse(llvm_ctx);
+        m_ctx->llvm_builder->CreateStore(val, *flag);
     }
 }
 
@@ -11950,13 +11993,34 @@ Function *Compiler::get_fn(ast::Node *node) {
         auto fn_type = eval_type(node->resolved_type);
         if (fn_type->kind == TypeKind::Fn && fn_type->data.fn.container_ref) {
             auto container = fn_type->data.fn.container_ref->get_elem();
-            // Build ID using the container's global_id (includes module prefix)
-            auto container_id = container->global_id.empty()
-                                    ? get_resolver()->format_type_id(container)
-                                    : container->global_id;
-            auto subst_id =
-                fmt::format("{}.{}.{}", node->module->global_id(), container_id, node->name);
+            auto subst_id = fmt::format(
+                "{}.{}.{}", node->module->global_id(),
+                get_resolver()->format_type_qualified_name(
+                    container, node->module->global_id()),
+                node->name);
             entry = m_ctx->function_table.get(subst_id);
+            // On-demand compile: the concrete method exists but hasn't been compiled yet
+            if (!entry) {
+                auto concrete_struct = container;
+                if (concrete_struct->kind == TypeKind::Subtype) {
+                    if (!concrete_struct->data.subtype.final_type)
+                        get_resolver()->resolve_subtype(concrete_struct);
+                    concrete_struct = concrete_struct->data.subtype.final_type;
+                }
+                if (concrete_struct && concrete_struct->kind == TypeKind::Struct) {
+                    auto *member = concrete_struct->data.struct_.find_member(node->name);
+                    if (!member)
+                        member = concrete_struct->data.struct_.find_static_member(node->name);
+                    if (member && member->node &&
+                        member->node->type == ast::NodeType::FnDef) {
+                        auto compiled = compile_fn_proto(
+                            member->node->data.fn_def.fn_proto, member->node);
+                        if (!member->node->declspec_ref().is_extern())
+                            m_ctx->pending_fns.add(compiled);
+                        entry = m_ctx->function_table.get(subst_id);
+                    }
+                }
+            }
         }
     }
 
@@ -12182,6 +12246,20 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
                 if (auto entry =
                         get_resolver()->get_generics()->struct_envs.get(container->global_id)) {
                     new_fn->type_env = &entry->subs;
+                }
+            }
+        } else if (container && container->kind == TypeKind::Struct &&
+                   !container->global_id.empty() && !new_fn->type_env) {
+            // When the container is already resolved to a Struct (e.g. from resolve_subtype
+            // creating a final_type for a generic specialization like Shared<Inner<int>>),
+            // the Struct shares the same global_id as the original Subtype. Look up
+            // struct_envs to recover the type substitution map and container context.
+            if (auto entry = get_resolver()->get_generics()->struct_envs.get(
+                    container->global_id)) {
+                new_fn->type_env = &entry->subs;
+                if (entry->subtype) {
+                    new_fn->container_type = entry->subtype;
+                    new_fn->container_subtype = &entry->subtype->data.subtype;
                 }
             }
         }

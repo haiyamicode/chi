@@ -15,6 +15,31 @@ struct DeepWrap<T> {
     }
 }
 
+// Nested generic struct with Shared<Inner<T>> and auto-deref method dispatch.
+// Exercises: compile_fn_proto Struct container type_env recovery,
+// resolve_variant_type_id ensuring variants are registered,
+// and on-demand compile in get_fn for substituted container methods.
+struct State<T> {
+    value: T;
+    count: int = 0;
+}
+
+struct Holder<T> {
+    data: Shared<State<T>>;
+
+    mut func new(value: T) {
+        this.data = {new {:value}};
+    }
+
+    mut func increment() {
+        this.data.mut().count += 1;
+    }
+
+    func count() int {
+        return this.data.count;
+    }
+}
+
 func main() {
     var d1 = DeepWrap<int>.make(42);
     var d2 = d1.wrap();
@@ -33,4 +58,22 @@ func main() {
 
     var d10_copy = d10;
     printf("d10_copy.a_is_null={}\n", d10_copy.value.a == null);
+
+    // Nested generic: Shared<State<T>> inside Holder<T>
+    // Exercises auto-deref through Shared<State<T>> for field access and method dispatch
+    var h1 = Holder<int>{10};
+    printf("h1.value={}\n", h1.data.value);
+    h1.increment();
+    printf("h1.count={}\n", h1.count());
+
+    var h2 = Holder<string>{"hello"};
+    printf("h2.value={}\n", h2.data.value);
+    h2.increment();
+    h2.increment();
+    printf("h2.count={}\n", h2.count());
+
+    // Nested with another generic: Shared<State<Pair<T>>>
+    var h3 = Holder<Pair<int>>{{a: 1, b: 2}};
+    printf("h3.value.a={}\n", h3.data.value.a!);
+    printf("h3.value.b={}\n", h3.data.value.b!);
 }

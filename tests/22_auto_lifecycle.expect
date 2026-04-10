@@ -417,4 +417,48 @@ after unary
   value.item.id=430
 --- scope exit ---
   TrackedInitField.delete(430)
+=== Test 20: Maybe-moved parameter drop flag ===
+--- param moved ---
+  TrackedVal.new(501)
+  accepted.id=501
+  TrackedVal.delete(501)
+  after maybe_move
+  returned
+--- param not moved ---
+  TrackedVal.new(502)
+  after maybe_move
+  TrackedVal.delete(502)
+  returned
+=== Test 21: Maybe-moved for-loop bind drop flag ===
+--- fixed array ---
+  TrackedVal.new(601)
+  TrackedVal.new(602)
+  TrackedVal.new(603)
+  TrackedVal.copy(601)
+  TrackedVal.delete(601)
+  TrackedVal.copy(602)
+  accepted.id=602
+  TrackedVal.delete(602)
+  TrackedVal.copy(603)
+  TrackedVal.delete(603)
+  after fixed array loop
+--- dynamic array ---
+  TrackedVal.new(701)
+  TrackedVal.new(702)
+  TrackedVal.new(703)
+  TrackedVal.copy(701)
+  TrackedVal.delete(701)
+  TrackedVal.copy(702)
+  accepted.id=702
+  TrackedVal.delete(702)
+  TrackedVal.copy(703)
+  TrackedVal.delete(703)
+  after dynamic array loop
+--- scope exit ---
+  TrackedVal.delete(701)
+  TrackedVal.delete(702)
+  TrackedVal.delete(703)
+  TrackedVal.delete(603)
+  TrackedVal.delete(602)
+  TrackedVal.delete(601)
 All tests completed!

@@ -5870,7 +5870,18 @@ string Resolver::format_type_qualified_name(ChiType *type, const string &module_
             return format_type_qualified_name(data.final_type, module_id);
         }
         std::stringstream ss;
-        ss << format_type_qualified_name(data.generic, module_id) << "<";
+        // Use the generic's base name without its own type_params — the Subtype's
+        // args replace those params, so including them would double-count.
+        if (data.generic->kind == TypeKind::Struct && data.generic->data.struct_.node) {
+            ss << qualify_base_name(data.generic->data.struct_.node->name,
+                                    data.generic->data.struct_.node->module, module_id);
+        } else if (data.generic->kind == TypeKind::Enum && data.generic->data.enum_.node) {
+            ss << qualify_base_name(data.generic->data.enum_.node->name,
+                                    data.generic->data.enum_.node->module, module_id);
+        } else {
+            ss << format_type_qualified_name(data.generic, module_id);
+        }
+        ss << "<";
         for (int i = 0; i < data.args.len; i++) {
             if (i > 0) ss << ",";
             ss << format_type_qualified_name(data.args[i], module_id);
@@ -5880,6 +5891,14 @@ string Resolver::format_type_qualified_name(ChiType *type, const string &module_
     }
     case TypeKind::Struct: {
         auto &sty = type->data.struct_;
+        // For specialized structs from resolve_subtype, delegate to the original
+        // Subtype for correct module-relative naming at each nesting level.
+        if (!type->global_id.empty()) {
+            auto entry = m_ctx->generics.struct_envs.get(type->global_id);
+            if (entry && entry->subtype && entry->subtype->kind == TypeKind::Subtype) {
+                return format_type_qualified_name(entry->subtype, module_id);
+            }
+        }
         auto base_name = type->name.value_or(sty.node ? sty.node->name : string("<anon>"));
         return format_container_qualified_name(this, base_name,
                                                sty.node ? sty.node->module : nullptr,
@@ -5887,6 +5906,13 @@ string Resolver::format_type_qualified_name(ChiType *type, const string &module_
     }
     case TypeKind::Enum: {
         auto &ety = type->data.enum_;
+        // Same as Struct: delegate to Subtype for specialized enum types.
+        if (!type->global_id.empty()) {
+            auto entry = m_ctx->generics.struct_envs.get(type->global_id);
+            if (entry && entry->subtype && entry->subtype->kind == TypeKind::Subtype) {
+                return format_type_qualified_name(entry->subtype, module_id);
+            }
+        }
         auto base_name = type->name.value_or(ety.node ? ety.node->name : string("<anon>"));
         return format_container_qualified_name(this, base_name,
                                                ety.node ? ety.node->module : nullptr,

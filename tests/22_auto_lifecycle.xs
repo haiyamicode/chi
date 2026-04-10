@@ -794,6 +794,56 @@ func test_construct_field_initializer_without_default() {
     println("--- scope exit ---");
 }
 
+func accept_val(v: TrackedVal) {
+    printf("  accepted.id={}\n", v.id);
+}
+
+func maybe_move_param(v: TrackedVal, do_move: bool) {
+    if do_move {
+        accept_val(move v);
+    }
+    println("  after maybe_move");
+}
+
+func test_maybe_moved_param() {
+    println("=== Test 20: Maybe-moved parameter drop flag ===");
+
+    println("--- param moved ---");
+    maybe_move_param({501}, true);
+    println("  returned");
+
+    println("--- param not moved ---");
+    maybe_move_param({502}, false);
+    println("  returned");
+}
+
+func test_maybe_moved_for_bind() {
+    println("=== Test 21: Maybe-moved for-loop bind drop flag ===");
+
+    println("--- fixed array ---");
+    var arr: [3]TrackedVal = [{601}, {602}, {603}];
+    for item in arr {
+        if item.id == 602 {
+            accept_val(move item);
+        }
+    }
+    println("  after fixed array loop");
+
+    println("--- dynamic array ---");
+    var dyn: Array<TrackedVal> = [];
+    dyn.push({701});
+    dyn.push({702});
+    dyn.push({703});
+    for item in dyn {
+        if item.id == 702 {
+            accept_val(move item);
+        }
+    }
+    println("  after dynamic array loop");
+
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -814,5 +864,7 @@ func main() {
     test_array_copy_nested_array_cleanup();
     test_construct_field_initializer_cleanup();
     test_construct_field_initializer_without_default();
+    test_maybe_moved_param();
+    test_maybe_moved_for_bind();
     println("All tests completed!");
 }

@@ -53,6 +53,7 @@ TESTS_LIST = 00_fib.test \
 		48_stdlib.test \
 		49_tuple.test \
 		50_async_await_managed.test \
+		51_deep_generics.test \
 		52_async_lifecycle_stress.test \
 		53_panic.test \
 		54_managed_array_escape.test \

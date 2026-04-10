@@ -521,6 +521,13 @@ class Compiler {
         return m_ctx->var_table.at(node);
     }
 
+    // Allocate a drop flag for a maybe-moved variable.
+    // initial_alive: true for params (always alive at entry), false for vars/binds.
+    void alloc_drop_flag(Function *fn, ast::Node *node, bool initial_alive);
+
+    // Set the drop flag for a node (no-op if no flag registered).
+    void set_drop_flag_alive(ast::Node *node, bool alive);
+
     llvm::Value *compile_comparator(Function *fn, ast::Node *expr, ChiType *type = nullptr);
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);
