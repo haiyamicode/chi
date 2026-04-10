@@ -1,7 +1,7 @@
 import "std/ops" as ops;
 
 struct TrackedBox {
-    id: int;
+    id: int = 0;
 
     mut func new(id_val: int) {
         this.id = id_val;

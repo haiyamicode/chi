@@ -4296,8 +4296,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             for (auto member : data.members) {
                 if (member->type == NodeType::VarDecl && !member->data.var_decl.initialized_at) {
                     auto not_needed = member->data.var_decl.is_embed &&
-                                      (get_struct_member(struct_type, "new") ||
-                                       struct_->kind == ContainerKind::Interface);
+                                      struct_->kind == ContainerKind::Interface;
                     // Skip initialization check for extern C structs
                     auto is_extern = data.decl_spec && data.decl_spec->is_extern();
                     // Skip if the struct has no constructor — fields can be provided

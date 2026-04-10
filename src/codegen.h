@@ -840,6 +840,8 @@ class Compiler {
     Function *compile_end_fn();
 
     void emit_dbg_location(ast::Node *node);
+    size_t attach_generated_debug_info(llvm::Function *llvm_fn, const std::string &fn_name,
+                                       ast::Node *anchor_node);
     void emit_runtime_assert(Function *fn, llvm::Value *cond, llvm::Value *msg, ast::Node *site);
     void emit_output();
     void dump_generics_comparison();

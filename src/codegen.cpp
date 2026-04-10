@@ -65,13 +65,19 @@ void Compiler::emit_default_field_initializer(Function *fn, llvm::Value *dest,
     if (!field || !field->node) {
         return;
     }
-    auto default_expr = field->node->data.var_decl.expr;
-    if (!default_expr) {
+    auto &var_decl = field->node->data.var_decl;
+    auto default_expr = var_decl.expr;
+    if (default_expr) {
+        auto field_gep = compile_dot_access(fn, dest, container_type, field);
+        compile_assignment_to_ptr(fn, default_expr, field_gep, field->resolved_type);
         return;
     }
 
-    auto field_gep = compile_dot_access(fn, dest, container_type, field);
-    compile_assignment_to_ptr(fn, default_expr, field_gep, field->resolved_type);
+    // Embedded struct field: recursively initialize via its own constructor.
+    if (var_decl.is_embed && var_decl.is_field) {
+        auto field_gep = compile_dot_access(fn, dest, container_type, field);
+        emit_construct_init(fn, field_gep, field->resolved_type);
+    }
 }
 
 bool Compiler::struct_needs_managed_constructor(ChiType *struct_type,
@@ -190,7 +196,17 @@ void Compiler::emit_construct_init(Function *fn, llvm::Value *dest, ChiType *typ
     auto generated_ctor = generate_constructor(struct_type, nullptr, use_managed_ctor,
                                                managed_module);
     if (generated_ctor) {
-        m_ctx->llvm_builder->CreateCall(generated_ctor->llvm_fn, {dest});
+        auto &builder = *m_ctx->llvm_builder;
+        // The call must carry a !dbg if the surrounding function has debug
+        // info. Synthesize a zero-line location anchored to the current
+        // function scope when the caller hasn't set one.
+        auto saved_dbg = builder.getCurrentDebugLocation();
+        if (!saved_dbg && m_ctx->dbg_scopes.len) {
+            builder.SetCurrentDebugLocation(
+                llvm::DILocation::get(*m_ctx->llvm_ctx, 0, 0, m_ctx->dbg_scopes.last(), nullptr));
+        }
+        builder.CreateCall(generated_ctor->llvm_fn, {dest});
+        builder.SetCurrentDebugLocation(saved_dbg);
     }
 
     emit_alloc_init(fn, dest, struct_type);
@@ -7606,13 +7622,10 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             if (destruct_old) {
                 compile_destruction_for_type(fn, dest, type);
             }
-            // Zero `this` so the user's Copy method sees a fresh slot — matches
-            // the contract that Copy writes into uninitialized memory (e.g.
-            // `Array.copy` calls `push` which reads `length`/`capacity`).
-            auto size = llvm_type_size(compile_type(type));
-            builder.CreateMemSet(
-                dest, llvm::ConstantInt::get(llvm::IntegerType::getInt8Ty(*m_ctx->llvm_ctx), 0),
-                size, {});
+            // User-defined Copy sees a freshly-defaulted `this` — run the
+            // generated field-default ctor so defaults (including non-zero
+            // ones) are applied correctly.
+            emit_construct_init(fn, dest, type);
             // Use variant lookup to get the specialized copy method
             auto eval_t = eval_type(type);
             std::optional<TypeId> variant_type_id = std::nullopt;
@@ -7936,12 +7949,12 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
                                                         &transferred_cleanup_vars));
                 }
             }
+            emit_dbg_location(expr);
             builder.CreateCall(constructor_type_l, constructor_fn->llvm_fn, args);
             for (auto *var : transferred_cleanup_vars) {
                 arg_cleanup_block.exit_flow.add_sink_edge(var, expr);
             }
             pop_cleanup_block(fn, arg_cleanup_block);
-            emit_dbg_location(expr);
         }
 
         if (use_list_init) {
@@ -11772,16 +11785,29 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
         return nullptr;
     }
 
-    // Check if any field has a default value
+    // Check if any field has a default value (or is an embedded struct field
+    // whose own type carries defaults that we'd recursively initialize).
     auto &struct_data = resolved_type->data.struct_;
     bool has_defaults = false;
     for (auto field : struct_data.fields) {
         if (!field->node)
             continue;
-        auto default_expr = field->node->data.var_decl.expr;
-        if (default_expr) {
+        auto &var_decl = field->node->data.var_decl;
+        if (var_decl.expr) {
             has_defaults = true;
             break;
+        }
+        if (var_decl.is_embed && var_decl.is_field) {
+            auto embed_struct = get_resolver()->eval_struct_type(field->resolved_type);
+            if (embed_struct && embed_struct->kind == TypeKind::Struct) {
+                for (auto embed_field : embed_struct->data.struct_.fields) {
+                    if (embed_field->node && embed_field->node->data.var_decl.expr) {
+                        has_defaults = true;
+                        break;
+                    }
+                }
+                if (has_defaults) break;
+            }
         }
     }
 
@@ -11818,27 +11844,38 @@ Function *Compiler::generate_constructor(ChiType *struct_type, ChiType *containe
     m_ctx->functions.emplace(fn);
     ctor_table[struct_type] = fn;
 
-    // Save current insert point
+    // Save current insert point and debug location
     auto saved_block = builder.GetInsertBlock();
     auto saved_point = builder.GetInsertPoint();
+    auto saved_dbg = builder.getCurrentDebugLocation();
+
+    auto saved_dbg_scope_len =
+        attach_generated_debug_info(llvm_fn, fn_name, resolved_type->data.struct_.node);
 
     // Create entry block
     auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
     builder.SetInsertPoint(entry_bb);
+    builder.SetCurrentDebugLocation(llvm::DebugLoc());
 
     auto this_ptr = llvm_fn->getArg(0);
 
     // Initialize all fields with default values
     for (auto field : struct_data.fields) {
+        if (field->node) {
+            emit_dbg_location(field->node);
+        }
         emit_default_field_initializer(fn, this_ptr, resolved_type, field);
     }
 
     builder.CreateRetVoid();
 
-    // Restore insert point
+    m_ctx->dbg_scopes.resize(saved_dbg_scope_len);
+
+    // Restore insert point and debug location
     if (saved_block) {
         builder.SetInsertPoint(saved_block, saved_point);
     }
+    builder.SetCurrentDebugLocation(saved_dbg);
 
     return fn;
 }
@@ -12496,6 +12533,23 @@ void Compiler::emit_dbg_location(ast::Node *node) {
     auto col_no = node->token->pos.col_number();
     builder->SetCurrentDebugLocation(
         llvm::DILocation::get(llvm_ctx, line_no, col_no, scope, nullptr));
+}
+
+size_t Compiler::attach_generated_debug_info(llvm::Function *llvm_fn, const std::string &fn_name,
+                                              ast::Node *anchor_node) {
+    auto *mod = anchor_node ? anchor_node->module : nullptr;
+    auto cu = mod ? get_module_cu(mod) : m_ctx->dbg_cu;
+    auto dbg_builder = m_ctx->dbg_builder.get();
+    auto file = dbg_builder->createFile(cu->getFilename(), cu->getDirectory());
+    auto line_no = anchor_node ? anchor_node->token->pos.line_number() : 0;
+    auto sp_type = dbg_builder->createSubroutineType(dbg_builder->getOrCreateTypeArray({}));
+    auto sp = dbg_builder->createFunction(
+        file, fn_name, llvm::StringRef(), file, line_no, sp_type, line_no,
+        llvm::DINode::FlagArtificial, llvm::DISubprogram::SPFlagDefinition);
+    llvm_fn->setSubprogram(sp);
+    auto saved_len = m_ctx->dbg_scopes.len;
+    m_ctx->dbg_scopes.add(sp);
+    return saved_len;
 }
 
 void Compiler::emit_runtime_assert(Function *fn, llvm::Value *cond, llvm::Value *msg,
