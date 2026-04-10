@@ -10482,9 +10482,15 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
             continue; // Move-returned: skip destruction
         if (fn->async_frame_owned_vars.count(var))
             continue; // async frame owns this value; frame destructor handles it
-        // Skip variables not yet compiled (e.g. early return before var decl)
+        // Skip variables not yet compiled (e.g. early return before var decl).
+        // Also skip stale entries from a previous generic instantiation of the same
+        // AST (same node key, but the alloca belongs to a different LLVM function).
         if (!m_ctx->var_table.has_key(var))
             continue;
+        if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(m_ctx->var_table.at(var))) {
+            if (alloca->getFunction() != fn->llvm_fn)
+                continue;
+        }
         if (flow.is_maybe_sunk(var)) {
             // Maybe-moved: check drop flag at runtime
             auto *flag = m_ctx->drop_flags.get(var);

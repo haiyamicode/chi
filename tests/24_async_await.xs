@@ -1867,6 +1867,65 @@ func test_sleep_capture() {
     printf("mutated: {}\n", counter);
 }
 
+// --- Promise.all ---
+
+async func async_value(v: int) Promise<int> {
+    await time.sleep(1);
+    return v;
+}
+
+async func async_string(s: string) Promise<string> {
+    await time.sleep(1);
+    return s;
+}
+
+async func async_throw(code: int) Promise<int> {
+    await time.sleep(1);
+    throw new TestError{:code};
+}
+
+async func run_promise_all_cases() Promise {
+    // Empty array
+    println("=== Promise.all empty ===");
+    let empty = await Promise<int>.all([]);
+    printf("length: {}\n", empty.length);
+
+    // Single async promise
+    println("=== Promise.all single ===");
+    let single = await Promise<int>.all([async_value(42)]);
+    printf("length: {}\n", single.length);
+    printf("[0]: {}\n", single[0]);
+
+    // Multiple async promises, resolve order differs from array order
+    println("=== Promise.all multiple ===");
+    let multi = await Promise<int>.all([async_value(10), async_value(20), async_value(30)]);
+    printf("values: [{}, {}, {}]\n", multi[0], multi[1], multi[2]);
+
+    // String type (exercises second generic instantiation — codegen regression)
+    println("=== Promise.all string ===");
+    let strings = await Promise<string>.all([async_string("hello"), async_string("world")]);
+    printf("values: ['{}', '{}']\n", strings[0], strings[1]);
+
+    // Rejection propagation
+    println("=== Promise.all reject ===");
+    let reject_result = await Promise<int>.all([async_value(1), async_throw(55), async_value(3)]).catch(
+        func (err: Shared<Error>) Array<int> {
+            printf("caught: {}\n", err.message());
+            return [];
+        }
+    );
+    printf("reject len: {}\n", reject_result.length);
+
+    // All succeed — result used in computation
+    println("=== Promise.all sum ===");
+    let parts = await Promise<int>.all([async_value(100), async_value(200), async_value(300)]);
+    var sum = 0;
+    for v in parts {
+        sum = sum + v;
+    }
+    printf("sum: {}\n", sum);
+}
+
 async func run_async_tail() Promise {
     println("=== Branchy returns ===");
     printf("tt={}\n", await do_branchy_returns(true, true, 5));
@@ -2010,6 +2069,8 @@ async func run_async_tail() Promise {
             return -1;
         }
     );
+
+    await run_promise_all_cases();
 
     println("=== timeout ===");
     var timeout_done = Promise{};

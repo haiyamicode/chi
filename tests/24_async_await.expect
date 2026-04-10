@@ -223,6 +223,20 @@ nested caught: error 77
 nested delayed caught: error 88
 === nested rejection 3level ===
 3level caught: error 33
+=== Promise.all empty ===
+length: 0
+=== Promise.all single ===
+length: 1
+[0]: 42
+=== Promise.all multiple ===
+values: [10, 20, 30]
+=== Promise.all string ===
+values: ['hello', 'world']
+=== Promise.all reject ===
+caught: error 55
+reject len: 0
+=== Promise.all sum ===
+sum: 600
 === timeout ===
 scheduled
 timeout fired
