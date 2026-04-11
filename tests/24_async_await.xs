@@ -1892,23 +1892,23 @@ async func run_promise_all_cases() Promise {
 
     // Single async promise
     println("=== Promise.all single ===");
-    let single = await Promise<int>.all([async_value(42)]);
+    let single = await Promise.all([async_value(42)]);
     printf("length: {}\n", single.length);
     printf("[0]: {}\n", single[0]);
 
     // Multiple async promises, resolve order differs from array order
     println("=== Promise.all multiple ===");
-    let multi = await Promise<int>.all([async_value(10), async_value(20), async_value(30)]);
+    let multi = await Promise.all([async_value(10), async_value(20), async_value(30)]);
     printf("values: [{}, {}, {}]\n", multi[0], multi[1], multi[2]);
 
     // String type (exercises second generic instantiation — codegen regression)
     println("=== Promise.all string ===");
-    let strings = await Promise<string>.all([async_string("hello"), async_string("world")]);
+    let strings = await Promise.all([async_string("hello"), async_string("world")]);
     printf("values: ['{}', '{}']\n", strings[0], strings[1]);
 
     // Rejection propagation
     println("=== Promise.all reject ===");
-    let reject_result = await Promise<int>.all([async_value(1), async_throw(55), async_value(3)]).catch(
+    let reject_result = await Promise.all([async_value(1), async_throw(55), async_value(3)]).catch(
         func (err: Shared<Error>) Array<int> {
             printf("caught: {}\n", err.message());
             return [];
@@ -1918,7 +1918,7 @@ async func run_promise_all_cases() Promise {
 
     // All succeed — result used in computation
     println("=== Promise.all sum ===");
-    let parts = await Promise<int>.all([async_value(100), async_value(200), async_value(300)]);
+    let parts = await Promise.all([async_value(100), async_value(200), async_value(300)]);
     var sum = 0;
     for v in parts {
         sum = sum + v;

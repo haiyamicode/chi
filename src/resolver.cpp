@@ -678,8 +678,25 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
             return enum_type && enum_type->data.enum_.is_plain;
         }
         return false;
-    case TypeKind::Subtype:
-        return from_type->kind == TypeKind::EnumValue && get_enum_root(from_type) == get_enum_root(to_type);
+    case TypeKind::Subtype: {
+        if (from_type->kind == TypeKind::EnumValue) {
+            return get_enum_root(from_type) == get_enum_root(to_type);
+        }
+        // Struct subtypes: same generic + compatible type args
+        if (from_type->kind == TypeKind::Subtype) {
+            auto &from_sub = from_type->data.subtype;
+            auto &to_sub = to_type->data.subtype;
+            if (from_sub.generic == to_sub.generic && from_sub.args.len == to_sub.args.len) {
+                for (int i = 0; i < from_sub.args.len; i++) {
+                    if (!can_assign(from_sub.args[i], to_sub.args[i], is_explicit)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+        return false;
+    }
     case TypeKind::Infer: {
         auto &infer_data = to_type->data.infer;
         if (infer_data.inferred_type) {
@@ -7806,7 +7823,13 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
             // Recursively substitute in case the inferred type has placeholders
             return make_recursive_call(inferred, subs);
         }
-        // If no inferred type, return as-is (should not happen in normal flow)
+        // No inferred type yet — try substituting the inner placeholder directly.
+        // This handles the case where wrap_placeholders_with_infer() created an Infer(T)
+        // but can_assign never filled in inferred_type (e.g. Array<Infer(T)> used as
+        // value_type for an array literal whose element type was resolved independently).
+        if (type->data.infer.placeholder) {
+            return handle_placeholder(type->data.infer.placeholder, subs);
+        }
         return type;
     }
 
@@ -9579,6 +9602,28 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                                 track_move_sink(scope.parent_fn_node, arg, concrete_arg_type,
                                                 node, concrete_param);
                                 ensure_temp_owner(arg, concrete_arg_type, scope);
+
+                                // Mark rvalue/moved args — same logic as the normal path
+                                bool is_explicit_move = arg->type == NodeType::UnaryOpExpr &&
+                                                        arg->data.unary_op_expr.op_type == TokenType::KW_MOVE;
+                                if (concrete_param && !concrete_param->is_reference() &&
+                                    (is_explicit_move || should_move_temp_expr(arg, concrete_arg_type)) &&
+                                    should_destroy(arg, concrete_arg_type)) {
+                                    arg->analysis.moved = true;
+                                    if (arg->resolved_outlet && scope.parent_fn_node) {
+                                        scope.parent_fn_def()->add_sink_edge(arg->resolved_outlet, node);
+                                    }
+                                }
+
+                                // NoCopy: error if passing a named value by value to a non-ref param
+                                if (concrete_param && !concrete_param->is_reference() && is_addressable(arg) &&
+                                    !arg->analysis.moved && is_non_copyable(concrete_arg_type)) {
+                                    error(arg, errors::TYPE_NOT_COPYABLE, format_type_display(concrete_arg_type));
+                                }
+                            }
+                            if (scope.parent_fn_node && node->type == NodeType::FnCallExpr) {
+                                apply_call_capture_move_effects(*scope.parent_fn_def(),
+                                                                node->data.fn_call_expr, node);
                             }
                             return spec_fn.return_type;
                         }
@@ -9614,6 +9659,28 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 }
                 track_move_sink(scope.parent_fn_node, arg, concrete_arg_type, node, concrete_param);
                 ensure_temp_owner(arg, concrete_arg_type, scope);
+
+                // Mark rvalue/moved args — same logic as the normal path
+                bool is_explicit_move = arg->type == NodeType::UnaryOpExpr &&
+                                        arg->data.unary_op_expr.op_type == TokenType::KW_MOVE;
+                if (concrete_param && !concrete_param->is_reference() &&
+                    (is_explicit_move || should_move_temp_expr(arg, concrete_arg_type)) &&
+                    should_destroy(arg, concrete_arg_type)) {
+                    arg->analysis.moved = true;
+                    if (arg->resolved_outlet && scope.parent_fn_node) {
+                        scope.parent_fn_def()->add_sink_edge(arg->resolved_outlet, node);
+                    }
+                }
+
+                // NoCopy: error if passing a named value by value to a non-ref param
+                if (concrete_param && !concrete_param->is_reference() && is_addressable(arg) &&
+                    !arg->analysis.moved && is_non_copyable(concrete_arg_type)) {
+                    error(arg, errors::TYPE_NOT_COPYABLE, format_type_display(concrete_arg_type));
+                }
+            }
+            if (scope.parent_fn_node && node->type == NodeType::FnCallExpr) {
+                apply_call_capture_move_effects(*scope.parent_fn_def(),
+                                                node->data.fn_call_expr, node);
             }
             return spec_fn.return_type;
         }
@@ -10928,10 +10995,26 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
 
     assert(generic->kind == TypeKind::Struct);
     auto &gen = generic->data.struct_;
+
+    // Check if the requested type_args are all concrete (no placeholders)
+    bool args_concrete = true;
+    for (auto arg : *type_args) {
+        if (arg->is_placeholder) {
+            args_concrete = false;
+            break;
+        }
+    }
+
     for (auto subtype : gen.subtypes) {
         assert(subtype->kind == TypeKind::Subtype);
         auto &subtype_data = subtype->data.subtype;
         if (subtype_data.args.len != type_args->len) {
+            continue;
+        }
+        // Skip placeholder subtypes when looking for a concrete instantiation.
+        // is_same_type follows Infer types, so a placeholder subtype with
+        // Infer(T) args (where inferred_type=int) would falsely match [int].
+        if (args_concrete && subtype->is_placeholder) {
             continue;
         }
         bool matches = true;
