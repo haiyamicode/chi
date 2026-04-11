@@ -227,6 +227,7 @@ struct CompilationSettings {
     string output_ir_to_file = "";
     uint32_t lang_flags = LANG_FLAG_NONE;
     CompilationProfile profile = CompilationProfile::Debug;
+    bool sanitize_address = false;
 };
 
 class Compiler;

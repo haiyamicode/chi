@@ -165,6 +165,7 @@ void Builder::build_single_file(const string &file_name) {
     if (!emit_ir_path.empty()) settings->output_ir_to_file = emit_ir_path;
     settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
     settings->profile = profile;
+    settings->sanitize_address = sanitize_address;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
@@ -172,8 +173,10 @@ void Builder::build_single_file(const string &file_name) {
     compiler.emit_output();
 
     // produce executable
-    auto cmd = fmt::format("c++ {} {} -o {} {}-l{}", settings->output_obj_to_file,
-                           linker_mode_flags(profile), output_file_name,
+    string sanitizer_flags = sanitize_address ? "-fsanitize=address " : "";
+    string linker = sanitize_address ? LLVM_TOOLS_BINARY_DIR "/clang++" : "c++";
+    auto cmd = fmt::format("{} {} {}{} -o {} {}-l{}", linker, settings->output_obj_to_file,
+                           sanitizer_flags, linker_mode_flags(profile), output_file_name,
                            runtime_library_search_flags(m_ctx, runtime_library_name),
                            runtime_library_name);
 
@@ -350,6 +353,7 @@ void Builder::build_package(const string &package_dir) {
     if (!emit_ir_path.empty()) settings->output_ir_to_file = emit_ir_path;
     settings->lang_flags = module->get_lang_flags() | m_ctx.resolve_ctx.lang_flags;
     settings->profile = profile;
+    settings->sanitize_address = sanitize_address;
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
@@ -433,8 +437,11 @@ void Builder::build_package(const string &package_dir) {
         library_flags += fmt::format("-l{} ", lib);
     }
 
-    auto cmd = fmt::format("c++ {} {} -o {} {}{}-l{} {}", obj_files, linker_mode_flags(profile),
-                           output_file_name, runtime_library_search_flags(m_ctx, runtime_library_name),
+    string sanitizer_flags = sanitize_address ? "-fsanitize=address " : "";
+    string pkg_linker = sanitize_address ? LLVM_TOOLS_BINARY_DIR "/clang++" : "c++";
+    auto cmd = fmt::format("{} {} {}{} -o {} {}{}-l{} {}", pkg_linker, obj_files, sanitizer_flags,
+                           linker_mode_flags(profile), output_file_name,
+                           runtime_library_search_flags(m_ctx, runtime_library_name),
                            library_path_flags, runtime_library_name, library_flags);
 
     if (debug_mode) {

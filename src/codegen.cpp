@@ -8,6 +8,7 @@
 #include "util.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Transforms/Instrumentation/AddressSanitizer.h"
 #include <set>
 
 namespace cx {
@@ -12259,6 +12260,9 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     fn_l->addAttributeAtIndex(llvm::AttributeList::FunctionIndex,
                               llvm::Attribute::get(*m_ctx->llvm_ctx, llvm::Attribute::NoInline));
     fn_l->addFnAttr("frame-pointer", "all");
+    if (get_settings()->sanitize_address && !declspec.is_extern()) {
+        fn_l->addFnAttr(llvm::Attribute::SanitizeAddress);
+    }
 
     Function *new_fn = nullptr;
     if (register_global) {
@@ -12846,6 +12850,25 @@ void Compiler::emit_output() {
         auto module_pass =
             pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
         module_pass.run(*module, module_am);
+    }
+
+    if (settings->sanitize_address) {
+        llvm::LoopAnalysisManager loop_am;
+        llvm::FunctionAnalysisManager function_am;
+        llvm::CGSCCAnalysisManager cgscc_am;
+        llvm::ModuleAnalysisManager module_am;
+        llvm::PassBuilder pass_builder(target_machine);
+        pass_builder.registerModuleAnalyses(module_am);
+        pass_builder.registerCGSCCAnalyses(cgscc_am);
+        pass_builder.registerFunctionAnalyses(function_am);
+        pass_builder.registerLoopAnalyses(loop_am);
+        pass_builder.crossRegisterProxies(loop_am, function_am, cgscc_am, module_am);
+
+        llvm::AddressSanitizerOptions asan_opts;
+        asan_opts.UseAfterScope = true;
+        llvm::ModulePassManager asan_mpm;
+        asan_mpm.addPass(llvm::AddressSanitizerPass(asan_opts));
+        asan_mpm.run(*module, module_am);
     }
 
     pass.add((llvm::Pass *)llvm::createVerifierPass());

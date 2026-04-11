@@ -16,7 +16,7 @@ using namespace cx;
 MAKE_ENUM(FlagType, String, Bool);
 MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Release, Strip, Output, Ast, Format,
           FormatterNoSemantic, WorkingDir, Analyzer, Safe, VerboseLifetimes, VerboseGenerics,
-          DebugAllocatorRuntime, EmitIR, Help);
+          DebugAllocatorRuntime, EmitIR, SanitizeAddress, Help);
 MAKE_ENUM(InputMode, File, Package)
 MAKE_ENUM(ProcessingMode, Build, Analyzer, Format)
 
@@ -49,6 +49,7 @@ void init_flags() {
     flags.add({FlagId::VerboseGenerics, "", "verbose-generics", FlagType::Bool});
     flags.add({FlagId::DebugAllocatorRuntime, "", "debug-allocator-runtime", FlagType::Bool});
     flags.add({FlagId::EmitIR, "", "emit-ir", FlagType::String});
+    flags.add({FlagId::SanitizeAddress, "", "sanitize", FlagType::Bool});
     flags.add({FlagId::Help, "h", "help", FlagType::Bool});
 
     for (auto &f : flags) {
@@ -93,6 +94,7 @@ int main(int argc, char *argv[]) {
         print("  --verbose-generics: print generic instantiation debug details\n");
         print("  --debug-allocator-runtime: link against the debug allocator runtime\n");
         print("  --emit-ir <path>: write LLVM IR to the specified file\n");
+        print("  --sanitize: enable AddressSanitizer (detects memory errors)\n");
         print("  -h --help: help\n");
     };
 
@@ -149,6 +151,9 @@ int main(int argc, char *argv[]) {
             break;
         case FlagId::EmitIR:
             bld.emit_ir_path = flag->value;
+            break;
+        case FlagId::SanitizeAddress:
+            bld.sanitize_address = true;
             break;
         case FlagId::Help:
             print_help();
