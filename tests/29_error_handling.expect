@@ -73,3 +73,9 @@ re-caught: error code 42
 branch fallback = -1
 branch rethrow: error code 123
 early return = -1
+=== error trace ===
+has trace: true
+has deep_thrower: true
+has mid_caller: true
+result has trace: true
+result has deep_thrower: true

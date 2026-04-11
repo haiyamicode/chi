@@ -28,6 +28,7 @@ extern "C" {
     unsafe func cx_set_panic_location(file: *string, line: uint32, col: uint32);
     unsafe func cx_clear_panic_location();
     unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    func cx_get_error_trace(result: *string);
     unsafe func cx_get_error_type_info() *void;
     unsafe func cx_get_error_data() *void;
     unsafe func cx_get_error_vtable() *void;
@@ -1059,6 +1060,12 @@ export struct Buffer {
 
 export interface Error {
     func message() string;
+
+    func trace() string {
+        var t: string = "";
+        cx_get_error_trace(&t);
+        return t;
+    }
 }
 
 export enum Result<T, E> {

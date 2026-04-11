@@ -482,6 +482,42 @@ func test_catch_return() int {
     return 99;
 }
 
+func deep_thrower() {
+    throw new MyError{msg: "deep"};
+}
+
+func mid_caller() {
+    deep_thrower();
+}
+
+func test_error_trace() {
+    println("=== error trace ===");
+
+    // Typed catch
+    try {
+        mid_caller();
+    } catch MyError as err {
+        let t = err.trace();
+        printf("has trace: {}\n", t.length > 0);
+        printf("has deep_thrower: {}\n", t.contains("deep_thrower"));
+        printf("has mid_caller: {}\n", t.contains("mid_caller"));
+    };
+
+    // Result mode
+    var result = try {
+        mid_caller();
+        0
+    } catch MyError;
+    switch result {
+        Err(err) => {
+            let t = err.trace();
+            printf("result has trace: {}\n", t.length > 0);
+            printf("result has deep_thrower: {}\n", t.contains("deep_thrower"));
+        },
+        Ok => {}
+    }
+}
+
 func main() {
     test_catch_all();
     test_typed_catch();
@@ -521,4 +557,6 @@ func main() {
 
     // Return from catch exits the function
     printf("early return = {}\n", test_catch_return());
+
+    test_error_trace();
 }

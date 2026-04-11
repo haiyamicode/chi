@@ -1151,6 +1151,13 @@ void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_i
     throw data_ptr; // non-null, distinguishes from panic's NULL
 }
 
+void cx_get_error_trace(CxString *result) {
+    auto len = strlen(st.trace);
+    if (len > 0) {
+        cx_string_from_chars(st.trace, (uint32_t)len, result);
+    }
+}
+
 void *cx_get_error_type_info() { return st.error_type_info; }
 
 void *cx_get_error_data() { return st.error_data_ptr; }
