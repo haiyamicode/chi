@@ -1336,6 +1336,12 @@ export struct Map<K: ops.Hash + ops.Eq, V> {
         }
     }
 
+    impl ops.KvInit<K, V> {
+        mut func kv_init(key: K, value: V) {
+            this.set(move key, move value);
+        }
+    }
+
     private mut func init_buckets() {
         this.capacity = 16;
         unsafe {

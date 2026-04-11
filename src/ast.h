@@ -504,6 +504,7 @@ struct FieldInitExpr {
     Token *token = nullptr;
     Token *field = nullptr;
     Node *value = nullptr;
+    Node *key_expr = nullptr; // for kv init: the key expression (string literal)
     ChiStructMember *resolved_field = nullptr;
     void *compiled_field_address = nullptr;
 };
@@ -552,6 +553,7 @@ struct ConstructExpr {
     Node *type = nullptr;
     Node *spread_expr = nullptr; // ...expr spread source
     bool use_list_init = false;
+    bool use_kv_init = false;
     bool use_alloc_init = false;
     ResolvedTypeSourceKind resolved_type_source = ResolvedTypeSourceKind::None;
     bool resolved_type_is_ambiguous = false;

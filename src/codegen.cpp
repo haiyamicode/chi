@@ -7989,6 +7989,44 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             return;
         }
 
+        if (expr->data.construct_expr.use_kv_init) {
+            auto variant_type_id = resolve_variant_type_id(m_fn, expr->resolved_type);
+            auto *kv_init_member =
+                *type->data.struct_.member_intrinsics.get(IntrinsicSymbol::KvInit);
+            assert(kv_init_member && "KvInit member missing");
+            auto kv_init_node = get_variant_member_node(kv_init_member, variant_type_id);
+            auto kv_init_type = get_chitype(kv_init_node);
+            auto kv_init_id = get_resolver()->resolve_global_id(kv_init_node);
+            auto kv_init_entry = m_ctx->function_table.get(kv_init_id);
+            assert(kv_init_entry && "kv_init method not compiled");
+            auto kv_init_fn = *kv_init_entry;
+            auto kv_init_type_l = (llvm::FunctionType *)compile_type(kv_init_type);
+
+            for (auto fi : expr->data.construct_expr.field_inits) {
+                auto &fi_data = fi->data.field_init_expr;
+                ast::Block arg_cleanup_block = {};
+                std::vector<ast::Node *> transferred_cleanup_vars = {};
+                push_cleanup_block(fn, arg_cleanup_block);
+
+                NodeList kv_args = {};
+                kv_args.add(fi_data.key_expr);
+                kv_args.add(fi_data.value);
+                auto remaining_args = compile_fn_args(fn, kv_init_fn, kv_args, fi,
+                                                      &arg_cleanup_block,
+                                                      &transferred_cleanup_vars);
+                auto args = std::vector<llvm::Value *>{dest};
+                args.insert(args.end(), remaining_args.begin(), remaining_args.end());
+                builder.CreateCall(kv_init_type_l, kv_init_fn->llvm_fn, args);
+
+                for (auto *var : transferred_cleanup_vars) {
+                    arg_cleanup_block.exit_flow.add_sink_edge(var, fi);
+                }
+                pop_cleanup_block(fn, arg_cleanup_block);
+            }
+            emit_dbg_location(expr);
+            return;
+        }
+
         if (expr->data.construct_expr.spread_expr) {
             // Build set of target field names that have explicit overrides
             std::set<int> overridden;

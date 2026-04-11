@@ -3082,7 +3082,23 @@ Node *Parser::parse_construct_expr() {
             continue;
         }
 
-        if (token->type == TokenType::COLON && lookahead(1)->type == TokenType::IDEN) {
+        if ((token->type == TokenType::STRING || token->type == TokenType::INT ||
+             token->type == TokenType::FLOAT || token->type == TokenType::CHAR) &&
+            lookahead(1)->type == TokenType::COLON) {
+            // kv init entry: "key": value, 42: value, 'c': value
+            field_started = true;
+            consume(); // consume literal
+            auto key_token = token;
+            expect(TokenType::COLON);
+            auto value = parse_child_expr_construct(false, node);
+            auto field_init = create_node(NodeType::FieldInitExpr, key_token);
+            field_init->data.field_init_expr.token = key_token;
+            field_init->data.field_init_expr.field = key_token; // reuse token for diagnostics
+            auto key_node = create_node(NodeType::LiteralExpr, key_token);
+            field_init->data.field_init_expr.key_expr = key_node;
+            field_init->data.field_init_expr.value = value;
+            node->data.construct_expr.field_inits.add(field_init);
+        } else if (token->type == TokenType::COLON && lookahead(1)->type == TokenType::IDEN) {
             // shorthand field initializer: :field (desugars to field: field)
             field_started = true;
             consume(); // consume ':'

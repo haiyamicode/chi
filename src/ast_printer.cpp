@@ -914,9 +914,14 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::FieldInitExpr: {
         auto &data = node->data.field_init_expr;
-        // Collapse key: key → :key
-        if (data.value && data.value->type == NodeType::Identifier &&
+        if (data.key_expr) {
+            // kv init: "key": value, 42: value, 'c': value
+            print_node(data.key_expr);
+            emit(": ");
+            print_node(data.value);
+        } else if (data.value && data.value->type == NodeType::Identifier &&
             data.value->name == data.field->str) {
+            // Collapse key: key → :key
             emit_fmt(":{}", data.field->str);
         } else {
             emit_fmt("{}: ", data.field->str);

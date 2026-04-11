@@ -224,6 +224,7 @@ void Resolver::context_init_primitives() {
     m_ctx->intrinsic_symbols["std.ops.IndexMut"] = IntrinsicSymbol::IndexMut;
     m_ctx->intrinsic_symbols["std.ops.IndexMutIterable"] = IntrinsicSymbol::IndexMutIterable;
     m_ctx->intrinsic_symbols["std.ops.ListInit"] = IntrinsicSymbol::ListInit;
+    m_ctx->intrinsic_symbols["std.ops.KvInit"] = IntrinsicSymbol::KvInit;
     m_ctx->intrinsic_symbols["std.mem.AllocInit"] = IntrinsicSymbol::AllocInit;
     m_ctx->intrinsic_symbols["std.mem.annotate_copy"] = IntrinsicSymbol::AnnotateCopy;
     m_ctx->intrinsic_symbols["intrinsics.__copy"] = IntrinsicSymbol::MemCopy;
@@ -3127,15 +3128,27 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto struct_type = resolve_struct_type(value_type);
         auto *list_init_member_p =
             struct_type ? struct_type->member_intrinsics.get(IntrinsicSymbol::ListInit) : nullptr;
+        auto *kv_init_member_p =
+            struct_type ? struct_type->member_intrinsics.get(IntrinsicSymbol::KvInit) : nullptr;
         auto *alloc_init_member_p =
             struct_type ? struct_type->member_intrinsics.get(IntrinsicSymbol::AllocInit) : nullptr;
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
         bool use_list_init = list_init_member_p && data.items.len > 0 && !data.field_inits.len &&
                              !data.spread_expr;
+        // Detect kv init: all field_inits have key_expr (string: value pairs)
+        bool has_kv_entries = data.field_inits.len > 0 && data.items.len == 0 &&
+                              data.field_inits[0]->data.field_init_expr.key_expr != nullptr;
+        bool use_kv_init = kv_init_member_p && has_kv_entries;
         bool use_alloc_init =
             has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_MANAGED) && alloc_init_member_p;
         data.use_list_init = use_list_init;
+        data.use_kv_init = use_kv_init;
         data.use_alloc_init = use_alloc_init;
+        if (has_kv_entries && !use_kv_init) {
+            error(node, "type '{}' does not support key-value initialization (missing KvInit implementation)",
+                  format_type_display(value_type));
+            return nullptr;
+        }
         if (use_list_init) {
             auto *list_init_member = *list_init_member_p;
             assert(list_init_member && "ListInit member missing");
@@ -3159,6 +3172,43 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto &fn_def = *scope.parent_fn_def();
                 for (auto item : data.items) {
                     add_borrow_source_edges(fn_def, item, node, false);
+                }
+            }
+            return result_type;
+        }
+        if (use_kv_init) {
+            auto *kv_init_member = *kv_init_member_p;
+            assert(kv_init_member && "KvInit member missing");
+            if (constructor) {
+                auto is_internal =
+                    scope.parent_struct && is_friend_struct(scope.parent_struct, value_type);
+                if (!constructor->check_access(is_internal, false)) {
+                    error(node, errors::PRIVATE_MEMBER_NOT_ACCESSIBLE, "new",
+                          format_type_display(value_type));
+                    return nullptr;
+                }
+                auto &fn_type = constructor->resolved_type->data.fn;
+                NodeList empty_args = {};
+                resolve_fn_call(node, scope, &fn_type, &empty_args, constructor->node);
+            }
+
+            auto &kv_init_fn = kv_init_member->resolved_type->data.fn;
+            for (auto fi : data.field_inits) {
+                auto &fi_data = fi->data.field_init_expr;
+                assert(fi_data.key_expr && "kv init entry missing key_expr");
+                // Resolve key and value as args to kv_init(key, value)
+                NodeList kv_args = {};
+                kv_args.add(fi_data.key_expr);
+                kv_args.add(fi_data.value);
+                resolve_fn_call(fi, scope, &kv_init_fn, &kv_args, kv_init_member->node);
+            }
+
+            if (scope.parent_fn_node && !scope.is_unsafe_block) {
+                auto &fn_def = *scope.parent_fn_def();
+                for (auto fi : data.field_inits) {
+                    auto &fi_data = fi->data.field_init_expr;
+                    add_borrow_source_edges(fn_def, fi_data.key_expr, node, false);
+                    add_borrow_source_edges(fn_def, fi_data.value, node, false);
                 }
             }
             return result_type;

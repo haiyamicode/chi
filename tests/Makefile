@@ -64,7 +64,8 @@ TESTS_LIST = 00_fib.test \
 		58_managed_lowlevel_custom_ctor_map_escape.test \
 		59_contextual_variant_shorthand.test \
 		60_conditional_compilation.test \
-		61_package_import.test
+		61_package_import.test \
+		62_map_init.test
 TESTS ?= $(TESTS_LIST)
 CHIC = $(abspath $(BUILD_DIR)/src/bin/chic)
 CHI = $(abspath $(BUILD_DIR)/src/bin/chi)

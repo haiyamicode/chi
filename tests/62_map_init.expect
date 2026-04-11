@@ -1,0 +1,28 @@
+=== explicit ===
+hello = 1
+world = 2
+chi = 3
+missing not found
+=== contextual ===
+foo = 10
+bar = 20
+=== new ===
+x = 100
+=== string values ===
+lang = chi
+type = compiled
+=== single ===
+only = 1
+=== int keys ===
+1 = one
+2 = two
+3 = three
+=== nested array values ===
+nums len = 3
+more len = 2
+=== struct values ===
+origin = (0, 0)
+offset = (10, 20)
+=== int key struct value ===
+0 = (1, 2)
+1 = (3, 4)

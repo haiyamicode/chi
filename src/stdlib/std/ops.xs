@@ -27,6 +27,10 @@ export interface ListInit<T> {
     func list_init(...items: T);
 }
 
+export interface KvInit<K, V> {
+    func kv_init(key: K, value: V);
+}
+
 export interface Add {
     func add(rhs: &This) This;
 }
