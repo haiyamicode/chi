@@ -403,6 +403,22 @@ func test_temp_cleanup() {
     println("--- if expr as fn arg ---");
     consume_tracked(true ? make_tracked("if-true") : make_tracked("if-false"));
     println("after consume(if ...)");
+
+    // Regression: early return BEFORE a later stmt that owns a stmt-temp must
+    // not destroy the temp's alloca (it's live but uninitialized). Historically
+    // crashed on Linux and silently read garbage on macOS.
+    println("--- early return before later stmt-temp ---");
+    early_return_before_temp(true);
+    println("after early(true)");
+    early_return_before_temp(false);
+    println("after early(false)");
+}
+
+func early_return_before_temp(fast: bool) {
+    if fast {
+        return;
+    }
+    consume_tracked(make_tracked("late-temp"));
 }
 
 func test_expr_contexts() {

@@ -3850,11 +3850,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.exit_flow = fn_def.flow.fork();
             check_lifetime_constraints(&fn_def, data.exit_flow);
         };
-        for (auto stmt : data.statements) {
+        auto stamp_new_stmt_temps = [&](size_t before, int stmt_idx) {
+            for (size_t t = before; t < data.stmt_temp_vars.len; t++) {
+                data.stmt_temp_vars[t]->data.var_decl.stmt_owner_index = stmt_idx;
+            }
+        };
+        for (int i = 0; i < (int)data.statements.len; i++) {
+            auto stmt = data.statements[i];
+            size_t temps_before = data.stmt_temp_vars.len;
             auto stmt_type = resolve(stmt, child_scope);
             ensure_temp_owner(stmt, stmt_type, child_scope);
+            stamp_new_stmt_temps(temps_before, i);
         }
         if (data.return_expr) {
+            size_t temps_before = data.stmt_temp_vars.len;
             auto type = resolve(data.return_expr, child_scope);
             if (!type || type->kind == TypeKind::Void) {
                 // Not value-producing (e.g. void if/switch) — reclassify as statement
@@ -3862,9 +3871,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.return_expr->index = data.statements.len;
                 data.statements.add(data.return_expr);
                 data.return_expr = nullptr;
+                stamp_new_stmt_temps(temps_before, data.statements.len - 1);
                 snapshot_flow();
                 return get_system_types()->void_;
             }
+            stamp_new_stmt_temps(temps_before, data.statements.len);
             snapshot_flow();
             return type;
         }
@@ -10031,8 +10042,11 @@ ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, Reso
 
     expr->resolved_outlet = temp;
     scope.block->stmt_temp_vars.add(temp);
+    // Also tracked in cleanup_vars for interleaved LIFO destruction with regular
+    // locals. Early-return cleanup skips temps whose owning stmt hasn't been
+    // reached yet via `stmt_owner_index` (see compile_block_cleanup).
+    add_cleanup_var(scope.block, temp);
     if (should_destroy(temp, expr_type)) {
-        add_cleanup_var(scope.block, temp);
         scope.parent_fn_def()->has_cleanup = true;
     }
     return temp;

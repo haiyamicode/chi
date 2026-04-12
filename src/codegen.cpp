@@ -1543,7 +1543,7 @@ ast::Node *Compiler::create_cleanup_temp_var(Function *fn, ast::Node *expr, ChiT
 
 void Compiler::push_cleanup_block(Function *fn, ast::Block &block) {
     fn->push_scope();
-    fn->active_blocks.push_back(&block);
+    fn->push_active_block(&block);
 }
 
 void Compiler::pop_cleanup_block(Function *fn, ast::Block &block) {
@@ -1551,7 +1551,7 @@ void Compiler::pop_cleanup_block(Function *fn, ast::Block &block) {
     if (!builder.GetInsertBlock()->getTerminator()) {
         compile_block_cleanup(fn, &block, nullptr, block.exit_flow);
     }
-    fn->active_blocks.pop_back();
+    fn->pop_active_block();
     fn->pop_scope();
 }
 
@@ -4776,7 +4776,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
     auto &data = block->data.block;
 
     auto scope = fn->push_scope();
-    fn->active_blocks.push_back(&data);
+    fn->push_active_block(&data);
 
     bool entering_block = !(resume_point && resume_point->block == block);
     if (entering_block && stmt_index == 0) {
@@ -4800,6 +4800,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
     }
 
     for (int i = stmt_index; i < data.statements.len; i++) {
+        fn->active_block_stmt_idx.back() = i;
         auto stmt = data.statements[i];
         const AsyncResumePoint *current_resume = nullptr;
         if (resume_point && resume_point->block == block && resume_point->stmt_index == i) {
@@ -4821,7 +4822,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_if_recursive(stmt_ctx, stmt, block, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4829,7 +4830,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_switch_recursive(stmt_ctx, stmt, switch_expr, block, i, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4837,7 +4838,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_while_recursive(stmt_ctx, stmt, block, i, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4845,7 +4846,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_for_recursive(stmt_ctx, stmt, block, i, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4853,7 +4854,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_try_recursive(stmt_ctx, stmt, block, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4874,7 +4875,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             if (token->type == TokenType::KW_CONTINUE) {
                 emit_async_state_transition(fn, machine, loop->async_continue_state_id);
             }
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4891,7 +4892,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             emit_async_suspend(fn, machine, state_id, promise_expr, settled_type,
                                result_promise_ptr);
 
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4901,12 +4902,15 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             sync_async_frame_var(fn, machine, stmt, local_vars);
         }
         if (builder.GetInsertBlock()->getTerminator()) {
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
     }
 
+    if (data.return_expr) {
+        fn->active_block_stmt_idx.back() = (int)data.statements.len;
+    }
     const AsyncResumePoint *return_resume = nullptr;
     if (resume_point && resume_point->block == block &&
         resume_point->stmt_index == data.statements.len) {
@@ -4925,7 +4929,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
         auto state_id = register_async_resume_state(fn, machine, next);
         emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
 
-        fn->active_blocks.pop_back();
+        fn->pop_active_block();
         fn->pop_scope();
         return;
     }
@@ -4952,7 +4956,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             move_returned_var = data.return_expr->data.identifier.decl;
         }
         compile_block_cleanup(fn, &data, move_returned_var, data.exit_flow);
-        fn->active_blocks.pop_back();
+        fn->pop_active_block();
         fn->pop_scope();
 
         if (fn->return_label) {
@@ -4989,13 +4993,13 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             } else {
                 builder.CreateRetVoid();
             }
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
     }
 
-    fn->active_blocks.pop_back();
+    fn->pop_active_block();
     fn->pop_scope();
 }
 
@@ -10496,10 +10500,26 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
                                      ast::FlowState &flow) {
     auto &builder = *m_ctx->llvm_builder.get();
     auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+
+    // Look up how far into `block`'s statement list we are at this cleanup point.
+    // Stmt-scoped temps whose owning statement hasn't been reached yet are skipped —
+    // their alloca is live but unfilled, so an early return from an earlier stmt must
+    // not destroy them.
+    int current_stmt_idx = INT_MAX; // normal block exit: all stmts done, no filter
+    for (size_t ai = 0; ai < fn->active_blocks.size(); ai++) {
+        if (fn->active_blocks[ai] == block) {
+            current_stmt_idx = fn->active_block_stmt_idx[ai];
+            break;
+        }
+    }
+
     for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
         auto var = block->cleanup_vars[i];
         if (var == skip_var)
             continue; // Move-returned: skip destruction
+        if (var->type == ast::NodeType::VarDecl &&
+            var->data.var_decl.stmt_owner_index > current_stmt_idx)
+            continue; // stmt-temp not yet born at this divergence point
         if (fn->async_frame_owned_vars.count(var))
             continue; // async frame owns this value; frame destructor handles it
         // Skip variables not yet compiled (e.g. early return before var decl).
@@ -11962,15 +11982,17 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
     }
 
     auto scope = fn->push_scope();
-    fn->active_blocks.push_back(&data);
+    fn->push_active_block(&data);
     for (auto var : data.stmt_temp_vars) {
         compile_stmt(fn, var);
     }
 
-    for (auto stmt : data.statements) {
-        compile_stmt(fn, stmt);
+    for (int i = 0; i < (int)data.statements.len; i++) {
+        fn->active_block_stmt_idx.back() = i;
+        compile_stmt(fn, data.statements[i]);
     }
     if (data.return_expr) {
+        fn->active_block_stmt_idx.back() = (int)data.statements.len;
         if (var && parent) {
             result = compile_assignment_to_type(fn, data.return_expr, get_chitype(parent));
         } else {
@@ -11983,7 +12005,7 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
     if (!scope->branched && !builder.GetInsertBlock()->getTerminator()) {
         compile_block_cleanup(fn, &data, nullptr, data.exit_flow);
     }
-    fn->active_blocks.pop_back();
+    fn->pop_active_block();
     fn->pop_scope();
 
     if (data.return_expr) {

@@ -89,6 +89,11 @@ after orphaned TrackedVar construct
   TrackedVar.new('if-true')
   TrackedVar.delete('if-true')
 after consume(if ...)
+--- early return before later stmt-temp ---
+after early(true)
+  TrackedVar.new('late-temp')
+  TrackedVar.delete('late-temp')
+after early(false)
   TrackedVar.delete('orphan-construct')
   TrackedVar.delete('orphan-fn')
 === Test 11: Temps in expression-position contexts ===
