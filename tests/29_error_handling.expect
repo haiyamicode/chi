@@ -14,6 +14,10 @@ Resource.delete(B)
 Resource.delete(A)
 Resource.delete(mid)
 caught after unwind
+=== direct throw with locals ===
+Resource.delete(local_B)
+Resource.delete(local_A)
+caught direct: direct
 === error cleanup ===
 msg: heap string error
 after cleanup

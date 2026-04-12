@@ -10075,7 +10075,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 llvm_builder.CreateRetVoid();
             }
         } else {
-            // Normal context: call cx_throw
+            // Normal context: run cleanup for live locals/owners before cx_throw so the
+            // throwing frame's destructors fire even though the Itanium unwinder will skip
+            // this frame (it has no landingpad at the call site).
+            auto &throw_flow = fn->active_blocks.back()->exit_flow;
+            for (int i = fn->active_blocks.size() - 1; i >= 0; i--) {
+                compile_block_cleanup(fn, fn->active_blocks[i], nullptr, throw_flow);
+            }
+            emit_cleanup_owners(fn);
             auto throw_fn = get_system_fn("cx_throw");
             auto type_id =
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);

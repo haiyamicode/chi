@@ -147,6 +147,23 @@ func test_destructor_unwind() {
     };
 }
 
+// --- Direct throw in a frame with live destructible locals ---
+// Regression: ThrowStmt used to call cx_throw without running the throwing
+// frame's block cleanup first, leaking r1/r2 here.
+
+func throws_with_locals() {
+    var r1 = Resource{name: "local_A"};
+    var r2 = Resource{name: "local_B"};
+    throw new MyError{msg: "direct"};
+}
+
+func test_direct_throw_with_locals() {
+    println("=== direct throw with locals ===");
+    try throws_with_locals() catch MyError as err {
+        printf("caught direct: {}\n", err.message());
+    };
+}
+
 // --- Error struct with string field (tests cleanup of caught error) ---
 
 func test_error_cleanup() {
@@ -524,6 +541,7 @@ func main() {
     test_catch_binding_narrow();
     test_void_try();
     test_destructor_unwind();
+    test_direct_throw_with_locals();
     test_error_cleanup();
     test_sequential();
     test_nested();
