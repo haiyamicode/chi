@@ -4620,8 +4620,8 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
             // --- Merge ---
             state_fn->use_label(merge_b);
             auto shared_error = builder.CreatePHI(shared_error_type_l, 2, "_shared_error");
-            cast<llvm::PHINode>(shared_error)->addIncoming(tls_shared_error, from_tls_b);
-            cast<llvm::PHINode>(shared_error)->addIncoming(frame_shared_error, from_frame_b);
+            llvm::cast<llvm::PHINode>(shared_error)->addIncoming(tls_shared_error, from_tls_b);
+            llvm::cast<llvm::PHINode>(shared_error)->addIncoming(frame_shared_error, from_frame_b);
             // Shared.ref() expects a pointer (self) — spill the PHI value to a slot
             auto shared_error_ptr = state_fn->entry_alloca(shared_error_type_l, "_shared_error_slot");
             builder.CreateStore(shared_error, shared_error_ptr);
