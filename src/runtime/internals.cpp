@@ -1138,6 +1138,11 @@ void cx_clear_panic_location() {
     st.has_site = false;
 }
 
+static thread_local int cx_destructor_depth = 0;
+
+void cx_destructor_enter() { cx_destructor_depth++; }
+void cx_destructor_leave() { cx_destructor_depth--; }
+
 void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_id) {
     st.error_type_info = type_info;
     st.error_data_ptr = data_ptr;
@@ -1148,6 +1153,18 @@ void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_i
     message.data = (char *)rendered.data();
     message.size = (uint32_t)rendered.size();
     capture_unhandled_state(&message);
+    if (cx_destructor_depth > 0) {
+        // Destructors must not fail: a panic escaping a destructor aborts the
+        // process (matches C++ terminate / Rust double-panic semantics).
+        print("fatal: panic inside destructor: {}\n", rendered);
+        if (st.has_site) {
+            print("at {}:{}:{}\n", st.site_file, st.site_line, st.site_col);
+        }
+        print(st.trace);
+        fflush(stdout);
+        fflush(stderr);
+        std::_Exit(134);
+    }
     throw data_ptr; // non-null, distinguishes from panic's NULL
 }
 

@@ -11120,7 +11120,14 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
             destructor_fn = *destructor_fn_ptr;
         }
         auto destructor_type_l = (llvm::FunctionType *)compile_type(destructor_type);
+        // Guard the user destructor call: if the user's delete() or anything it
+        // calls panics, cx_throw observes cx_destructor_depth > 0 and aborts
+        // instead of throwing. Matches C++ noexcept-dtor / Rust double-panic.
+        auto enter_fn = get_system_fn("cx_destructor_enter");
+        auto leave_fn = get_system_fn("cx_destructor_leave");
+        builder.CreateCall(enter_fn->llvm_fn, {});
         builder.CreateCall(destructor_type_l, destructor_fn->llvm_fn, {this_ptr});
+        builder.CreateCall(leave_fn->llvm_fn, {});
     }
 
     // 2. Destroy fields that need destruction (in reverse order)

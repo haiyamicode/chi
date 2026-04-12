@@ -142,6 +142,8 @@ CHI_RT_EXPORT void cx_set_panic_location(CxString *file, uint32_t line, uint32_t
 CHI_RT_EXPORT void cx_clear_panic_location();
 
 CHI_RT_EXPORT void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_id);
+CHI_RT_EXPORT void cx_destructor_enter();
+CHI_RT_EXPORT void cx_destructor_leave();
 CHI_RT_EXPORT void cx_get_error_trace(CxString *result);
 CHI_RT_EXPORT void *cx_get_error_type_info();
 CHI_RT_EXPORT void *cx_get_error_data();

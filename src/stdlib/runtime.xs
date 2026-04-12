@@ -28,6 +28,8 @@ extern "C" {
     unsafe func cx_set_panic_location(file: *string, line: uint32, col: uint32);
     unsafe func cx_clear_panic_location();
     unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    unsafe func cx_destructor_enter();
+    unsafe func cx_destructor_leave();
     func cx_get_error_trace(result: *string);
     unsafe func cx_get_error_type_info() *void;
     unsafe func cx_get_error_data() *void;
