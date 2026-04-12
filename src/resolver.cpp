@@ -1690,6 +1690,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        // `opt! = value` → `opt = value`: retarget the assignment at the whole
+        // optional so codegen's normal T → ?T implicit-wrap path handles it,
+        // rather than special-casing optional unwrap in the ASS handler.
+        // We keep the RHS inference context on the inner T (not ?T) so
+        // brace-init shorthand continues to construct the payload type.
+        ChiType *rhs_ctx_override = nullptr;
+        if (data.op_type == TokenType::ASS &&
+            data.op1->type == NodeType::UnaryOpExpr) {
+            auto &u = data.op1->data.unary_op_expr;
+            if (u.is_suffix && u.op_type == TokenType::LNOT && u.op1 &&
+                u.op1->resolved_type &&
+                u.op1->resolved_type->kind == TypeKind::Optional &&
+                t1 == u.op1->resolved_type->get_elem()) {
+                rhs_ctx_override = t1;
+                data.op1 = u.op1;
+                t1 = u.op1->resolved_type;
+            }
+        }
+
         ChiType *t2;
         if (is_assignment_op(data.op_type)) {
             auto var = data.op1->get_decl();
@@ -1717,7 +1736,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             }
-            auto var_scope = scope.set_value_type(t1);
+            auto var_scope = scope.set_value_type(rhs_ctx_override ? rhs_ctx_override : t1);
             // For plain assignment, allow construct-into-target optimization.
             // For compound assignments (+=, -=, etc.), don't set move_outlet because
             // the old LHS value must be read by the operator method before being overwritten.

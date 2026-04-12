@@ -2012,6 +2012,19 @@ void Compiler::compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm:
     compile_assignment_to_ptr(fn, source_expr, value_p, elem_type, false, false);
 }
 
+llvm::Value *Compiler::compile_aliasing_safe_assignment(Function *fn, ast::Node *rhs,
+                                                        llvm::Value *dest_ptr,
+                                                        ChiType *dest_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto *ty_l = compile_type(dest_type);
+    auto *tmp = fn->entry_alloca(ty_l, "_assign_tmp");
+    compile_assignment_to_ptr(fn, rhs, tmp, dest_type, /*destruct_old=*/false);
+    compile_destruction_for_type(fn, dest_ptr, dest_type);
+    builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), tmp, llvm::MaybeAlign(),
+                         llvm_type_size(ty_l));
+    return builder.CreateLoad(ty_l, dest_ptr);
+}
+
 void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                          ChiType *dest_type, bool destruct_old,
                                          bool allow_saved_owning_conversion) {
@@ -6145,53 +6158,21 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 [&]() { return compile_assignment_to_type(fn, data.op2, result_type); });
         }
         case TokenType::ASS: {
-            auto assign_target = data.op1;
-            bool unwrap_optional_lhs = false;
-            llvm::Value *optional_value_ptr = nullptr;
-            llvm::Value *optional_had_value = nullptr;
-            if (data.op1->type == ast::NodeType::UnaryOpExpr) {
-                auto &lhs_unary = data.op1->data.unary_op_expr;
-                if (lhs_unary.is_suffix && lhs_unary.op_type == TokenType::LNOT &&
-                    lhs_unary.op1 && lhs_unary.op1->resolved_type &&
-                    lhs_unary.op1->resolved_type->kind == TypeKind::Optional) {
-                    assign_target = lhs_unary.op1;
-                    unwrap_optional_lhs = true;
-                }
-            }
-            auto ref = compile_expr_ref(fn, assign_target);
+            auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
-            auto dest_type = get_chitype(assign_target);
+            auto dest_type = get_chitype(data.op1);
             auto dest_ptr = ref.address;
-            if (unwrap_optional_lhs) {
-                auto opt_type_l = compile_type(dest_type);
-                auto has_value_p = builder.CreateStructGEP(opt_type_l, ref.address, 0);
-                optional_had_value = builder.CreateLoad(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx),
-                                                        has_value_p);
-                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
-                                    has_value_p);
-                optional_value_ptr = builder.CreateStructGEP(opt_type_l, ref.address, 1);
-                dest_ptr = optional_value_ptr;
-                dest_type = dest_type->get_elem();
+
+            // Route owning assignment through a disjoint temp so RHS and
+            // dest cannot alias (fixes self-assignment UAF).
+            if (!data.is_initializing &&
+                get_resolver()->type_needs_destruction(dest_type)) {
+                return compile_aliasing_safe_assignment(fn, data.op2, dest_ptr, dest_type);
             }
             auto src_type = get_chitype(data.op2);
             bool destruct_old = !data.is_initializing;
-            if (unwrap_optional_lhs && destruct_old && get_resolver()->type_needs_destruction(dest_type)) {
-                auto bb_destroy = fn->new_label("opt_assign_destroy");
-                auto bb_done = fn->new_label("opt_assign_ready");
-                builder.CreateCondBr(optional_had_value, bb_destroy, bb_done);
-
-                builder.SetInsertPoint(bb_destroy);
-                compile_destruction_for_type(fn, dest_ptr, dest_type);
-                builder.CreateBr(bb_done);
-
-                builder.SetInsertPoint(bb_done);
-                destruct_old = false;
-            }
             if (compile_implicit_owning_conversion_to_ptr(
                     fn, data.op2, dest_ptr, dest_type, destruct_old)) {
-                if (unwrap_optional_lhs) {
-                    return builder.CreateLoad(compile_type(dest_type), dest_ptr);
-                }
                 return builder.CreateLoad(compile_type(dest_type), dest_ptr);
             }
             // Fallback for cloned AST nodes (e.g. subtype variants):

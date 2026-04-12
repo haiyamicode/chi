@@ -263,8 +263,8 @@ after unary
   c.id=4
 --- reassign from construct ---
   TrackedVal.new(5)
-  TrackedVal.delete(5)
   TrackedVal.new(6)
+  TrackedVal.delete(5)
   d.id=6
 --- struct field from fn call ---
   TrackedVal.new(7)

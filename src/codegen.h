@@ -629,6 +629,8 @@ class Compiler {
     void compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                    ChiType *dest_type, bool destruct_old = false,
                                    bool allow_saved_owning_conversion = true);
+    llvm::Value *compile_aliasing_safe_assignment(Function *fn, ast::Node *rhs,
+                                                  llvm::Value *dest_ptr, ChiType *dest_type);
 
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                       array<ast::FnCapture> *captures);
