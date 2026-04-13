@@ -53,8 +53,8 @@ Traced(10) destroyed
 Traced(10) destroyed
 === Test: Enum traced reassign ===
 Traced(10) created
-Traced(10) destroyed
 Traced(20) created
+Traced(10) destroyed
 a.trace.id=20
 --- scope exit ---
 Traced(20) destroyed
@@ -97,8 +97,8 @@ a.trace.id=1
 Traced(1) copied
 b.trace.id=1
 -- reassign --
-Traced(1) destroyed
 Traced(2) created
+Traced(1) destroyed
 a.trace.id=2
 -- variant with data --
 Traced(3) created

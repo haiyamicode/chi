@@ -112,8 +112,8 @@ read_only:
 reassign:
   construct(10)
   before: 10
-  destroy(10)
   construct(20)
+  destroy(10)
   after: 20
   destroy(20)
 guard_read:
@@ -123,15 +123,15 @@ guard_read:
 guard_reassign:
   construct(200)
   before: 200
-  destroy(200)
   construct(300)
+  destroy(200)
   after: 300
   destroy(300)
 assert_reassign:
   construct(400)
   before: 400
-  destroy(400)
   construct(500)
+  destroy(400)
   after: 500
   destroy(500)
 compound:

@@ -1543,7 +1543,7 @@ ast::Node *Compiler::create_cleanup_temp_var(Function *fn, ast::Node *expr, ChiT
 
 void Compiler::push_cleanup_block(Function *fn, ast::Block &block) {
     fn->push_scope();
-    fn->active_blocks.push_back(&block);
+    fn->push_active_block(&block);
 }
 
 void Compiler::pop_cleanup_block(Function *fn, ast::Block &block) {
@@ -1551,7 +1551,7 @@ void Compiler::pop_cleanup_block(Function *fn, ast::Block &block) {
     if (!builder.GetInsertBlock()->getTerminator()) {
         compile_block_cleanup(fn, &block, nullptr, block.exit_flow);
     }
-    fn->active_blocks.pop_back();
+    fn->pop_active_block();
     fn->pop_scope();
 }
 
@@ -2010,6 +2010,19 @@ void Compiler::compile_optional_wrap_to_ptr(Function *fn, ast::Node *expr, llvm:
     auto value_p = builder.CreateStructGEP(opt_type_l, dest, 1);
     auto source_expr = get_owning_conversion_source_expr(expr);
     compile_assignment_to_ptr(fn, source_expr, value_p, elem_type, false, false);
+}
+
+llvm::Value *Compiler::compile_aliasing_safe_assignment(Function *fn, ast::Node *rhs,
+                                                        llvm::Value *dest_ptr,
+                                                        ChiType *dest_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto *ty_l = compile_type(dest_type);
+    auto *tmp = fn->entry_alloca(ty_l, "_assign_tmp");
+    compile_assignment_to_ptr(fn, rhs, tmp, dest_type, /*destruct_old=*/false);
+    compile_destruction_for_type(fn, dest_ptr, dest_type);
+    builder.CreateMemCpy(dest_ptr, llvm::MaybeAlign(), tmp, llvm::MaybeAlign(),
+                         llvm_type_size(ty_l));
+    return builder.CreateLoad(ty_l, dest_ptr);
 }
 
 void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
@@ -4763,7 +4776,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
     auto &data = block->data.block;
 
     auto scope = fn->push_scope();
-    fn->active_blocks.push_back(&data);
+    fn->push_active_block(&data);
 
     bool entering_block = !(resume_point && resume_point->block == block);
     if (entering_block && stmt_index == 0) {
@@ -4787,6 +4800,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
     }
 
     for (int i = stmt_index; i < data.statements.len; i++) {
+        fn->active_block_stmt_idx.back() = i;
         auto stmt = data.statements[i];
         const AsyncResumePoint *current_resume = nullptr;
         if (resume_point && resume_point->block == block && resume_point->stmt_index == i) {
@@ -4808,7 +4822,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_if_recursive(stmt_ctx, stmt, block, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4816,7 +4830,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_switch_recursive(stmt_ctx, stmt, switch_expr, block, i, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4824,7 +4838,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_while_recursive(stmt_ctx, stmt, block, i, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4832,7 +4846,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_for_recursive(stmt_ctx, stmt, block, i, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4840,7 +4854,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             auto stmt_ctx = ctx;
             stmt_ctx.resume_point = current_resume;
             compile_async_try_recursive(stmt_ctx, stmt, block, i + 1);
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4861,7 +4875,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             if (token->type == TokenType::KW_CONTINUE) {
                 emit_async_state_transition(fn, machine, loop->async_continue_state_id);
             }
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4878,7 +4892,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             emit_async_suspend(fn, machine, state_id, promise_expr, settled_type,
                                result_promise_ptr);
 
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
@@ -4888,12 +4902,15 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             sync_async_frame_var(fn, machine, stmt, local_vars);
         }
         if (builder.GetInsertBlock()->getTerminator()) {
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
     }
 
+    if (data.return_expr) {
+        fn->active_block_stmt_idx.back() = (int)data.statements.len;
+    }
     const AsyncResumePoint *return_resume = nullptr;
     if (resume_point && resume_point->block == block &&
         resume_point->stmt_index == data.statements.len) {
@@ -4912,7 +4929,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
         auto state_id = register_async_resume_state(fn, machine, next);
         emit_async_suspend(fn, machine, state_id, promise_expr, settled_type, result_promise_ptr);
 
-        fn->active_blocks.pop_back();
+        fn->pop_active_block();
         fn->pop_scope();
         return;
     }
@@ -4939,7 +4956,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             move_returned_var = data.return_expr->data.identifier.decl;
         }
         compile_block_cleanup(fn, &data, move_returned_var, data.exit_flow);
-        fn->active_blocks.pop_back();
+        fn->pop_active_block();
         fn->pop_scope();
 
         if (fn->return_label) {
@@ -4976,13 +4993,13 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             } else {
                 builder.CreateRetVoid();
             }
-            fn->active_blocks.pop_back();
+            fn->pop_active_block();
             fn->pop_scope();
             return;
         }
     }
 
-    fn->active_blocks.pop_back();
+    fn->pop_active_block();
     fn->pop_scope();
 }
 
@@ -6145,53 +6162,21 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 [&]() { return compile_assignment_to_type(fn, data.op2, result_type); });
         }
         case TokenType::ASS: {
-            auto assign_target = data.op1;
-            bool unwrap_optional_lhs = false;
-            llvm::Value *optional_value_ptr = nullptr;
-            llvm::Value *optional_had_value = nullptr;
-            if (data.op1->type == ast::NodeType::UnaryOpExpr) {
-                auto &lhs_unary = data.op1->data.unary_op_expr;
-                if (lhs_unary.is_suffix && lhs_unary.op_type == TokenType::LNOT &&
-                    lhs_unary.op1 && lhs_unary.op1->resolved_type &&
-                    lhs_unary.op1->resolved_type->kind == TypeKind::Optional) {
-                    assign_target = lhs_unary.op1;
-                    unwrap_optional_lhs = true;
-                }
-            }
-            auto ref = compile_expr_ref(fn, assign_target);
+            auto ref = compile_expr_ref(fn, data.op1);
             assert(ref.address);
-            auto dest_type = get_chitype(assign_target);
+            auto dest_type = get_chitype(data.op1);
             auto dest_ptr = ref.address;
-            if (unwrap_optional_lhs) {
-                auto opt_type_l = compile_type(dest_type);
-                auto has_value_p = builder.CreateStructGEP(opt_type_l, ref.address, 0);
-                optional_had_value = builder.CreateLoad(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx),
-                                                        has_value_p);
-                builder.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), 1),
-                                    has_value_p);
-                optional_value_ptr = builder.CreateStructGEP(opt_type_l, ref.address, 1);
-                dest_ptr = optional_value_ptr;
-                dest_type = dest_type->get_elem();
+
+            // Route owning assignment through a disjoint temp so RHS and
+            // dest cannot alias (fixes self-assignment UAF).
+            if (!data.is_initializing &&
+                get_resolver()->type_needs_destruction(dest_type)) {
+                return compile_aliasing_safe_assignment(fn, data.op2, dest_ptr, dest_type);
             }
             auto src_type = get_chitype(data.op2);
             bool destruct_old = !data.is_initializing;
-            if (unwrap_optional_lhs && destruct_old && get_resolver()->type_needs_destruction(dest_type)) {
-                auto bb_destroy = fn->new_label("opt_assign_destroy");
-                auto bb_done = fn->new_label("opt_assign_ready");
-                builder.CreateCondBr(optional_had_value, bb_destroy, bb_done);
-
-                builder.SetInsertPoint(bb_destroy);
-                compile_destruction_for_type(fn, dest_ptr, dest_type);
-                builder.CreateBr(bb_done);
-
-                builder.SetInsertPoint(bb_done);
-                destruct_old = false;
-            }
             if (compile_implicit_owning_conversion_to_ptr(
                     fn, data.op2, dest_ptr, dest_type, destruct_old)) {
-                if (unwrap_optional_lhs) {
-                    return builder.CreateLoad(compile_type(dest_type), dest_ptr);
-                }
                 return builder.CreateLoad(compile_type(dest_type), dest_ptr);
             }
             // Fallback for cloned AST nodes (e.g. subtype variants):
@@ -10090,7 +10075,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 llvm_builder.CreateRetVoid();
             }
         } else {
-            // Normal context: call cx_throw
+            // Normal context: run cleanup for live locals/owners before cx_throw so the
+            // throwing frame's destructors fire even though the Itanium unwinder will skip
+            // this frame (it has no landingpad at the call site).
+            auto &throw_flow = fn->active_blocks.back()->exit_flow;
+            for (int i = fn->active_blocks.size() - 1; i >= 0; i--) {
+                compile_block_cleanup(fn, fn->active_blocks[i], nullptr, throw_flow);
+            }
+            emit_cleanup_owners(fn);
             auto throw_fn = get_system_fn("cx_throw");
             auto type_id =
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), elem_type->id);
@@ -10515,10 +10507,26 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
                                      ast::FlowState &flow) {
     auto &builder = *m_ctx->llvm_builder.get();
     auto &llvm_ctx = *m_ctx->llvm_ctx.get();
+
+    // Look up how far into `block`'s statement list we are at this cleanup point.
+    // Stmt-scoped temps whose owning statement hasn't been reached yet are skipped —
+    // their alloca is live but unfilled, so an early return from an earlier stmt must
+    // not destroy them.
+    int current_stmt_idx = INT_MAX; // normal block exit: all stmts done, no filter
+    for (size_t ai = 0; ai < fn->active_blocks.size(); ai++) {
+        if (fn->active_blocks[ai] == block) {
+            current_stmt_idx = fn->active_block_stmt_idx[ai];
+            break;
+        }
+    }
+
     for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
         auto var = block->cleanup_vars[i];
         if (var == skip_var)
             continue; // Move-returned: skip destruction
+        if (var->type == ast::NodeType::VarDecl &&
+            var->data.var_decl.stmt_owner_index > current_stmt_idx)
+            continue; // stmt-temp not yet born at this divergence point
         if (fn->async_frame_owned_vars.count(var))
             continue; // async frame owns this value; frame destructor handles it
         // Skip variables not yet compiled (e.g. early return before var decl).
@@ -11112,7 +11120,14 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
             destructor_fn = *destructor_fn_ptr;
         }
         auto destructor_type_l = (llvm::FunctionType *)compile_type(destructor_type);
+        // Guard the user destructor call: if the user's delete() or anything it
+        // calls panics, cx_throw observes cx_destructor_depth > 0 and aborts
+        // instead of throwing. Matches C++ noexcept-dtor / Rust double-panic.
+        auto enter_fn = get_system_fn("cx_destructor_enter");
+        auto leave_fn = get_system_fn("cx_destructor_leave");
+        builder.CreateCall(enter_fn->llvm_fn, {});
         builder.CreateCall(destructor_type_l, destructor_fn->llvm_fn, {this_ptr});
+        builder.CreateCall(leave_fn->llvm_fn, {});
     }
 
     // 2. Destroy fields that need destruction (in reverse order)
@@ -11981,15 +11996,17 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
     }
 
     auto scope = fn->push_scope();
-    fn->active_blocks.push_back(&data);
+    fn->push_active_block(&data);
     for (auto var : data.stmt_temp_vars) {
         compile_stmt(fn, var);
     }
 
-    for (auto stmt : data.statements) {
-        compile_stmt(fn, stmt);
+    for (int i = 0; i < (int)data.statements.len; i++) {
+        fn->active_block_stmt_idx.back() = i;
+        compile_stmt(fn, data.statements[i]);
     }
     if (data.return_expr) {
+        fn->active_block_stmt_idx.back() = (int)data.statements.len;
         if (var && parent) {
             result = compile_assignment_to_type(fn, data.return_expr, get_chitype(parent));
         } else {
@@ -12002,7 +12019,7 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
     if (!scope->branched && !builder.GetInsertBlock()->getTerminator()) {
         compile_block_cleanup(fn, &data, nullptr, data.exit_flow);
     }
-    fn->active_blocks.pop_back();
+    fn->pop_active_block();
     fn->pop_scope();
 
     if (data.return_expr) {
@@ -12075,7 +12092,12 @@ Function *Compiler::get_fn(ast::Node *node) {
             auto &gfn = node->data.generated_fn;
             array<ChiType *> concrete_args;
             for (auto arg : gfn.fn_subtype->data.subtype.args) {
-                concrete_args.add(eval_type(arg));
+                // Substitute placeholders without collapsing Subtype wrappers
+                // (eval_type would collapse to final_type Struct, losing nesting
+                // info needed for the generic-depth check in get_fn_variant).
+                auto substituted =
+                    get_resolver()->type_placeholders_sub_map(arg, m_fn->type_env);
+                concrete_args.add(substituted);
             }
             target = get_resolver()->get_fn_variant(get_resolver()->node_get_type(gfn.original_fn),
                                                     &concrete_args, gfn.original_fn);

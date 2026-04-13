@@ -1690,6 +1690,25 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return nullptr;
         }
 
+        // `opt! = value` → `opt = value`: retarget the assignment at the whole
+        // optional so codegen's normal T → ?T implicit-wrap path handles it,
+        // rather than special-casing optional unwrap in the ASS handler.
+        // We keep the RHS inference context on the inner T (not ?T) so
+        // brace-init shorthand continues to construct the payload type.
+        ChiType *rhs_ctx_override = nullptr;
+        if (data.op_type == TokenType::ASS &&
+            data.op1->type == NodeType::UnaryOpExpr) {
+            auto &u = data.op1->data.unary_op_expr;
+            if (u.is_suffix && u.op_type == TokenType::LNOT && u.op1 &&
+                u.op1->resolved_type &&
+                u.op1->resolved_type->kind == TypeKind::Optional &&
+                t1 == u.op1->resolved_type->get_elem()) {
+                rhs_ctx_override = t1;
+                data.op1 = u.op1;
+                t1 = u.op1->resolved_type;
+            }
+        }
+
         ChiType *t2;
         if (is_assignment_op(data.op_type)) {
             auto var = data.op1->get_decl();
@@ -1717,7 +1736,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             }
-            auto var_scope = scope.set_value_type(t1);
+            auto var_scope = scope.set_value_type(rhs_ctx_override ? rhs_ctx_override : t1);
             // For plain assignment, allow construct-into-target optimization.
             // For compound assignments (+=, -=, etc.), don't set move_outlet because
             // the old LHS value must be read by the operator method before being overwritten.
@@ -3831,11 +3850,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             data.exit_flow = fn_def.flow.fork();
             check_lifetime_constraints(&fn_def, data.exit_flow);
         };
-        for (auto stmt : data.statements) {
+        auto stamp_new_stmt_temps = [&](size_t before, int stmt_idx) {
+            for (size_t t = before; t < data.stmt_temp_vars.len; t++) {
+                data.stmt_temp_vars[t]->data.var_decl.stmt_owner_index = stmt_idx;
+            }
+        };
+        for (int i = 0; i < (int)data.statements.len; i++) {
+            auto stmt = data.statements[i];
+            size_t temps_before = data.stmt_temp_vars.len;
             auto stmt_type = resolve(stmt, child_scope);
             ensure_temp_owner(stmt, stmt_type, child_scope);
+            stamp_new_stmt_temps(temps_before, i);
         }
         if (data.return_expr) {
+            size_t temps_before = data.stmt_temp_vars.len;
             auto type = resolve(data.return_expr, child_scope);
             if (!type || type->kind == TypeKind::Void) {
                 // Not value-producing (e.g. void if/switch) — reclassify as statement
@@ -3843,9 +3871,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.return_expr->index = data.statements.len;
                 data.statements.add(data.return_expr);
                 data.return_expr = nullptr;
+                stamp_new_stmt_temps(temps_before, data.statements.len - 1);
                 snapshot_flow();
                 return get_system_types()->void_;
             }
+            stamp_new_stmt_temps(temps_before, data.statements.len);
             snapshot_flow();
             return type;
         }
@@ -10012,8 +10042,11 @@ ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, Reso
 
     expr->resolved_outlet = temp;
     scope.block->stmt_temp_vars.add(temp);
+    // Also tracked in cleanup_vars for interleaved LIFO destruction with regular
+    // locals. Early-return cleanup skips temps whose owning stmt hasn't been
+    // reached yet via `stmt_owner_index` (see compile_block_cleanup).
+    add_cleanup_var(scope.block, temp);
     if (should_destroy(temp, expr_type)) {
-        add_cleanup_var(scope.block, temp);
         scope.parent_fn_def()->has_cleanup = true;
     }
     return temp;
@@ -11115,6 +11148,33 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
     assert(generic_fn->kind == TypeKind::Fn);
     assert(fn_node->type == NodeType::FnDef);
     auto &gen = generic_fn->data.fn;
+
+    int max_arg_depth = 0;
+    for (auto arg : *type_args) {
+        int d = arg->subtype_depth();
+        if (d > max_arg_depth) max_arg_depth = d;
+    }
+    if (max_arg_depth > MAX_GENERIC_DEPTH) {
+        auto fn_display = fn_node->name + "<" + format_type_list(type_args) + ">";
+        error(fn_node, errors::GENERIC_DEPTH_EXCEEDED, fn_display, MAX_GENERIC_DEPTH);
+        if (fn_node->data.fn_def.variants.len > 0) {
+            return fn_node->data.fn_def.variants[0];
+        }
+        auto stub_sub = create_type(TypeKind::Subtype);
+        stub_sub->data.subtype.generic = generic_fn;
+        stub_sub->data.subtype.root_node = fn_node->get_root_node();
+        stub_sub->is_placeholder = true;
+        auto stub_fn = create_node(NodeType::GeneratedFn);
+        stub_fn->data.generated_fn.fn_subtype = stub_sub;
+        stub_fn->data.generated_fn.original_fn = fn_node;
+        stub_fn->module = fn_node->module;
+        stub_fn->root_node = fn_node->get_root_node();
+        stub_fn->token = fn_node->token;
+        stub_fn->resolved_type = generic_fn;
+        stub_sub->data.subtype.generated_fn = stub_fn;
+        return stub_fn;
+    }
+
     for (auto variant : fn_node->data.fn_def.variants) {
         assert(variant->type == NodeType::GeneratedFn);
         auto subtype = variant->data.generated_fn.fn_subtype;

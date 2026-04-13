@@ -89,6 +89,11 @@ after orphaned TrackedVar construct
   TrackedVar.new('if-true')
   TrackedVar.delete('if-true')
 after consume(if ...)
+--- early return before later stmt-temp ---
+after early(true)
+  TrackedVar.new('late-temp')
+  TrackedVar.delete('late-temp')
+after early(false)
   TrackedVar.delete('orphan-construct')
   TrackedVar.delete('orphan-fn')
 === Test 11: Temps in expression-position contexts ===
@@ -263,8 +268,8 @@ after unary
   c.id=4
 --- reassign from construct ---
   TrackedVal.new(5)
-  TrackedVal.delete(5)
   TrackedVal.new(6)
+  TrackedVal.delete(5)
   d.id=6
 --- struct field from fn call ---
   TrackedVal.new(7)

@@ -95,6 +95,7 @@ struct Function {
     std::list<BlockScope *> scope_stack;
     std::list<LoopLabels> loop_labels;
     std::vector<ast::Block *> active_blocks;  // block cleanup stack (inner to outer)
+    std::vector<int> active_block_stmt_idx;   // current stmt index per active block (parallel stack); -1 = no stmt started
     bool has_cleanup_invoke = false;
     llvm::Value *async_reject_promise_ptr = nullptr; // non-null in async: landing pad rejects promise
     ChiType *async_promise_type = nullptr;           // Promise<T> type for reject call
@@ -194,6 +195,15 @@ struct Function {
     }
     void pop_scope() { scope_stack.pop_back(); }
     BlockScope *get_scope() { return scope_stack.back(); }
+
+    void push_active_block(ast::Block *block) {
+        active_blocks.push_back(block);
+        active_block_stmt_idx.push_back(-1);
+    }
+    void pop_active_block() {
+        active_blocks.pop_back();
+        active_block_stmt_idx.pop_back();
+    }
 
     LoopLabels *push_loop() {
         auto *loop = &loop_labels.emplace_back();
@@ -629,6 +639,8 @@ class Compiler {
     void compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Value *dest,
                                    ChiType *dest_type, bool destruct_old = false,
                                    bool allow_saved_owning_conversion = true);
+    llvm::Value *compile_aliasing_safe_assignment(Function *fn, ast::Node *rhs,
+                                                  llvm::Value *dest_ptr, ChiType *dest_type);
 
     llvm::Value *compile_lambda_alloc(Function *fn, ChiType *lambda_type, llvm::Value *fn_ptr,
                                       array<ast::FnCapture> *captures);

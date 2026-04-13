@@ -423,6 +423,7 @@ struct VarDecl {
     bool is_generated = false;
     Node *initialized_at = nullptr;
     Node *narrowed_from = nullptr;
+    int stmt_owner_index = -1; // for stmt-scoped temps: index of owning stmt in parent block
 };
 
 struct BinOpExpr {
