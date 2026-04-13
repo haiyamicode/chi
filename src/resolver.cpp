@@ -180,7 +180,8 @@ void Resolver::context_init_primitives() {
     system_types.unit = create_type(TypeKind::Unit);
     system_types.tuple = create_type(TypeKind::Tuple);
     m_ctx->rt_unit_type = system_types.unit;
-    m_ctx->static_lifetime = new ChiLifetime{"static", LifetimeKind::Static, nullptr, nullptr};
+    m_ctx->static_lifetime =
+        m_ctx->allocator->create_lifetime("static", LifetimeKind::Static, nullptr, nullptr);
 
     // Create a system lambda type for LLVM compatibility
     // All lambdas use the same underlying structure: {ptr, size, data, flags}
@@ -1075,7 +1076,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (lt_node->name == "static") {
                 lt = m_ctx->static_lifetime;
             } else {
-                lt = new ChiLifetime{lt_node->name, LifetimeKind::Param, nullptr, nullptr};
+                lt = m_ctx->allocator->create_lifetime(lt_node->name, LifetimeKind::Param,
+                                                       nullptr, nullptr);
             }
             lifetime_map[lt_node->name] = lt;
             fn_lifetime_list.add(lt);
@@ -1184,8 +1186,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             // Each reference-like param gets its own distinct lifetime.
             if (type_needs_first_ref_lifetime(param_type)) {
-                auto *lt =
-                    new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
+                auto *lt = m_ctx->allocator->create_lifetime(
+                    string(param->name), LifetimeKind::Param, param, nullptr);
                 all_ref_lifetimes.add(lt);
                 auto *fresh = with_first_ref_lifetime(param_type, lt);
                 param_type = fresh;
@@ -1211,7 +1213,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     lt = param_type->data.placeholder.lifetime_bound;
                 }
                 if (!lt) {
-                    lt = new ChiLifetime{string(param->name), LifetimeKind::Param, param, nullptr};
+                    lt = m_ctx->allocator->create_lifetime(
+                        string(param->name), LifetimeKind::Param, param, nullptr);
                 }
                 pdata.borrow_lifetime = lt;
                 all_ref_lifetimes.add(lt);
@@ -1250,8 +1253,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (container) {
                 auto &st = container->data.struct_;
                 if (!st.this_lifetime) {
-                    st.this_lifetime =
-                        new ChiLifetime{"this", LifetimeKind::This, nullptr, container};
+                    st.this_lifetime = m_ctx->allocator->create_lifetime(
+                        "this", LifetimeKind::This, nullptr, container);
                 }
                 all_ref_lifetimes.add(st.this_lifetime);
             }
@@ -1262,7 +1265,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (all_ref_lifetimes.len == 1) {
                     elided_lt = all_ref_lifetimes[0];
                 } else {
-                    elided_lt = new ChiLifetime{"fn", LifetimeKind::Return, nullptr, nullptr};
+                    elided_lt = m_ctx->allocator->create_lifetime(
+                        "fn", LifetimeKind::Return, nullptr, nullptr);
                     for (size_t i = 0; i < all_ref_lifetimes.len; i++) {
                         all_ref_lifetimes[i]->outlives.add(elided_lt);
                     }
@@ -1332,8 +1336,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Attach 'this lifetime so satisfies_lifetime_constraint can check it
             auto &st = scope.parent_struct->data.struct_;
             if (!st.this_lifetime) {
-                st.this_lifetime =
-                    new ChiLifetime{"this", LifetimeKind::This, nullptr, scope.parent_struct};
+                st.this_lifetime = m_ctx->allocator->create_lifetime(
+                    "this", LifetimeKind::This, nullptr, scope.parent_struct);
             }
             type->data.pointer.lifetimes.add(st.this_lifetime);
             return type;
@@ -4102,7 +4106,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (lt_node->name == "static") {
                     lt = m_ctx->static_lifetime;
                 } else {
-                    lt = new ChiLifetime{lt_node->name, LifetimeKind::Param, nullptr, struct_type};
+                    lt = m_ctx->allocator->create_lifetime(lt_node->name, LifetimeKind::Param,
+                                                           nullptr, struct_type);
                 }
                 struct_->lifetime_params.add(lt);
             }
@@ -4121,8 +4126,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Implicit 'this bound: all lifetime params outlive the struct instance
             if (struct_->lifetime_params.len > 0) {
                 if (!struct_->this_lifetime) {
-                    struct_->this_lifetime =
-                        new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
+                    struct_->this_lifetime = m_ctx->allocator->create_lifetime(
+                        "this", LifetimeKind::This, nullptr, struct_type);
                 }
                 for (auto *lt : struct_->lifetime_params) {
                     if (lt->kind != LifetimeKind::Static) {
@@ -7188,8 +7193,8 @@ ChiStructMember *Resolver::resolve_struct_member(ChiType *struct_type, ast::Node
         // Reference fields implicitly have 'this lifetime
         if (member->resolved_type && member->resolved_type->is_pointer_like()) {
             if (!struct_.this_lifetime) {
-                struct_.this_lifetime =
-                    new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
+                struct_.this_lifetime = m_ctx->allocator->create_lifetime(
+                    "this", LifetimeKind::This, nullptr, struct_type);
             }
         }
     } else if (node->type == NodeType::FnDef) {
@@ -9910,7 +9915,8 @@ ChiLifetime *Resolver::resolve_named_lifetime(ast::Node *node, ResolveScope &sco
         auto *struct_type = scope.parent_struct;
         auto &st = struct_type->data.struct_;
         if (!st.this_lifetime) {
-            st.this_lifetime = new ChiLifetime{"this", LifetimeKind::This, nullptr, struct_type};
+            st.this_lifetime = m_ctx->allocator->create_lifetime(
+                "this", LifetimeKind::This, nullptr, struct_type);
         }
         return st.this_lifetime;
     }

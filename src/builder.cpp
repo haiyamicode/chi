@@ -267,8 +267,9 @@ void Builder::build_package(const string &package_dir) {
     // Parse configuration using Boost.JSON native serialization
     auto config = boost::json::value_to<PackageConfig>(config_json);
 
-    // Store config in a heap-allocated object for later access
-    auto* config_ptr = new PackageConfig(std::move(config));
+    // Store config in a heap-allocated object for later access, owned by the context.
+    auto* config_ptr =
+        m_ctx.package_configs.emplace(new PackageConfig(std::move(config)))->get();
 
     // Process native modules (C interop via libclang)
     if (config_ptr->c_interop.has_value() && !config_ptr->c_interop->native_modules.empty()) {
