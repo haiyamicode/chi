@@ -29,6 +29,8 @@ struct Context {
     virtual InterfaceImpl *create_interface_impl() = 0;
     virtual ChiEnumVariant *create_enum_member() = 0;
     virtual WhereCondition *create_where_condition() = 0;
+    virtual ChiLifetime *create_lifetime(string name, LifetimeKind kind, ast::Node *owner,
+                                         ChiType *origin) = 0;
 
     virtual ast::Module *module_from_path(ast::Package *package, const string &path,
                                           bool import = false) = 0;

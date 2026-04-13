@@ -465,16 +465,16 @@ ast::Module* create_native_module(
     dummy_token->str = "<virtual>";
     dummy_token->pos = Pos{0, 0};
 
+    // Create a virtual package for this module
+    auto* package = ctx->add_package("<virtual>");
+
     // Create module
-    auto* module = new ast::Module();
+    auto* module = package->add_module();
     module->name = module_name;
     module->id_path = module_name;
     module->kind = ast::ModuleKind::XS;  // Manual memory
     module->path = "<virtual:" + module_name + ">";
     module->filename = "<virtual:" + module_name + ">";
-
-    // Create a virtual package for this module
-    auto* package = ctx->add_package("<virtual>");
     module->package = package;
 
     // Create root node
@@ -527,16 +527,16 @@ ast::Module* get_or_create_c_module(
     dummy_token->str = "<virtual>";
     dummy_token->pos = Pos{0, 0};
 
+    // Create a virtual package for this module
+    auto* package = ctx->add_package("<virtual>");
+
     // Create new virtual "C" module
-    auto* module = new ast::Module();
+    auto* module = package->add_module();
     module->name = "C";
     module->id_path = module_key;  // Use namespaced key as id_path
     module->kind = ast::ModuleKind::XS;  // Manual memory
     module->path = "<virtual:" + module_key + ">";
     module->filename = "<virtual:" + module_key + ">";
-
-    // Create a virtual package for this module
-    auto* package = ctx->add_package("<virtual>");
     module->package = package;
 
     // Create root node

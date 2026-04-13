@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ast.h"
+#include "package_config.h"
 #include "resolver.h"
 #include "sema.h"
 
@@ -28,6 +29,8 @@ struct CompilationContext : public Context {
     array<box<ChiEnumVariant>> enum_members = {};
     array<box<InterfaceImpl>> interface_impls = {};
     array<box<WhereCondition>> where_conditions = {};
+    array<box<ChiLifetime>> lifetimes = {};
+    array<box<PackageConfig>> package_configs = {};
     uint32_t flags = 0;
     array<string> file_extensions = {"xs", "x"};
     string root_path = "";
@@ -113,6 +116,11 @@ struct CompilationContext : public Context {
 
     WhereCondition *create_where_condition() {
         return where_conditions.emplace(new WhereCondition())->get();
+    }
+
+    ChiLifetime *create_lifetime(string name, LifetimeKind kind, ast::Node *owner,
+                                 ChiType *origin) {
+        return lifetimes.emplace(new ChiLifetime{std::move(name), kind, owner, origin})->get();
     }
 };
 } // namespace cx

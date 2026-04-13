@@ -866,7 +866,7 @@ void Compiler::compile_enum_name_intrinsics(ChiTypeEnum *enum_data, ChiType *bas
                     base_value_type, member->node->module->global_id());
                 auto key = fmt::format("{}.{}.{}", member->node->module->global_id(),
                                        type_key, method_name);
-                auto fn = new Function(m_ctx, llvm_fn, member->node);
+                auto fn = m_ctx->functions.emplace(new Function(m_ctx, llvm_fn, member->node))->get();
                 fn->qualified_name = key;
                 m_ctx->function_table[key] = fn;
                 break;
@@ -3191,7 +3191,7 @@ Function *Compiler::generate_async_frame_destructor(Function *fn, AsyncStateMach
     auto fn_name = fmt::format("{}__async_frame_dtor", fn->qualified_name);
     auto dtor_llvm_fn =
         llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fn_name, llvm_module);
-    auto dtor_fn = new Function(m_ctx, dtor_llvm_fn, fn->node);
+    auto dtor_fn = m_ctx->functions.emplace(new Function(m_ctx, dtor_llvm_fn, fn->node))->get();
     dtor_fn->qualified_name = fn_name;
 
     auto saved_ip = builder.saveIP();
@@ -3318,7 +3318,7 @@ AsyncLambdaValue Compiler::build_async_resume_forwarder_lambda(Function *fn,
         fmt::format("{}__async_resume_{}", fn->qualified_name, (uintptr_t)await_expr);
     auto fwd_llvm_fn =
         llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fwd_name, llvm_module);
-    auto fwd_fn = new Function(m_ctx, fwd_llvm_fn, fn->node);
+    auto fwd_fn = m_ctx->functions.emplace(new Function(m_ctx, fwd_llvm_fn, fn->node))->get();
     fwd_fn->qualified_name = fwd_name;
 
     auto saved_ip = builder.saveIP();
@@ -3369,7 +3369,7 @@ AsyncLambdaValue Compiler::build_async_try_await_forwarder_lambda(Function *fn,
                                 (uintptr_t)await_expr);
     auto fwd_llvm_fn =
         llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage, fwd_name, llvm_module);
-    auto fwd_fn = new Function(m_ctx, fwd_llvm_fn, fn->node);
+    auto fwd_fn = m_ctx->functions.emplace(new Function(m_ctx, fwd_llvm_fn, fn->node))->get();
     fwd_fn->qualified_name = fwd_name;
 
     auto saved_ip = builder.saveIP();
@@ -3463,7 +3463,7 @@ AsyncLambdaValue Compiler::build_async_rejection_forwarder_lambda(Function *fn,
     auto fwd_name = fmt::format("{}__async_reject_fwd", fn->qualified_name);
     auto fwd_llvm_fn =
         llvm::Function::Create(fwd_fn_type, llvm::Function::PrivateLinkage, fwd_name, llvm_module);
-    auto fwd_fn = new Function(m_ctx, fwd_llvm_fn, fn->node);
+    auto fwd_fn = m_ctx->functions.emplace(new Function(m_ctx, fwd_llvm_fn, fn->node))->get();
     fwd_fn->qualified_name = fwd_name;
 
     auto saved_ip = builder.saveIP();
@@ -5163,7 +5163,7 @@ AsyncWorkerContext Compiler::begin_async_worker_state(Function *fn, AsyncStateMa
                                          name_suffix);
     auto worker_llvm_fn = llvm::Function::Create(worker_type, llvm::Function::PrivateLinkage,
                                                   worker_name, llvm_module);
-    auto state_fn = new Function(m_ctx, worker_llvm_fn, fn->node);
+    auto state_fn = m_ctx->functions.emplace(new Function(m_ctx, worker_llvm_fn, fn->node))->get();
     state_fn->qualified_name = worker_name;
 
     auto saved_ip = builder.saveIP();

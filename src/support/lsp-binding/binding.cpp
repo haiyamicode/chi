@@ -134,7 +134,8 @@ static long col_to_utf16(const std::string &source, long line, long col) {
 // Utilities
 // ============================================================================
 
-static void load_package_config(cx::ast::Package* package, const std::string& file_path) {
+static void load_package_config(cx::CompilationContext* ctx, cx::ast::Package* package,
+                                 const std::string& file_path) {
     if (!package) return;
 
     fs::path current = fs::path(file_path).parent_path();
@@ -167,8 +168,10 @@ static void load_package_config(cx::ast::Package* package, const std::string& fi
     auto config_json = boost::json::parse(config_content, ec, {}, opts);
     if (ec) return;
 
-    package->config = new cx::PackageConfig(
-        boost::json::value_to<cx::PackageConfig>(config_json));
+    package->config = ctx->package_configs
+                          .emplace(new cx::PackageConfig(
+                              boost::json::value_to<cx::PackageConfig>(config_json)))
+                          ->get();
 }
 
 static void crash_handler(int sig) {
@@ -239,7 +242,7 @@ static cx::ast::Module* process_source(cx::Analyzer &analyzer, const std::string
 
     analyzer.build_runtime();
     auto pkg = analyzer.get_context()->add_package(".");
-    load_package_config(pkg, input_file);
+    load_package_config(analyzer.get_context(), pkg, input_file);
 
     if (pkg->config && pkg->config->c_interop.has_value() &&
         !pkg->config->c_interop->native_modules.empty()) {
@@ -1098,7 +1101,7 @@ static napi_value FormatMethod(napi_env env, napi_callback_info info) {
     auto src = cx::io::Buffer::from_string(source_str.c_str());
 
     auto pkg = analyzer.get_context()->add_package(".");
-    load_package_config(pkg, input_file);
+    load_package_config(analyzer.get_context(), pkg, input_file);
     auto module = analyzer.format_source(pkg, &src, input_file);
 
     boost::json::object output;
