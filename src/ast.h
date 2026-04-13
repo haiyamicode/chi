@@ -908,6 +908,9 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(generated_fn, GeneratedFn)
             _AST_CASE_INITIALIZE_FIELD(lifetime_param, LifetimeParam)
             _AST_CASE_INITIALIZE_FIELD(destructure_decl, DestructureDecl)
+            _AST_CASE_INITIALIZE_FIELD(sigil_type, TypeSigil)
+            _AST_CASE_INITIALIZE_FIELD(type_param, TypeParam)
+            _AST_CASE_INITIALIZE_FIELD(import_symbol, ImportSymbol)
         default:
             break;
         }
@@ -940,6 +943,9 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(enum_decl, EnumDecl)
             _AST_CASE_DESTROY_FIELD(generated_fn, GeneratedFn)
             _AST_CASE_DESTROY_FIELD(destructure_decl, DestructureDecl)
+            _AST_CASE_DESTROY_FIELD(sigil_type, TypeSigil)
+            _AST_CASE_DESTROY_FIELD(type_param, TypeParam)
+            _AST_CASE_DESTROY_FIELD(import_symbol, ImportSymbol)
         default:
             memset(&data, 0, sizeof(data));
             break;
@@ -984,6 +990,9 @@ struct Node {
             _AST_CASE_CLONE_FIELD(enum_decl, EnumDecl)
             _AST_CASE_CLONE_FIELD(generated_fn, GeneratedFn)
             _AST_CASE_CLONE_FIELD(destructure_decl, DestructureDecl)
+            _AST_CASE_CLONE_FIELD(sigil_type, TypeSigil)
+            _AST_CASE_CLONE_FIELD(type_param, TypeParam)
+            _AST_CASE_CLONE_FIELD(import_symbol, ImportSymbol)
         default:
             memcpy(&b->data, &data, sizeof(data));
             break;
