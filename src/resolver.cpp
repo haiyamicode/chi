@@ -11148,6 +11148,33 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
     assert(generic_fn->kind == TypeKind::Fn);
     assert(fn_node->type == NodeType::FnDef);
     auto &gen = generic_fn->data.fn;
+
+    int max_arg_depth = 0;
+    for (auto arg : *type_args) {
+        int d = arg->subtype_depth();
+        if (d > max_arg_depth) max_arg_depth = d;
+    }
+    if (max_arg_depth > MAX_GENERIC_DEPTH) {
+        auto fn_display = fn_node->name + "<" + format_type_list(type_args) + ">";
+        error(fn_node, errors::GENERIC_DEPTH_EXCEEDED, fn_display, MAX_GENERIC_DEPTH);
+        if (fn_node->data.fn_def.variants.len > 0) {
+            return fn_node->data.fn_def.variants[0];
+        }
+        auto stub_sub = create_type(TypeKind::Subtype);
+        stub_sub->data.subtype.generic = generic_fn;
+        stub_sub->data.subtype.root_node = fn_node->get_root_node();
+        stub_sub->is_placeholder = true;
+        auto stub_fn = create_node(NodeType::GeneratedFn);
+        stub_fn->data.generated_fn.fn_subtype = stub_sub;
+        stub_fn->data.generated_fn.original_fn = fn_node;
+        stub_fn->module = fn_node->module;
+        stub_fn->root_node = fn_node->get_root_node();
+        stub_fn->token = fn_node->token;
+        stub_fn->resolved_type = generic_fn;
+        stub_sub->data.subtype.generated_fn = stub_fn;
+        return stub_fn;
+    }
+
     for (auto variant : fn_node->data.fn_def.variants) {
         assert(variant->type == NodeType::GeneratedFn);
         auto subtype = variant->data.generated_fn.fn_subtype;

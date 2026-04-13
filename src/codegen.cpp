@@ -12092,7 +12092,12 @@ Function *Compiler::get_fn(ast::Node *node) {
             auto &gfn = node->data.generated_fn;
             array<ChiType *> concrete_args;
             for (auto arg : gfn.fn_subtype->data.subtype.args) {
-                concrete_args.add(eval_type(arg));
+                // Substitute placeholders without collapsing Subtype wrappers
+                // (eval_type would collapse to final_type Struct, losing nesting
+                // info needed for the generic-depth check in get_fn_variant).
+                auto substituted =
+                    get_resolver()->type_placeholders_sub_map(arg, m_fn->type_env);
+                concrete_args.add(substituted);
             }
             target = get_resolver()->get_fn_variant(get_resolver()->node_get_type(gfn.original_fn),
                                                     &concrete_args, gfn.original_fn);

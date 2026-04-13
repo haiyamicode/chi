@@ -19,6 +19,21 @@ struct DeepWrap<T> {
 // Exercises: compile_fn_proto Struct container type_env recovery,
 // resolve_variant_type_id ensuring variants are registered,
 // and on-demand compile in get_fn for substituted container methods.
+struct Wrap<T> {
+    value: T;
+}
+
+func make_wrap<T>(v: T) Wrap<T> {
+    return {value: v};
+}
+
+func recur<T>(depth: int, v: T) {
+    if depth <= 0 {
+        return;
+    }
+    recur<Wrap<T>>(depth - 1, make_wrap(v));
+}
+
 struct State<T> {
     value: T;
     count: int = 0;
@@ -41,6 +56,9 @@ struct Holder<T> {
 }
 
 func main() {
+    recur<int>(3, 0);
+    printf("recur done\n");
+
     var d1 = DeepWrap<int>.make(42);
     var d2 = d1.wrap();
     var d3 = d2.wrap();
