@@ -25,7 +25,7 @@ static Node *get_arrow_block_value(Node *block) {
     if (data.return_expr) {
         return data.return_expr;
     }
-    if (data.statements.len == 1) {
+    if (data.statements.size() == 1) {
         auto *stmt = data.statements[0];
         if (stmt->type == NodeType::ConstructExpr) {
             return stmt;
@@ -38,8 +38,8 @@ static Node *get_arrow_block_value(Node *block) {
 }
 
 static bool should_collapse_promise_unit_subtype(SubtypeExpr &data) {
-    return node_spells_name(data.type, "Promise") && data.lifetime_args.len == 0 &&
-           data.args.len == 1 && node_spells_name(data.args[0], "Unit");
+    return node_spells_name(data.type, "Promise") && data.lifetime_args.size() == 0 &&
+           data.args.size() == 1 && node_spells_name(data.args[0], "Unit");
 }
 
 string get_sigil_symbol(SigilKind sigil) {
@@ -206,7 +206,7 @@ void AstPrinter::print_node(Node *node) {
                     prev_end = prev_decl->start_token->pos.line;
 
                 long next_start = -1;
-                if (m_comments && m_comment_idx < m_comments->len) {
+                if (m_comments && m_comment_idx < m_comments->size()) {
                     auto &comment = m_comments->at(m_comment_idx);
                     auto *ft = first_token(decl);
                     long node_line = ft ? ft->pos.line : -1;
@@ -236,8 +236,8 @@ void AstPrinter::print_node(Node *node) {
                 emit(";");
             }
             bool is_last_decl =
-                m_root->data.root.top_level_decls.len > 0 &&
-                decl == m_root->data.root.top_level_decls[m_root->data.root.top_level_decls.len - 1];
+                m_root->data.root.top_level_decls.size() > 0 &&
+                decl == m_root->data.root.top_level_decls[m_root->data.root.top_level_decls.size() - 1];
             if (!(is_last_decl && decl_emits_trailing_newline(decl))) {
                 emit("\n");
             }
@@ -245,7 +245,7 @@ void AstPrinter::print_node(Node *node) {
         }
         // Flush any trailing comments at end of file
         if (m_comments) {
-            while (m_comment_idx < m_comments->len) {
+            while (m_comment_idx < m_comments->size()) {
                 auto &comment = m_comments->at(m_comment_idx);
                 emit_fmt("{}\n", comment.text);
                 m_comment_idx++;
@@ -257,12 +257,12 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.fn_def;
         print_declspec(data.decl_spec);
         // Value captures go between 'func' and params: func [x, y](...)
-        if (data.value_captures.len > 0) {
+        if (data.value_captures.size() > 0) {
             m_suppress_func_keyword = true;
             emit("func [");
-            for (size_t i = 0; i < data.value_captures.len; i++) {
+            for (size_t i = 0; i < data.value_captures.size(); i++) {
                 emit_fmt("{}", data.value_captures.at(i));
-                if (i < data.value_captures.len - 1) {
+                if (i < data.value_captures.size() - 1) {
                     emit(", ");
                 }
             }
@@ -316,13 +316,13 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::FnProto: {
         auto &data = node->data.fn_proto;
-        if (data.is_type_expr && !data.params.len && !data.return_type) {
+        if (data.is_type_expr && !data.params.size() && !data.return_type) {
             if (!m_suppress_func_keyword) {
                 emit("func");
             }
-            if (data.lifetime_params.len > 0) {
+            if (data.lifetime_params.size() > 0) {
                 emit("<");
-                for (int i = 0; i < data.lifetime_params.len; i++) {
+                for (int i = 0; i < data.lifetime_params.size(); i++) {
                     if (i > 0)
                         emit(", ");
                     auto *lt = data.lifetime_params[i];
@@ -343,9 +343,9 @@ void AstPrinter::print_node(Node *node) {
             emit_fmt("func {}", node->name);
         }
         // Print lifetime and type parameters if present
-        if (data.lifetime_params.len > 0 || data.type_params.len > 0) {
+        if (data.lifetime_params.size() > 0 || data.type_params.size() > 0) {
             emit("<");
-            for (int i = 0; i < data.lifetime_params.len; i++) {
+            for (int i = 0; i < data.lifetime_params.size(); i++) {
                 if (i > 0)
                     emit(", ");
                 auto *lt = data.lifetime_params[i];
@@ -354,7 +354,7 @@ void AstPrinter::print_node(Node *node) {
                 if (!bound.empty())
                     emit_fmt(": '{}", bound);
             }
-            if (data.lifetime_params.len > 0 && data.type_params.len > 0)
+            if (data.lifetime_params.size() > 0 && data.type_params.size() > 0)
                 emit(", ");
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
@@ -363,10 +363,10 @@ void AstPrinter::print_node(Node *node) {
         if (data.is_vararg) {
             // Calculate total length including varargs
             int base_len = m_current_column + 1; // "("
-            for (int i = 0; i < data.params.len; i++) {
+            for (int i = 0; i < data.params.size(); i++) {
                 auto param_str = format_node_to_string(data.params.at(i));
                 base_len += param_str.size();
-                if (i < data.params.len - 1 || data.params.len > 0) {
+                if (i < data.params.size() - 1 || data.params.size() > 0) {
                     base_len += 2; // ", "
                 }
             }
@@ -378,7 +378,7 @@ void AstPrinter::print_node(Node *node) {
             if (should_wrap) {
                 emit("\n");
                 m_indent++;
-                for (int i = 0; i < data.params.len; i++) {
+                for (int i = 0; i < data.params.size(); i++) {
                     print_indent(m_indent);
                     print_node(data.params.at(i));
                     emit(",\n");
@@ -389,7 +389,7 @@ void AstPrinter::print_node(Node *node) {
                 print_indent(m_indent);
             } else {
                 print_node_list(&data.params);
-                if (data.params.len > 0) {
+                if (data.params.size() > 0) {
                     emit(", ");
                 }
                 emit("...");
@@ -421,9 +421,9 @@ void AstPrinter::print_node(Node *node) {
         emit_fmt("{}", node->name);
         if (!data.lifetime_bound.empty()) {
             emit_fmt(": '{}", data.lifetime_bound);
-        } else if (data.type_bounds.len > 0) {
+        } else if (data.type_bounds.size() > 0) {
             emit(": ");
-            for (size_t i = 0; i < data.type_bounds.len; i++) {
+            for (size_t i = 0; i < data.type_bounds.size(); i++) {
                 if (i > 0)
                     emit(" + ");
                 print_node(data.type_bounds[i]);
@@ -453,7 +453,7 @@ void AstPrinter::print_node(Node *node) {
     }
     case NodeType::Block: {
         auto &data = node->data.block;
-        auto is_inline = !data.statements.len && !data.has_braces;
+        auto is_inline = !data.statements.size() && !data.has_braces;
         bool arrow_value_context = data.is_arrow && (m_strip_arrow_return || is_value_context(node));
         if (data.is_arrow) {
             emit(" => ");
@@ -461,7 +461,7 @@ void AstPrinter::print_node(Node *node) {
         if (data.is_unsafe) {
             emit("unsafe ");
         }
-        bool is_empty_block = data.has_braces && !data.statements.len && !data.return_expr;
+        bool is_empty_block = data.has_braces && !data.statements.size() && !data.return_expr;
         if (data.has_braces) {
             if (is_empty_block) {
                 emit("{}");
@@ -478,7 +478,7 @@ void AstPrinter::print_node(Node *node) {
                 stmt->data.return_stmt.expr) {
                 print_arrow_body_value(stmt->data.return_stmt.expr);
             } else if (data.is_arrow && stmt->type == NodeType::ConstructExpr &&
-                       !data.return_expr && data.statements.len == 1 && !data.has_braces) {
+                       !data.return_expr && data.statements.size() == 1 && !data.has_braces) {
                 print_arrow_body_value(stmt);
             } else {
                 // Preserve blank lines from original source
@@ -506,7 +506,7 @@ void AstPrinter::print_node(Node *node) {
                     print_indent(m_indent);
                 }
                 bool wrap_value_construct = !data.is_arrow && is_value_context(node) &&
-                                            !data.return_expr && data.statements.len == 1 &&
+                                            !data.return_expr && data.statements.size() == 1 &&
                                             stmt->type == NodeType::ConstructExpr &&
                                             should_suppress_construct_type_in_value_context(stmt);
                 if (wrap_value_construct) {
@@ -652,7 +652,7 @@ void AstPrinter::print_node(Node *node) {
 
             // Check if effective type is Unit
             bool is_unit = false;
-            if (etype && !cdata.items.len && !cdata.field_inits.len && !cdata.spread_expr) {
+            if (etype && !cdata.items.size() && !cdata.field_inits.size() && !cdata.spread_expr) {
                 if (etype->type == NodeType::Identifier && etype->name == "Unit") {
                     is_unit = true;
                 }
@@ -688,7 +688,7 @@ void AstPrinter::print_node(Node *node) {
                     }
                 }
                 // Use wrapping for long construct expressions
-                if (cdata.items.len && !cdata.field_inits.len && !cdata.spread_expr) {
+                if (cdata.items.size() && !cdata.field_inits.size() && !cdata.spread_expr) {
                     emit_wrapped_list(&cdata.items, "{", "}", ", ");
                 } else {
                     emit_construct_body(cdata);
@@ -716,9 +716,9 @@ void AstPrinter::print_node(Node *node) {
         if (!node->name.empty()) {
             emit_fmt("{}", node->name);
         }
-        if (data.lifetime_params.len > 0 || data.type_params.len > 0) {
+        if (data.lifetime_params.size() > 0 || data.type_params.size() > 0) {
             emit("<");
-            for (int i = 0; i < data.lifetime_params.len; i++) {
+            for (int i = 0; i < data.lifetime_params.size(); i++) {
                 if (i > 0)
                     emit(", ");
                 auto *lt = data.lifetime_params[i];
@@ -727,14 +727,14 @@ void AstPrinter::print_node(Node *node) {
                 if (!bound.empty())
                     emit_fmt(": '{}", bound);
             }
-            if (data.lifetime_params.len > 0 && data.type_params.len > 0)
+            if (data.lifetime_params.size() > 0 && data.type_params.size() > 0)
                 emit(", ");
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
         }
         emit(" {");
 
-        if (data.members.len) {
+        if (data.members.size()) {
             emit("\n");
             m_indent++;
             Node *prev_member = nullptr;
@@ -770,7 +770,7 @@ void AstPrinter::print_node(Node *node) {
                         emit("\n");
                     }
                 } else if (member->type == NodeType::EnumVariant) {
-                    if (i != data.members.len - 1) {
+                    if (i != data.members.size() - 1) {
                         emit(",");
                     }
                     flush_trailing_comment(member);
@@ -780,7 +780,7 @@ void AstPrinter::print_node(Node *node) {
                 i++;
             }
             m_indent--;
-        } else if (node->end_token && m_comments && m_comment_idx < m_comments->len &&
+        } else if (node->end_token && m_comments && m_comment_idx < m_comments->size() &&
                    m_comments->at(m_comment_idx).pos < node->end_token->pos) {
             // Empty struct with inner comments
             emit("\n");
@@ -796,16 +796,16 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::ImplementBlock: {
         auto &data = node->data.implement_block;
         emit("impl ");
-        for (size_t i = 0; i < data.interface_types.len; i++) {
+        for (size_t i = 0; i < data.interface_types.size(); i++) {
             if (i > 0)
                 emit(", ");
             print_node(data.interface_types[i]);
         }
-        if (data.where_clauses.len > 0) {
-            if (data.interface_types.len > 0)
+        if (data.where_clauses.size() > 0) {
+            if (data.interface_types.size() > 0)
                 emit(" ");
             emit("where ");
-            for (size_t i = 0; i < data.where_clauses.len; i++) {
+            for (size_t i = 0; i < data.where_clauses.size(); i++) {
                 if (i > 0) {
                     // Same param as previous: use +
                     if (data.where_clauses[i].param_name->str ==
@@ -824,7 +824,7 @@ void AstPrinter::print_node(Node *node) {
             }
         }
         emit(" {");
-        if (data.members.len) {
+        if (data.members.size()) {
             emit("\n");
             m_indent++;
             Node *prev_member = nullptr;
@@ -869,7 +869,7 @@ void AstPrinter::print_node(Node *node) {
             break;
         }
         // Collapse Unit{} or {} (with Unit context) to ()
-        bool is_unit_construct = !data.items.len && !data.field_inits.len && !data.spread_expr;
+        bool is_unit_construct = !data.items.size() && !data.field_inits.size() && !data.spread_expr;
         if (is_unit_construct) {
             if (data.type && data.type->type == NodeType::Identifier &&
                 data.type->name == "Unit") {
@@ -900,9 +900,9 @@ void AstPrinter::print_node(Node *node) {
             }
         }
         // For construct expressions, always try wrapping
-        if (data.items.len || data.field_inits.len || data.spread_expr) {
+        if (data.items.size() || data.field_inits.size() || data.spread_expr) {
             // If only items (no field_inits, no spread), use emit_wrapped_list
-            if (data.items.len && !data.field_inits.len && !data.spread_expr) {
+            if (data.items.size() && !data.field_inits.size() && !data.spread_expr) {
                 emit_wrapped_list(&data.items, "{", "}", ", ");
             } else {
                 emit_construct_body(data);
@@ -997,9 +997,9 @@ void AstPrinter::print_node(Node *node) {
     case NodeType::TupleExpr: {
         auto &data = node->data.tuple_expr;
         emit("(");
-        for (int i = 0; i < data.items.len; i++) {
+        for (int i = 0; i < data.items.size(); i++) {
             print_node(data.items[i]);
-            if (i < data.items.len - 1) emit(", ");
+            if (i < data.items.size() - 1) emit(", ");
         }
         emit(")");
         break;
@@ -1013,7 +1013,7 @@ void AstPrinter::print_node(Node *node) {
                 return false;
             auto is_single_expr = [](Node *block) {
                 if (!block || block->type != NodeType::Block ||
-                    block->data.block.statements.len != 0 ||
+                    block->data.block.statements.size() != 0 ||
                     !block->data.block.return_expr)
                     return false;
                 auto *ret = block->data.block.return_expr;
@@ -1067,7 +1067,7 @@ void AstPrinter::print_node(Node *node) {
         // Collapse single-expression blocks: { expr } → => expr
         auto can_collapse = [](Node *block) {
             return block && block->type == NodeType::Block && block->data.block.has_braces &&
-                   block->data.block.statements.len == 0 &&
+                   block->data.block.statements.size() == 0 &&
                    block->data.block.return_expr != nullptr;
         };
         auto already_arrow = [](Node *block) {
@@ -1115,7 +1115,7 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.fn_call_expr;
         print_node(data.fn_ref_expr);
         // Print type parameters if present
-        if (data.type_args.len > 0) {
+        if (data.type_args.size() > 0) {
             emit("<");
             emit_wrapped_list(&data.type_args, "", "", ", ");
             emit(">");
@@ -1130,7 +1130,7 @@ void AstPrinter::print_node(Node *node) {
             break;
         }
         emit("<");
-        for (int i = 0; i < data.lifetime_args.len; i++) {
+        for (int i = 0; i < data.lifetime_args.size(); i++) {
             if (i > 0)
                 emit(", ");
             auto *lt = data.lifetime_args[i];
@@ -1139,7 +1139,7 @@ void AstPrinter::print_node(Node *node) {
             if (!bound.empty())
                 emit_fmt(": '{}", bound);
         }
-        if (data.lifetime_args.len > 0 && data.args.len > 0)
+        if (data.lifetime_args.size() > 0 && data.args.size() > 0)
             emit(", ");
         emit_wrapped_list(&data.args, "", "", ", ");
         emit(">");
@@ -1224,7 +1224,7 @@ void AstPrinter::print_node(Node *node) {
         auto &data = node->data.typedef_decl;
         emit("typedef ");
         emit(data.identifier->str);
-        if (data.type_params.len) {
+        if (data.type_params.size()) {
             emit("<");
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
@@ -1239,9 +1239,9 @@ void AstPrinter::print_node(Node *node) {
         emit_fmt("{}", node->name);
         if (data.is_tuple_form) {
             emit("(");
-            for (int i = 0; i < data.tuple_types.len; i++) {
+            for (int i = 0; i < data.tuple_types.size(); i++) {
                 print_node(data.tuple_types[i]);
-                if (i < data.tuple_types.len - 1) {
+                if (i < data.tuple_types.size() - 1) {
                     emit(", ");
                 }
             }
@@ -1467,7 +1467,7 @@ void AstPrinter::print_node(Node *node) {
             // Canonical form: import "./module" as mod;
             emit(data.path->to_string());
             emit_fmt(" as {}", data.alias->to_string());
-        } else if (data.symbols.len) {
+        } else if (data.symbols.size()) {
             // Canonical form: import {X, Y} from "./module";
             // Use wrapped list for long imports
             emit_wrapped_list(&data.symbols, "{", "}", ", ");
@@ -1487,7 +1487,7 @@ void AstPrinter::print_node(Node *node) {
             // Canonical form: export * from "./module";
             emit("* from ");
             emit(data.path->to_string());
-        } else if (data.symbols.len) {
+        } else if (data.symbols.size()) {
             // Canonical form: export {X, Y} from "./module";
             // Use wrapped list for long exports
             emit_wrapped_list(&data.symbols, "{", "}", ", ");
@@ -1525,14 +1525,14 @@ void AstPrinter::print_node(Node *node) {
             emit(".(type)");
         emit(" {\n");
         m_indent++;
-        for (int i = 0; i < data.cases.len; i++) {
+        for (int i = 0; i < data.cases.size(); i++) {
             auto case_node = data.cases.at(i);
             auto *ft = first_token(case_node);
             if (ft)
                 flush_comments_before(ft->pos);
             print_indent(m_indent);
             print_node(case_node);
-            if (i < data.cases.len - 1) {
+            if (i < data.cases.size() - 1) {
                 emit(",");
             }
             // Flush trailing comment — use body if present (arrow block end)
@@ -1556,7 +1556,7 @@ void AstPrinter::print_node(Node *node) {
         if (data.is_else) {
             emit("else");
         } else {
-            for (int i = 0; i < data.clauses.len; i++) {
+            for (int i = 0; i < data.clauses.size(); i++) {
                 auto clause = data.clauses.at(i);
                 if (should_semantically_collapse_case_clause(clause)) {
                     emit_fmt("{}", clause->data.dot_expr.field->str);
@@ -1566,7 +1566,7 @@ void AstPrinter::print_node(Node *node) {
                 if (i == 0 && data.destructure_pattern) {
                     print_destructure_pattern(data.destructure_pattern);
                 }
-                if (i < data.clauses.len - 1) {
+                if (i < data.clauses.size() - 1) {
                     emit(", ");
                 }
             }
@@ -1575,15 +1575,15 @@ void AstPrinter::print_node(Node *node) {
         auto *body = data.body;
         auto can_collapse = [](Node *block) {
             return block && block->type == NodeType::Block && block->data.block.has_braces &&
-                   block->data.block.statements.len == 0 &&
+                   block->data.block.statements.size() == 0 &&
                    block->data.block.return_expr != nullptr;
         };
         if (body && body->type == NodeType::Block && body->data.block.is_arrow &&
             !body->data.block.has_braces) {
             emit(" => ");
-            if (body->data.block.statements.len == 1 && !body->data.block.return_expr) {
+            if (body->data.block.statements.size() == 1 && !body->data.block.return_expr) {
                 print_arrow_body_value(body->data.block.statements[0]);
-            } else if (body->data.block.statements.len == 0 && body->data.block.return_expr) {
+            } else if (body->data.block.statements.size() == 0 && body->data.block.return_expr) {
                 print_arrow_body_value(body->data.block.return_expr);
             } else {
                 print_node(body);
@@ -1610,7 +1610,7 @@ void AstPrinter::print_node(Node *node) {
         if (!node->name.empty()) {
             emit_fmt("{}", node->name);
         }
-        if (data.type_params.len) {
+        if (data.type_params.size()) {
             emit("<");
             emit_wrapped_list(&data.type_params, "", "", ", ");
             emit(">");
@@ -1624,14 +1624,14 @@ void AstPrinter::print_node(Node *node) {
         }
         emit(" {\n");
         m_indent++;
-        for (int i = 0; i < data.variants.len; i++) {
+        for (int i = 0; i < data.variants.size(); i++) {
             auto variant = data.variants.at(i);
             auto *ft = first_token(variant);
             if (ft)
                 flush_comments_before(ft->pos);
             print_indent(m_indent);
             print_node(variant);
-            bool is_last = (i == data.variants.len - 1);
+            bool is_last = (i == data.variants.size() - 1);
             if (is_last && data.base_struct) {
                 emit(";");
             } else if (!is_last) {
@@ -1641,8 +1641,8 @@ void AstPrinter::print_node(Node *node) {
             emit("\n");
         }
         // Flush inner comments in empty enum
-        if (data.variants.len == 0 && !data.base_struct && node->end_token && m_comments &&
-            m_comment_idx < m_comments->len &&
+        if (data.variants.size() == 0 && !data.base_struct && node->end_token && m_comments &&
+            m_comment_idx < m_comments->size() &&
             m_comments->at(m_comment_idx).pos < node->end_token->pos) {
             flush_comments_before(node->end_token->pos);
         }
@@ -1676,9 +1676,9 @@ void AstPrinter::print_indent(int level) {
 }
 
 void AstPrinter::print_node_list(array<Node *> *list) {
-    for (int i = 0; i < list->len; i++) {
+    for (int i = 0; i < list->size(); i++) {
         print_node(list->at(i));
-        if (i < list->len - 1) {
+        if (i < list->size() - 1) {
             emit(", ");
         }
     }
@@ -1688,7 +1688,7 @@ void AstPrinter::print_destructure_pattern(Node *node) {
     auto &data = node->data.destructure_decl;
     if (data.is_tuple) {
         emit("(");
-        for (size_t i = 0; i < data.fields.len; i++) {
+        for (size_t i = 0; i < data.fields.size(); i++) {
             if (i > 0)
                 emit(", ");
             auto &field_data = data.fields[i]->data.destructure_field;
@@ -1703,7 +1703,7 @@ void AstPrinter::print_destructure_pattern(Node *node) {
         emit(")");
     } else if (data.is_array) {
         emit("[");
-        for (size_t i = 0; i < data.fields.len; i++) {
+        for (size_t i = 0; i < data.fields.size(); i++) {
             if (i > 0)
                 emit(", ");
             auto &field_data = data.fields[i]->data.destructure_field;
@@ -1718,7 +1718,7 @@ void AstPrinter::print_destructure_pattern(Node *node) {
         emit("]");
     } else {
         emit("{");
-        for (size_t i = 0; i < data.fields.len; i++) {
+        for (size_t i = 0; i < data.fields.size(); i++) {
             if (i > 0)
                 emit(", ");
             auto &field_data = data.fields[i]->data.destructure_field;
@@ -1740,7 +1740,7 @@ void AstPrinter::print_destructure_pattern(Node *node) {
 
 void AstPrinter::print_struct_members(StructDecl &data) {
     emit("{");
-    if (data.members.len) {
+    if (data.members.size()) {
         emit("\n");
         m_indent++;
         Node *prev_member = nullptr;
@@ -1818,7 +1818,7 @@ string AstPrinter::format_node_to_string(Node *node) {
 
 bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const char *close,
                                    const char *separator, int extra_indent) {
-    if (!items || items->len == 0) {
+    if (!items || items->size() == 0) {
         emit_fmt("{}{}", open, close);
         return false;
     }
@@ -1826,10 +1826,10 @@ bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const
     // Calculate the total length if printed on one line
     int total_length = m_current_column;
     total_length += strlen(open);
-    for (int i = 0; i < items->len; i++) {
+    for (int i = 0; i < items->size(); i++) {
         auto item_str = format_node_to_string(items->at(i));
         total_length += item_str.size();
-        if (i < items->len - 1) {
+        if (i < items->size() - 1) {
             total_length += strlen(separator);
         }
     }
@@ -1838,9 +1838,9 @@ bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const
     // If it fits on one line, emit inline
     if (total_length < m_max_line_length) {
         emit_fmt("{}", open);
-        for (int i = 0; i < items->len; i++) {
+        for (int i = 0; i < items->size(); i++) {
             print_node(items->at(i));
-            if (i < items->len - 1) {
+            if (i < items->size() - 1) {
                 emit_fmt("{}", separator);
             }
         }
@@ -1851,10 +1851,10 @@ bool AstPrinter::emit_wrapped_list(array<Node *> *items, const char *open, const
     // Otherwise, wrap with proper indentation
     emit_fmt("{}\n", open);
     m_indent += extra_indent;
-    for (int i = 0; i < items->len; i++) {
+    for (int i = 0; i < items->size(); i++) {
         print_indent(m_indent);
         print_node(items->at(i));
-        if (i < items->len - 1) {
+        if (i < items->size() - 1) {
             emit(",");
         }
         emit("\n");
@@ -1878,15 +1878,15 @@ void AstPrinter::emit_construct_body(ConstructExpr &data) {
             }
             pos++;
         }
-        if (idx < pos + data.items.len) {
+        if (idx < pos + data.items.size()) {
             print_node(data.items[idx - pos]);
             return;
         }
-        pos += data.items.len;
+        pos += data.items.size();
         print_node(data.field_inits[idx - pos]);
     };
 
-    int total_elements = (data.spread_expr ? 1 : 0) + data.items.len + data.field_inits.len;
+    int total_elements = (data.spread_expr ? 1 : 0) + data.items.size() + data.field_inits.size();
 
     // Calculate total length if printed on one line
     int total_length = m_current_column + 2; // for { and }
@@ -1899,10 +1899,10 @@ void AstPrinter::emit_construct_body(ConstructExpr &data) {
             pos = 1;
         } else {
             int adj = i - (data.spread_expr ? 1 : 0);
-            if (adj < data.items.len) {
+            if (adj < data.items.size()) {
                 elem_str = format_node_to_string(data.items[adj]);
             } else {
-                elem_str = format_node_to_string(data.field_inits[adj - data.items.len]);
+                elem_str = format_node_to_string(data.field_inits[adj - data.items.size()]);
             }
         }
         total_length += elem_str.size();
@@ -1947,7 +1947,7 @@ bool AstPrinter::has_blank_line_between(Node *prev, Node *next) {
 
     // Use first comment's position if there are comments before the next node
     long next_start = -1;
-    if (m_comments && m_comment_idx < m_comments->len) {
+    if (m_comments && m_comment_idx < m_comments->size()) {
         auto &comment = m_comments->at(m_comment_idx);
         auto *ft = first_token(next);
         long node_line = ft ? ft->pos.line : -1;
@@ -1983,7 +1983,7 @@ void AstPrinter::flush_comments_before(Pos before_pos) {
     if (!m_comments)
         return;
     long last_comment_line = -1;
-    while (m_comment_idx < m_comments->len) {
+    while (m_comment_idx < m_comments->size()) {
         auto &comment = m_comments->at(m_comment_idx);
         if (!(comment.pos < before_pos))
             break;
@@ -2021,9 +2021,9 @@ bool AstPrinter::types_match(Node *a, Node *b) {
     case NodeType::SubtypeExpr: {
         if (!types_match(a->data.subtype_expr.type, b->data.subtype_expr.type))
             return false;
-        if (a->data.subtype_expr.args.len != b->data.subtype_expr.args.len)
+        if (a->data.subtype_expr.args.size() != b->data.subtype_expr.args.size())
             return false;
-        for (int i = 0; i < a->data.subtype_expr.args.len; i++) {
+        for (int i = 0; i < a->data.subtype_expr.args.size(); i++) {
             if (!types_match(a->data.subtype_expr.args.at(i), b->data.subtype_expr.args.at(i)))
                 return false;
         }
@@ -2061,7 +2061,7 @@ bool AstPrinter::should_semantically_shorthand_construct_type(Node *node) {
     }
     auto *resolved_decl = data.type->data.dot_expr.resolved_decl;
     if (resolved_decl && resolved_decl->type == NodeType::EnumVariant) {
-        return resolved_decl->data.enum_variant.is_tuple_form && !data.field_inits.len &&
+        return resolved_decl->data.enum_variant.is_tuple_form && !data.field_inits.size() &&
                !data.spread_expr;
     }
     auto *resolved_type = data.type->resolved_type ? data.type->resolved_type->eval() : nullptr;
@@ -2072,7 +2072,7 @@ bool AstPrinter::should_semantically_shorthand_construct_type(Node *node) {
         (resolved_type && resolved_type->kind == TypeKind::EnumValue) ? resolved_type->data.enum_value.member
                                                                       : nullptr;
     return member && member->node && member->node->type == NodeType::EnumVariant &&
-           member->node->data.enum_variant.is_tuple_form && !data.field_inits.len &&
+           member->node->data.enum_variant.is_tuple_form && !data.field_inits.size() &&
            !data.spread_expr;
 }
 
@@ -2092,7 +2092,7 @@ void AstPrinter::flush_trailing_comment(Node *node) {
     if (!lt)
         return;
     long on_line = lt->pos.line;
-    while (m_comment_idx < m_comments->len) {
+    while (m_comment_idx < m_comments->size()) {
         auto &comment = m_comments->at(m_comment_idx);
         if (comment.pos.line != on_line)
             break;

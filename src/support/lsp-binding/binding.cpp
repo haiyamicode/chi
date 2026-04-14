@@ -325,15 +325,15 @@ static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolv
 
     std::stringstream ss;
     ss << "func(";
-    for (int i = 0; i < fn.params.len; i++) {
+    for (int i = 0; i < fn.params.size(); i++) {
         auto *param_type = fn.params[i];
-        if (fn.is_variadic && i == fn.params.len - 1) {
+        if (fn.is_variadic && i == fn.params.size() - 1) {
             ss << "...";
         }
-        if (i < proto_params.len && !proto_params[i]->name.empty()) {
+        if (i < proto_params.size() && !proto_params[i]->name.empty()) {
             ss << proto_params[i]->name << ": ";
         }
-        if (fn.is_variadic && i == fn.params.len - 1) {
+        if (fn.is_variadic && i == fn.params.size() - 1) {
             if (auto *elem_type = fn.get_variadic_elem_type()) {
                 ss << resolver.format_type_display(elem_type);
             } else {
@@ -342,7 +342,7 @@ static std::string format_fn_signature(cx::ast::Node *decl, cx::Resolver &resolv
         } else {
             ss << resolver.format_type_display(param_type);
         }
-        if (i < fn.params.len - 1) {
+        if (i < fn.params.size() - 1) {
             ss << ", ";
         }
     }
@@ -408,16 +408,16 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
     std::string label = fn_decl->name + "(";
     boost::json::array params_json;
 
-    for (int i = 0; i < fn.params.len; i++) {
+    for (int i = 0; i < fn.params.size(); i++) {
         auto *param_type = fn.params[i];
         auto param_start = label.size();
-        if (fn.is_variadic && i == fn.params.len - 1) {
+        if (fn.is_variadic && i == fn.params.size() - 1) {
             label += "...";
         }
-        if (i < proto_params.len && !proto_params[i]->name.empty()) {
+        if (i < proto_params.size() && !proto_params[i]->name.empty()) {
             label += proto_params[i]->name + ": ";
         }
-        if (fn.is_variadic && i == fn.params.len - 1) {
+        if (fn.is_variadic && i == fn.params.size() - 1) {
             if (auto *elem_type = fn.get_variadic_elem_type()) {
                 label += resolver.format_type_display(elem_type);
             } else {
@@ -432,7 +432,7 @@ static boost::json::object build_signature_help(cx::ScanResult &result, cx::Reso
         param["label"] = boost::json::array{(int64_t)param_start, (int64_t)param_end};
         params_json.push_back(param);
 
-        if (i < fn.params.len - 1) {
+        if (i < fn.params.size() - 1) {
             label += ", ";
         }
     }
@@ -481,9 +481,9 @@ static boost::json::object build_construct_signature_help(cx::ScanResult &result
     std::string label = type_name + "{";
     boost::json::array params_json;
 
-    for (int i = 0; i < fn.params.len; i++) {
+    for (int i = 0; i < fn.params.size(); i++) {
         auto param_start = label.size();
-        if (i < proto_params.len && !proto_params[i]->name.empty()) {
+        if (i < proto_params.size() && !proto_params[i]->name.empty()) {
             label += proto_params[i]->name + ": ";
         }
         label += resolver.format_type_display(fn.params[i]);
@@ -493,7 +493,7 @@ static boost::json::object build_construct_signature_help(cx::ScanResult &result
         param["label"] = boost::json::array{(int64_t)param_start, (int64_t)param_end};
         params_json.push_back(param);
 
-        if (i < fn.params.len - 1) {
+        if (i < fn.params.size() - 1) {
             label += ", ";
         }
     }
@@ -502,7 +502,7 @@ static boost::json::object build_construct_signature_help(cx::ScanResult &result
     // Compute active parameter from cursor position vs construct items
     auto &data = node->data.construct_expr;
     int active_param = 0;
-    for (int i = 0; i < data.items.len; i++) {
+    for (int i = 0; i < data.items.size(); i++) {
         auto item = data.items[i];
         auto item_start = item->start_token ? item->start_token : item->token;
         if (item_start && result.pos.offset >= item_start->pos.offset) {
@@ -510,12 +510,12 @@ static boost::json::object build_construct_signature_help(cx::ScanResult &result
         }
     }
     // Past all items (trailing comma) → next param
-    if (data.items.len > 0) {
-        auto last = data.items[data.items.len - 1];
+    if (data.items.size() > 0) {
+        auto last = data.items[data.items.size() - 1];
         auto last_end = last->end_token ? last->end_token : last->token;
         if (last_end &&
             result.pos.offset > last_end->pos.offset + (long)last_end->to_string().size()) {
-            active_param = data.items.len;
+            active_param = data.items.size();
         }
     }
 
@@ -1106,7 +1106,7 @@ static napi_value FormatMethod(napi_env env, napi_callback_info info) {
 
     boost::json::object output;
     output["errors"] = collect_errors(module, source_str);
-    if (module && module->errors.len == 0 && module->root) {
+    if (module && module->errors.size() == 0 && module->root) {
         cx::AstPrinter printer(module->root, &module->comments);
         output["formatted"] = printer.format_to_string();
     }

@@ -214,7 +214,7 @@ int main(int argc, char *argv[]) {
         auto module = analyzer.process_file(pkg, input_file);
 
         // Print collected errors for analyzer testing
-        if (module && module->errors.len > 0) {
+        if (module && module->errors.size() > 0) {
             for (auto &error : module->errors) {
                 print("{}:{}:{}: error: {}\n", module->display_path(), error.pos.line_number(),
                       error.pos.col_number(), error.message);
@@ -231,7 +231,7 @@ int main(int argc, char *argv[]) {
         auto pkg = analyzer.add_package(".");
         auto module = analyzer.format_file(pkg, input_file);
 
-        if (module && module->errors.len > 0) {
+        if (module && module->errors.size() > 0) {
             for (auto &error : module->errors) {
                 fmt::print(stderr, "{}:{}:{}: error: {}\n", module->display_path(),
                            error.pos.line_number(), error.pos.col_number(), error.message);
@@ -241,9 +241,9 @@ int main(int argc, char *argv[]) {
 
         bool use_resolved_info = false;
         if (formatter_use_semantic && module && module->root) {
-            auto syntax_error_count = module->errors.len;
+            auto syntax_error_count = module->errors.size();
             analyzer.resolve_module(module, true);
-            if (module->errors.len == syntax_error_count) {
+            if (module->errors.size() == syntax_error_count) {
                 use_resolved_info = true;
             } else {
                 module->errors.resize(syntax_error_count);

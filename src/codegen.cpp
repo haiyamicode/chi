@@ -202,7 +202,7 @@ void Compiler::emit_construct_init(Function *fn, llvm::Value *dest, ChiType *typ
         // info. Synthesize a zero-line location anchored to the current
         // function scope when the caller hasn't set one.
         auto saved_dbg = builder.getCurrentDebugLocation();
-        if (!saved_dbg && m_ctx->dbg_scopes.len) {
+        if (!saved_dbg && m_ctx->dbg_scopes.size()) {
             builder.SetCurrentDebugLocation(
                 llvm::DILocation::get(*m_ctx->llvm_ctx, 0, 0, m_ctx->dbg_scopes.last(), nullptr));
         }
@@ -490,7 +490,7 @@ void Compiler::compile_module(ast::Module *module) {
         }
     }
 
-    while (m_ctx->pending_fns.len) {
+    while (m_ctx->pending_fns.size()) {
         auto list = m_ctx->pending_fns;
         m_ctx->pending_fns.clear();
         for (auto fn : list) {
@@ -705,7 +705,7 @@ void Compiler::_compile_struct(ast::Node *node, ChiType *type) {
     }
     generate_copier(type);
 
-    if (struct_type->data.struct_.interfaces.len) {
+    if (struct_type->data.struct_.interfaces.size()) {
         // For generic instantiations (subtype != null), pass the subtype as the lookup_type
         // so that the dtor/copier are found in destructor_table/copier_table (which are
         // keyed by the subtype, not the resolved concrete struct).
@@ -811,7 +811,7 @@ void Compiler::compile_enum(ast::Node *node) {
         compile_enum_name_intrinsics(&enum_data, base_value_type, resolved_struct);
 
         auto &sdata = resolved_struct->data.struct_;
-        if (sdata.interfaces.len) {
+        if (sdata.interfaces.size()) {
             compile_struct_vtables(resolved_struct, nullptr);
         }
         for (auto member : sdata.members) {
@@ -1059,7 +1059,7 @@ void Compiler::compile_concrete_enum(ChiTypeEnum *enum_data) {
             compile_enum_name_intrinsics(enum_data, base_value_type, resolved_struct);
 
             auto &sdata = resolved_struct->data.struct_;
-            if (sdata.interfaces.len) {
+            if (sdata.interfaces.size()) {
                 compile_struct_vtables(resolved_struct, nullptr);
             }
             for (auto member : sdata.members) {
@@ -1160,7 +1160,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
     }
     case TypeKind::Struct: {
         auto &data = type->data.struct_;
-        if (!data.fields.len) {
+        if (!data.fields.size()) {
             return llvm_db.createBasicType("void", 0, llvm::dwarf::DW_ATE_address);
         }
         auto cu = &llvm_cu;
@@ -1176,7 +1176,7 @@ llvm::DIType *Compiler::compile_di_type(ChiType *type) {
         if (data.node) {
             line_no = data.node->token->pos.line_number();
         }
-        auto scope = m_ctx->dbg_scopes.len ? m_ctx->dbg_scopes.last() : nullptr;
+        auto scope = m_ctx->dbg_scopes.size() ? m_ctx->dbg_scopes.last() : nullptr;
         if (!scope) {
             auto dbg_builder = m_ctx->dbg_builder.get();
             auto unit = dbg_builder->createFile(cu->getFilename(), cu->getDirectory());
@@ -1235,7 +1235,7 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         dctx, name, llvm::StringRef(), file, 0, compile_di_fn_type(fn), line_no,
         llvm::DINode::FlagPrototyped, llvm::DISubprogram::SPFlagDefinition);
     fn->llvm_fn->setSubprogram(sp);
-    auto saved_dbg_scope_len = m_ctx->dbg_scopes.len;
+    auto saved_dbg_scope_len = m_ctx->dbg_scopes.size();
     m_ctx->dbg_scopes.add(sp);
     emit_dbg_location(nullptr); // unset the location for the prologue emission
 
@@ -1256,8 +1256,8 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
             fn->bind_ptr = llvm_param;
         } else if (param_info.kind == ParameterKind::Regular) {
             auto idx = param_info.user_param_index;
-            if (idx >= fn_proto.params.len) {
-                printf("ERROR: idx %d >= proto.params.len %lu\n", idx, fn_proto.params.len);
+            if (idx >= fn_proto.params.size()) {
+                printf("ERROR: idx %d >= proto.params.size() %lu\n", idx, fn_proto.params.size());
                 continue;
             }
 
@@ -1480,7 +1480,7 @@ llvm::Value *Compiler::compile_assignment_to_type(Function *fn, ast::Node *expr,
     auto has_placeholder_params = [](ChiType *type) -> bool {
         if (type->is_placeholder)
             return true;
-        if (type->kind == TypeKind::Struct && type->data.struct_.type_params.len > 0) {
+        if (type->kind == TypeKind::Struct && type->data.struct_.type_params.size() > 0) {
             return true;
         }
         return false;
@@ -1741,11 +1741,11 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
     auto *elem_type = span_type->get_elem();
     auto *i32_ty = llvm::Type::getInt32Ty(*m_ctx->llvm_ctx);
 
-    if ((int)args.len <= va_start) {
+    if ((int)args.size() <= va_start) {
         return llvm::Constant::getNullValue(compile_type(span_type));
     }
 
-    if ((int)args.len == va_start + 1 && args[va_start]->type == ast::NodeType::PackExpansion) {
+    if ((int)args.size() == va_start + 1 && args[va_start]->type == ast::NodeType::PackExpansion) {
         auto &pack_data = args[va_start]->data.pack_expansion;
         if (pack_data.can_forward_directly) {
             return compile_assignment_to_type(fn, pack_data.expr, span_type);
@@ -1760,10 +1760,10 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
     };
 
     array<PackSource> pack_sources = {};
-    llvm::Value *total_count = llvm::ConstantInt::get(i32_ty, args.len - va_start);
+    llvm::Value *total_count = llvm::ConstantInt::get(i32_ty, args.size() - va_start);
     bool has_pack = false;
 
-    for (int i = va_start; i < args.len; i++) {
+    for (int i = va_start; i < args.size(); i++) {
         auto *arg = args[i];
         if (arg->type != ast::NodeType::PackExpansion) {
             continue;
@@ -1785,7 +1785,7 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
     llvm::Value *blob_data = nullptr;
     llvm::Value *length_value = nullptr;
     if (!has_pack) {
-        auto count = (uint32_t)(args.len - va_start);
+        auto count = (uint32_t)(args.size() - va_start);
         auto *length_const = llvm::ConstantInt::get(i32_ty, count);
         if (count == 0) {
             return llvm::Constant::getNullValue(compile_type(span_type));
@@ -1830,7 +1830,7 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
 
         int pack_index = 0;
 
-        for (int i = va_start; i < args.len; i++) {
+        for (int i = va_start; i < args.size(); i++) {
             auto *arg = args[i];
             if (arg->type != ast::NodeType::PackExpansion) {
                 auto add_fn = get_system_fn("cx_array_add");
@@ -2164,7 +2164,7 @@ static bool is_reflect_array_type(Resolver *resolver, ChiType *type) {
     auto rt_array_type = resolver->get_context()->rt_array_type;
     if (type->kind == TypeKind::Subtype && rt_array_type && type->data.subtype.generic &&
         resolver->to_value_type(type->data.subtype.generic) == resolver->to_value_type(rt_array_type) &&
-        type->data.subtype.args.len > 0) {
+        type->data.subtype.args.size() > 0) {
         return true;
     }
     return false;
@@ -2180,7 +2180,7 @@ static ChiType *get_reflect_array_elem_type(Resolver *resolver, ChiType *type) {
     auto rt_array_type = resolver->get_context()->rt_array_type;
     if (type->kind == TypeKind::Subtype && rt_array_type && type->data.subtype.generic &&
         resolver->to_value_type(type->data.subtype.generic) == resolver->to_value_type(rt_array_type) &&
-        type->data.subtype.args.len > 0) {
+        type->data.subtype.args.size() > 0) {
         return type->data.subtype.args[0];
     }
     return nullptr;
@@ -2308,7 +2308,7 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
         if ((final_type->kind == TypeKind::Struct || reflect_kind == TypeKind::Array) &&
             sty && !ChiTypeStruct::is_interface(final_type)) {
             auto own_fields = sty->own_fields();
-            if (own_fields.len > 0) {
+            if (own_fields.size() > 0) {
                 auto layout = llvm_module.getDataLayout().getStructLayout((llvm::StructType *)type_l);
                 for (auto field : own_fields) {
                     auto new_len = field_table_len + 1;
@@ -2345,9 +2345,9 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
             }
         } else if (final_type->kind == TypeKind::Tuple) {
             auto &elements = final_type->data.tuple.elements;
-            if (elements.len > 0) {
+            if (elements.size() > 0) {
                 auto layout = llvm_module.getDataLayout().getStructLayout((llvm::StructType *)type_l);
-                for (int i = 0; i < elements.len; i++) {
+                for (int i = 0; i < elements.size(); i++) {
                     auto elem_type = elements[i];
                     auto field_name = std::to_string(i);
                     auto name_len = (uint32_t)field_name.size();
@@ -2542,7 +2542,7 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
 }
 
 void Compiler::finalize_pending_typeinfos() {
-    while (m_ctx->pending_typeinfo_keys.len) {
+    while (m_ctx->pending_typeinfo_keys.size()) {
         auto keys = m_ctx->pending_typeinfo_keys;
         m_ctx->pending_typeinfo_keys.clear();
         for (auto &key : keys) {
@@ -2635,7 +2635,7 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     llvm::Value *final_fn_ptr = nullptr;
     uint32_t bind_size = 0;
 
-    if (captures && captures->len) {
+    if (captures && captures->size()) {
         auto bstruct = lambda_type->data.fn_lambda.bind_struct;
         assert(bstruct);
         auto bstruct_l = compile_type(bstruct);
@@ -2649,7 +2649,7 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
     auto [var, struct_type_l] = compile_cxlambda_init(fn, final_fn_ptr, bind_size);
 
     // For lambdas with captures, set the data field
-    if (captures && captures->len) {
+    if (captures && captures->size()) {
         auto bstruct = lambda_type->data.fn_lambda.bind_struct;
         auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
 
@@ -2657,17 +2657,17 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
         auto bind_var = builder.CreateAlloca(bstruct_l, nullptr, "bind_struct");
 
         // Store captures into bind_struct
-        for (int i = 0; i < captures->len; i++) {
+        for (int i = 0; i < captures->size(); i++) {
             auto &cap = (*captures)[i];
             auto capture = cap.decl;
             auto capture_gep = builder.CreateStructGEP(bstruct_l, bind_var, i);
-            auto capture_flag_gep = builder.CreateStructGEP(bstruct_l, bind_var, captures->len + i);
+            auto capture_flag_gep = builder.CreateStructGEP(bstruct_l, bind_var, captures->size() + i);
 
             // Get source address of the captured variable
             llvm::Value *src_addr = nullptr;
             llvm::Value *src_move_flag = nullptr;
             auto &current_captures = fn->node->data.fn_def.captures;
-            for (int j = 0; j < current_captures.len; j++) {
+            for (int j = 0; j < current_captures.size(); j++) {
                 if (current_captures[j].decl == capture && fn->bind_ptr) {
                     auto current_fn_type = get_chitype(fn->node);
                     if (current_fn_type->kind == TypeKind::FnLambda) {
@@ -2681,9 +2681,9 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
                             src_addr =
                                 builder.CreateLoad(current_bstruct_l->elements()[j], nested_gep);
                             auto nested_flag_gep = builder.CreateStructGEP(
-                                current_bstruct_l, fn->bind_ptr, current_captures.len + j);
+                                current_bstruct_l, fn->bind_ptr, current_captures.size() + j);
                             src_move_flag = builder.CreateLoad(
-                                current_bstruct_l->elements()[current_captures.len + j],
+                                current_bstruct_l->elements()[current_captures.size() + j],
                                 nested_flag_gep);
                         }
                         break;
@@ -2719,7 +2719,7 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
                 m_ctx->drop_flags.has_key(capture)) {
                 src_move_flag = m_ctx->drop_flags[capture];
             }
-            auto *flag_field_type = bstruct_l->getElementType(captures->len + i);
+            auto *flag_field_type = bstruct_l->getElementType(captures->size() + i);
             if (!src_move_flag) {
                 src_move_flag = llvm::Constant::getNullValue(flag_field_type);
             }
@@ -3395,7 +3395,7 @@ AsyncLambdaValue Compiler::build_async_try_await_forwarder_lambda(Function *fn,
     builder.CreateMemCpy(settled_var, {}, enum_var, {}, copy_size);
 
     auto payload_fields = get_resolver()->get_enum_payload_fields(variant_member->resolved_type);
-    if (payload_fields.len > 0) {
+    if (payload_fields.size() > 0) {
         auto payload_ptr = compile_dot_access(fwd_fn, settled_var, variant_member->resolved_type,
                                               payload_fields[0]);
         compile_copy_with_ref(fwd_fn, RefValue::from_value(value_arg), payload_ptr,
@@ -4516,7 +4516,7 @@ void Compiler::compile_async_switch_recursive(const AsyncBlockContext &ctx,
     auto expr_value = compile_comparator(fn, data.expr);
     auto comparator_type = expr_value->getType();
     auto default_label = fn->new_label("_async_switch_default");
-    auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.len);
+    auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.size());
     auto done_label = fn->new_label("_async_switch_done");
 
     array<label_t *> case_labels;
@@ -4536,7 +4536,7 @@ void Compiler::compile_async_switch_recursive(const AsyncBlockContext &ctx,
     }
 
     bool has_else = false;
-    for (int i = 0; i < data.cases.len; i++) {
+    for (int i = 0; i < data.cases.size(); i++) {
         fn->use_label(case_labels[i]);
         auto scase = data.cases[i];
         if (scase->data.case_expr.is_else) {
@@ -4799,7 +4799,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
         }
     }
 
-    for (int i = stmt_index; i < data.statements.len; i++) {
+    for (int i = stmt_index; i < data.statements.size(); i++) {
         fn->active_block_stmt_idx.back() = i;
         auto stmt = data.statements[i];
         const AsyncResumePoint *current_resume = nullptr;
@@ -4909,11 +4909,11 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
     }
 
     if (data.return_expr) {
-        fn->active_block_stmt_idx.back() = (int)data.statements.len;
+        fn->active_block_stmt_idx.back() = (int)data.statements.size();
     }
     const AsyncResumePoint *return_resume = nullptr;
     if (resume_point && resume_point->block == block &&
-        resume_point->stmt_index == data.statements.len) {
+        resume_point->stmt_index == data.statements.size()) {
         return_resume = resume_point;
     }
     auto return_resolved = get_async_resolved_awaits(return_resume, data.return_expr);
@@ -4921,7 +4921,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
         auto site = find_unresolved_await_site(data.return_expr, return_resolved);
         auto promise_expr = site.await_expr;
         auto settled_type = get_async_resume_value_type(data.return_expr, promise_expr, site.resume_expr);
-        auto next = build_async_resume_point(block, data.statements.len, data.return_expr,
+        auto next = build_async_resume_point(block, data.statements.size(), data.return_expr,
                                              return_resume, promise_expr,
                                              continue_block, continue_stmt_index,
                                              continue_state_id, tail_return_expr_parent);
@@ -6358,7 +6358,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             auto err_variant_type = err_member->resolved_type;
             auto err_fields = get_resolver()->get_enum_payload_fields(err_variant_type);
-            assert(err_fields.len > 0);
+            assert(err_fields.size() > 0);
             auto shared_error_ptr =
                 compile_dot_access(fn, settled_var, err_variant_type, err_fields[0]);
             auto shared_error_value =
@@ -6409,7 +6409,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 builder.CreateMemCpy(result_var, {}, enum_var, {}, copy_size);
 
                 auto payload_fields = get_resolver()->get_enum_payload_fields(variant_type);
-                if (payload_fields.len > 0) {
+                if (payload_fields.size() > 0) {
                     auto payload_ptr =
                         compile_dot_access(fn, result_var, variant_type, payload_fields[0]);
                     store_payload(payload_fields[0]->resolved_type, payload_ptr);
@@ -6503,13 +6503,13 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto ok_variant_type = ok_member->resolved_type;
             auto ok_fields = get_resolver()->get_enum_payload_fields(ok_variant_type);
             llvm::Value *payload_value = nullptr;
-            if (ok_fields.len > 0) {
+            if (ok_fields.size() > 0) {
                 auto payload_ptr = compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
                 payload_value =
                     builder.CreateLoad(compile_type(ok_fields[0]->resolved_type), payload_ptr);
             }
             auto prev_async_refs = m_async_await_refs;
-            if (ok_fields.len > 0) {
+            if (ok_fields.size() > 0) {
                 auto payload_ptr = compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
                 m_async_await_refs[site.await_expr] = RefValue::from_address(payload_ptr);
             } else {
@@ -6575,7 +6575,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             builder.CreateMemCpy(result_var, {}, enum_var, {}, copy_size);
 
             auto payload_fields = get_resolver()->get_enum_payload_fields(variant_type);
-            if (payload_fields.len > 0) {
+            if (payload_fields.size() > 0) {
                 auto payload_ptr =
                     compile_dot_access(fn, result_var, variant_type, payload_fields[0]);
                 store_payload(payload_fields[0]->resolved_type, payload_ptr);
@@ -7153,7 +7153,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto &data = expr->data.tuple_expr;
         auto tuple_type = compile_type(expr->resolved_type);
         llvm::Value *tuple = llvm::UndefValue::get(tuple_type);
-        for (int i = 0; i < data.items.len; i++) {
+        for (int i = 0; i < data.items.size(); i++) {
             auto elem = compile_expr(fn, data.items[i]);
             tuple = m_ctx->llvm_builder->CreateInsertValue(tuple, elem, {(unsigned)i});
         }
@@ -7303,7 +7303,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto comparator_type = expr_value->getType();
         auto default_label = fn->new_label("_switch_default");
 
-        auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.len);
+        auto switch_b = builder.CreateSwitch(expr_value, default_label, data.cases.size());
 
         auto done_label = fn->new_label("_switch_done");
 
@@ -7324,7 +7324,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
 
         bool has_else = false;
-        for (int i = 0; i < data.cases.len; i++) {
+        for (int i = 0; i < data.cases.size(); i++) {
             fn->use_label(case_labels[i]);
             auto scase = data.cases[i];
             if (scase->data.case_expr.is_else) has_else = true;
@@ -7814,7 +7814,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
 
         std::set<int> initialized_fields;
         auto payload_fields = get_resolver()->get_enum_payload_fields(type);
-        for (uint32_t i = 0; i < expr->data.construct_expr.items.len && i < payload_fields.len; i++) {
+        for (uint32_t i = 0; i < expr->data.construct_expr.items.size() && i < payload_fields.size(); i++) {
             initialized_fields.insert(payload_fields[i]->field_index);
         }
         for (auto field_init : expr->data.construct_expr.field_inits) {
@@ -7834,7 +7834,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             }
         }
 
-        for (uint32_t i = 0; i < expr->data.construct_expr.items.len && i < payload_fields.len; i++) {
+        for (uint32_t i = 0; i < expr->data.construct_expr.items.size() && i < payload_fields.size(); i++) {
             auto field = payload_fields[i];
             auto item = expr->data.construct_expr.items[i];
             auto gep = compile_dot_access(fn, dest, type, field);
@@ -7871,7 +7871,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         auto elem_type = type->data.fixed_array.elem;
         auto arr_type_l = compile_type(type);
         auto fa_size = type->data.fixed_array.size;
-        if (items.len < fa_size) {
+        if (items.size() < fa_size) {
             auto byte_size = m_ctx->llvm_module->getDataLayout().getTypeAllocSize(arr_type_l);
             builder.CreateMemSet(
                 dest,
@@ -7880,7 +7880,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
         }
         auto i32_ty = llvm::IntegerType::getInt32Ty(*m_ctx->llvm_ctx);
         auto zero = llvm::ConstantInt::get(i32_ty, 0);
-        for (uint32_t i = 0; i < items.len; i++) {
+        for (uint32_t i = 0; i < items.size(); i++) {
             auto idx = llvm::ConstantInt::get(i32_ty, i);
             auto elem_ptr = builder.CreateGEP(arr_type_l, dest, {zero, idx});
             compile_assignment_to_ptr(fn, items[i], elem_ptr, elem_type, false);
@@ -7930,7 +7930,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             // Compile default args for missing params (e.g. = {} on generic field)
             if (constructor_node->type == ast::NodeType::FnDef) {
                 auto &proto = constructor_node->data.fn_def.fn_proto->data.fn_proto;
-                for (size_t i = ctor_items.len; i < proto.params.len; i++) {
+                for (size_t i = ctor_items.size(); i < proto.params.size(); i++) {
                     auto default_val = proto.params[i]->data.param_decl.effective_default_value();
                     if (!default_val)
                         break;
@@ -8069,7 +8069,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
     }
     case TypeKind::Optional: {
         assert(expr->type == ast::NodeType::ConstructExpr &&
-               expr->data.construct_expr.items.len == 1);
+               expr->data.construct_expr.items.size() == 1);
         auto value = expr->data.construct_expr.items[0];
         auto opt_type = get_chitype(expr);
         auto elem_type = eval_type(opt_type->get_elem());
@@ -8147,7 +8147,7 @@ void Compiler::compile_destructure_fields(Function *fn, array<ast::Node *> &fiel
         } else {
             // Allocate binding variable
             auto &gen_vars = field_node->parent->data.destructure_decl.generated_vars;
-            assert(var_idx < gen_vars.len);
+            assert(var_idx < gen_vars.size());
             auto var_node = gen_vars[var_idx++];
             auto var_ptr = compile_alloc(fn, var_node);
             add_var(var_node, var_ptr);
@@ -8197,11 +8197,11 @@ void Compiler::compile_array_destructure(Function *fn, ast::DestructureDecl &dat
     auto elem_type = method->resolved_type->data.fn.return_type->get_elem();
     auto elem_type_l = compile_type(elem_type);
 
-    for (size_t i = 0; i < data.fields.len; i++) {
+    for (size_t i = 0; i < data.fields.size(); i++) {
         auto field_node = data.fields[i];
 
         // Allocate binding variable
-        assert(i < data.generated_vars.len);
+        assert(i < data.generated_vars.size());
         auto var_node = data.generated_vars[i];
         auto var_ptr = compile_alloc(fn, var_node);
         add_var(var_node, var_ptr);
@@ -8264,11 +8264,11 @@ void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &dat
     TypeList &elems = source_type->kind == TypeKind::Tuple ? source_type->data.tuple.elements
                                                            : tuple_like_elems;
 
-    for (size_t i = 0; i < data.fields.len; i++) {
+    for (size_t i = 0; i < data.fields.size(); i++) {
         auto field_node = data.fields[i];
         auto &field_data = field_node->data.destructure_field;
 
-        assert(i < data.generated_vars.len);
+        assert(i < data.generated_vars.size());
         auto var_node = data.generated_vars[i];
         auto var_ptr = compile_alloc(fn, var_node);
         add_var(var_node, var_ptr);
@@ -8276,7 +8276,7 @@ void Compiler::compile_tuple_destructure(Function *fn, ast::DestructureDecl &dat
         if (field_data.is_rest) {
             auto rest_type = get_chitype(var_node);
             auto rest_type_l = compile_type(rest_type);
-            int rest_count = elems.len - (int)i;
+            int rest_count = elems.size() - (int)i;
             for (int j = 0; j < rest_count; j++) {
                 llvm::Value *src_ptr;
                 auto elem_type = elems[i + j];
@@ -8665,7 +8665,7 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
 
 llvm::Value *Compiler::load_capture_move_flag_ptr(Function *fn, ast::Node *iden) {
     if (!fn || !fn->bind_ptr || !iden || !iden->analysis.is_capture() ||
-        iden->analysis.capture_path.len == 0) {
+        iden->analysis.capture_path.size() == 0) {
         return nullptr;
     }
     auto &immediate_capture = iden->analysis.capture_path[0];
@@ -8679,15 +8679,15 @@ llvm::Value *Compiler::load_capture_move_flag_ptr(Function *fn, ast::Node *iden)
         return nullptr;
     }
     auto &captures = fn->node->data.fn_def.captures;
-    if (capture_idx >= captures.len || captures[capture_idx].mode != ast::CaptureMode::ByRef) {
+    if (capture_idx >= captures.size() || captures[capture_idx].mode != ast::CaptureMode::ByRef) {
         return nullptr;
     }
 
     auto bstruct = fn_type->data.fn_lambda.bind_struct;
     auto bstruct_l = (llvm::StructType *)compile_type(bstruct);
     auto &builder = *m_ctx->llvm_builder.get();
-    auto flag_gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, captures.len + capture_idx);
-    return builder.CreateLoad(bstruct_l->elements()[captures.len + capture_idx], flag_gep,
+    auto flag_gep = builder.CreateStructGEP(bstruct_l, fn->bind_ptr, captures.size() + capture_idx);
+    return builder.CreateLoad(bstruct_l->elements()[captures.size() + capture_idx], flag_gep,
                               "capture_move_flag");
 }
 
@@ -8753,7 +8753,7 @@ normal:
     // handle captured variables
     if (iden->analysis.is_capture()) {
         assert(fn->bind_ptr);
-        assert(iden->analysis.capture_path.len > 0);
+        assert(iden->analysis.capture_path.size() > 0);
 
         // The capture_path[0] represents the current function's capture
         // We just need to access the immediate capture from current function's bind_ptr
@@ -8770,7 +8770,7 @@ normal:
 
         // Check the actual capture mode from the function's captures list
         auto &captures = fn->node->data.fn_def.captures;
-        bool is_by_ref = capture_idx < captures.len &&
+        bool is_by_ref = capture_idx < captures.size() &&
                          captures[capture_idx].mode == ast::CaptureMode::ByRef;
         if (!is_by_ref) {
             // By-value capture: the field IS the value
@@ -8795,7 +8795,7 @@ std::vector<llvm::Value *> Compiler::compile_fn_args(
     bool is_variadic = callee->fn_type->data.fn.is_variadic;
     bool is_extern = callee->fn_type->data.fn.is_extern;
 
-    for (int i = 0; i < args.len; i++) {
+    for (int i = 0; i < args.size(); i++) {
         if (is_variadic && !is_extern && i >= va_start) {
             continue;
         }
@@ -8848,7 +8848,7 @@ llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
             i32_ty, m_ctx->llvm_module->getDataLayout().getTypeAllocSize(value_type_l));
         return builder.CreateCall(meiyan_fn, {tmp, size}, "hash");
     } else if (method_name == "eq") {
-        assert(fn_call_data.args.len == 1 && "eq() expects one argument");
+        assert(fn_call_data.args.size() == 1 && "eq() expects one argument");
         auto other = compile_expr(fn, fn_call_data.args[0]);
         // Unwrap reference: if the arg is &T (from operator method wrapping), load to get T
         if (get_chitype(fn_call_data.args[0])->is_reference()) {
@@ -8863,7 +8863,7 @@ llvm::Value *Compiler::compile_builtin_trait_call(Function *fn, ast::Node *expr,
         }
     } else if (method_name == "cmp") {
         // Ord::cmp — returns int (lhs - rhs for numeric types)
-        assert(fn_call_data.args.len == 1 && "cmp() expects one argument");
+        assert(fn_call_data.args.size() == 1 && "cmp() expects one argument");
         auto other = compile_expr(fn, fn_call_data.args[0]);
         // Unwrap reference: if the arg is &T (from operator method wrapping), load to get T
         if (get_chitype(fn_call_data.args[0])->is_reference()) {
@@ -9168,7 +9168,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         // Always pass binding struct pointer as argument for all lambdas
         args.push_back(data_ptr);
 
-        for (int i = 0; i < data.args.len; i++) {
+        for (int i = 0; i < data.args.size(); i++) {
             auto arg = data.args[i];
             // User arguments always start from parameter index 1 (after binding struct)
             int param_index = i + 1;
@@ -9397,7 +9397,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         callee = callee_fn->llvm_fn;
     }
 
-    for (int i = 0; i < data.args.len; i++) {
+    for (int i = 0; i < data.args.size(); i++) {
         if (is_variadic && !is_extern && i >= va_start) {
             continue;
         }
@@ -9420,7 +9420,7 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
     // Compile default values for missing arguments
     if (fn_decl->type == ast::NodeType::FnDef) {
         auto &proto = fn_decl->data.fn_def.fn_proto->data.fn_proto;
-        for (size_t i = data.args.len; i < proto.params.len; i++) {
+        for (size_t i = data.args.size(); i < proto.params.size(); i++) {
             auto default_val = proto.params[i]->data.param_decl.effective_default_value();
             if (!default_val)
                 break;
@@ -9708,7 +9708,7 @@ llvm::Value *Compiler::compile_void_to_unit_lambda_wrapper(Function *fn, llvm::V
 
     auto &from_fn_spec = from_type->data.fn_lambda.fn->data.fn;
     std::vector<llvm::Type *> wrapper_params = {ptr_type};
-    for (size_t i = 0; i < from_fn_spec.params.len; i++)
+    for (size_t i = 0; i < from_fn_spec.params.size(); i++)
         wrapper_params.push_back(compile_type(from_fn_spec.params[i]));
 
     static int counter = 0;
@@ -10533,7 +10533,7 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
         }
     }
 
-    for (int i = block->cleanup_vars.len - 1; i >= 0; i--) {
+    for (int i = block->cleanup_vars.size() - 1; i >= 0; i--) {
         auto var = block->cleanup_vars[i];
         if (var == skip_var)
             continue; // Move-returned: skip destruction
@@ -11148,7 +11148,7 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
     auto fields = resolved_type->data.struct_.own_fields();
 
     // Iterate in reverse order
-    for (int i = fields.len - 1; i >= 0; i--) {
+    for (int i = fields.size() - 1; i >= 0; i--) {
         auto field = fields[i];
         auto field_type = field->resolved_type;
         auto resolved_field_type = field_type;
@@ -11454,7 +11454,7 @@ Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_ty
     // 1. Destroy base_value_struct fields that need it (in reverse)
     if (bvs) {
         auto &fields = bvs->data.struct_.fields;
-        for (int i = fields.len - 1; i >= 0; i--) {
+        for (int i = fields.size() - 1; i >= 0; i--) {
             auto field = fields[i];
             if (!get_resolver()->type_needs_destruction(field->resolved_type))
                 continue;
@@ -11484,10 +11484,10 @@ Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_ty
         auto disc = builder.CreateLoad(compile_type(enum_->discriminator), disc_gep, "disc");
 
         // 4. Variant data index matches __data field_index used by compile_dot_access
-        auto variant_data_idx = bvs ? (unsigned)bvs->data.struct_.fields.len : 0u;
+        auto variant_data_idx = bvs ? (unsigned)bvs->data.struct_.fields.size() : 0u;
 
         auto bb_done = fn->new_label("enum_dtor_done");
-        auto sw = builder.CreateSwitch(disc, bb_done, enum_->variants.len);
+        auto sw = builder.CreateSwitch(disc, bb_done, enum_->variants.size());
 
         for (auto variant : enum_->variants) {
             auto vs = variant->resolved_type->data.enum_value.variant_struct;
@@ -11516,7 +11516,7 @@ Function *Compiler::generate_destructor_enum(ChiType *type, ChiType *resolved_ty
 
             // Destroy variant fields in reverse
             auto &vfields = vs->data.struct_.fields;
-            for (int i = vfields.len - 1; i >= 0; i--) {
+            for (int i = vfields.size() - 1; i >= 0; i--) {
                 auto field = vfields[i];
                 if (!get_resolver()->type_needs_destruction(field->resolved_type))
                     continue;
@@ -11687,10 +11687,10 @@ Function *Compiler::generate_copier_enum(ChiType *type) {
         auto disc = builder.CreateLoad(compile_type(enum_->discriminator), disc_gep, "disc");
 
         // Variant data index matches __data field_index used by compile_dot_access
-        auto variant_data_idx = bvs ? (unsigned)bvs->data.struct_.fields.len : 0u;
+        auto variant_data_idx = bvs ? (unsigned)bvs->data.struct_.fields.size() : 0u;
 
         auto bb_done = fn->new_label("enum_copy_done");
-        auto sw = builder.CreateSwitch(disc, bb_done, enum_->variants.len);
+        auto sw = builder.CreateSwitch(disc, bb_done, enum_->variants.size());
 
         for (auto variant : enum_->variants) {
             auto vs = variant->resolved_type->data.enum_value.variant_struct;
@@ -12015,12 +12015,12 @@ llvm::Value *Compiler::compile_block(Function *fn, ast::Node *parent, ast::Node 
         compile_stmt(fn, var);
     }
 
-    for (int i = 0; i < (int)data.statements.len; i++) {
+    for (int i = 0; i < (int)data.statements.size(); i++) {
         fn->active_block_stmt_idx.back() = i;
         compile_stmt(fn, data.statements[i]);
     }
     if (data.return_expr) {
-        fn->active_block_stmt_idx.back() = (int)data.statements.len;
+        fn->active_block_stmt_idx.back() = (int)data.statements.size();
         if (var && parent) {
             result = compile_assignment_to_type(fn, data.return_expr, get_chitype(parent));
         } else {
@@ -12375,7 +12375,7 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
     }
 
     // Add regular user parameters
-    for (int user_idx = 0; user_idx < proto_node->data.fn_proto.params.len; user_idx++) {
+    for (int user_idx = 0; user_idx < proto_node->data.fn_proto.params.size(); user_idx++) {
         auto param = proto_node->data.fn_proto.params[user_idx];
         auto param_name = param->name;
         auto &info =
@@ -12516,7 +12516,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         }
         // For extern C variadic functions, exclude the varargs parameter from the param list
         // (LLVM handles it separately with the isVarArg flag)
-        auto param_count = data.params.len;
+        auto param_count = data.params.size();
         if (data.is_variadic && data.is_extern) {
             param_count = data.get_va_start();
         }
@@ -12584,7 +12584,7 @@ llvm::Type *Compiler::_compile_type(ChiType *type) {
         auto key = get_resolver()->format_type_id(type);
         auto &data = type->data.struct_;
         auto own = data.own_fields();
-        if (!own.len) {
+        if (!own.size()) {
             // Empty structs need a placeholder byte for LLVM allocations
             // (void type cannot be allocated)
             std::vector<llvm::Type *> members;
@@ -12688,7 +12688,7 @@ void Compiler::emit_dbg_location(ast::Node *node) {
     assert(node->token);
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     llvm::DIScope *scope = m_ctx->dbg_cu;
-    if (m_ctx->dbg_scopes.len) {
+    if (m_ctx->dbg_scopes.size()) {
         scope = m_ctx->dbg_scopes.last();
     }
     auto line_no = node->token->pos.line_number();
@@ -12709,7 +12709,7 @@ size_t Compiler::attach_generated_debug_info(llvm::Function *llvm_fn, const std:
         file, fn_name, llvm::StringRef(), file, line_no, sp_type, line_no,
         llvm::DINode::FlagArtificial, llvm::DISubprogram::SPFlagDefinition);
     llvm_fn->setSubprogram(sp);
-    auto saved_len = m_ctx->dbg_scopes.len;
+    auto saved_len = m_ctx->dbg_scopes.size();
     m_ctx->dbg_scopes.add(sp);
     return saved_len;
 }

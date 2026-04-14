@@ -68,7 +68,7 @@ struct ChiTypeFn {
     ChiType *get_variadic_elem_type();
     int get_va_start();
     bool should_use_sret();
-    bool is_generic() const { return type_params.len > 0; }
+    bool is_generic() const { return type_params.size() > 0; }
 };
 
 struct WhereBound {
@@ -158,7 +158,7 @@ struct ChiTypeStruct {
 
     InterfaceImpl *add_interface(Context *allocator, ChiType *trait, ChiType *impl);
 
-    bool is_generic() { return type_params.len > 0; }
+    bool is_generic() { return type_params.size() > 0; }
 
     static bool is_interface(ChiType *type);
     static bool is_interface(ChiTypeStruct *type) { return type->kind == ContainerKind::Interface; }
@@ -251,7 +251,7 @@ struct ChiTypeEnum {
     ChiEnumVariant *add_variant(Context *allocator, const string &name, ast::Node *node,
                                 ChiType *resolved_type);
     ChiEnumVariant *find_member(const string &name);
-    bool is_generic() { return type_params.len > 0; }
+    bool is_generic() { return type_params.size() > 0; }
 };
 
 struct ChiTypeEnumValue {

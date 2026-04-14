@@ -723,24 +723,24 @@ struct SemanticAnalysis {
     ConversionType conversion_type = ConversionType::None;
     array<CapturePath> capture_path = {}; // Path from original declaration to current context
 
-    bool is_capture() { return capture_path.len > 0; }
+    bool is_capture() { return capture_path.size() > 0; }
 
     // Get the original declaring function (root of the capture chain)
     Node *get_original_function() {
-        return capture_path.len > 0 ? capture_path[0].function : nullptr;
+        return capture_path.size() > 0 ? capture_path[0].function : nullptr;
     }
 
     // Get the immediate capturing function (last in the chain)
     Node *get_immediate_capturing_function() {
-        return capture_path.len > 0 ? capture_path[capture_path.len - 1].function : nullptr;
+        return capture_path.size() > 0 ? capture_path[capture_path.size() - 1].function : nullptr;
     }
 
     // Get the capture depth (how many function levels deep)
-    int get_capture_depth() { return capture_path.len; }
+    int get_capture_depth() { return capture_path.size(); }
 
     // Get the capture index for the immediate capturing function (most commonly needed)
     int32_t get_immediate_capture_index() {
-        return capture_path.len > 0 ? capture_path[capture_path.len - 1].capture_index : -1;
+        return capture_path.size() > 0 ? capture_path[capture_path.size() - 1].capture_index : -1;
     }
 };
 
@@ -1114,7 +1114,7 @@ struct Node {
 
     bool is_last_stmt() {
         return parent && parent->type == NodeType::Block &&
-               index == parent->data.block.statements.len - 1;
+               index == parent->data.block.statements.size() - 1;
     }
 };
 } // namespace ast

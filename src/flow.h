@@ -36,7 +36,7 @@ struct FlowState {
     void add_terminal(Node *terminal) {
         if (!terminal)
             return;
-        for (size_t i = 0; i < terminals.len; i++) {
+        for (size_t i = 0; i < terminals.size(); i++) {
             if (terminals[i] == terminal)
                 return;
         }
@@ -119,7 +119,7 @@ struct FlowState {
     // Mark current edges as stale (called before adding new edges on reassignment)
     void bump_edge_offset(Node *node) {
         auto *edges = ref_edges.get(node);
-        edge_offsets[node] = edges ? edges->len : 0;
+        edge_offsets[node] = edges ? edges->size() : 0;
     }
 
     // Deep copy of this flow state for branching
@@ -168,8 +168,8 @@ struct FlowState {
                 invalidate_exempt_terminals[key] = items;
                 continue;
             }
-            for (size_t i = 0; i < items.len; i++) {
-                auto *item = items.items[i];
+            for (size_t i = 0; i < items.size(); i++) {
+                auto *item = items[i];
                 bool found = false;
                 for (auto *cur : *existing) {
                     if (cur == item) {
@@ -197,21 +197,21 @@ struct FlowState {
                     ref_edge_offsets[key] = *other_pos;
                 }
             } else {
-                for (size_t i = 0; i < edges.len; i++) {
+                for (size_t i = 0; i < edges.size(); i++) {
                     bool found = false;
-                    for (size_t j = 0; j < existing->len; j++) {
-                        if (existing->items[j] == edges.items[i]) {
+                    for (size_t j = 0; j < existing->size(); j++) {
+                        if ((*existing)[j] == edges[i]) {
                             found = true;
                             break;
                         }
                     }
                     if (!found) {
-                        existing->add(edges.items[i]);
+                        existing->add(edges[i]);
                         if (!existing_pos) {
                             ref_edge_offsets[key] = {};
                             existing_pos = ref_edge_offsets.get(key);
                         }
-                        existing_pos->add(other_pos && i < other_pos->len ? other_pos->items[i] : -1);
+                        existing_pos->add(other_pos && i < other_pos->size() ? (*other_pos)[i] : -1);
                     }
                 }
             }
@@ -223,16 +223,16 @@ struct FlowState {
             if (!existing) {
                 copy_edges[key] = edges;
             } else {
-                for (size_t i = 0; i < edges.len; i++) {
+                for (size_t i = 0; i < edges.size(); i++) {
                     bool found = false;
-                    for (size_t j = 0; j < existing->len; j++) {
-                        if (existing->items[j] == edges.items[i]) {
+                    for (size_t j = 0; j < existing->size(); j++) {
+                        if ((*existing)[j] == edges[i]) {
                             found = true;
                             break;
                         }
                     }
                     if (!found) {
-                        existing->add(edges.items[i]);
+                        existing->add(edges[i]);
                     }
                 }
             }
@@ -263,7 +263,7 @@ struct FlowState {
         }
 
         // Merge terminals: union
-        for (size_t i = 0; i < other.terminals.len; i++) {
+        for (size_t i = 0; i < other.terminals.size(); i++) {
             add_terminal(other.terminals[i]);
         }
 
@@ -292,25 +292,25 @@ struct FlowState {
         if (!to || !from || to == from)
             return;
         auto *deps = ref_edges.get(from);
-        if (!deps || deps->len == 0) {
+        if (!deps || deps->size() == 0) {
             if (fallback_to_source)
                 add_ref_edge(to, from, edge_offset);
             return;
         }
         // Follow edges to find leaf terminals (nodes with no outgoing edges)
         array<Node *> stack;
-        for (size_t i = 0; i < deps->len; i++)
-            stack.add(deps->items[i]);
+        for (size_t i = 0; i < deps->size(); i++)
+            stack.add((*deps)[i]);
         map<Node *, bool> visited;
-        while (stack.len > 0) {
+        while (stack.size() > 0) {
             auto *node = stack.pop();
             if (visited.has_key(node))
                 continue;
             visited[node] = true;
             auto *next = ref_edges.get(node);
-            if (next && next->len > 0) {
-                for (size_t i = 0; i < next->len; i++)
-                    stack.add(next->items[i]);
+            if (next && next->size() > 0) {
+                for (size_t i = 0; i < next->size(); i++)
+                    stack.add((*next)[i]);
             } else {
                 // Leaf terminal — add direct edge
                 add_ref_edge(to, node, edge_offset);
@@ -334,17 +334,17 @@ struct FlowState {
         map<Node *, uint8_t> visited;
 
         if (auto *deps = ref_edges.get(start)) {
-            for (size_t i = 0; i < deps->len; i++) {
-                stack.add({deps->items[i], true});
+            for (size_t i = 0; i < deps->size(); i++) {
+                stack.add({(*deps)[i], true});
             }
         }
         if (auto *deps = copy_edges.get(start)) {
-            for (size_t i = 0; i < deps->len; i++) {
-                stack.add({deps->items[i], false});
+            for (size_t i = 0; i < deps->size(); i++) {
+                stack.add({(*deps)[i], false});
             }
         }
 
-        while (stack.len > 0) {
+        while (stack.size() > 0) {
             auto state = stack.pop();
 
             uint8_t mask = state.has_borrow ? 0x2 : 0x1;
@@ -354,9 +354,9 @@ struct FlowState {
             }
             visited[state.node] = seen ? static_cast<uint8_t>(*seen | mask) : mask;
 
-            if (auto *next = ref_edges.get(state.node); next && next->len > 0) {
-                for (size_t i = 0; i < next->len; i++) {
-                    stack.add({next->items[i], true});
+            if (auto *next = ref_edges.get(state.node); next && next->size() > 0) {
+                for (size_t i = 0; i < next->size(); i++) {
+                    stack.add({(*next)[i], true});
                 }
                 continue;
             }
@@ -376,8 +376,8 @@ struct FlowState {
             }
 
             if (auto *next = copy_edges.get(state.node)) {
-                for (size_t i = 0; i < next->len; i++) {
-                    stack.add({next->items[i], false});
+                for (size_t i = 0; i < next->size(); i++) {
+                    stack.add({(*next)[i], false});
                 }
             }
         }
