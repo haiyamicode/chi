@@ -12,6 +12,7 @@ message(STATUS "LLVM tools dir: ${LLVM_TOOLS_BINARY_DIR}")
 execute_process(COMMAND ${LLVM_TOOLS_BINARY_DIR}/llvm-config --libs --link-shared OUTPUT_VARIABLE LLVM_LIBS_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
 separate_arguments(LLVM_LIBS UNIX_COMMAND "${LLVM_LIBS_RAW}")
 message(STATUS "LLVM libs (shared): " ${LLVM_LIBS})
+link_directories(${LLVM_LIBRARY_DIRS})
 
 # libclang (C API) — only available as a shared lib in standard distributions
 find_library(LIBCLANG_LIBRARY clang HINTS ${LLVM_LIBRARY_DIRS})

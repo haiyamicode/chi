@@ -1724,19 +1724,39 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             if (var && var->type == NodeType::VarDecl) {
                 auto &vd = var->data.var_decl;
+                // `copy` methods — like `new` — see `this` in an uninitialized
+                // state and track field init in their own `initialized_at_copy`
+                // slot. Every other method shares `new`'s `initialized_at`,
+                // since they observe `this` after construction has completed.
+                const string *pfn_name =
+                    (scope.parent_fn_node &&
+                     scope.parent_fn_node->type == NodeType::FnDef)
+                        ? &scope.parent_fn_node->name
+                        : nullptr;
+                bool in_copy_method =
+                    vd.is_field && pfn_name && *pfn_name == "copy";
+                bool in_new_method =
+                    vd.is_field && pfn_name && *pfn_name == "new";
+                auto &init_slot =
+                    in_copy_method ? vd.initialized_at_copy : vd.initialized_at;
                 // First assignment: no previous initialization at all
-                bool is_first = !vd.initialized_at;
+                bool is_first = !init_slot;
                 // Field with only a default value (parser sets initialized_at = var itself)
                 // being assigned for the first time in a constructor
-                if (!is_first && vd.is_field && vd.initialized_at == var && scope.parent_fn &&
-                    scope.parent_fn->name == "new") {
+                if (!is_first && vd.is_field && init_slot == var &&
+                    (in_new_method || in_copy_method)) {
                     is_first = true;
                 }
                 if (is_first) {
                     data.is_initializing = true;
-                    vd.initialized_at = node;
+                    init_slot = node;
                     if (var->root_node) {
-                        var->root_node->data.var_decl.initialized_at = node;
+                        auto &root_vd = var->root_node->data.var_decl;
+                        if (in_copy_method) {
+                            root_vd.initialized_at_copy = node;
+                        } else {
+                            root_vd.initialized_at = node;
+                        }
                     }
                 }
             }

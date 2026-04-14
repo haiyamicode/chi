@@ -422,6 +422,11 @@ struct VarDecl {
     DeclSpec *decl_spec = {};
     bool is_generated = false;
     Node *initialized_at = nullptr;
+    // Separate init tracking for `copy` methods, which — like `new` — see `this`
+    // in an uninitialized state and must write every field. All other methods
+    // share `initialized_at` (new's state), since they observe `this` after
+    // construction has completed.
+    Node *initialized_at_copy = nullptr;
     Node *narrowed_from = nullptr;
     int stmt_owner_index = -1; // for stmt-scoped temps: index of owning stmt in parent block
 };
