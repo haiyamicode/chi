@@ -996,7 +996,7 @@ void cx_string_format(CxString *format, CxSlice *values, CxString *str) {
     auto &s = *str;
     auto cstr = format_cstr(*format, *values);
     s.size = (uint32_t)cstr.size();
-    s.data = (char *)malloc(cstr.size());
+    s.data = (char *)malloc(s.size);
     s.is_static = false;
     memcpy(s.data, cstr.data(), s.size);
 }

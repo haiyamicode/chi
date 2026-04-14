@@ -101,7 +101,7 @@ optional<ModulePathInfo> CompilationContext::find_module_path(const string &path
 
 std::pair<string, string> CompilationContext::parse_import_path(const string &path) {
     auto segments = string_split(path, "/");
-    if (!segments.len) {
+    if (!segments.size()) {
         return {"", ""};
     }
 
@@ -169,7 +169,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     optional<ErrorHandler> error_handler = std::nullopt;
     if (!exitOnError) {
         error_handler = [module](Error error) {
-            if (module->errors.len > MAX_ERRORS) {
+            if (module->errors.size() > MAX_ERRORS) {
                 return;
             }
             module->errors.add(error);
@@ -230,7 +230,7 @@ ast::Module *CompilationContext::process_source(ast::Package *package, io::Buffe
     }
 
     if (flags & FLAG_PRINT_AST) {
-        if (module->errors.len) {
+        if (module->errors.size()) {
             return module;
         }
         print_ast(module->root);

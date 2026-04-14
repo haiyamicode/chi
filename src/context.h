@@ -53,14 +53,14 @@ struct CompilationContext : public Context {
 
     ast::Node *create_node(ast::NodeType type) {
         auto node = ast_nodes.emplace(new ast::Node(type))->get();
-        node->id = ast_nodes.len;
+        node->id = ast_nodes.size();
         return node;
     }
 
     ast::DeclSpec *create_decl_spec() { return decl_specs.emplace(new ast::DeclSpec())->get(); }
 
     ChiType *create_type(TypeKind kind) {
-        return types.emplace(new ChiType(kind, types.len + 1))->get();
+        return types.emplace(new ChiType(kind, types.size() + 1))->get();
     }
 
     Scope *create_scope(Scope *parent) { return scopes.emplace(new Scope(parent))->get(); }

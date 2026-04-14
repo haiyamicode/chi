@@ -489,7 +489,7 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                 // This is the innermost call
                 result->fn_call = node;
                 result->active_param = 0;
-                for (int i = 0; i < call.args.len; i++) {
+                for (int i = 0; i < call.args.size(); i++) {
                     auto arg = call.args[i];
                     auto arg_start = arg->start_token ? arg->start_token : arg->token;
                     if (arg_start && cursor_pos.offset >= arg_start->pos.offset) {
@@ -497,12 +497,12 @@ static bool find_fn_call(ast::Node *node, Pos cursor_pos, ScanResult *result) {
                     }
                 }
                 // Past all args (trailing comma) → next param
-                if (call.args.len > 0) {
-                    auto last = call.args[call.args.len - 1];
+                if (call.args.size() > 0) {
+                    auto last = call.args[call.args.size() - 1];
                     auto last_end = last->end_token ? last->end_token : last->token;
                     if (last_end && cursor_pos.offset >
                                         last_end->pos.offset + (long)last_end->to_string().size()) {
-                        result->active_param = call.args.len;
+                        result->active_param = call.args.size();
                     }
                 }
                 return true;

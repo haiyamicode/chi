@@ -45,7 +45,7 @@ ChiStructMember *ChiTypeStruct::add_member(Context *allocator, const string &nam
         if (node->type == ast::NodeType::FnDef) {
             member->method_index = vtable_size++;
         } else if (is_layout_field) {
-            member->field_index = fields.len;
+            member->field_index = fields.size();
             fields.add(member);
         }
         member_table[name] = member;
@@ -91,7 +91,7 @@ bool ChiTypeStruct::is_interface(ChiType *type) {
 }
 
 bool ChiTypeStruct::is_generic(ChiType *type) {
-    return type->kind == TypeKind::Struct && type->data.struct_.type_params.len > 0;
+    return type->kind == TypeKind::Struct && type->data.struct_.type_params.size() > 0;
 }
 
 bool ChiTypeStruct::is_pointer_type(ChiType *type) {
@@ -129,7 +129,7 @@ ChiEnumVariant *ChiTypeEnum::add_variant(Context *allocator, const string &name,
     member->enum_ = this;
     variants.add(member);
 
-    member->index = variants.len;
+    member->index = variants.size();
     variant_table[name] = member;
 
     assert(resolved_type->kind == TypeKind::EnumValue);
@@ -221,16 +221,16 @@ ChiType *ChiTypeFn::get_param_at(size_t index) {
     if (is_extern && is_variadic) {
         return nullptr;
     }
-    if (params.len == 0) {
+    if (params.size() == 0) {
         return nullptr;
     }
     return get_variadic_elem_type();
 }
 
-int ChiTypeFn::get_va_start() { return params.len - (int)(is_variadic && !is_extern); }
+int ChiTypeFn::get_va_start() { return params.size() - (int)(is_variadic && !is_extern); }
 
 ChiType *ChiTypeFn::get_variadic_span_param() {
-    if (!is_variadic || is_extern || params.len == 0) {
+    if (!is_variadic || is_extern || params.size() == 0) {
         return nullptr;
     }
     auto *va_param = params.last();

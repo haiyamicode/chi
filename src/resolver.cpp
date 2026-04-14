@@ -373,7 +373,7 @@ bool Resolver::can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit)
     auto &to_data = to_fn->data.fn;
 
     // Check parameter count
-    if (from_data.params.len != to_data.params.len) {
+    if (from_data.params.size() != to_data.params.size()) {
         return false;
     }
 
@@ -392,7 +392,7 @@ bool Resolver::can_assign_fn(ChiType *from_fn, ChiType *to_fn, bool is_explicit)
     }
 
     // Check parameter types (contravariant)
-    for (size_t i = 0; i < from_data.params.len; i++) {
+    for (size_t i = 0; i < from_data.params.size(); i++) {
         if (!can_assign(to_data.params[i], from_data.params[i], is_explicit)) {
             return false;
         }
@@ -688,8 +688,8 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
         if (from_type->kind == TypeKind::Subtype) {
             auto &from_sub = from_type->data.subtype;
             auto &to_sub = to_type->data.subtype;
-            if (from_sub.generic == to_sub.generic && from_sub.args.len == to_sub.args.len) {
-                for (int i = 0; i < from_sub.args.len; i++) {
+            if (from_sub.generic == to_sub.generic && from_sub.args.size() == to_sub.args.size()) {
+                for (int i = 0; i < from_sub.args.size(); i++) {
                     if (!can_assign(from_sub.args[i], to_sub.args[i], is_explicit)) {
                         return false;
                     }
@@ -748,7 +748,7 @@ static bool is_exclusive_access_borrow_param(ChiType *type, ast::Node *param_nod
 static bool lifetime_outlives(ChiLifetime *a, ChiLifetime *b) {
     if (a == b)
         return true;
-    for (size_t i = 0; i < a->outlives.len; i++) {
+    for (size_t i = 0; i < a->outlives.size(); i++) {
         if (lifetime_outlives(a->outlives[i], b))
             return true;
     }
@@ -988,11 +988,11 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto &bstruct_data = bstruct->data.struct_;
             bstruct_data.kind = ContainerKind::Struct;
 
-            if (data.captures.len > 0) {
+            if (data.captures.size() > 0) {
                 // Add capture fields to binding struct
                 // By-ref captures: pointer (Reference) to original variable
                 // By-value captures: value type directly in struct
-                for (int i = 0; i < data.captures.len; i++) {
+                for (int i = 0; i < data.captures.size(); i++) {
                     auto &cap = data.captures[i];
                     auto name = fmt::format("capture_{}", i);
                     auto field_type =
@@ -1004,7 +1004,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 // Hidden per-capture drop-flag pointers. These let a lambda move clear the
                 // caller's maybe-move flag when a captured by-ref value is actually moved.
-                for (int i = 0; i < data.captures.len; i++) {
+                for (int i = 0; i < data.captures.size(); i++) {
                     auto name = fmt::format("capture_flag_{}", i);
                     bstruct_data.add_member(get_allocator(), name, get_dummy_var(name),
                                             get_pointer_type(get_system_types()->bool_, TypeKind::Pointer));
@@ -1163,17 +1163,17 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             is_variadic = true;
         }
         array<ChiLifetime *> all_ref_lifetimes; // all ref param lifetimes (for return elision)
-        for (int i = 0; i < data.params.len; i++) {
+        for (int i = 0; i < data.params.size(); i++) {
             auto param = data.params[i];
             auto &pdata = param->data.param_decl;
-            auto is_last = i == data.params.len - 1;
+            auto is_last = i == data.params.size() - 1;
             if (pdata.is_variadic && !is_last) {
                 error(param, errors::VARIADIC_NOT_FINAL, param->name);
                 return create_type(TypeKind::Fn);
             }
             // Pass expected parameter type for inference if available
             ChiType *expected_param_type = nullptr;
-            if (expected_fn && (size_t)i < expected_fn->params.len) {
+            if (expected_fn && (size_t)i < expected_fn->params.size()) {
                 expected_param_type = expected_fn->params[i];
             }
             auto param_scope =
@@ -1225,14 +1225,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Lambda arity flexibility: if the lambda declares fewer params than the
         // expected function type, pad with the remaining expected param types.
         // This allows e.g. a.map(v => v * 2) when map expects func(T, uint32) U.
-        if (is_lambda && expected_fn && param_types.len < expected_fn->params.len) {
-            for (size_t i = param_types.len; i < expected_fn->params.len; i++) {
+        if (is_lambda && expected_fn && param_types.size() < expected_fn->params.size()) {
+            for (size_t i = param_types.size(); i < expected_fn->params.size(); i++) {
                 param_types.add(expected_fn->params[i]);
             }
         }
 
         // Auto-default trailing ?T params to null (walk backwards, stop at first non-optional)
-        for (int i = data.params.len - 1; i >= 0; i--) {
+        for (int i = data.params.size() - 1; i >= 0; i--) {
             auto &pdata = data.params[i]->data.param_decl;
             if (pdata.default_value || pdata.is_variadic)
                 continue;
@@ -1258,16 +1258,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
                 all_ref_lifetimes.add(st.this_lifetime);
             }
-            if (all_ref_lifetimes.len > 0) {
+            if (all_ref_lifetimes.size() > 0) {
                 // If only one ref source, use it directly; otherwise create a Return
                 // lifetime that all ref lifetimes outlive
                 ChiLifetime *elided_lt = nullptr;
-                if (all_ref_lifetimes.len == 1) {
+                if (all_ref_lifetimes.size() == 1) {
                     elided_lt = all_ref_lifetimes[0];
                 } else {
                     elided_lt = m_ctx->allocator->create_lifetime(
                         "fn", LifetimeKind::Return, nullptr, nullptr);
-                    for (size_t i = 0; i < all_ref_lifetimes.len; i++) {
+                    for (size_t i = 0; i < all_ref_lifetimes.size(); i++) {
                         all_ref_lifetimes[i]->outlives.add(elided_lt);
                     }
                 }
@@ -1282,7 +1282,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto fn_type = get_fn_type(return_type, &param_types, is_variadic, method_container,
                                    is_extern, &type_param_types);
 
-        if (fn_lifetime_list.len > 0) {
+        if (fn_lifetime_list.size() > 0) {
             fn_type->data.fn.lifetime_params = fn_lifetime_list;
         }
 
@@ -1403,7 +1403,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
 
                 // Now propagate captures and build path from innermost to outermost
-                for (int i = 0; i < function_chain.len; i++) {
+                for (int i = 0; i < function_chain.size(); i++) {
                     auto fn = function_chain[i];
                     auto &fn_def = fn->data.fn_def;
                     auto &captures = fn_def.captures;
@@ -1413,7 +1413,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto existing = capture_map.get(data.decl);
                     int32_t capture_idx;
                     if (!existing) {
-                        capture_idx = captures.len;
+                        capture_idx = captures.size();
                         // Check if this capture is explicitly by-value
                         auto mode = ast::CaptureMode::ByRef;
                         for (auto &vc : fn_def.value_captures) {
@@ -1802,7 +1802,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 array<ast::Node *> rhs_narrowables;
                 collect_narrowables(data.op1, logical_rhs_uses_truthy_narrowing(data.op_type),
                                     rhs_narrowables);
-                if (rhs_narrowables.len > 0) {
+                if (rhs_narrowables.size() > 0) {
                     rhs_narrow_block.scope = m_ctx->allocator->create_scope(scope.block->scope);
                     for (auto ident : rhs_narrowables) {
                         auto var = create_narrowed_var(ident, node, scope);
@@ -2602,7 +2602,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         TypeList elements;
         auto *tuple_owner = scope.move_outlet ? scope.move_outlet : node;
-        for (int32_t i = 0; i < data.items.len; i++) {
+        for (int32_t i = 0; i < data.items.size(); i++) {
             auto *item = data.items[i];
             auto elem_type = resolve(item, scope);
             if (!elem_type) return nullptr;
@@ -2757,7 +2757,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 // (e.g., Promise.exec(...) instead of requiring Promise<int>.exec(...))
                 if (underlying_type->data.struct_.is_generic() &&
                     result_type->kind == TypeKind::Fn &&
-                    result_type->data.fn.type_params.len == 0) {
+                    result_type->data.fn.type_params.size() == 0) {
                     auto &struct_tparams = underlying_type->data.struct_.type_params;
                     auto promoted = create_type(TypeKind::Fn);
                     result_type->clone(promoted);
@@ -2844,7 +2844,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Parse field name as integer index
             char *end;
             long idx = std::strtol(field_name.c_str(), &end, 10);
-            if (*end == '\0' && idx >= 0 && idx < elems.len) {
+            if (*end == '\0' && idx >= 0 && idx < elems.size()) {
                 data.resolved_value = idx;
                 data.resolved_dot_kind = DotKind::TupleField;
                 if (scope.parent_fn_node && !scope.is_unsafe_block &&
@@ -2998,7 +2998,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!value_type) {
                 return nullptr;
             }
-            if (data.items.len == 0 && value_type->kind == TypeKind::Placeholder) {
+            if (data.items.size() == 0 && value_type->kind == TypeKind::Placeholder) {
                 bool has_construct_bound = false;
                 for (auto t : get_placeholder_traits(value_type)) {
                     if (!t || t->kind != TypeKind::Struct || !ChiTypeStruct::is_interface(t))
@@ -3006,7 +3006,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto *new_member = t->data.struct_.find_member("new");
                     if (new_member && new_member->node &&
                         new_member->node->data.fn_def.fn_kind == ast::FnKind::Constructor &&
-                        new_member->node->data.fn_def.fn_proto->data.fn_proto.params.len == 0) {
+                        new_member->node->data.fn_def.fn_proto->data.fn_proto.params.size() == 0) {
                         has_construct_bound = true;
                         break;
                     }
@@ -3064,7 +3064,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     // [1, 2, 3] assigned to [N]T — treat as fixed array init
                     result_type = scope.value_type;
                     value_type = result_type;
-                } else if (data.is_array_literal && data.items.len > 0) {
+                } else if (data.is_array_literal && data.items.size() > 0) {
                     auto elem_type = resolve(data.items[0], scope);
                     if (!elem_type)
                         return nullptr;
@@ -3082,14 +3082,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.resolved_type_source = ast::ResolvedTypeSourceKind::Contextual;
                 {
                     // Empty construct on unresolved Infer type — cannot determine type
-                    if (data.items.len == 0 && result_type->kind == TypeKind::Infer &&
+                    if (data.items.size() == 0 && result_type->kind == TypeKind::Infer &&
                         !result_type->data.infer.inferred_type) {
                         error(node, errors::CONSTRUCT_CANNOT_INFER_TYPE);
                         return nullptr;
                     }
                     // Empty construct on placeholder (= {}) requires a constructor
                     // interface bound whose new() has zero params
-                    if (data.items.len == 0 && result_type->kind == TypeKind::Placeholder) {
+                    if (data.items.size() == 0 && result_type->kind == TypeKind::Placeholder) {
                         bool has_construct_bound = false;
                         for (auto t : get_placeholder_traits(result_type)) {
                             if (!t || t->kind != TypeKind::Struct ||
@@ -3098,7 +3098,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                             auto *new_member = t->data.struct_.find_member("new");
                             if (new_member && new_member->node &&
                                 new_member->node->data.fn_def.fn_kind == ast::FnKind::Constructor &&
-                                new_member->node->data.fn_def.fn_proto->data.fn_proto.params.len ==
+                                new_member->node->data.fn_def.fn_proto->data.fn_proto.params.size() ==
                                     0) {
                                 has_construct_bound = true;
                                 break;
@@ -3123,8 +3123,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
         }
         // Empty construct of Unit type → rewrite to UnitExpr for formatter
-        if (value_type && value_type->kind == TypeKind::Unit && data.items.len == 0 &&
-            !data.field_inits.len && !data.spread_expr) {
+        if (value_type && value_type->kind == TypeKind::Unit && data.items.size() == 0 &&
+            !data.field_inits.size() && !data.spread_expr) {
             node->type = NodeType::UnitExpr;
             return value_type;
         }
@@ -3133,9 +3133,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (value_type->kind == TypeKind::FixedArray) {
             auto elem_type = value_type->data.fixed_array.elem;
             auto fa_size = value_type->data.fixed_array.size;
-            if ((uint32_t)data.items.len > fa_size) {
+            if ((uint32_t)data.items.size() > fa_size) {
                 error(node, "too many items for [{}]{}: got {}, max {}", fa_size,
-                      format_type_display(elem_type), data.items.len, fa_size);
+                      format_type_display(elem_type), data.items.size(), fa_size);
             }
             for (auto item : data.items) {
                 auto item_scope = scope.set_value_type(elem_type);
@@ -3156,10 +3156,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto *alloc_init_member_p =
             struct_type ? struct_type->member_intrinsics.get(IntrinsicSymbol::AllocInit) : nullptr;
         auto constructor = struct_type ? struct_type->get_constructor() : nullptr;
-        bool use_list_init = list_init_member_p && data.items.len > 0 && !data.field_inits.len &&
+        bool use_list_init = list_init_member_p && data.items.size() > 0 && !data.field_inits.size() &&
                              !data.spread_expr;
         // Detect kv init: all field_inits have key_expr (string: value pairs)
-        bool has_kv_entries = data.field_inits.len > 0 && data.items.len == 0 &&
+        bool has_kv_entries = data.field_inits.size() > 0 && data.items.size() == 0 &&
                               data.field_inits[0]->data.field_init_expr.key_expr != nullptr;
         bool use_kv_init = kv_init_member_p && has_kv_entries;
         bool use_alloc_init =
@@ -3257,14 +3257,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 assert(ctor_proto && "constructor summary proto missing");
                 if (ctor_proto->copy_edge_summary_valid) {
                     for (auto idx : ctor_proto->this_copy_edge_param_indices) {
-                        if (idx >= 0 && idx < static_cast<int32_t>(data.items.len)) {
+                        if (idx >= 0 && idx < static_cast<int32_t>(data.items.size())) {
                             add_borrow_source_edges(
                                 fn_def, data.items[static_cast<uint32_t>(idx)], node, false);
                         }
                     }
                 }
             }
-        } else if (value_type->kind == TypeKind::Placeholder && data.items.len > 0) {
+        } else if (value_type->kind == TypeKind::Placeholder && data.items.size() > 0) {
             // Placeholder type with positional args: resolve args against
             // a matching constructor interface bound's new() signature
             ChiStructMember *iface_new = nullptr;
@@ -3281,18 +3281,18 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto &fn_type = iface_new->resolved_type->data.fn;
                 resolve_fn_call(node, scope, &fn_type, &data.items, iface_new->node);
             } else {
-                error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.len);
+                error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.size());
                 return nullptr;
             }
         } else {
             auto payload_fields = get_enum_payload_fields(value_type);
-            if (payload_fields.len > 0 && data.items.len > 0) {
-                if (data.items.len != payload_fields.len) {
-                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, payload_fields.len,
-                          data.items.len);
+            if (payload_fields.size() > 0 && data.items.size() > 0) {
+                if (data.items.size() != payload_fields.size()) {
+                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, payload_fields.size(),
+                          data.items.size());
                     return nullptr;
                 }
-                for (uint32_t i = 0; i < data.items.len; i++) {
+                for (uint32_t i = 0; i < data.items.size(); i++) {
                     auto item = data.items[i];
                     auto field = payload_fields[i];
                     auto item_scope = scope.set_value_type(field->resolved_type);
@@ -3311,8 +3311,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
                 }
             } else if (result_type->kind == TypeKind::Optional) {
-                if (data.items.len != 1) {
-                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 1, data.items.len);
+                if (data.items.size() != 1) {
+                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 1, data.items.size());
                     return nullptr;
                 }
                 auto item = data.items[0];
@@ -3320,8 +3320,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 check_assignment(item, item_type, result_type->get_elem(), &scope);
                 return result_type;
             } else {
-                if (data.items.len != 0) {
-                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.len);
+                if (data.items.size() != 0) {
+                    error(node, errors::CALL_WRONG_NUMBER_OF_ARGS, 0, data.items.size());
                     return nullptr;
                 }
             }
@@ -3417,7 +3417,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // wherever 'b flows.
         if (scope.parent_fn_node && value_type && value_type->kind == TypeKind::Struct) {
             auto &st = value_type->data.struct_;
-            if (st.lifetime_params.len > 0) {
+            if (st.lifetime_params.size() > 0) {
                 // Map each lifetime param to its field init source decls
                 map<ChiLifetime *, array<ast::Node *>> lt_to_sources;
                 for (auto field_init : data.field_inits) {
@@ -3563,7 +3563,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // mem move intrinsic: sink the source variable so it's not destroyed at scope exit
         if (fn_symbol == IntrinsicSymbol::MemMove && scope.parent_fn_node) {
-            assert(data.args.len > 1 && "intrinsic mem move missing source argument");
+            assert(data.args.size() > 1 && "intrinsic mem move missing source argument");
             auto *src_decl = find_root_decl(data.args[1]);
             if (src_decl) {
                 scope.parent_fn_def()->add_sink_edge(src_decl, node);
@@ -3574,7 +3574,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // compiler-only marker that the owner copies the borrow dependencies of value into itself.
         // No runtime effect.
         if (fn_symbol == IntrinsicSymbol::AnnotateCopy && scope.parent_fn_node) {
-            assert(data.args.len > 1 && "intrinsic annotate_copy missing argument");
+            assert(data.args.size() > 1 && "intrinsic annotate_copy missing argument");
             auto *owner_expr = unwrap_lifetime_copy_intrinsic_arg(data.args[0]);
             auto *value_expr = unwrap_lifetime_copy_intrinsic_arg(data.args[1]);
             auto *owner_root = owner_expr ? find_root_decl(owner_expr) : nullptr;
@@ -3591,7 +3591,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 data.generated_fn ? get_decl_fn_proto(data.generated_fn) : get_decl_fn_proto(fn_decl);
             if (callee_proto) {
                 auto &fn_def = *scope.parent_fn_def();
-                for (size_t i = 0; i < callee_proto->params.len && i < data.args.len; i++) {
+                for (size_t i = 0; i < callee_proto->params.size() && i < data.args.size(); i++) {
                     auto *lt = callee_proto->params[i]->data.param_decl.borrow_lifetime;
                     if (lt && lt->kind == LifetimeKind::Static) {
                         auto *arg = data.args[i];
@@ -3605,7 +3605,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
 
         // Assert narrowing: assert(expr) → narrow all optional/result vars in expr
-        if (fn_decl && fn_decl == get_builtin("assert") && data.args.len >= 1) {
+        if (fn_decl && fn_decl == get_builtin("assert") && data.args.size() >= 1) {
             array<ast::Node *> narrowables;
             collect_narrowables(data.args[0], true, narrowables);
             for (auto ident : narrowables) {
@@ -3855,31 +3855,31 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             check_lifetime_constraints(&fn_def, data.exit_flow);
         };
         auto stamp_new_stmt_temps = [&](size_t before, int stmt_idx) {
-            for (size_t t = before; t < data.stmt_temp_vars.len; t++) {
+            for (size_t t = before; t < data.stmt_temp_vars.size(); t++) {
                 data.stmt_temp_vars[t]->data.var_decl.stmt_owner_index = stmt_idx;
             }
         };
-        for (int i = 0; i < (int)data.statements.len; i++) {
+        for (int i = 0; i < (int)data.statements.size(); i++) {
             auto stmt = data.statements[i];
-            size_t temps_before = data.stmt_temp_vars.len;
+            size_t temps_before = data.stmt_temp_vars.size();
             auto stmt_type = resolve(stmt, child_scope);
             ensure_temp_owner(stmt, stmt_type, child_scope);
             stamp_new_stmt_temps(temps_before, i);
         }
         if (data.return_expr) {
-            size_t temps_before = data.stmt_temp_vars.len;
+            size_t temps_before = data.stmt_temp_vars.size();
             auto type = resolve(data.return_expr, child_scope);
             if (!type || type->kind == TypeKind::Void) {
                 // Not value-producing (e.g. void if/switch) — reclassify as statement
                 ensure_temp_owner(data.return_expr, type, child_scope);
-                data.return_expr->index = data.statements.len;
+                data.return_expr->index = data.statements.size();
                 data.statements.add(data.return_expr);
                 data.return_expr = nullptr;
-                stamp_new_stmt_temps(temps_before, data.statements.len - 1);
+                stamp_new_stmt_temps(temps_before, data.statements.size() - 1);
                 snapshot_flow();
                 return get_system_types()->void_;
             }
-            stamp_new_stmt_temps(temps_before, data.statements.len);
+            stamp_new_stmt_temps(temps_before, data.statements.size());
             snapshot_flow();
             return type;
         }
@@ -4112,10 +4112,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 struct_->lifetime_params.add(lt);
             }
             // Wire up outlives bounds
-            for (size_t i = 0; i < data.lifetime_params.len; i++) {
+            for (size_t i = 0; i < data.lifetime_params.size(); i++) {
                 auto &bound = data.lifetime_params[i]->data.lifetime_param.bound;
                 if (!bound.empty()) {
-                    for (size_t j = 0; j < struct_->lifetime_params.len; j++) {
+                    for (size_t j = 0; j < struct_->lifetime_params.size(); j++) {
                         if (data.lifetime_params[j]->name == bound) {
                             struct_->lifetime_params[i]->outlives.add(struct_->lifetime_params[j]);
                             break;
@@ -4124,7 +4124,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
             }
             // Implicit 'this bound: all lifetime params outlive the struct instance
-            if (struct_->lifetime_params.len > 0) {
+            if (struct_->lifetime_params.size() > 0) {
                 if (!struct_->this_lifetime) {
                     struct_->this_lifetime = m_ctx->allocator->create_lifetime(
                         "this", LifetimeKind::This, nullptr, struct_type);
@@ -4146,7 +4146,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type != NodeType::ImplementBlock)
                     continue;
                 auto &impl_data = member->data.implement_block;
-                if (impl_data.where_clauses.len == 0)
+                if (impl_data.where_clauses.size() == 0)
                     continue;
                 impl_data.resolved_where_cond =
                     build_where_condition(impl_data, struct_, scope);
@@ -4207,8 +4207,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         // Make struct lifetime params available for field type resolution (&'a T)
         map<string, ChiLifetime *> struct_lifetime_map;
-        if (struct_->lifetime_params.len > 0) {
-            for (size_t i = 0; i < data.lifetime_params.len && i < struct_->lifetime_params.len; i++) {
+        if (struct_->lifetime_params.size() > 0) {
+            for (size_t i = 0; i < data.lifetime_params.size() && i < struct_->lifetime_params.size(); i++) {
                 struct_lifetime_map[data.lifetime_params[i]->name] = struct_->lifetime_params[i];
             }
             struct_scope.fn_lifetime_params = &struct_lifetime_map;
@@ -4224,7 +4224,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (member->type != NodeType::ImplementBlock)
                     continue;
                 auto &impl_data = member->data.implement_block;
-                if (impl_data.interface_types.len == 0 || impl_data.where_clauses.len > 0)
+                if (impl_data.interface_types.size() == 0 || impl_data.where_clauses.size() > 0)
                     continue;
                 for (auto iface_node : impl_data.interface_types) {
                     auto impl_trait = resolve_value(iface_node, struct_scope);
@@ -4274,7 +4274,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 auto &impl_data = member->data.implement_block;
 
                 // Skip non-interface where-blocks (members tagged in pass 2)
-                if (impl_data.interface_types.len == 0)
+                if (impl_data.interface_types.size() == 0)
                     continue;
 
                 // Use where condition built in pass 1
@@ -4362,7 +4362,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
                     // For where-blocks, set scoped where-clause traits
                     array<ChiType *> where_placeholders;
-                    if (impl_data.where_clauses.len > 0) {
+                    if (impl_data.where_clauses.size() > 0) {
                         for (auto &clause : impl_data.where_clauses) {
                             auto param_name = clause.param_name->str;
                             for (auto tp : struct_->type_params) {
@@ -4456,26 +4456,26 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (decl_for_typedef && decl_for_typedef->type == NodeType::TypedefDecl) {
             auto td_node = decl_for_typedef;
             auto &td = td_node->data.typedef_decl;
-            if (td.type_params.len > 0) {
+            if (td.type_params.size() > 0) {
                 // Resolve provided type args
-                if (data.args.len > td.type_params.len) {
+                if (data.args.size() > td.type_params.size()) {
                     error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
-                          td_node->name, td.type_params.len, data.args.len);
+                          td_node->name, td.type_params.size(), data.args.size());
                     return nullptr;
                 }
                 // Check missing args have defaults
-                for (auto i = data.args.len; i < td.type_params.len; i++) {
+                for (auto i = data.args.size(); i < td.type_params.size(); i++) {
                     if (!td.type_params[i]->data.type_param.default_type) {
                         error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
-                              td_node->name, td.type_params.len, data.args.len);
+                              td_node->name, td.type_params.size(), data.args.size());
                         return nullptr;
                     }
                 }
                 // Build substitution args matching the typedef's type param indices
                 ChiTypeSubtype subs;
-                for (size_t i = 0; i < td.type_params.len; i++) {
+                for (size_t i = 0; i < td.type_params.size(); i++) {
                     ChiType *arg;
-                    if (i < data.args.len) {
+                    if (i < data.args.size()) {
                         arg = resolve_value(data.args[i], scope);
                     } else {
                         arg = resolve_value(td.type_params[i]->data.type_param.default_type, scope);
@@ -4492,7 +4492,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         if (type->kind == TypeKind::Tuple) {
             // Tuple<> → Unit, Tuple<A, B, ...> → Tuple type
-            if (data.args.len == 0) {
+            if (data.args.size() == 0) {
                 return create_type_symbol({}, get_system_types()->unit);
             }
             TypeList elements;
@@ -4503,7 +4503,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     if (!inner) return nullptr;
                     // If inner is a variadic placeholder, Tuple<...T> is just T
                     if (inner->kind == TypeKind::Placeholder && inner->data.placeholder.is_variadic) {
-                        if (data.args.len == 1) {
+                        if (data.args.size() == 1) {
                             return create_type_symbol({}, inner);
                         }
                     }
@@ -4525,19 +4525,19 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return create_type_symbol({}, get_tuple_type(elements));
         }
         if (type->kind == TypeKind::Array || type->kind == TypeKind::Optional) {
-            if (data.args.len != 1) {
+            if (data.args.size() != 1) {
                 error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS,
-                      format_type_display(get_system_type(type->kind)), 1, data.args.len);
+                      format_type_display(get_system_type(type->kind)), 1, data.args.size());
             }
             auto elem_type = to_value_type(resolve(data.args[0], scope));
             return get_wrapped_type(elem_type, type->kind);
         }
         // Handle lifetime-only SubtypeExpr: Holder<'static>{...}
         // Lifetime args don't change the struct type — just constrain borrow checking
-        if (data.lifetime_args.len > 0 && data.args.len == 0) {
+        if (data.lifetime_args.size() > 0 && data.args.size() == 0) {
             if (type->kind == TypeKind::Struct) {
                 auto &struct_ = type->data.struct_;
-                if (struct_.type_params.len == 0) {
+                if (struct_.type_params.size() == 0) {
                     // Resolve lifetime args and store on the node for borrow checking
                     for (auto lt_arg : data.lifetime_args) {
                         // Validate that the lifetime matches a struct lifetime param
@@ -4565,44 +4565,44 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto &decl_params = *decl_params_ptr;
 
         // Check if the last type param is variadic
-        bool has_variadic = decl_params.len > 0 &&
-                            decl_params[decl_params.len - 1]->data.type_param.is_variadic;
-        size_t non_variadic_count = has_variadic ? params.len - 1 : params.len;
+        bool has_variadic = decl_params.size() > 0 &&
+                            decl_params[decl_params.size() - 1]->data.type_param.is_variadic;
+        size_t non_variadic_count = has_variadic ? params.size() - 1 : params.size();
 
-        if (!has_variadic && data.args.len > params.len) {
-            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.len,
-                  data.args.len);
+        if (!has_variadic && data.args.size() > params.size()) {
+            error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type), params.size(),
+                  data.args.size());
             return nullptr;
         }
-        if (has_variadic && data.args.len < non_variadic_count) {
+        if (has_variadic && data.args.size() < non_variadic_count) {
             error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type),
-                  non_variadic_count, data.args.len);
+                  non_variadic_count, data.args.size());
             return nullptr;
         }
         // Check that missing non-variadic args all have defaults
         if (!has_variadic) {
-            for (auto i = data.args.len; i < params.len; i++) {
+            for (auto i = data.args.size(); i < params.size(); i++) {
                 if (!decl_params[i]->data.type_param.default_type) {
                     error(node, errors::SUBTYPE_WRONG_NUMBER_OF_ARGS, format_type_display(type),
-                          params.len, data.args.len);
+                          params.size(), data.args.size());
                     return nullptr;
                 }
             }
         }
         // Resolve all provided type args
         array<ChiType *> resolved_args;
-        for (size_t i = 0; i < data.args.len; i++) {
+        for (size_t i = 0; i < data.args.size(); i++) {
             auto resolved = resolve_value(data.args[i], scope);
             resolved_args.add(resolved);
         }
         // Build final args, packing variadic excess into a Tuple
         array<ChiType *> args;
         if (has_variadic) {
-            for (size_t i = 0; i < non_variadic_count && i < resolved_args.len; i++) {
+            for (size_t i = 0; i < non_variadic_count && i < resolved_args.size(); i++) {
                 args.add(resolved_args[i]);
             }
             TypeList variadic_elements;
-            for (size_t i = non_variadic_count; i < resolved_args.len; i++) {
+            for (size_t i = non_variadic_count; i < resolved_args.size(); i++) {
                 variadic_elements.add(resolved_args[i]);
             }
             args.add(get_tuple_type(variadic_elements));
@@ -4611,14 +4611,14 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         // Fill in defaults for missing non-variadic type args
         if (!has_variadic) {
-            for (auto i = data.args.len; i < params.len; i++) {
+            for (auto i = data.args.size(); i < params.size(); i++) {
                 auto resolved = resolve_value(decl_params[i]->data.type_param.default_type, scope);
                 args.add(resolved);
             }
         }
 
         // Validate trait bounds on type arguments
-        for (size_t i = 0; i < args.len && i < params.len; i++) {
+        for (size_t i = 0; i < args.size() && i < params.size(); i++) {
             auto param_type = to_value_type(params[i]);
             auto type_arg = args[i];
             if (!type_arg)
@@ -4634,7 +4634,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!param_type)
                 continue;
             auto param_traits = get_placeholder_traits(param_type);
-            if (param_traits.len == 0)
+            if (param_traits.size() == 0)
                 continue;
             for (auto trait : param_traits) {
                 if (!check_trait_bound(type_arg, trait)) {
@@ -5155,8 +5155,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     auto *edges = fn_def.flow.ref_edges.get(deleted_decl);
                     if (edges) {
                         size_t offset = fn_def.current_edge_offset(deleted_decl);
-                        for (size_t i = offset; i < edges->len; i++) {
-                            fn_def.add_sink_edge(edges->items[i], node);
+                        for (size_t i = offset; i < edges->size(); i++) {
+                            fn_def.add_sink_edge((*edges)[i], node);
                         }
                     }
                 }
@@ -5487,7 +5487,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (scase->data.case_expr.is_else)
                     has_else = true;
                 else
-                    covered_count += scase->data.case_expr.clauses.len;
+                    covered_count += scase->data.case_expr.clauses.size();
 
                 if (!scase->data.case_expr.is_else) {
                     for (auto clause : scase->data.case_expr.clauses) {
@@ -5513,7 +5513,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                     }
 
                     // Type narrowing: single-clause case
-                    if (scase->data.case_expr.clauses.len == 1) {
+                    if (scase->data.case_expr.clauses.size() == 1) {
                         auto clause_type = node_get_type(scase->data.case_expr.clauses[0]);
                         if (clause_type) {
                             auto switch_expr = data.expr;
@@ -5557,13 +5557,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // Merge flow states
             if (all_terminate && exhaustive) {
                 // All cases terminate and switch is exhaustive: nothing runs after
-            } else if (case_flows.len == 0) {
+            } else if (case_flows.size() == 0) {
                 // All cases terminate but not exhaustive: no-match path continues
                 fn_def->flow = pre_branch;
             } else {
                 // Start with first non-terminating case's flow
                 fn_def->flow = case_flows[0];
-                for (int i = 1; i < case_flows.len; i++) {
+                for (int i = 1; i < case_flows.size(); i++) {
                     fn_def->flow.merge(case_flows[i]);
                 }
                 if (!exhaustive) {
@@ -5598,7 +5598,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (scase->data.case_expr.is_else)
                 has_else = true;
             else
-                covered_count += scase->data.case_expr.clauses.len;
+                covered_count += scase->data.case_expr.clauses.size();
 
             // Resolve clauses BEFORE body so we can inject narrowed vars
             if (!scase->data.case_expr.is_else) {
@@ -5644,7 +5644,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 }
 
                 // Enum variant narrowing: single-clause case matching a specific variant
-                if (scase->data.case_expr.clauses.len == 1) {
+                if (scase->data.case_expr.clauses.size() == 1) {
                     auto switch_enum = get_enum_type(expr_type);
                     if (switch_enum && switch_enum->kind == TypeKind::Enum) {
                         auto clause = scase->data.case_expr.clauses[0];
@@ -5721,7 +5721,7 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             auto enum_type = get_enum_type(expr_type);
             if (enum_type && enum_type->kind == TypeKind::Enum) {
                 auto enum_ = &enum_type->data.enum_;
-                if (covered_count >= enum_->variants.len) {
+                if (covered_count >= enum_->variants.size()) {
                     exhaustive = true;
                 }
             }
@@ -5733,13 +5733,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         // Merge flow states
         if (all_terminate && exhaustive) {
             // All cases terminate and switch is exhaustive: nothing runs after
-        } else if (case_flows.len == 0) {
+        } else if (case_flows.size() == 0) {
             // All cases terminate but not exhaustive: no-match path continues
             fn_def->flow = pre_branch;
         } else {
             // Start with first non-terminating case's flow
             fn_def->flow = case_flows[0];
-            for (int i = 1; i < case_flows.len; i++) {
+            for (int i = 1; i < case_flows.size(); i++) {
                 fn_def->flow.merge(case_flows[i]);
             }
             if (!exhaustive) {
@@ -5902,13 +5902,13 @@ static string format_container_name(Resolver *resolver, const string &base_name,
                                      TypeList *type_params, const string &module_id,
                                      ast::Module *module = nullptr) {
     auto qualified = qualify_base_name(base_name, module, module_id);
-    if (!type_params || type_params->len == 0) {
+    if (!type_params || type_params->size() == 0) {
         return qualified;
     }
 
     std::stringstream ss;
     ss << qualified << "<";
-    for (int i = 0; i < type_params->len; i++) {
+    for (int i = 0; i < type_params->size(); i++) {
         if (i > 0) ss << ",";
         ss << resolver->format_type_qualified_name((*type_params)[i], module_id);
     }
@@ -5918,13 +5918,13 @@ static string format_container_name(Resolver *resolver, const string &base_name,
 
 static string format_container_display_name(Resolver *resolver, const string &base_name,
                                             TypeList *type_params) {
-    if (!type_params || type_params->len == 0) {
+    if (!type_params || type_params->size() == 0) {
         return base_name;
     }
 
     std::stringstream ss;
     ss << base_name << "<";
-    for (int i = 0; i < type_params->len; i++) {
+    for (int i = 0; i < type_params->size(); i++) {
         if (i > 0) ss << ",";
         ss << resolver->format_type_display((*type_params)[i]);
     }
@@ -5936,13 +5936,13 @@ static string format_container_qualified_name(Resolver *resolver, const string &
                                               ast::Module *module, TypeList *type_params,
                                               const string &module_id) {
     auto qualified = qualify_base_name(base_name, module, module_id);
-    if (!type_params || type_params->len == 0) {
+    if (!type_params || type_params->size() == 0) {
         return qualified;
     }
 
     std::stringstream ss;
     ss << qualified << "<";
-    for (int i = 0; i < type_params->len; i++) {
+    for (int i = 0; i < type_params->size(); i++) {
         if (i > 0) ss << ",";
         ss << resolver->format_type_qualified_name((*type_params)[i], module_id);
     }
@@ -5984,7 +5984,7 @@ string Resolver::format_type_qualified_name(ChiType *type, const string &module_
             ss << format_type_qualified_name(data.generic, module_id);
         }
         ss << "<";
-        for (int i = 0; i < data.args.len; i++) {
+        for (int i = 0; i < data.args.size(); i++) {
             if (i > 0) ss << ",";
             ss << format_type_qualified_name(data.args[i], module_id);
         }
@@ -6078,9 +6078,9 @@ string Resolver::resolve_display_name(ast::Node *node) {
         std::stringstream ss;
         ss << base_name << "<";
         auto &args = data.fn_subtype->data.subtype.args;
-        for (int i = 0; i < args.len; i++) {
+        for (int i = 0; i < args.size(); i++) {
             ss << format_type_display(args[i]);
-            if (i < args.len - 1) {
+            if (i < args.size() - 1) {
                 ss << ", ";
             }
         }
@@ -6128,9 +6128,9 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         std::stringstream ss;
         ss << "Tuple<";
         auto &elems = type->data.tuple.elements;
-        for (int i = 0; i < elems.len; i++) {
+        for (int i = 0; i < elems.size(); i++) {
             ss << format_type(elems[i], for_display);
-            if (i < elems.len - 1) ss << ", ";
+            if (i < elems.size() - 1) ss << ", ";
         }
         ss << ">";
         return ss.str();
@@ -6154,17 +6154,17 @@ string Resolver::format_type(ChiType *type, bool for_display) {
             std::stringstream ss;
             ss << format_type(data.generic, for_display) << "<";
             bool first = true;
-            for (int i = 0; i < data.args.len; i++) {
+            for (int i = 0; i < data.args.size(); i++) {
                 auto arg = data.args[i];
                 // Unpack variadic Tuple arg for display
                 bool is_variadic_param = false;
                 if (data.generic->kind == TypeKind::Struct) {
                     auto &dp = data.generic->data.struct_.node->data.struct_decl.type_params;
-                    if (i < dp.len && dp[i]->data.type_param.is_variadic)
+                    if (i < dp.size() && dp[i]->data.type_param.is_variadic)
                         is_variadic_param = true;
                 } else if (data.generic->kind == TypeKind::Enum) {
                     auto &dp = data.generic->data.enum_.node->data.enum_decl.type_params;
-                    if (i < dp.len && dp[i]->data.type_param.is_variadic)
+                    if (i < dp.size() && dp[i]->data.type_param.is_variadic)
                         is_variadic_param = true;
                 }
                 if (is_variadic_param && arg->kind == TypeKind::Tuple) {
@@ -6200,7 +6200,7 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         return fmt::format("Array<{}>", format_type(type->get_elem(), for_display));
     case TypeKind::Span: {
         string lt_name =
-            type->data.span.lifetimes.len > 0 && type->data.span.lifetimes[0]
+            type->data.span.lifetimes.size() > 0 && type->data.span.lifetimes[0]
                 ? type->data.span.lifetimes[0]->name
                 : "";
         string prefix = format_span_prefix(type->data.span.is_mut, lt_name);
@@ -6228,9 +6228,9 @@ string Resolver::format_type(ChiType *type, bool for_display) {
 
 string Resolver::format_type_list(TypeList *type_list, bool for_display) {
     std::stringstream ss;
-    for (int i = 0; i < type_list->len; i++) {
+    for (int i = 0; i < type_list->size(); i++) {
         ss << format_type(type_list->at(i), for_display);
-        if (i < type_list->len - 1) {
+        if (i < type_list->size() - 1) {
             ss << ",";
         }
     }
@@ -6243,21 +6243,21 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         auto &struct_ = data->struct_;
         std::stringstream ss;
         ss << "struct ";
-        if (struct_.type_params.len > 0) {
+        if (struct_.type_params.size() > 0) {
             ss << "<";
-            for (int i = 0; i < struct_.type_params.len; i++) {
+            for (int i = 0; i < struct_.type_params.size(); i++) {
                 ss << format_type(struct_.type_params[i], for_display);
-                if (i < struct_.type_params.len - 1) {
+                if (i < struct_.type_params.size() - 1) {
                     ss << ",";
                 }
             }
             ss << ">";
         }
         ss << "{";
-        for (int i = 0; i < struct_.members.len; i++) {
+        for (int i = 0; i < struct_.members.size(); i++) {
             auto &member = struct_.members[i];
             ss << format_type(member->resolved_type, for_display);
-            if (i < struct_.members.len - 1) {
+            if (i < struct_.members.size() - 1) {
                 ss << ",";
             }
         }
@@ -6276,8 +6276,8 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
             ss << ") ";
         }
         ss << "func(";
-        for (int i = 0; i < fn.params.len; i++) {
-            if (fn.is_variadic && i == fn.params.len - 1) {
+        for (int i = 0; i < fn.params.size(); i++) {
+            if (fn.is_variadic && i == fn.params.size() - 1) {
                 ss << "...";
                 auto *param = fn.get_variadic_elem_type();
                 if (param) {
@@ -6285,13 +6285,13 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
                 } else {
                     ss << format_type(fn.params[i], for_display);
                 }
-                if (i < fn.params.len - 1) {
+                if (i < fn.params.size() - 1) {
                     ss << ",";
                 }
                 continue;
             }
             ss << format_type(fn.params[i], for_display);
-            if (i < fn.params.len - 1) {
+            if (i < fn.params.size() - 1) {
                 ss << ",";
             }
         }
@@ -6309,14 +6309,14 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         auto &enum_ = data->enum_;
         std::stringstream ss;
         ss << "enum ";
-        for (int i = 0; i < enum_.variants.len; i++) {
+        for (int i = 0; i < enum_.variants.size(); i++) {
             auto &member = enum_.variants[i];
             ss << member->name;
             auto &enum_value = member->resolved_type->data.enum_value;
             if (member->resolved_type->data.enum_value.variant_struct) {
                 ss << "{" << format_type(enum_value.variant_struct, for_display) << "}";
             }
-            if (i < enum_.variants.len - 1) {
+            if (i < enum_.variants.size() - 1) {
                 ss << ",";
             }
         }
@@ -6604,7 +6604,7 @@ optional<bool> Resolver::resolve_conditional_platform_term(ast::Node *term) {
 
     auto &call = term->data.fn_call_expr;
     if (!call.fn_ref_expr || call.fn_ref_expr->type != NodeType::Identifier ||
-        call.fn_ref_expr->name != "if" || call.args.len != 1) {
+        call.fn_ref_expr->name != "if" || call.args.size() != 1) {
         return std::nullopt;
     }
 
@@ -6700,7 +6700,7 @@ static void append_leaf_borrow_roots(ast::FlowState &flow, ast::Node *source,
     }
     auto *deps = flow.ref_edges.get(source);
     size_t offset = flow.current_edge_offset(source);
-    if (!deps || deps->len <= offset) {
+    if (!deps || deps->size() <= offset) {
         if (fallback_to_source) {
             add_unique_node(out, source);
         }
@@ -6709,25 +6709,24 @@ static void append_leaf_borrow_roots(ast::FlowState &flow, ast::Node *source,
 
     array<ast::Node *> stack;
     map<ast::Node *, bool> visited;
-    for (size_t i = offset; i < deps->len; i++) {
-        stack.add(deps->items[i]);
+    for (size_t i = offset; i < deps->size(); i++) {
+        stack.add((*deps)[i]);
     }
 
     for (;;) {
-        if (stack.len == 0) {
+        if (stack.size() == 0) {
             break;
         }
-        auto *node = stack[stack.len - 1];
-        stack.len -= 1;
+        auto *node = stack.pop();
         if (visited.has_key(node)) {
             continue;
         }
         visited[node] = true;
         auto *next = flow.ref_edges.get(node);
         size_t next_offset = flow.current_edge_offset(node);
-        if (next && next->len > next_offset) {
-            for (size_t i = next_offset; i < next->len; i++) {
-                stack.add(next->items[i]);
+        if (next && next->size() > next_offset) {
+            for (size_t i = next_offset; i < next->size(); i++) {
+                stack.add((*next)[i]);
             }
         } else {
             add_unique_node(out, node);
@@ -6807,7 +6806,7 @@ static ChiLifetime *get_first_ref_lifetime(ChiType *type) {
         return get_first_ref_lifetime(type->get_elem());
     }
     auto *lifetimes = type->get_lifetimes();
-    if (!type->is_lifetime_reference() || !lifetimes || lifetimes->len == 0) {
+    if (!type->is_lifetime_reference() || !lifetimes || lifetimes->size() == 0) {
         return nullptr;
     }
     return (*lifetimes)[0];
@@ -6828,7 +6827,7 @@ bool Resolver::type_needs_first_ref_lifetime(ChiType *type) {
         return type_needs_first_ref_lifetime(type->get_elem());
     }
     auto *lifetimes = type->get_lifetimes();
-    return type->is_lifetime_reference() && lifetimes && lifetimes->len == 0;
+    return type->is_lifetime_reference() && lifetimes && lifetimes->size() == 0;
 }
 
 ChiType *Resolver::with_first_ref_lifetime(ChiType *type, ChiLifetime *lt) {
@@ -6934,8 +6933,8 @@ static bool is_this_identifier_node(ast::Node *node) {
 }
 
 static void add_unique_int32(array<int32_t> &out, int32_t value) {
-    size_t insert_at = out.len;
-    for (size_t i = 0; i < out.len; i++) {
+    size_t insert_at = out.size();
+    for (size_t i = 0; i < out.size(); i++) {
         auto existing = out[i];
         if (existing == value) {
             return;
@@ -6946,7 +6945,7 @@ static void add_unique_int32(array<int32_t> &out, int32_t value) {
         }
     }
     out.add({});
-    for (size_t i = out.len - 1; i > insert_at; i--) {
+    for (size_t i = out.size() - 1; i > insert_at; i--) {
         out[i] = out[i - 1];
     }
     out[insert_at] = value;
@@ -6954,7 +6953,7 @@ static void add_unique_int32(array<int32_t> &out, int32_t value) {
 
 static ast::FnProto::ProjectionCopySummary *find_projection_copy_summary(
     array<ast::FnProto::ProjectionCopySummary> &items, int32_t index) {
-    for (size_t i = 0; i < items.len; i++) {
+    for (size_t i = 0; i < items.size(); i++) {
         if (items[i].index == index) {
             return &items[i];
         }
@@ -6971,11 +6970,10 @@ static void collect_copy_edge_reachable_params(ast::FlowState &flow, array<ast::
         stack.add(start);
     }
     for (;;) {
-        if (stack.len == 0) {
+        if (stack.size() == 0) {
             break;
         }
-        auto *node = stack[stack.len - 1];
-        stack.len -= 1;
+        auto *node = stack.pop();
         if (!node || visited.has_key(node)) {
             continue;
         }
@@ -6985,7 +6983,7 @@ static void collect_copy_edge_reachable_params(ast::FlowState &flow, array<ast::
             *out_reaches_this = true;
         }
         if (out_params) {
-            for (size_t i = 0; i < params.len; i++) {
+            for (size_t i = 0; i < params.size(); i++) {
                 if (params[i] == node) {
                     add_unique_int32(*out_params, static_cast<int32_t>(i));
                     break;
@@ -6994,8 +6992,8 @@ static void collect_copy_edge_reachable_params(ast::FlowState &flow, array<ast::
         }
 
         if (auto *next = flow.copy_edges.get(node)) {
-            for (size_t i = 0; i < next->len; i++) {
-                stack.add(next->items[i]);
+            for (size_t i = 0; i < next->size(); i++) {
+                stack.add((*next)[i]);
             }
         }
     }
@@ -7242,13 +7240,13 @@ ast::Node *Resolver::synthesize_method_lambda(ast::Node *dot_node, ChiStructMemb
     // original type expression refers to type params (T) that wouldn't
     // substitute in the lambda's scope; pre-seeding short-circuits resolution.
     array<ast::Node *> arg_idents;
-    for (size_t i = 0; i < orig_proto.params.len; i++) {
+    for (size_t i = 0; i < orig_proto.params.size(); i++) {
         auto *orig = orig_proto.params[i];
         auto *param = make(ast::NodeType::ParamDecl, orig);
         param->name = orig->name;
         param->parent_fn = lambda_def;
         param->data.param_decl.is_variadic = orig->data.param_decl.is_variadic;
-        param->resolved_type = i < method_fn.params.len ? method_fn.params[i] : nullptr;
+        param->resolved_type = i < method_fn.params.size() ? method_fn.params[i] : nullptr;
         lambda_proto->data.fn_proto.params.add(param);
 
         auto *ident = make(ast::NodeType::Identifier, orig);
@@ -7932,7 +7930,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     }
     case TypeKind::Span: {
         auto elem_type = make_recursive_call(type->get_elem(), subs);
-        auto *lt = type->data.span.lifetimes.len > 0 ? type->data.span.lifetimes[0] : nullptr;
+        auto *lt = type->data.span.lifetimes.size() > 0 ? type->data.span.lifetimes[0] : nullptr;
         return get_span_type(elem_type, type->data.span.is_mut, lt);
     }
 
@@ -7978,7 +7976,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
     case TypeKind::Enum: {
         auto &data = type->data.enum_;
 
-        if (data.type_params.len > 0) {
+        if (data.type_params.size() > 0) {
             bool has_placeholder_param = false;
             array<ChiType *> subst_args;
             for (auto tp : data.type_params) {
@@ -8005,7 +8003,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         // If struct has placeholder type_params, substitute them to get a Subtype
         // This handles "specialized structs" created by resolve_subtype for generic
         // instantiations like Promise<T> where T is still a placeholder
-        if (data.type_params.len > 0) {
+        if (data.type_params.size() > 0) {
             bool has_placeholder_param = false;
             array<ChiType *> subst_args;
             for (auto tp : data.type_params) {
@@ -8044,7 +8042,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         new_data.kind = data.kind;
         for (auto field : data.fields) {
             auto new_type = make_recursive_call(field->resolved_type, subs);
-            auto name = fmt::format("field_{}", new_data.fields.len);
+            auto name = fmt::format("field_{}", new_data.fields.size());
             new_data.add_member(get_allocator(), field->get_name(), get_dummy_var(name), new_type);
         }
         new_struct->is_placeholder = false;
@@ -8093,7 +8091,7 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
         if (enum_type && enum_type->kind == TypeKind::Subtype) {
             enum_type = make_recursive_call(enum_type, subs);
         } else if (enum_type && enum_type->kind == TypeKind::Enum &&
-                   enum_type->data.enum_.type_params.len > 0) {
+                   enum_type->data.enum_.type_params.size() > 0) {
             bool has_placeholder_param = false;
             array<ChiType *> subst_args;
             for (auto tp : enum_type->data.enum_.type_params) {
@@ -8157,10 +8155,10 @@ ChiType *Resolver::recursive_type_replace(ChiType *type, ChiTypeSubtype *subs,
                     new_member->field_index = member->field_index;
                 }
             }
-            for (size_t i = 0; i < src->data.struct_.members.len; i++) {
+            for (size_t i = 0; i < src->data.struct_.members.size(); i++) {
                 auto orig = src->data.struct_.members[i];
                 if (orig->parent_member) {
-                    for (size_t j = 0; j < src->data.struct_.members.len; j++) {
+                    for (size_t j = 0; j < src->data.struct_.members.size(); j++) {
                         if (src->data.struct_.members[j] == orig->parent_member) {
                             dst->data.struct_.members[i]->parent_member =
                                 dst->data.struct_.members[j];
@@ -8324,7 +8322,7 @@ ChiType *Resolver::finalize_fn_decl_type(ast::Node *decl, ast::Node *origin) {
         proto->resolved_type = resolved;
         auto &params = resolved->data.fn.params;
         auto &proto_params = proto->data.fn_proto.params;
-        size_t count = params.len < proto_params.len ? params.len : proto_params.len;
+        size_t count = params.size() < proto_params.size() ? params.size() : proto_params.size();
         for (size_t i = 0; i < count; i++) {
             proto_params[i]->resolved_type = params[i];
         }
@@ -8438,10 +8436,10 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
         if (param_data.generic != arg_data.generic) {
             return false;
         }
-        if (param_data.args.len != arg_data.args.len) {
+        if (param_data.args.size() != arg_data.args.size()) {
             return false;
         }
-        for (size_t i = 0; i < param_data.args.len; i++) {
+        for (size_t i = 0; i < param_data.args.size(); i++) {
             if (!make_recursive_call(param_data.args[i], arg_data.args[i])) {
                 return false;
             }
@@ -8469,12 +8467,12 @@ bool Resolver::visit_type_recursive(ChiType *param_type, ChiType *arg_type,
         }
 
         // Check parameter count
-        if (param_data.params.len != arg_data.params.len) {
+        if (param_data.params.size() != arg_data.params.size()) {
             return false;
         }
 
         // Check each parameter type
-        for (size_t i = 0; i < param_data.params.len; i++) {
+        for (size_t i = 0; i < param_data.params.size(); i++) {
             if (!make_recursive_call(param_data.params[i], arg_data.params[i])) {
                 return false;
             }
@@ -8506,7 +8504,7 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
 
     // Type inference only needs the arguments that were actually provided.
     // Trailing defaulted parameters may be omitted at the call site.
-    if (arg_types->len > fn->params.len) {
+    if (arg_types->size() > fn->params.size()) {
         return false;
     }
 
@@ -8522,7 +8520,7 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
 
         // Find the corresponding type parameter
         size_t placeholder_index = placeholder->data.placeholder.index;
-        if (placeholder_index >= fn->type_params.len) {
+        if (placeholder_index >= fn->type_params.size()) {
             return false;
         }
 
@@ -8558,7 +8556,7 @@ bool Resolver::infer_type_arguments(ChiTypeFn *fn, TypeList *arg_types,
     };
 
     // Use visitor pattern to unify each parameter with its argument
-    for (size_t i = 0; i < arg_types->len; i++) {
+    for (size_t i = 0; i < arg_types->size(); i++) {
         ChiType *param_type = fn->params[i];
         ChiType *arg_type = (*arg_types)[i];
 
@@ -8597,7 +8595,7 @@ bool Resolver::infer_from_return_type(ChiTypeFn *fn, ChiType *expected_type,
     auto handle_placeholder = [fn, inferred_types](ChiType *placeholder,
                                                    ChiType *concrete) -> bool {
         size_t placeholder_index = placeholder->data.placeholder.index;
-        if (placeholder_index >= fn->type_params.len) {
+        if (placeholder_index >= fn->type_params.size()) {
             return false;
         }
 
@@ -8999,10 +8997,10 @@ void Resolver::record_specialized_fn_env(ast::Node *node,
         case TypeKind::Subtype: {
             auto &generic_sub = generic_type->data.subtype;
             auto &concrete_sub = concrete_type->data.subtype;
-            if (generic_sub.args.len != concrete_sub.args.len) {
+            if (generic_sub.args.size() != concrete_sub.args.size()) {
                 return;
             }
-            for (size_t i = 0; i < generic_sub.args.len; i++) {
+            for (size_t i = 0; i < generic_sub.args.size(); i++) {
                 collect(generic_sub.args[i], concrete_sub.args[i]);
             }
             return;
@@ -9011,7 +9009,7 @@ void Resolver::record_specialized_fn_env(ast::Node *node,
             auto &generic_fn = generic_type->data.fn;
             auto &concrete_fn = concrete_type->data.fn;
             collect(generic_fn.return_type, concrete_fn.return_type);
-            for (size_t i = 0; i < generic_fn.params.len && i < concrete_fn.params.len; i++) {
+            for (size_t i = 0; i < generic_fn.params.size() && i < concrete_fn.params.size(); i++) {
                 collect(generic_fn.params[i], concrete_fn.params[i]);
             }
             if (generic_fn.container_ref && concrete_fn.container_ref) {
@@ -9061,7 +9059,7 @@ void Resolver::ensure_enum_subtype_final_type(ChiType *generic, ChiType *subtype
     auto final_type = subtype_data.final_type;
     auto needs_materialization = !final_type;
     if (!needs_materialization && final_type->kind == TypeKind::Enum) {
-        needs_materialization = final_type->data.enum_.variants.len != gen.variants.len;
+        needs_materialization = final_type->data.enum_.variants.size() != gen.variants.size();
     }
     if (!needs_materialization) {
         m_resolving_subtype = prev_resolving;
@@ -9159,7 +9157,7 @@ void Resolver::ensure_enum_subtype_final_type(ChiType *generic, ChiType *subtype
         member->resolved_type = concrete_vt;
         member->enum_ = &concrete_enum->data.enum_;
         concrete_enum->data.enum_.variants.add(member);
-        member->index = concrete_enum->data.enum_.variants.len;
+        member->index = concrete_enum->data.enum_.variants.size();
         concrete_enum->data.enum_.variant_table[variant->name] = member;
         concrete_vt->data.enum_value.member = member;
     }
@@ -9433,8 +9431,8 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     if (!fn || !args) {
         return nullptr;
     }
-    auto n_args = args->len;
-    auto n_params = fn->params.len;
+    auto n_args = args->size();
+    auto n_params = fn->params.size();
     auto intrinsic_symbol = fn_decl ? resolve_intrinsic_symbol(fn_decl) : IntrinsicSymbol::None;
 
     // Count required parameters (those without defaults, excluding variadic)
@@ -9442,7 +9440,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
     size_t max_args = params_required;
     if (auto *fn_proto = get_decl_fn_proto(fn_decl)) {
         params_required = 0;
-        for (size_t i = 0; i < fn_proto->params.len; i++) {
+        for (size_t i = 0; i < fn_proto->params.size(); i++) {
             auto param = fn_proto->params[i];
             if (!param->data.param_decl.effective_default_value() &&
                 !param->data.param_decl.is_variadic) {
@@ -9502,18 +9500,18 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         // Check for explicit type arguments first (e.g., promise<Unit>)
         if (node->type == ast::NodeType::FnCallExpr) {
             auto &fn_call_data = node->data.fn_call_expr;
-            if (fn_call_data.type_args.len > 0) {
+            if (fn_call_data.type_args.size() > 0) {
                 has_explicit_type_args = true;
 
                 // Check if the number of type parameters matches
-                if (fn_call_data.type_args.len != fn->type_params.len) {
+                if (fn_call_data.type_args.size() != fn->type_params.size()) {
                     error(node, "Wrong number of type parameters: expected {}, got {}",
-                          fn->type_params.len, fn_call_data.type_args.len);
+                          fn->type_params.size(), fn_call_data.type_args.size());
                     return fn->return_type;
                 }
 
                 // Resolve the explicit type parameters and build substitution map
-                for (size_t i = 0; i < fn->type_params.len; i++) {
+                for (size_t i = 0; i < fn->type_params.size(); i++) {
                     auto type_arg = resolve_value(fn_call_data.type_args[i], scope);
                     type_args.add(type_arg);
 
@@ -9553,7 +9551,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
                 if (all_inferred) {
                     has_return_type_inference = true;
                     // Build type_args and type_substitutions from inferred types
-                    for (size_t i = 0; i < fn->type_params.len; i++) {
+                    for (size_t i = 0; i < fn->type_params.size(); i++) {
                         auto type_param = fn->type_params[i];
                         auto inferred = return_type_inferred.get(type_param);
                         type_args.add(*inferred);
@@ -9606,7 +9604,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
             }
 
             // Convert inferred types to type_args array and build substitution map
-            for (size_t i = 0; i < fn->type_params.len; i++) {
+            for (size_t i = 0; i < fn->type_params.size(); i++) {
                 auto type_param = fn->type_params[i];
                 auto inferred = inferred_types.get(type_param);
                 if (!inferred) {
@@ -9624,7 +9622,7 @@ ChiType *Resolver::resolve_fn_call(ast::Node *node, ResolveScope &scope, ChiType
         }
 
         // Check that type arguments satisfy trait bounds
-        for (size_t i = 0; i < fn->type_params.len; i++) {
+        for (size_t i = 0; i < fn->type_params.size(); i++) {
             auto type_param = fn->type_params[i];
             auto lookup_key = type_param;
             if (type_param->kind == TypeKind::TypeSymbol) {
@@ -10312,7 +10310,7 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
     // Check if there's a rest pattern
     bool has_rest = false;
     int rest_index = -1;
-    for (int i = 0; i < (int)fields.len; i++) {
+    for (int i = 0; i < (int)fields.size(); i++) {
         if (fields[i]->data.destructure_field.is_rest) {
             has_rest = true;
             rest_index = i;
@@ -10320,20 +10318,20 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
         }
     }
 
-    if (!has_rest && (int)fields.len > elems.len) {
+    if (!has_rest && (int)fields.size() > elems.size()) {
         error(parent, "too many bindings in tuple destructure: expected at most {}, got {}",
-              elems.len, fields.len);
+              elems.size(), fields.size());
         return;
     }
-    if (has_rest && (int)fields.len - 1 > elems.len) {
+    if (has_rest && (int)fields.size() - 1 > elems.size()) {
         error(parent, "too many bindings in tuple destructure: expected at most {}, got {}",
-              elems.len, (int)fields.len - 1);
+              elems.size(), (int)fields.size() - 1);
         return;
     }
 
     auto kind = parent->data.destructure_decl.kind;
 
-    for (int i = 0; i < (int)fields.len; i++) {
+    for (int i = 0; i < (int)fields.size(); i++) {
         auto field_node = fields[i];
         auto &field_data = field_node->data.destructure_field;
         auto binding_name = string(field_data.binding_name->str);
@@ -10342,7 +10340,7 @@ void Resolver::resolve_tuple_destructure(ast::Node *parent, array<ast::Node *> &
         if (field_data.is_rest) {
             // Collect remaining elements into a Tuple type
             TypeList rest_elems;
-            for (int j = i; j < elems.len; j++) {
+            for (int j = i; j < elems.size(); j++) {
                 rest_elems.add(elems[j]);
             }
             elem_type = get_tuple_type(rest_elems);
@@ -10449,7 +10447,7 @@ bool Resolver::always_terminates(ast::Node *node) {
     }
     case NodeType::Block: {
         auto &stmts = node->data.block.statements;
-        return stmts.len > 0 && always_terminates(stmts[stmts.len - 1]);
+        return stmts.size() > 0 && always_terminates(stmts[stmts.size() - 1]);
     }
     case NodeType::IfExpr: {
         auto &d = node->data.if_expr;
@@ -10634,7 +10632,7 @@ void Resolver::finalize_placeholder_lambda_params(ChiType *fn_type) {
     bool had_placeholder = false;
 
     // Walk through all function parameters and finalize placeholder lambdas recursively
-    for (size_t i = 0; i < fn_type->data.fn.params.len; i++) {
+    for (size_t i = 0; i < fn_type->data.fn.params.size(); i++) {
         auto param = fn_type->data.fn.params[i];
         if (finalize_lambda_type_recursive(param)) {
             had_placeholder = true;
@@ -10991,10 +10989,10 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
         if (a->kind == TypeKind::Fn) {
             auto &a_fn = a->data.fn;
             auto &b_fn = b->data.fn;
-            if (a_fn.params.len != b_fn.params.len) {
+            if (a_fn.params.size() != b_fn.params.size()) {
                 return false;
             }
-            for (int i = 0; i < a_fn.params.len; i++) {
+            for (int i = 0; i < a_fn.params.size(); i++) {
                 if (!is_same_type(a_fn.params[i], b_fn.params[i])) {
                     return false;
                 }
@@ -11014,8 +11012,8 @@ bool Resolver::is_same_type(ChiType *a, ChiType *b) {
         if (a->kind == TypeKind::Tuple) {
             auto &a_elems = a->data.tuple.elements;
             auto &b_elems = b->data.tuple.elements;
-            if (a_elems.len != b_elems.len) return false;
-            for (int i = 0; i < a_elems.len; i++) {
+            if (a_elems.size() != b_elems.size()) return false;
+            for (int i = 0; i < a_elems.size(); i++) {
                 if (!is_same_type(a_elems[i], b_elems[i])) return false;
             }
             return true;
@@ -11031,11 +11029,11 @@ ChiType *Resolver::get_enum_subtype(ChiType *generic, TypeList *type_args) {
     for (auto subtype : gen.subtypes) {
         assert(subtype->kind == TypeKind::Subtype);
         auto &subtype_data = subtype->data.subtype;
-        if (subtype_data.args.len != type_args->len) {
+        if (subtype_data.args.size() != type_args->size()) {
             continue;
         }
         bool matches = true;
-        for (size_t i = 0; i < type_args->len; i++) {
+        for (size_t i = 0; i < type_args->size(); i++) {
             if (!is_same_type(type_args->at(i), subtype_data.args[i])) {
                 matches = false;
                 break;
@@ -11066,7 +11064,7 @@ ChiType *Resolver::get_enum_subtype(ChiType *generic, TypeList *type_args) {
                              m_resolving_subtype->data.subtype.generic == generic &&
                              sub->subtype_depth() > m_resolving_subtype->subtype_depth();
         map<ChiType *, ChiType *> subs;
-        for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
+        for (size_t i = 0; i < gen.type_params.size() && i < type_args->size(); i++) {
             subs[to_value_type(gen.type_params[i])] = type_args->at(i);
         }
         m_ctx->generics.record_struct(sub->global_id, sub->global_id, generic, sub, subs,
@@ -11097,7 +11095,7 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
     for (auto subtype : gen.subtypes) {
         assert(subtype->kind == TypeKind::Subtype);
         auto &subtype_data = subtype->data.subtype;
-        if (subtype_data.args.len != type_args->len) {
+        if (subtype_data.args.size() != type_args->size()) {
             continue;
         }
         // Skip placeholder subtypes when looking for a concrete instantiation.
@@ -11107,7 +11105,7 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
             continue;
         }
         bool matches = true;
-        for (size_t i = 0; i < type_args->len; i++) {
+        for (size_t i = 0; i < type_args->size(); i++) {
             auto a = type_args->at(i);
             auto b = subtype_data.args[i];
             if (!is_same_type(a, b)) {
@@ -11138,7 +11136,7 @@ ChiType *Resolver::get_subtype(ChiType *generic, TypeList *type_args) {
                              m_resolving_subtype->data.subtype.generic == generic &&
                              sub->subtype_depth() > m_resolving_subtype->subtype_depth();
         map<ChiType *, ChiType *> subs;
-        for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
+        for (size_t i = 0; i < gen.type_params.size() && i < type_args->size(); i++) {
             // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in
             // struct members contain raw Placeholder types, not TypeSymbol wrappers
             subs[to_value_type(gen.type_params[i])] = type_args->at(i);
@@ -11163,7 +11161,7 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
     if (max_arg_depth > MAX_GENERIC_DEPTH) {
         auto fn_display = fn_node->name + "<" + format_type_list(type_args) + ">";
         error(fn_node, errors::GENERIC_DEPTH_EXCEEDED, fn_display, MAX_GENERIC_DEPTH);
-        if (fn_node->data.fn_def.variants.len > 0) {
+        if (fn_node->data.fn_def.variants.size() > 0) {
             return fn_node->data.fn_def.variants[0];
         }
         auto stub_sub = create_type(TypeKind::Subtype);
@@ -11185,11 +11183,11 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
         assert(variant->type == NodeType::GeneratedFn);
         auto subtype = variant->data.generated_fn.fn_subtype;
         auto &subtype_data = subtype->data.subtype;
-        if (subtype_data.args.len != type_args->len) {
+        if (subtype_data.args.size() != type_args->size()) {
             continue;
         }
         bool matches = true;
-        for (size_t i = 0; i < type_args->len; i++) {
+        for (size_t i = 0; i < type_args->size(); i++) {
             auto a = type_args->at(i);
             auto b = subtype_data.args[i];
             if (!is_same_type(a, b)) {
@@ -11238,7 +11236,7 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
 
     // Resolve generated nodes
     generated_fn->resolved_type = resolved_fn_type;
-    for (int i = 0; i < resolved_fn_type->data.fn.params.len; i++) {
+    for (int i = 0; i < resolved_fn_type->data.fn.params.size(); i++) {
         auto proto_param = new_proto->data.fn_proto.params[i];
         proto_param->resolved_type = resolved_fn_type->data.fn.params[i];
     }
@@ -11264,14 +11262,14 @@ ast::Node *Resolver::get_fn_variant(ChiType *generic_fn, TypeList *type_args, as
                 auto &container_data = container->data.subtype;
                 auto &container_base = container_data.generic->data.struct_;
                 for (size_t i = 0;
-                     i < container_base.type_params.len && i < container_data.args.len; i++) {
+                     i < container_base.type_params.size() && i < container_data.args.size(); i++) {
                     subs[to_value_type(container_base.type_params[i])] = container_data.args[i];
                 }
             }
         }
 
         // Include the function's own type parameters
-        for (size_t i = 0; i < gen.type_params.len && i < type_args->len; i++) {
+        for (size_t i = 0; i < gen.type_params.size() && i < type_args->size(); i++) {
             // Use to_value_type to unwrap TypeSymbol wrapper - the actual types in
             // params/return contain raw Placeholder types, not TypeSymbol wrappers
             subs[to_value_type(gen.type_params[i])] = type_args->at(i);
@@ -11298,7 +11296,7 @@ ChiType *Resolver::resolve_fn_subtype(ChiType *subtype) {
 
     // Create type substitution map
     map<ChiType *, ChiType *> type_substitutions;
-    for (size_t i = 0; i < generic_fn_data.type_params.len; i++) {
+    for (size_t i = 0; i < generic_fn_data.type_params.size(); i++) {
         auto type_param = to_value_type(generic_fn_data.type_params[i]);
         auto concrete_type = data.args[i];
 
@@ -11372,7 +11370,7 @@ ChiType *Resolver::resolve_subtype(ChiType *subtype, ast::Node *origin) {
         } else {
             auto &gen = data.generic->data.struct_;
             map<ChiType *, ChiType *> subs;
-            for (size_t i = 0; i < gen.type_params.len && i < data.args.len; i++) {
+            for (size_t i = 0; i < gen.type_params.size() && i < data.args.size(); i++) {
                 subs[to_value_type(gen.type_params[i])] = data.args[i];
             }
             m_ctx->generics.record_struct(subtype->global_id, subtype->global_id,
@@ -11670,9 +11668,9 @@ ChiType *Resolver::get_tuple_type(TypeList &elements) {
     // Build cache key from element type IDs
     std::stringstream key;
     key << "Tuple<";
-    for (int i = 0; i < elements.len; i++) {
+    for (int i = 0; i < elements.size(); i++) {
         key << format_type(elements[i]);
-        if (i < elements.len - 1) key << ",";
+        if (i < elements.size() - 1) key << ",";
     }
     key << ">";
     auto key_str = key.str();
@@ -11931,7 +11929,7 @@ void Resolver::add_projection_source_edges(ast::FnDef &fn_def, ast::Node *expr,
 
     switch (expr->type) {
     case NodeType::TupleExpr: {
-        if (tuple_index < 0 || tuple_index >= expr->data.tuple_expr.items.len) {
+        if (tuple_index < 0 || tuple_index >= expr->data.tuple_expr.items.size()) {
             return;
         }
         add_borrow_source_edges(fn_def, expr->data.tuple_expr.items[tuple_index], target, false);
@@ -11950,7 +11948,7 @@ void Resolver::add_projection_source_edges(ast::FnDef &fn_def, ast::Node *expr,
 
             auto *value_type = to_value_type(node_get_type(expr));
             auto payload_fields = value_type ? get_enum_payload_fields(value_type) : array<ChiStructMember *>{};
-            for (uint32_t i = 0; i < payload_fields.len && i < data.items.len; i++) {
+            for (uint32_t i = 0; i < payload_fields.size() && i < data.items.size(); i++) {
                 if (payload_fields[i] == field_member) {
                     add_borrow_source_edges(fn_def, data.items[i], target, false);
                     return;
@@ -11983,7 +11981,7 @@ void Resolver::add_projection_source_edges(ast::FnDef &fn_def, ast::Node *expr,
                             false);
                     }
                     for (auto idx : summary->param_indices) {
-                        if (idx >= 0 && idx < static_cast<int32_t>(call.args.len)) {
+                        if (idx >= 0 && idx < static_cast<int32_t>(call.args.size())) {
                             add_borrow_source_edges(fn_def, call.args[static_cast<uint32_t>(idx)],
                                                     target, false);
                         }
@@ -12025,7 +12023,7 @@ void Resolver::copy_projection_summaries(ast::FnDef &fn_def, ast::Node *expr, as
 
     if (target_type->kind == TypeKind::Tuple) {
         auto &elems = target_type->data.tuple.elements;
-        for (int32_t i = 0; i < elems.len; i++) {
+        for (int32_t i = 0; i < elems.size(); i++) {
             if (!type_may_propagate_borrow_deps(this, elems[i])) {
                 continue;
             }
@@ -12066,9 +12064,9 @@ void Resolver::resolve_fn_lifetimes(ast::Node *fn_node) {
     proto->resolved_return_lifetime = nullptr;
 
     // Extract only explicit param lifetimes from resolved param types.
-    for (size_t i = 0; i < fn.params.len; i++) {
+    for (size_t i = 0; i < fn.params.size(); i++) {
         auto *pt = fn.params[i];
-        auto *param_node = (i < proto->params.len) ? proto->params[i] : nullptr;
+        auto *param_node = (i < proto->params.size()) ? proto->params[i] : nullptr;
         ChiLifetime *lt = get_param_effective_lifetime(param_node, pt);
         proto->resolved_param_lifetimes.add(lt);
     }
@@ -12098,13 +12096,13 @@ void Resolver::compute_lambda_capture_move_summary(ast::Node *fn_node) {
             return;
         }
         auto *capture_idx = fn_def.capture_map.get(root);
-        if (!capture_idx || *capture_idx < 0 || *capture_idx >= fn_def.captures.len) {
+        if (!capture_idx || *capture_idx < 0 || *capture_idx >= fn_def.captures.size()) {
             return;
         }
         if (fn_def.captures[*capture_idx].mode != ast::CaptureMode::ByRef) {
             return;
         }
-        for (size_t i = 0; i < proto.moved_capture_roots.len; i++) {
+        for (size_t i = 0; i < proto.moved_capture_roots.size(); i++) {
             if (proto.moved_capture_roots[i] == root) {
                 if (proto.moved_capture_kinds[i] == ast::SinkKind::Maybe ||
                     kind == ast::SinkKind::Maybe) {
@@ -12172,7 +12170,7 @@ void Resolver::compute_return_projection_copy_summaries(ast::FnDef &fn_def) {
         auto *summary = find_projection_copy_summary(proto.return_projection_copy_summaries, index);
         if (!summary) {
             proto.return_projection_copy_summaries.add({});
-            summary = &proto.return_projection_copy_summaries[proto.return_projection_copy_summaries.len - 1];
+            summary = &proto.return_projection_copy_summaries[proto.return_projection_copy_summaries.size() - 1];
             summary->index = index;
         }
         collect_copy_edge_reachable_params(fn_def.flow, proto.params, source,
@@ -12194,7 +12192,7 @@ void Resolver::compute_return_projection_copy_summaries(ast::FnDef &fn_def) {
 
         if (type->kind == TypeKind::Tuple) {
             auto &elems = type->data.tuple.elements;
-            for (int32_t i = 0; i < elems.len; i++) {
+            for (int32_t i = 0; i < elems.size(); i++) {
                 if (!type_may_propagate_borrow_deps(this, elems[i])) {
                     continue;
                 }
@@ -12238,7 +12236,7 @@ void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_
         proto.requires_exclusive_capture_sources = {};
     }
 
-    for (int fi = (int)fns.len - 1; fi >= 0; fi--) {
+    for (int fi = (int)fns.size() - 1; fi >= 0; fi--) {
         auto *fn_node = fns[fi];
         if (fn_node->type != ast::NodeType::FnDef) {
             continue;
@@ -12257,7 +12255,7 @@ void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_
             if (!fn_def.capture_map.has_key(root)) {
                 return;
             }
-            for (size_t i = 0; i < proto.requires_exclusive_capture_roots.len; i++) {
+            for (size_t i = 0; i < proto.requires_exclusive_capture_roots.size(); i++) {
                 if (proto.requires_exclusive_capture_roots[i] == root) {
                     return;
                 }
@@ -12296,19 +12294,19 @@ void Resolver::compute_exclusive_access_summaries(array<ast::Node *> &top_level_
             if (fn_type && fn_type->kind == TypeKind::FnLambda) {
                 fn_type = fn_type->data.fn_lambda.fn;
             }
-            for (size_t i = 0; i < call.args.len; i++) {
+            for (size_t i = 0; i < call.args.size(); i++) {
                 auto *param_type =
                     (fn_type && fn_type->kind == TypeKind::Fn) ? fn_type->data.fn.get_param_at(i) : nullptr;
-                auto *param_node = i < callee_proto->params.len ? callee_proto->params[i] : nullptr;
+                auto *param_node = i < callee_proto->params.size() ? callee_proto->params[i] : nullptr;
                 if (is_exclusive_access_borrow_param(param_type, param_node)) {
                     add_capture_roots_from_expr(call.args[i], call_node);
                 }
             }
 
-            for (size_t i = 0; i < callee_proto->requires_exclusive_capture_roots.len; i++) {
+            for (size_t i = 0; i < callee_proto->requires_exclusive_capture_roots.size(); i++) {
                 add_capture_root(
                     callee_proto->requires_exclusive_capture_roots[i],
-                    i < callee_proto->requires_exclusive_capture_sources.len &&
+                    i < callee_proto->requires_exclusive_capture_sources.size() &&
                             callee_proto->requires_exclusive_capture_sources[i]
                         ? callee_proto->requires_exclusive_capture_sources[i]
                         : call_node);
@@ -12348,7 +12346,7 @@ bool Resolver::apply_call_receiver_copy_edge_effects(ast::FnDef &fn_def, ast::Fn
         return false;
     }
     auto has_receiver = callee_proto && call_has_instance_receiver(call, callee_proto);
-    if (!callee_proto || callee_proto->this_copy_edge_param_indices.len == 0 || !has_receiver ||
+    if (!callee_proto || callee_proto->this_copy_edge_param_indices.size() == 0 || !has_receiver ||
         call.fn_ref_expr->type != ast::NodeType::DotExpr) {
         return false;
     }
@@ -12360,15 +12358,15 @@ bool Resolver::apply_call_receiver_copy_edge_effects(ast::FnDef &fn_def, ast::Fn
 
     bool changed = false;
     for (auto idx : callee_proto->this_copy_edge_param_indices) {
-        if (idx < 0 || idx >= (int32_t)call.args.len) {
+        if (idx < 0 || idx >= (int32_t)call.args.size()) {
             continue;
         }
         auto *before = fn_def.flow.ref_edges.get(receiver_decl);
-        size_t before_len = before ? before->len : 0;
+        size_t before_len = before ? before->size() : 0;
         add_borrow_source_edges(fn_def, call.args[static_cast<uint32_t>(idx)], receiver_decl,
                                 false);
         auto *after = fn_def.flow.ref_edges.get(receiver_decl);
-        size_t after_len = after ? after->len : 0;
+        size_t after_len = after ? after->size() : 0;
         if (after_len != before_len) {
             changed = true;
         }
@@ -12379,17 +12377,17 @@ bool Resolver::apply_call_receiver_copy_edge_effects(ast::FnDef &fn_def, ast::Fn
 
 bool Resolver::apply_receiver_copy_edge_effects(ast::FnDef &fn_def) {
     bool changed = false;
-    for (size_t i = fn_def.applied_receiver_copy_effect_call_count; i < fn_def.call_sites.len; i++) {
+    for (size_t i = fn_def.applied_receiver_copy_effect_call_count; i < fn_def.call_sites.size(); i++) {
         auto *call_node = fn_def.call_sites[i];
         changed |=
             apply_call_receiver_copy_edge_effects(fn_def, call_node->data.fn_call_expr, call_node);
     }
-    fn_def.applied_receiver_copy_effect_call_count = fn_def.call_sites.len;
+    fn_def.applied_receiver_copy_effect_call_count = fn_def.call_sites.size();
     return changed;
 }
 
 void Resolver::finalize_lifetime_flow(ast::FnDef &fn_def) {
-    if (fn_def.fn_proto && (fn_def.applied_receiver_copy_effect_call_count < fn_def.call_sites.len ||
+    if (fn_def.fn_proto && (fn_def.applied_receiver_copy_effect_call_count < fn_def.call_sites.size() ||
                             !fn_def.fn_proto->data.fn_proto.copy_edge_summary_valid)) {
         apply_receiver_copy_edge_effects(fn_def);
         compute_receiver_copy_edge_summary(fn_def);
@@ -12402,9 +12400,9 @@ void Resolver::apply_call_capture_move_effects(ast::FnDef &fn_def, ast::FnCallEx
     if (!callee_proto) {
         return;
     }
-    for (size_t i = 0; i < callee_proto->moved_capture_roots.len; i++) {
+    for (size_t i = 0; i < callee_proto->moved_capture_roots.size(); i++) {
         auto *root = callee_proto->moved_capture_roots[i];
-        auto kind = i < callee_proto->moved_capture_kinds.len
+        auto kind = i < callee_proto->moved_capture_kinds.size()
                         ? callee_proto->moved_capture_kinds[i]
                         : ast::SinkKind::Definite;
         fn_def.add_sink_edge(root, call_node, kind);
@@ -12455,13 +12453,13 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
         fn_type = fn_type->data.fn_lambda.fn;
     }
 
-    for (size_t i = 0; i < call.args.len; i++) {
+    for (size_t i = 0; i < call.args.size(); i++) {
         CallSlot slot;
         slot.expr = call.args[i];
         collect_expr_borrow_roots(this, fn_def.flow, slot.expr, slot.roots);
         auto *param_type =
             (fn_type && fn_type->kind == TypeKind::Fn) ? fn_type->data.fn.get_param_at(i) : nullptr;
-        auto *param_node = i < callee_proto->params.len ? callee_proto->params[i] : nullptr;
+        auto *param_node = i < callee_proto->params.size() ? callee_proto->params[i] : nullptr;
         slot.is_borrow = is_exclusive_access_borrow_param(param_type, param_node) ||
                          type_may_propagate_borrow_deps(this, param_type);
         slot.is_exclusive = is_exclusive_access_borrow_param(param_type, param_node);
@@ -12469,20 +12467,20 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
         slots.add(slot);
     }
 
-    for (size_t i = 0; i < callee_proto->requires_exclusive_capture_roots.len; i++) {
+    for (size_t i = 0; i < callee_proto->requires_exclusive_capture_roots.size(); i++) {
         CallSlot slot;
         slot.expr = call_node;
         slot.roots.add(callee_proto->requires_exclusive_capture_roots[i]);
         slot.is_exclusive = true;
         slot.exclusive_source =
-            i < callee_proto->requires_exclusive_capture_sources.len
+            i < callee_proto->requires_exclusive_capture_sources.size()
                 ? callee_proto->requires_exclusive_capture_sources[i]
                 : nullptr;
         slots.add(slot);
     }
 
     bool had_conflict = false;
-    for (size_t i = 0; i < slots.len; i++) {
+    for (size_t i = 0; i < slots.size(); i++) {
         if (!slots[i].is_exclusive) {
             continue;
         }
@@ -12493,7 +12491,7 @@ void Resolver::apply_call_exclusive_access_effects(ast::FnDef &fn_def, ast::FnCa
                 fn_def.flow.add_invalidate_exempt_terminal(root, exclusive_terminal);
             }
         }
-        for (size_t j = 0; j < slots.len; j++) {
+        for (size_t j = 0; j < slots.size(); j++) {
             if (i == j || !slots[j].is_borrow) {
                 continue;
             }
@@ -12564,7 +12562,7 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call,
         }
         if (summary_proto && summary_proto->copy_edge_summary_valid) {
             for (auto idx : summary_proto->return_copy_edge_param_indices) {
-                if (idx >= 0 && idx < (int32_t)call.args.len) {
+                if (idx >= 0 && idx < (int32_t)call.args.size()) {
                     add_borrow_source_edges(fn_def, call.args[static_cast<uint32_t>(idx)], target,
                                             false, call_edge_offset);
                 }
@@ -12581,13 +12579,13 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call,
         auto *ret = fn.return_type;
         ret_lt = get_first_ref_lifetime(ret);
         conservative = (!ret_lt && type_may_propagate_borrow_deps(this, ret));
-        for (size_t i = 0; i < fn.params.len; i++) {
+        for (size_t i = 0; i < fn.params.size(); i++) {
             param_lts.add(get_first_ref_lifetime(fn.params[i]));
         }
     }
 
     // 'static params: add arg as terminal (value must not contain local borrows)
-    for (size_t i = 0; i < param_lts.len && i < call.args.len; i++) {
+    for (size_t i = 0; i < param_lts.size() && i < call.args.size(); i++) {
         if (param_lts[i] && param_lts[i]->kind == LifetimeKind::Static) {
             auto *arg = call.args[i];
             if (fn_def.flow.ref_edges.has_key(arg)) {
@@ -12600,7 +12598,7 @@ void Resolver::add_call_borrow_edges(ast::FnDef &fn_def, ast::FnCallExpr &call,
     if (!ret_lt && !conservative)
         return;
 
-    for (size_t i = 0; i < param_lts.len && i < call.args.len; i++) {
+    for (size_t i = 0; i < param_lts.size() && i < call.args.size(); i++) {
         if (param_lts[i] && param_lts[i]->kind == LifetimeKind::Static)
             continue; // handled above as terminal
         if (param_lts[i] && ret_lt && lifetime_outlives(param_lts[i], ret_lt)) {
@@ -12804,7 +12802,7 @@ static ChiLifetime *get_terminal_required_lifetime(Resolver *resolver, ast::FnDe
             auto *ret_type = fn_def->fn_proto->resolved_type->data.fn.return_type;
             auto *ret_lifetimes = ret_type ? ret_type->get_lifetimes() : nullptr;
             if (ret_type && (ret_type->is_reference() || ret_type->kind == TypeKind::Span) &&
-                ret_lifetimes && ret_lifetimes->len > 0) {
+                ret_lifetimes && ret_lifetimes->size() > 0) {
                 return (*ret_lifetimes)[0];
             }
         }
@@ -12837,7 +12835,7 @@ static bool return_summary_allows_leaf(ast::FnDef *fn_def, ast::Node *leaf) {
     if (leaf->type != ast::NodeType::ParamDecl) {
         return false;
     }
-    for (size_t i = 0; i < proto.params.len; i++) {
+    for (size_t i = 0; i < proto.params.size(); i++) {
         if (proto.params[i] != leaf) {
             continue;
         }
@@ -12909,7 +12907,7 @@ static bool satisfies_lifetime_constraint(ast::FnDef *fn_def, ChiLifetime *requi
         if (!leaf_type)
             return false;
         auto &lifetimes = leaf_type->data.pointer.lifetimes;
-        for (size_t i = 0; i < lifetimes.len; i++) {
+        for (size_t i = 0; i < lifetimes.size(); i++) {
             if (lifetime_outlives(lifetimes[i], required))
                 return true;
         }
@@ -12940,7 +12938,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
         }
     }
 
-    if (flow.terminals.len == 0 && flow.ref_edges.data.size() == 0 && flow.copy_edges.data.size() == 0)
+    if (flow.terminals.size() == 0 && flow.ref_edges.data.size() == 0 && flow.copy_edges.data.size() == 0)
         return;
     bool is_safe = has_lang_flag(m_module->get_lang_flags(), LANG_FLAG_SAFE);
     bool verbose = has_lang_flag(m_ctx->lang_flags, LANG_FLAG_VERBOSE_LIFETIMES);
@@ -12962,13 +12960,13 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
                            debug_node_label(to));
             }
         }
-        fmt::print("[lifetime] terminals ({}):\n", flow.terminals.len);
-        for (size_t i = 0; i < flow.terminals.len; i++) {
+        fmt::print("[lifetime] terminals ({}):\n", flow.terminals.size());
+        for (size_t i = 0; i < flow.terminals.size(); i++) {
             fmt::print("[lifetime]   {}\n", debug_node_label(flow.terminals[i]));
         }
     }
 
-    for (size_t t = 0; t < flow.terminals.len; t++) {
+    for (size_t t = 0; t < flow.terminals.size(); t++) {
         auto *terminal = flow.terminals[t];
 
         auto *required = get_terminal_required_lifetime(this, fn_def, flow, terminal);
@@ -13011,7 +13009,7 @@ void Resolver::check_lifetime_constraints(ast::FnDef *fn_def, ast::FlowState &fl
 void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowState &flow,
                                                bool check_sinks, bool check_invalidations) {
     if (check_sinks) {
-        for (size_t t = 0; t < flow.terminals.len; t++) {
+        for (size_t t = 0; t < flow.terminals.size(); t++) {
             auto *terminal = flow.terminals[t];
             if (flow.is_sunk(terminal))
                 continue;
@@ -13025,8 +13023,8 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                 (!last_use_node || !*last_use_node)) {
                 continue;
             }
-            for (size_t i = offset; i < deps->len; i++) {
-                auto *node = deps->items[i];
+            for (size_t i = offset; i < deps->size(); i++) {
+                auto *node = (*deps)[i];
                 if (flow.is_sunk(node)) {
                     auto *sink_target = flow.sink_target(node);
                     if (sink_target == terminal)
@@ -13058,7 +13056,7 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
     }
 
     if (check_invalidations) {
-        for (size_t t = 0; t < flow.terminals.len; t++) {
+        for (size_t t = 0; t < flow.terminals.size(); t++) {
             auto *terminal = flow.terminals[t];
             if (flow.is_sunk(terminal)) {
                 continue;
@@ -13075,8 +13073,8 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                 continue;
             }
             auto *edge_offsets = flow.ref_edge_offsets.get(terminal);
-            for (size_t i = offset; i < deps->len; i++) {
-                auto *root = deps->items[i];
+            for (size_t i = offset; i < deps->size(); i++) {
+                auto *root = (*deps)[i];
                 auto *invalid = flow.invalidate_edges.get(root);
                 if (!invalid) {
                     continue;
@@ -13095,7 +13093,7 @@ void Resolver::check_terminal_flow_constraints(ast::FnDef *fn_def, ast::FlowStat
                 }
                 auto *target = invalid->target;
                 long edge_created_at =
-                    edge_offsets && i < edge_offsets->len ? edge_offsets->items[i] : -1;
+                    edge_offsets && i < edge_offsets->size() ? (*edge_offsets)[i] : -1;
                 if (edge_created_at < 0 && terminal->token) {
                     edge_created_at = terminal->token->pos.offset;
                 }
@@ -13144,10 +13142,10 @@ bool Resolver::compare_impl_type(ChiType *base, ChiType *impl) {
         return true;
     }
     if (base->kind == TypeKind::Fn) {
-        if (base->data.fn.params.len != impl->data.fn.params.len) {
+        if (base->data.fn.params.size() != impl->data.fn.params.size()) {
             return false;
         }
-        for (int i = 0; i < base->data.fn.params.len; ++i) {
+        for (int i = 0; i < base->data.fn.params.size(); ++i) {
             if (!compare_impl_type(base->data.fn.params[i], impl->data.fn.params[i])) {
                 return false;
             }
@@ -13371,10 +13369,10 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
             if (method_type && method_type->kind == TypeKind::Fn) {
                 auto &fn_data = method_type->data.fn;
                 if (t2 == nullptr) {
-                    if (fn_data.params.len == 0) {
+                    if (fn_data.params.size() == 0) {
                         return_type = fn_data.return_type;
                     }
-                } else if (fn_data.params.len == 1) {
+                } else if (fn_data.params.size() == 1) {
                     auto param = fn_data.params[0];
                     // Unwrap reference for operator params (e.g. &This → This)
                     auto param_elem = param->kind == TypeKind::Reference ? param->get_elem() : param;
@@ -13413,7 +13411,7 @@ Resolver::try_resolve_operator_method(IntrinsicSymbol symbol, ChiType *t1, ChiTy
                     auto method_type = method_member->resolved_type;
                     if (method_type && method_type->kind == TypeKind::Fn) {
                         auto &fn_data = method_type->data.fn;
-                        if (t2 == nullptr ? fn_data.params.len == 0 : fn_data.params.len == 1) {
+                        if (t2 == nullptr ? fn_data.params.size() == 0 : fn_data.params.size() == 1) {
                             return_type = t1;
                         }
                     }
@@ -13546,11 +13544,11 @@ bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface
     auto &iface_struct = iface_type->data.struct_;
 
     // Must be a pure constructor interface: only new(), no other methods, no embeds
-    if (iface_struct.embeds.len > 0)
+    if (iface_struct.embeds.size() > 0)
         return false;
 
     ChiStructMember *iface_new = nullptr;
-    for (size_t i = 0; i < iface_struct.members.len; i++) {
+    for (size_t i = 0; i < iface_struct.members.size(); i++) {
         auto m = iface_struct.members[i];
         if (m->is_method()) {
             if (iface_new)
@@ -13567,13 +13565,13 @@ bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface
 
     // For non-struct types (built-ins): only zero-arg constructible
     if (!type || type->kind != TypeKind::Struct) {
-        return iface_params.len == 0;
+        return iface_params.size() == 0;
     }
 
     auto *ctor = type->data.struct_.get_constructor();
     if (!ctor || !ctor->node) {
         // No constructor: zero-arg constructible only
-        return iface_params.len == 0;
+        return iface_params.size() == 0;
     }
 
     auto *ctor_proto = ctor->node->data.fn_def.fn_proto;
@@ -13581,25 +13579,25 @@ bool Resolver::is_constructor_interface_compatible(ChiType *type, ChiType *iface
 
     // Count required ctor params (those without defaults)
     size_t required_ctor = 0;
-    for (size_t i = 0; i < ctor_params.len; i++) {
+    for (size_t i = 0; i < ctor_params.size(); i++) {
         if (!ctor_params[i]->data.param_decl.effective_default_value() &&
             !ctor_params[i]->data.param_decl.is_variadic)
             required_ctor++;
     }
 
-    // Interface provides iface_params.len args — must cover required, not exceed total
-    if (iface_params.len < required_ctor || iface_params.len > ctor_params.len)
+    // Interface provides iface_params.size() args — must cover required, not exceed total
+    if (iface_params.size() < required_ctor || iface_params.size() > ctor_params.size())
         return false;
 
     // Check parameter types match (use resolved fn types)
     // Note: 'this' is stored as container_ref, not in params[], so index 0 = first explicit param
-    if (iface_params.len > 0) {
+    if (iface_params.size() > 0) {
         auto *iface_fn_type = iface_new->resolved_type;
         auto *ctor_fn_type = ctor->resolved_type;
         if (!iface_fn_type || !ctor_fn_type)
             return false;
 
-        for (size_t i = 0; i < iface_params.len; i++) {
+        for (size_t i = 0; i < iface_params.size(); i++) {
             auto iface_param = iface_fn_type->data.fn.get_param_at(i);
             auto ctor_param = ctor_fn_type->data.fn.get_param_at(i);
             if (iface_param != ctor_param)
@@ -13698,7 +13696,7 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
     if (check_arg->kind != TypeKind::Struct) {
         // Built-in types: check all required intrinsics are satisfied
         auto required = interface_get_intrinsics(trait_type);
-        if (required.len > 0) {
+        if (required.size() > 0) {
             bool all_satisfied = true;
             for (auto &intrinsic : required) {
                 if (!builtin_satisfies_intrinsic(type_arg, intrinsic)) {
@@ -13718,13 +13716,13 @@ bool Resolver::check_trait_bound(ChiType *type_arg, ChiType *trait_type) {
 
 WhereCondition *Resolver::build_where_condition(ast::ImplementBlockData &impl_data,
                                                 ChiTypeStruct *struct_, ResolveScope &scope) {
-    if (impl_data.where_clauses.len == 0)
+    if (impl_data.where_clauses.size() == 0)
         return nullptr;
     auto *cond = get_allocator()->create_where_condition();
     for (auto &clause : impl_data.where_clauses) {
         auto param_name = clause.param_name->str;
         long param_index = -1;
-        for (long i = 0; i < (long)struct_->type_params.len; i++) {
+        for (long i = 0; i < (long)struct_->type_params.size(); i++) {
             auto tp = to_value_type(struct_->type_params[i]);
             if (tp->name == param_name) {
                 param_index = i;
@@ -13748,7 +13746,7 @@ bool Resolver::check_where_condition(WhereCondition *cond, ChiTypeSubtype *subty
         return true; // No condition = always included
 
     for (auto &bound : cond->bounds) {
-        if (bound.param_index < 0 || bound.param_index >= (long)subtype_data->args.len) {
+        if (bound.param_index < 0 || bound.param_index >= (long)subtype_data->args.size()) {
             return false;
         }
 

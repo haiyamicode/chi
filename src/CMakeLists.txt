@@ -5,11 +5,13 @@ find_package(LLVM 17 REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
-execute_process(COMMAND llvm-config --bindir OUTPUT_VARIABLE LLVM_TOOLS_BINARY_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
 message(STATUS "LLVM tools dir: ${LLVM_TOOLS_BINARY_DIR}")
-execute_process(COMMAND llvm-config --libfiles --link-static OUTPUT_VARIABLE LLVM_LIBS_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
+# Link LLVM as a shared library so we share libLLVM-17.so.1 with libclang.
+# Using --link-static would clash with libclang's own dynamic libLLVM
+# ("CommandLine option registered more than once").
+execute_process(COMMAND ${LLVM_TOOLS_BINARY_DIR}/llvm-config --libs --link-shared OUTPUT_VARIABLE LLVM_LIBS_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
 separate_arguments(LLVM_LIBS UNIX_COMMAND "${LLVM_LIBS_RAW}")
-message(STATUS "LLVM libs (static): " ${LLVM_LIBS})
+message(STATUS "LLVM libs (shared): " ${LLVM_LIBS})
 
 # libclang (C API) — only available as a shared lib in standard distributions
 find_library(LIBCLANG_LIBRARY clang HINTS ${LLVM_LIBRARY_DIRS})
@@ -94,6 +96,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CHI_BOOTSTRAP_WORKDIR}
     COMMAND ${CMAKE_COMMAND} -E env LIBRARY_PATH=${CMAKE_BINARY_DIR}
+            ASAN_OPTIONS=detect_leaks=0
             $<TARGET_FILE:chic> -o ${CHI_BOOTSTRAP_OUTPUT} -c ${CMAKE_CURRENT_SOURCE_DIR}/chi/main.xs -w ${CHI_BOOTSTRAP_WORKDIR}
     DEPENDS chic ${CMAKE_CURRENT_SOURCE_DIR}/chi/main.xs
     COMMENT "Bootstrapping chi command"

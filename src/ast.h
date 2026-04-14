@@ -723,24 +723,24 @@ struct SemanticAnalysis {
     ConversionType conversion_type = ConversionType::None;
     array<CapturePath> capture_path = {}; // Path from original declaration to current context
 
-    bool is_capture() { return capture_path.len > 0; }
+    bool is_capture() { return capture_path.size() > 0; }
 
     // Get the original declaring function (root of the capture chain)
     Node *get_original_function() {
-        return capture_path.len > 0 ? capture_path[0].function : nullptr;
+        return capture_path.size() > 0 ? capture_path[0].function : nullptr;
     }
 
     // Get the immediate capturing function (last in the chain)
     Node *get_immediate_capturing_function() {
-        return capture_path.len > 0 ? capture_path[capture_path.len - 1].function : nullptr;
+        return capture_path.size() > 0 ? capture_path[capture_path.size() - 1].function : nullptr;
     }
 
     // Get the capture depth (how many function levels deep)
-    int get_capture_depth() { return capture_path.len; }
+    int get_capture_depth() { return capture_path.size(); }
 
     // Get the capture index for the immediate capturing function (most commonly needed)
     int32_t get_immediate_capture_index() {
-        return capture_path.len > 0 ? capture_path[capture_path.len - 1].capture_index : -1;
+        return capture_path.size() > 0 ? capture_path[capture_path.size() - 1].capture_index : -1;
     }
 };
 
@@ -909,6 +909,9 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(generated_fn, GeneratedFn)
             _AST_CASE_INITIALIZE_FIELD(lifetime_param, LifetimeParam)
             _AST_CASE_INITIALIZE_FIELD(destructure_decl, DestructureDecl)
+            _AST_CASE_INITIALIZE_FIELD(sigil_type, TypeSigil)
+            _AST_CASE_INITIALIZE_FIELD(type_param, TypeParam)
+            _AST_CASE_INITIALIZE_FIELD(import_symbol, ImportSymbol)
         default:
             break;
         }
@@ -941,6 +944,9 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(enum_decl, EnumDecl)
             _AST_CASE_DESTROY_FIELD(generated_fn, GeneratedFn)
             _AST_CASE_DESTROY_FIELD(destructure_decl, DestructureDecl)
+            _AST_CASE_DESTROY_FIELD(sigil_type, TypeSigil)
+            _AST_CASE_DESTROY_FIELD(type_param, TypeParam)
+            _AST_CASE_DESTROY_FIELD(import_symbol, ImportSymbol)
         default:
             memset(&data, 0, sizeof(data));
             break;
@@ -985,6 +991,9 @@ struct Node {
             _AST_CASE_CLONE_FIELD(enum_decl, EnumDecl)
             _AST_CASE_CLONE_FIELD(generated_fn, GeneratedFn)
             _AST_CASE_CLONE_FIELD(destructure_decl, DestructureDecl)
+            _AST_CASE_CLONE_FIELD(sigil_type, TypeSigil)
+            _AST_CASE_CLONE_FIELD(type_param, TypeParam)
+            _AST_CASE_CLONE_FIELD(import_symbol, ImportSymbol)
         default:
             memcpy(&b->data, &data, sizeof(data));
             break;
@@ -1105,7 +1114,7 @@ struct Node {
 
     bool is_last_stmt() {
         return parent && parent->type == NodeType::Block &&
-               index == parent->data.block.statements.len - 1;
+               index == parent->data.block.statements.size() - 1;
     }
 };
 } // namespace ast

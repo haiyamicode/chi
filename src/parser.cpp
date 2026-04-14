@@ -221,7 +221,7 @@ void Parser::recover_to_synchronization_point() {
 }
 
 Token *Parser::next() {
-    if (m_toki >= m_ctx->tokens.len) {
+    if (m_toki >= m_ctx->tokens.size()) {
         return m_eof_token;
     }
     return m_ctx->tokens.at(m_toki++);
@@ -237,7 +237,7 @@ Token *Parser::get() { return lookahead(0); }
 
 Token *Parser::lookahead(int n) {
     auto toki = m_toki + n;
-    if (toki < 0 || toki >= m_ctx->tokens.len) {
+    if (toki < 0 || toki >= m_ctx->tokens.size()) {
         return m_eof_token;
     }
     return m_ctx->tokens.at(toki);
@@ -659,7 +659,7 @@ Node *Parser::parse_type_expr(bool type_only) {
 
     array<Node *> sigil_nodes;
     auto wrap_sigil_nodes = [&](Node *node) {
-        for (int i = int(sigil_nodes.len) - 1; i >= 0; --i) {
+        for (int i = int(sigil_nodes.size()) - 1; i >= 0; --i) {
             auto parent = sigil_nodes[i];
             parent->data.sigil_type.type = node;
             node = parent;
@@ -1235,7 +1235,7 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
 
             if (param_token->type == TokenType::LIFETIME) {
                 auto lt_node = parse_lifetime_param(param_token);
-                lt_node->data.lifetime_param.index = lifetime_params.len;
+                lt_node->data.lifetime_param.index = lifetime_params.size();
                 lt_node->data.lifetime_param.source_decl = fn_node;
                 lifetime_params.add(lt_node);
             } else {
@@ -1245,7 +1245,7 @@ Node *Parser::parse_fn_proto(Token *token, Node *fn_node) {
                 auto param_iden = expect(TokenType::IDEN);
                 auto param_node = create_node(NodeType::TypeParam, param_iden);
                 param_node->name = param_iden->str;
-                param_node->data.type_param.index = type_params.len;
+                param_node->data.type_param.index = type_params.size();
                 param_node->data.type_param.source_decl = fn_node;
                 param_node->data.type_param.is_variadic = is_variadic;
 
@@ -1483,7 +1483,7 @@ Node *Parser::parse_block(Scope *scope, Token *arrow) {
                 // node->data.block.statements.add(stmt);
                 break;
             } else {
-                stmt->index = node->data.block.statements.len;
+                stmt->index = node->data.block.statements.size();
                 node->data.block.statements.add(stmt);
             }
         }
@@ -1525,7 +1525,7 @@ static bool switch_expr_returns_value(ast::Node *node) {
     }
 
     auto &cases = node->data.switch_expr.cases;
-    if (cases.len == 0) {
+    if (cases.size() == 0) {
         return false;
     }
 
@@ -2133,7 +2133,7 @@ Node *Parser::parse_operand(bool lhs, Node *parent) {
 Node *Parser::parse_fn_call_expr(Node *fn_expr, bool lhs, Node *parent) {
     auto node = create_node(NodeType::FnCallExpr, fn_expr->token);
     node->data.fn_call_expr.fn_ref_expr = fn_expr;
-    assert(fn_expr && node->data.fn_call_expr.args.len == 0);
+    assert(fn_expr && node->data.fn_call_expr.args.size() == 0);
     expect(TokenType::LPAREN);
 
     for (;;) {
@@ -2773,7 +2773,7 @@ Node *Parser::parse_enum_decl(DeclSpec *decl_spec) {
                 param_node->data.type_param.default_type = parse_type_expr(true);
             }
 
-            param_node->data.type_param.index = params.len;
+            param_node->data.type_param.index = params.size();
             param_node->data.type_param.source_decl = node;
             params.add(param_node);
 
@@ -2858,7 +2858,7 @@ Node *Parser::parse_struct_decl(TokenType keyword, DeclSpec *decl_spec) {
                     param_node->data.type_param.default_type = parse_type_expr(true);
                 }
 
-                param_node->data.type_param.index = params.len;
+                param_node->data.type_param.index = params.size();
                 param_node->data.type_param.source_decl = node;
                 params.add(param_node);
             }
@@ -3283,7 +3283,7 @@ Node *Parser::parse_typedef() {
                 consume();
                 param_node->data.type_param.default_type = parse_type_expr(true);
             }
-            param_node->data.type_param.index = params.len;
+            param_node->data.type_param.index = params.size();
             param_node->data.type_param.source_decl = node;
             params.add(param_node);
             if (!at_comma(TokenType::GT)) {
@@ -3293,7 +3293,7 @@ Node *Parser::parse_typedef() {
         }
         expect(TokenType::GT);
     }
-    if (params.len > 0) {
+    if (params.size() > 0) {
         m_ctx->resolver->push_scope(node);
         for (auto type_param : params) {
             m_ctx->resolver->declare_symbol(type_param->name, type_param);
@@ -3301,7 +3301,7 @@ Node *Parser::parse_typedef() {
     }
     expect(TokenType::ASS);
     node->data.typedef_decl.type = parse_type_expr(true);
-    if (params.len > 0) {
+    if (params.size() > 0) {
         m_ctx->resolver->pop_scope();
     }
     add_to_scope(node, iden->str);

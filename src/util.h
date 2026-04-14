@@ -17,6 +17,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "include/enum.h"
 #include "include/optional.h"
@@ -83,156 +84,143 @@ static inline std::string format_span_prefix(bool is_mut, const std::string &lif
     return "&";
 }
 
-template <typename T> struct array {
-    size_t len = 0;
-    size_t capacity = 0;
-    T *items = nullptr;
+template <typename T> class array {
+    std::vector<T> data_;
 
-    ~array() {
-        if (!items) {
-            return;
-        }
-        for (size_t i = 0; i < len; i++) {
-            items[i].~T();
-        }
-        free(items);
-        items = nullptr;
-    }
+  public:
+    array() = default;
+    array(const array<T> &) = default;
+    array(array<T> &&) noexcept = default;
+    array<T> &operator=(const array<T> &) = default;
+    array<T> &operator=(array<T> &&) noexcept = default;
+    array(std::initializer_list<T> values) : data_(values) {}
 
-    array() {}
-
-    array(const array<T> &other) {
-        len = 0;
-        reserve(other.len);
-        for (size_t i = 0; i < other.len; i++) {
-            add(other.items[i]);
-        }
-    }
-
-    array(array<T> &&other) {
-        len = other.len;
-        capacity = other.capacity;
-        items = other.items;
-        other.items = nullptr;
-    }
-
-    void operator=(const array<T> &other) {
-        len = 0;
-        reserve(other.len);
-        for (size_t i = 0; i < other.len; i++) {
-            add(other.items[i]);
-        }
-    }
-
-    array(std::initializer_list<T> values) {
-        reserve(values.size());
-        for (auto &value : values) {
-            add(std::move(value));
-        }
-    }
-
-    template <typename... Args> T *emplace(Args &&...args) {
-        resize(len + 1);
-        return new (&last()) T(std::forward<Args>(args)...);
-    }
-
-    T *add(T &&item) {
-        resize(len + 1);
-        memset(&last(), 0, sizeof(T));
-        last() = item;
-        return &last();
-    }
-
-    T *add(const T &item) {
-        resize(len + 1);
-        memset(&last(), 0, sizeof(T));
-        last() = item;
-        return &last();
-    }
-
-    void add_all(array<T> other) {
-        reserve(len + other.len);
-        for (auto &item : other) {
-            add(item);
-        }
-    }
+    // std::vector-compatible interface
+    size_t size() const { return data_.size(); }
+    bool empty() const { return data_.empty(); }
+    size_t capacity() const { return data_.capacity(); }
+    T *data() { return data_.data(); }
+    const T *data() const { return data_.data(); }
 
     T &operator[](size_t index) { return at(index); }
-
     const T &operator[](size_t index) const { return at(index); }
-
-    T *begin() { return items; }
-
-    T *end() { return items + len; }
 
     const T &at(size_t index) const {
         assert(index != SIZE_MAX);
-        assert(index < len);
-        return items[index];
+        assert(index < data_.size());
+        return data_[index];
     }
 
     T &at(size_t index) {
         assert(index != SIZE_MAX);
-        assert(index < len);
-        return items[index];
+        assert(index < data_.size());
+        return data_[index];
     }
 
+    T *begin() { return data_.data(); }
+    T *end() { return data_.data() + data_.size(); }
+    const T *begin() const { return data_.data(); }
+    const T *end() const { return data_.data() + data_.size(); }
+
+    T &back() {
+        assert(!data_.empty());
+        return data_.back();
+    }
+    const T &back() const {
+        assert(!data_.empty());
+        return data_.back();
+    }
+    T &front() {
+        assert(!data_.empty());
+        return data_.front();
+    }
+    const T &front() const {
+        assert(!data_.empty());
+        return data_.front();
+    }
+
+    void push_back(const T &item) { data_.push_back(item); }
+    void push_back(T &&item) { data_.push_back(std::move(item)); }
+
+    template <typename... Args> T &emplace_back(Args &&...args) {
+        return data_.emplace_back(std::forward<Args>(args)...);
+    }
+
+    void pop_back() {
+        assert(!data_.empty());
+        data_.pop_back();
+    }
+
+    void clear() { data_.clear(); }
+
+    void reserve(size_t new_capacity) { data_.reserve(new_capacity); }
+
+    // Shrink-only resize: truncate to new_length.
+    void resize(size_t new_length) {
+        assert(new_length != SIZE_MAX);
+        assert(new_length <= data_.size());
+        data_.erase(data_.begin() + new_length, data_.end());
+    }
+
+    // chi-specific conveniences
+    template <typename... Args> T *emplace(Args &&...args) {
+        data_.emplace_back(std::forward<Args>(args)...);
+        return &data_.back();
+    }
+
+    T *add(T &&item) {
+        data_.push_back(std::move(item));
+        return &data_.back();
+    }
+
+    T *add(const T &item) {
+        data_.push_back(item);
+        return &data_.back();
+    }
+
+    void add_all(array<T> other) {
+        data_.reserve(data_.size() + other.data_.size());
+        for (auto &item : other.data_) {
+            data_.push_back(item);
+        }
+    }
+
+    // pop() returns the popped value (unlike std::vector::pop_back which returns void).
     T pop() {
-        assert(len >= 1);
-        return items[--len];
+        assert(!data_.empty());
+        T value = std::move(data_.back());
+        data_.pop_back();
+        return value;
     }
 
     const T &last() const {
-        assert(len >= 1);
-        return items[len - 1];
+        assert(!data_.empty());
+        return data_.back();
     }
 
     T &last() {
-        assert(len >= 1);
-        return items[len - 1];
-    }
-
-    void resize(size_t new_length) {
-        assert(new_length != SIZE_MAX);
-        reserve(new_length);
-        len = new_length;
-    }
-
-    void clear() { len = 0; }
-
-    void reserve(size_t new_capacity) {
-        if (capacity >= new_capacity)
-            return;
-
-        size_t better_capacity = capacity;
-        do {
-            better_capacity = better_capacity * 5 / 2 + 8;
-        } while (better_capacity < new_capacity);
-
-        items = reallocate_nonzero(items, capacity, better_capacity);
-        capacity = better_capacity;
+        assert(!data_.empty());
+        return data_.back();
     }
 
     array<T> slice(size_t start, int32_t n = -1) const {
-        auto length = n >= 0 ? n : this->len - start;
+        auto length = n >= 0 ? static_cast<size_t>(n) : data_.size() - start;
 
-        if (start >= len || length == 0) {
-            return array<T>(); // Return empty array
+        if (start >= data_.size() || length == 0) {
+            return array<T>();
         }
 
         size_t end = start + length;
-        if (end > len) {
-            end = len;
+        if (end > data_.size()) {
+            end = data_.size();
         }
 
         array<T> result;
         size_t actual_length = end - start;
-        result.reserve(actual_length);
-
+        result.data_.reserve(actual_length);
         for (size_t i = start; i < end; i++) {
-            result.add(items[i]);
+            result.data_.push_back(data_[i]);
         }
-
         return result;
     }
 };
@@ -332,7 +320,7 @@ static inline array<string> string_split(string str, string sep) {
 
 static inline string string_join(array<string> arr, string sep) {
     string str;
-    for (size_t i = 0; i < arr.len; i++) {
+    for (size_t i = 0; i < arr.size(); i++) {
         if (i != 0)
             str += sep;
         str += arr[i];
@@ -386,12 +374,12 @@ struct CharBuf : public array<char> {
     char *write(const string &s) {
         if (s.empty())
             return 0;
-        auto old_size = len;
+        auto old_size = size();
         for (char ch : s) {
             add(ch);
         }
         add(0);
-        return &items[old_size];
+        return data() + old_size;
     }
 };
 

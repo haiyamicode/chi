@@ -72,9 +72,17 @@ static bool is_noisy_runtime_frame(const char *filename) {
            str_contains(filename, "libunwind") || is_internal_runtime_cpp(filename);
 }
 
+static bool is_libc_entry_frame(const char *function) {
+    if (!function) return false;
+    return strstr(function, "__libc_start") != nullptr || strstr(function, "_rt0") != nullptr;
+}
+
 int bt_callback(void *, uintptr_t, const char *filename, int lineno, const char *function) {
     if (!bt_output_file || !filename || !function || is_noisy_runtime_frame(filename)) {
         return 0;
+    }
+    if (is_libc_entry_frame(function)) {
+        return 1; // stop walking into libc startup frames
     }
     fprintf(bt_output_file, "%s:%d in function %s\n", filename, lineno, function);
     return 0;
