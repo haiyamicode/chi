@@ -6717,8 +6717,7 @@ static void append_leaf_borrow_roots(ast::FlowState &flow, ast::Node *source,
         if (stack.len == 0) {
             break;
         }
-        auto *node = stack[stack.len - 1];
-        stack.len -= 1;
+        auto *node = stack.pop();
         if (visited.has_key(node)) {
             continue;
         }
@@ -6974,8 +6973,7 @@ static void collect_copy_edge_reachable_params(ast::FlowState &flow, array<ast::
         if (stack.len == 0) {
             break;
         }
-        auto *node = stack[stack.len - 1];
-        stack.len -= 1;
+        auto *node = stack.pop();
         if (!node || visited.has_key(node)) {
             continue;
         }

@@ -4671,7 +4671,7 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
                     // Untyped catch: store Shared<Error> directly
                     builder.CreateStore(shared_error, err_var);
                 }
-                data.catch_block->data.block.implicit_vars.len = 0;
+                data.catch_block->data.block.implicit_vars.clear();
             }
 
             // Compile catch block (may contain awaits — handled by async lowering)
@@ -6473,7 +6473,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto owner_iface = compile_shared_ref(fn, shared_owner_var, shared_error_type);
                     auto concrete_data_ptr = extract_interface_data_ptr(owner_iface);
                     builder.CreateStore(concrete_data_ptr, err_var);
-                    data.catch_block->data.block.implicit_vars.len = 0;
+                    data.catch_block->data.block.implicit_vars.clear();
                 }
 
                 auto catch_cleanup_b = fn->new_label("_try_await_catch_cleanup");
@@ -6715,7 +6715,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 }
 
                 // Clear implicit_vars so compile_block doesn't re-alloca the err var
-                data.catch_block->data.block.implicit_vars.len = 0;
+                data.catch_block->data.block.implicit_vars.clear();
             }
 
             // Compile catch block with a cleanup label instead of continue_b
@@ -9906,6 +9906,13 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
         if (fn->get_def() && fn->get_def()->flow.is_maybe_sunk(stmt)) {
             alloc_drop_flag(fn, stmt, false);
             set_drop_flag_alive(stmt, true);
+        } else if (data.expr && fn->get_def() && fn->get_def()->has_cleanup &&
+                   get_resolver()->type_needs_destruction(var_type)) {
+            // Init expression may throw (function has cleanup landing). Allocate a
+            // drop flag initialized to dead; flip to alive after init completes so
+            // an unwind during init doesn't destroy the uninitialized slot (e.g.
+            // sret destination of a throwing callee).
+            alloc_drop_flag(fn, stmt, false);
         }
 
         if (data.expr) {
@@ -9930,6 +9937,12 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             } else {
                 compile_assignment_to_ptr(fn, data.expr, var, var_type);
             }
+        }
+        // If we allocated a drop flag purely to guard against unwind during init,
+        // mark the slot alive now that init completed successfully.
+        if (data.expr && m_ctx->drop_flags.has_key(stmt) &&
+            !(fn->get_def() && fn->get_def()->flow.is_maybe_sunk(stmt))) {
+            set_drop_flag_alive(stmt, true);
         }
         break;
     }
@@ -10538,10 +10551,13 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
             if (alloca->getFunction() != fn->llvm_fn)
                 continue;
         }
-        if (flow.is_maybe_sunk(var)) {
-            // Maybe-moved: check drop flag at runtime
-            auto *flag = m_ctx->drop_flags.get(var);
-            assert(flag);
+        if (flow.is_sunk(var) && !flow.is_maybe_sunk(var)) {
+            continue; // Definitely moved: skip destruction
+        }
+        // Check drop flag at runtime if one exists. Flags exist either for
+        // maybe-moved vars (from flow analysis) or for let-bindings whose init
+        // may unwind (so we destroy only if init completed).
+        if (auto *flag = m_ctx->drop_flags.get(var)) {
             auto alive = builder.CreateLoad(llvm::Type::getInt1Ty(llvm_ctx), *flag, "alive");
             auto *do_destroy = llvm::BasicBlock::Create(llvm_ctx, "drop", fn->llvm_fn);
             auto *skip_destroy = llvm::BasicBlock::Create(llvm_ctx, "drop.skip", fn->llvm_fn);
@@ -10550,8 +10566,6 @@ void Compiler::compile_block_cleanup(Function *fn, ast::Block *block, ast::Node 
             compile_destruction(fn, get_var(var), var);
             builder.CreateBr(skip_destroy);
             builder.SetInsertPoint(skip_destroy);
-        } else if (flow.is_sunk(var)) {
-            continue; // Definitely moved: skip destruction
         } else {
             compile_destruction(fn, get_var(var), var);
         }

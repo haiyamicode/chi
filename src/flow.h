@@ -303,8 +303,7 @@ struct FlowState {
             stack.add(deps->items[i]);
         map<Node *, bool> visited;
         while (stack.len > 0) {
-            auto *node = stack.last();
-            stack.len--;
+            auto *node = stack.pop();
             if (visited.has_key(node))
                 continue;
             visited[node] = true;
@@ -346,8 +345,7 @@ struct FlowState {
         }
 
         while (stack.len > 0) {
-            auto state = stack.last();
-            stack.len--;
+            auto state = stack.pop();
 
             uint8_t mask = state.has_borrow ? 0x2 : 0x1;
             auto *seen = visited.get(state.node);
