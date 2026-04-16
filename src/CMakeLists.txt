@@ -30,7 +30,7 @@ set(RUNTIME_HEADER_FILES runtime/internals.h runtime/format.h runtime/trace.h)
 
 set(HEADER_FILES builder.h codegen.h ${RUNTIME_HEADER_FILES} util.h sema.h resolver.h lexer.h parser.h include/enum.h ast.h errors.h ast_printer.h include/optional.h include/variant.h include/tgc/tgc.h include/hashdict/hashdict.h package_config.h c_importer.h)
 set(SOURCE_FILES analyzer.cpp builder.cpp ${RUNTIME_SOURCE_FILES} context.cpp codegen.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast.cpp ast_printer.cpp include/tgc/tgc.c include/hashdict/hashdict.c package_config.cpp c_importer.cpp)
-set(PKG_LIBS fmt::fmt libbacktrace::libbacktrace libuv::uv_a ValiJSON::valijson)
+set(PKG_LIBS fmt::fmt libbacktrace::libbacktrace uv ValiJSON::valijson)
 set(LIBS ${PKG_LIBS} ${LLVM_LIBS} pthread dl)
 if(LIBCLANG_LIBRARY)
     list(APPEND LIBS ${LIBCLANG_LIBRARY})
