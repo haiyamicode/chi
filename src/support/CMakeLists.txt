@@ -1,1 +1,6 @@
-add_subdirectory(lsp-binding)
+find_path(NODE_API_INCLUDE_DIR node/node_api.h)
+if(NODE_API_INCLUDE_DIR)
+    add_subdirectory(lsp-binding)
+else()
+    message(STATUS "Node.js headers not found — skipping LSP binding")
+endif()
