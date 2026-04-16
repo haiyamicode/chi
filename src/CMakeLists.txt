@@ -82,6 +82,7 @@ add_custom_command(
 
 # Compiler executable
 add_executable(chic chic.cpp ${SOURCE_FILES} ${PACKAGE_SCHEMA_OUTPUT})
+set_target_properties(chic PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 install(TARGETS chic)
 target_include_directories(chic PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${LLVM_INCLUDE_DIRS} ${PROJECT_BINARY_DIR})
 target_compile_definitions(chic PRIVATE LLVM_TOOLS_BINARY_DIR="${LLVM_TOOLS_BINARY_DIR}")
@@ -96,12 +97,12 @@ else()
     target_link_libraries(chic ${LIBS})
 endif()
 
-set(CHI_BOOTSTRAP_OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bin/chi)
-set(CHI_BOOTSTRAP_WORKDIR ${CMAKE_CURRENT_BINARY_DIR}/chi_bootstrap)
+set(CHI_BOOTSTRAP_OUTPUT ${CMAKE_BINARY_DIR}/bin/chi)
+set(CHI_BOOTSTRAP_WORKDIR ${CMAKE_BINARY_DIR}/chi_bootstrap)
 
 add_custom_command(
     OUTPUT ${CHI_BOOTSTRAP_OUTPUT}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/bin
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CHI_BOOTSTRAP_WORKDIR}
     COMMAND ${CMAKE_COMMAND} -E env LIBRARY_PATH=${CMAKE_BINARY_DIR}
             ASAN_OPTIONS=detect_leaks=0

@@ -2,7 +2,7 @@
 # Fuzz the analyzer with partial typing patterns to find crashes
 # Each test simulates what the user's editor sends mid-keystroke
 
-CHIC=../../build/src/bin/chic
+CHIC=../../build/bin/chic
 TMPFILE=/tmp/chi_fuzz_test.xs
 PASSED=0
 FAILED=0

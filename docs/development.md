@@ -33,7 +33,7 @@ make compile_example
 lldb -o run ./local/test
 
 # Debug the compiler itself
-lldb -o run -- build/src/bin/chic -d -c local/test.xs -o local/test -w local/build
+lldb -o run -- build/bin/chic -d -c local/test.xs -o local/test -w local/build
 ```
 
 ## Tips

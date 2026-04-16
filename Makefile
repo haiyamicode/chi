@@ -1,7 +1,7 @@
 BUILD_DIR=build
 BASE=$(shell pwd)
 LOCAL_DIR=local
-CHIC = $(BUILD_DIR)/src/bin/chic
+CHIC = $(BUILD_DIR)/bin/chic
 INPUT_FILE ?= $(LOCAL_DIR)/test.xs
 INPUT_PACKAGE ?= $(LOCAL_DIR)/test_package
 BUILD_MODE ?= Debug

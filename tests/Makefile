@@ -67,8 +67,8 @@ TESTS_LIST = 00_fib.test \
 		61_package_import.test \
 		62_map_init.test
 TESTS ?= $(TESTS_LIST)
-CHIC = $(abspath $(BUILD_DIR)/src/bin/chic)
-CHI = $(abspath $(BUILD_DIR)/src/bin/chi)
+CHIC = $(abspath $(BUILD_DIR)/bin/chic)
+CHI = $(abspath $(BUILD_DIR)/bin/chi)
 TMP = /tmp/chitests
 OUTPUT_DIR = $(BUILD_DIR)/tests
 
