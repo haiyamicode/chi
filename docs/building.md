@@ -4,11 +4,10 @@
 
 - C++17 compiler (GCC 9+ or Clang 10+)
 - CMake 3.12+
-- [Conan 1.x](https://conan.io/) package manager
+- [Conan 2](https://conan.io/) package manager
 - LLVM 17 (development headers and shared libraries)
 - libclang (optional, enables C interop)
-- System libraries: `zlib`, `zstd`, `libtinfo` (Linux) or `curses` (macOS)
-  - macOS also needs `libxml2` (transitive LLVM/libclang dependency, ships with Xcode)
+- System libraries: `zlib`, `zstd`, `ncurses`
 
 ### Platform-specific dependencies
 
@@ -34,13 +33,15 @@ Please use Windows Subsystem for Linux and follow the Linux (Ubuntu/Debian) inst
 ## Build
 
 ```bash
-# Install Conan dependencies (one-time, from build/ directory)
-mkdir -p build && cd build && conan install .. --build=missing && cd ..
+# Install Conan dependencies (one-time)
+mkdir -p build
+make dep
 
 # Build (Debug mode by default)
 make build
 
-# Or explicitly set build mode
+# Or build in Release mode
+BUILD_MODE=Release make dep
 BUILD_MODE=Release make build
 ```
 

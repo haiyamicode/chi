@@ -11,34 +11,8 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET 14)
 function(bundle_static_library tgt_name bundled_tgt_name)
   list(APPEND static_libs ${tgt_name})
 
-  function(_recursively_collect_dependencies input_target)
-    set(_input_link_libraries LINK_LIBRARIES)
-    get_target_property(_input_type ${input_target} TYPE)
-
-    if(${_input_type} STREQUAL "INTERFACE_LIBRARY")
-      set(_input_link_libraries INTERFACE_LINK_LIBRARIES)
-    endif()
-
-    get_target_property(public_dependencies ${input_target} ${_input_link_libraries})
-    message(STATUS "Public dependencies of ${input_target}: " ${public_dependencies})
-
-    foreach(dependency IN LISTS public_dependencies)
-      # if starts with CONAN_PKG, skip; this is a hack, not sure why private dependencies are included in INTERFACE_LINK_LIBRARIES
-      if(${dependency} MATCHES "^CONAN_PKG.*$")
-        continue()
-      endif()
-
-      find_library(${dependency}_full_name ${dependency})
-      message(STATUS "Dependency: " ${dependency} " -> " ${${dependency}_full_name})
-      list(APPEND dep_libs ${${dependency}_full_name})
-    endforeach()
-
-    set(dep_libs ${dep_libs} PARENT_SCOPE)
-  endfunction()
-
+  set(dep_libs ${ARGN})
   message(STATUS "Bundling ${tgt_name} into ${bundled_tgt_name}")
-  _recursively_collect_dependencies(${tgt_name})
-  list(REMOVE_DUPLICATES dep_libs)
   message(STATUS "Static libs: " ${static_libs} "; Dep libs: " ${dep_libs})
 
   set(bundled_tgt_full_name

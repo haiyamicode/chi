@@ -1,5 +1,7 @@
-include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
-conan_basic_setup(TARGETS)
+find_package(fmt REQUIRED)
+find_package(libbacktrace REQUIRED)
+find_package(libuv REQUIRED)
+find_package(valijson REQUIRED)
 
 find_package(LLVM 17 REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
@@ -28,7 +30,7 @@ set(RUNTIME_HEADER_FILES runtime/internals.h runtime/format.h runtime/trace.h)
 
 set(HEADER_FILES builder.h codegen.h ${RUNTIME_HEADER_FILES} util.h sema.h resolver.h lexer.h parser.h include/enum.h ast.h errors.h ast_printer.h include/optional.h include/variant.h include/tgc/tgc.h include/hashdict/hashdict.h package_config.h c_importer.h)
 set(SOURCE_FILES analyzer.cpp builder.cpp ${RUNTIME_SOURCE_FILES} context.cpp codegen.cpp resolver.cpp lexer.cpp parser.cpp sema.cpp ast.cpp ast_printer.cpp include/tgc/tgc.c include/hashdict/hashdict.c package_config.cpp c_importer.cpp)
-set(PKG_LIBS CONAN_PKG::fmt CONAN_PKG::libbacktrace CONAN_PKG::libuv CONAN_PKG::valijson)
+set(PKG_LIBS fmt::fmt libbacktrace::libbacktrace libuv::uv_a ValiJSON::valijson)
 set(LIBS ${PKG_LIBS} ${LLVM_LIBS} pthread dl)
 if(LIBCLANG_LIBRARY)
     list(APPEND LIBS ${LIBCLANG_LIBRARY})
@@ -44,19 +46,26 @@ else()
     list(APPEND LIBS z zstd tinfo)
 endif()
 
+# Resolve static library paths for bundling
+find_library(FMT_STATIC_LIB NAMES fmtd fmt PATHS ${fmt_LIB_DIRS_DEBUG} ${fmt_LIB_DIRS_RELEASE} ${fmt_fmt_fmt_LIB_DIRS_DEBUG} ${fmt_fmt_fmt_LIB_DIRS_RELEASE} NO_DEFAULT_PATH)
+find_library(BACKTRACE_STATIC_LIB NAMES backtrace PATHS ${libbacktrace_LIB_DIRS_DEBUG} ${libbacktrace_LIB_DIRS_RELEASE} NO_DEFAULT_PATH)
+find_library(UV_STATIC_LIB NAMES uv PATHS ${libuv_LIB_DIRS_DEBUG} ${libuv_LIB_DIRS_RELEASE} NO_DEFAULT_PATH)
+set(BUNDLE_DEPS ${FMT_STATIC_LIB} ${BACKTRACE_STATIC_LIB} ${UV_STATIC_LIB})
+message(STATUS "Bundle deps: ${BUNDLE_DEPS}")
+
 # Runtime library
 include(GenerateExportHeader)
 add_library(rt STATIC ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
 generate_export_header(rt PREFIX_NAME CHI_ EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/generated/rt_export.h)
 target_include_directories(rt PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${PROJECT_BINARY_DIR})
-target_link_libraries(rt PRIVATE fmt backtrace uv ${PKG_LIBS})
-bundle_static_library(rt chrt)
+target_link_libraries(rt PRIVATE ${PKG_LIBS})
+bundle_static_library(rt chrt ${BUNDLE_DEPS})
 
 add_library(rt_debug STATIC ${RUNTIME_SOURCE_FILES} include/tgc/tgc.c include/hashdict/hashdict.c)
 target_include_directories(rt_debug PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${PROJECT_BINARY_DIR})
-target_link_libraries(rt_debug PRIVATE fmt backtrace uv ${PKG_LIBS})
+target_link_libraries(rt_debug PRIVATE ${PKG_LIBS})
 target_compile_definitions(rt_debug PRIVATE CHI_DEBUG_ALLOCATOR_RUNTIME=1)
-bundle_static_library(rt_debug chrt_debug)
+bundle_static_library(rt_debug chrt_debug ${BUNDLE_DEPS})
 
 # Generate embedded package schema header from JSON
 set(PACKAGE_SCHEMA_INPUT ${CMAKE_CURRENT_SOURCE_DIR}/package_schema.json)
