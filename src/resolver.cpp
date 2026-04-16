@@ -1724,40 +1724,20 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             }
             if (var && var->type == NodeType::VarDecl) {
                 auto &vd = var->data.var_decl;
-                // `copy` methods — like `new` — see `this` in an uninitialized
-                // state and track field init in their own `initialized_at_copy`
-                // slot. Every other method shares `new`'s `initialized_at`,
-                // since they observe `this` after construction has completed.
-                const string *pfn_name =
-                    (scope.parent_fn_node &&
-                     scope.parent_fn_node->type == NodeType::FnDef)
-                        ? &scope.parent_fn_node->name
-                        : nullptr;
-                bool in_copy_method =
-                    vd.is_field && pfn_name && *pfn_name == "copy";
-                bool in_new_method =
-                    vd.is_field && pfn_name && *pfn_name == "new";
-                auto &init_slot =
-                    in_copy_method ? vd.initialized_at_copy : vd.initialized_at;
-                // First assignment: no previous initialization at all
+                auto init_ctx = vd.is_field ? get_init_context(scope) : InitContext::None;
+                auto *&init_slot = init_ctx == InitContext::Copy
+                    ? vd.initialized_at_copy : vd.initialized_at;
                 bool is_first = !init_slot;
                 // Field with only a default value (parser sets initialized_at = var itself)
-                // being assigned for the first time in a constructor
+                // being assigned for the first time in an initializer
                 if (!is_first && vd.is_field && init_slot == var &&
-                    (in_new_method || in_copy_method)) {
+                    init_ctx != InitContext::None) {
                     is_first = true;
+                    init_slot = nullptr; // reset so mark_field_initialized sees it as unset
                 }
                 if (is_first) {
                     data.is_initializing = true;
-                    init_slot = node;
-                    if (var->root_node) {
-                        auto &root_vd = var->root_node->data.var_decl;
-                        if (in_copy_method) {
-                            root_vd.initialized_at_copy = node;
-                        } else {
-                            root_vd.initialized_at = node;
-                        }
-                    }
+                    mark_field_initialized(var, node, init_ctx);
                 }
             }
             auto var_scope = scope.set_value_type(rhs_ctx_override ? rhs_ctx_override : t1);
@@ -3581,6 +3561,38 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
 
         auto result = resolve_fn_call(node, scope, &fn, &data.args, fn_decl);
 
+        // Initializer method calls (.new(), .copy() with ops.Copy) on `this.field`
+        // count as field initialization.
+        if (fn_decl && fn_decl->type == NodeType::FnDef &&
+            fn_decl->data.fn_def.decl_spec->is_mutable() &&
+            data.fn_ref_expr->type == NodeType::DotExpr) {
+            bool is_new_call = fn_decl->name == "new";
+            bool is_copy_call = false;
+            if (fn_decl->name == "copy") {
+                auto *rsm = data.fn_ref_expr->data.dot_expr.resolved_struct_member;
+                is_copy_call = rsm && rsm->symbol == IntrinsicSymbol::Copy;
+            }
+            if (is_new_call || is_copy_call) {
+                auto init_ctx = get_init_context(scope);
+                auto *receiver = data.fn_ref_expr->data.dot_expr.expr;
+                auto *field_decl = receiver ? receiver->get_decl() : nullptr;
+                if (field_decl && field_decl->type == NodeType::VarDecl &&
+                    field_decl->data.var_decl.is_field) {
+                    mark_field_initialized(field_decl, node, init_ctx);
+                } else if (is_new_call && fn_decl->resolved_type) {
+                    // this.new(...) initializes all fields
+                    auto *cref = fn_decl->resolved_type->data.fn.container_ref;
+                    auto *st = cref ? resolve_struct_type(cref) : nullptr;
+                    if (st) {
+                        for (auto m : st->node->data.struct_decl.members) {
+                            if (m->type == NodeType::VarDecl)
+                                mark_field_initialized(m, node, init_ctx);
+                        }
+                    }
+                }
+            }
+        }
+
         // mem move intrinsic: sink the source variable so it's not destroyed at scope exit
         if (fn_symbol == IntrinsicSymbol::MemMove && scope.parent_fn_node) {
             assert(data.args.size() > 1 && "intrinsic mem move missing source argument");
@@ -4430,6 +4442,31 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                         error(member, errors::UNINITIALIZED_FIELD, member->name,
                               format_type_display(struct_type));
                     }
+                }
+            }
+
+            // Same check for copy methods: every field must be initialized.
+            // Only applies when the struct has a non-promoted ops.Copy impl.
+            auto *copy_member_p = struct_->member_intrinsics.get(IntrinsicSymbol::Copy);
+            bool has_user_copy =
+                copy_member_p && !(*copy_member_p)->is_promoted();
+            if (has_user_copy) {
+                for (auto member : data.members) {
+                    if (member->type != NodeType::VarDecl)
+                        continue;
+                    auto &vd = member->data.var_decl;
+                    if (vd.initialized_at_copy)
+                        continue;
+                    // Fields with defaults are written by __copy before user's copy()
+                    if (vd.initialized_at == member)
+                        continue;
+                    if (vd.is_embed && struct_->kind == ContainerKind::Interface)
+                        continue;
+                    if (data.decl_spec && data.decl_spec->is_extern())
+                        continue;
+                    error(member, "field '{}' of type '{}' has not been "
+                          "initialized in copy()",
+                          member->name, format_type_display(struct_type));
                 }
             }
 
@@ -8662,6 +8699,36 @@ bool Resolver::is_struct_type(ChiType *type) {
 ChiTypeStruct *Resolver::resolve_struct_type(ChiType *type) {
     auto stype = eval_struct_type(type);
     return stype ? &stype->data.struct_ : nullptr;
+}
+
+InitContext Resolver::get_init_context(const ResolveScope &scope) {
+    if (!scope.parent_fn_node || scope.parent_fn_node->type != NodeType::FnDef)
+        return InitContext::None;
+    auto &name = scope.parent_fn_node->name;
+    if (name == "new") return InitContext::New;
+    if (name == "copy" && scope.parent_fn) {
+        auto *cref = scope.parent_fn->data.fn.container_ref;
+        auto *st = cref ? resolve_struct_type(cref) : nullptr;
+        auto *cm = st ? st->find_member("copy") : nullptr;
+        if (cm && cm->symbol == IntrinsicSymbol::Copy)
+            return InitContext::Copy;
+    }
+    return InitContext::None;
+}
+
+void Resolver::mark_field_initialized(ast::Node *field_decl, ast::Node *origin, InitContext ctx) {
+    auto &vd = field_decl->data.var_decl;
+    bool use_copy_slot = ctx == InitContext::Copy;
+    auto *&slot = use_copy_slot ? vd.initialized_at_copy : vd.initialized_at;
+    if (!slot) {
+        slot = origin;
+        if (field_decl->root_node) {
+            auto *&rs = use_copy_slot
+                ? field_decl->root_node->data.var_decl.initialized_at_copy
+                : field_decl->root_node->data.var_decl.initialized_at;
+            if (!rs) rs = origin;
+        }
+    }
 }
 
 ChiType *Resolver::eval_struct_type(ChiType *type, ast::Node *origin) {

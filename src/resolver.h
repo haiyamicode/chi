@@ -194,6 +194,9 @@ struct ResolveScope {
 
 enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0, IS_FN_LAMBDA = 1 << 1 };
 
+// Whether the enclosing method is an initializer (new or ops.Copy copy).
+enum class InitContext { None, New, Copy };
+
 struct AwaitSite {
     ast::Node *await_expr = nullptr;
     ast::Node *resume_expr = nullptr;
@@ -487,6 +490,9 @@ class Resolver {
     ChiType *eval_struct_type(ChiType *type, ast::Node *origin = nullptr);
 
     ChiTypeStruct *resolve_struct_type(ChiType *type);
+
+    InitContext get_init_context(const ResolveScope &scope);
+    void mark_field_initialized(ast::Node *field_decl, ast::Node *origin, InitContext ctx);
 
     void copy_struct_members(ChiType *from, ChiType *to, ChiStructMember *parent_member = nullptr);
 
