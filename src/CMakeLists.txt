@@ -36,7 +36,7 @@ endif()
 
 # System libs required by LLVM/clang static linking
 if(APPLE)
-    set(LIB_ZSTD /opt/homebrew/opt/zstd/lib/libzstd.a)
+    find_library(LIB_ZSTD zstd REQUIRED)
     find_library(LIB_CURSES curses REQUIRED)
     find_library(LIB_XML2 xml2 REQUIRED)
     list(APPEND LIBS z ${LIB_ZSTD} ${LIB_CURSES} ${LIB_XML2})
