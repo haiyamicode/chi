@@ -79,7 +79,7 @@ install(TARGETS chic)
 target_include_directories(chic PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${LLVM_INCLUDE_DIRS} ${PROJECT_BINARY_DIR})
 target_compile_definitions(chic PRIVATE LLVM_TOOLS_BINARY_DIR="${LLVM_TOOLS_BINARY_DIR}")
 
-option(ENABLE_ASAN "Enable AddressSanitizer in Debug builds" ON)
+option(ENABLE_ASAN "Enable AddressSanitizer in Debug builds" OFF)
 target_compile_options(chic PRIVATE -fno-omit-frame-pointer)
 if(ENABLE_ASAN)
     set(ASAN_FLAGS "-fsanitize=address")
