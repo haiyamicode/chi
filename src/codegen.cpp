@@ -2432,6 +2432,7 @@ llvm::Constant *Compiler::build_type_info_initializer(ChiType *type) {
         meta_table_ptr_l =
             llvm::ConstantExpr::getPointerCast(meta_global, ptr_type_l);
     }
+    free(meta_table_data);
 
     llvm::Constant *field_table_ptr_l = get_null_ptr();
     if (field_table_len > 0) {

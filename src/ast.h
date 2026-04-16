@@ -917,6 +917,13 @@ struct Node {
             _AST_CASE_INITIALIZE_FIELD(sigil_type, TypeSigil)
             _AST_CASE_INITIALIZE_FIELD(type_param, TypeParam)
             _AST_CASE_INITIALIZE_FIELD(import_symbol, ImportSymbol)
+            _AST_CASE_INITIALIZE_FIELD(tuple_expr, TupleExpr)
+            _AST_CASE_INITIALIZE_FIELD(bin_op_expr, BinOpExpr)
+            _AST_CASE_INITIALIZE_FIELD(if_expr, IfExpr)
+            _AST_CASE_INITIALIZE_FIELD(var_decl, VarDecl)
+        case NodeType::ImplementBlock:
+            new (&data.implement_block) ImplementBlockData();
+            break;
         default:
             break;
         }
@@ -948,10 +955,18 @@ struct Node {
             _AST_CASE_DESTROY_FIELD(field_init_expr, FieldInitExpr)
             _AST_CASE_DESTROY_FIELD(enum_decl, EnumDecl)
             _AST_CASE_DESTROY_FIELD(generated_fn, GeneratedFn)
+            _AST_CASE_DESTROY_FIELD(lifetime_param, LifetimeParam)
             _AST_CASE_DESTROY_FIELD(destructure_decl, DestructureDecl)
             _AST_CASE_DESTROY_FIELD(sigil_type, TypeSigil)
             _AST_CASE_DESTROY_FIELD(type_param, TypeParam)
             _AST_CASE_DESTROY_FIELD(import_symbol, ImportSymbol)
+            _AST_CASE_DESTROY_FIELD(tuple_expr, TupleExpr)
+            _AST_CASE_DESTROY_FIELD(bin_op_expr, BinOpExpr)
+            _AST_CASE_DESTROY_FIELD(if_expr, IfExpr)
+            _AST_CASE_DESTROY_FIELD(var_decl, VarDecl)
+        case NodeType::ImplementBlock:
+            data.implement_block.~ImplementBlockData();
+            break;
         default:
             memset(&data, 0, sizeof(data));
             break;
