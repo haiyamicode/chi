@@ -4,8 +4,12 @@ find_package(libuv REQUIRED)
 find_package(valijson REQUIRED)
 
 option(RUNTIME_ONLY "Build only runtime libraries, skip compiler" OFF)
-option(ENABLE_STATIC_LINK "Enable fully static LLVM/clang linking" OFF)
+option(ENABLE_STATIC_LINK "Enable fully static LLVM/clang linking (Linux only)" OFF)
 set(STATIC_LLVM_DIR "" CACHE PATH "Path to static LLVM/Clang build with libclang.a (for ENABLE_STATIC_LINK)")
+
+if(ENABLE_STATIC_LINK AND APPLE)
+    message(FATAL_ERROR "ENABLE_STATIC_LINK is not supported on macOS. Use shared linking (the default).")
+endif()
 
 if(NOT RUNTIME_ONLY)
     find_package(LLVM 17 REQUIRED CONFIG)
