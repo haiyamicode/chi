@@ -8,6 +8,7 @@
 # Environment variables:
 #   CHI_INSTALL_DIR    Override install location (default: ~/.chi)
 #   CHI_DOWNLOAD_URL   Override base download URL (for mirrors/testing)
+#   CHI_LIBC           Override Linux libc detection: "gnu" or "musl"
 #   GITHUB_TOKEN       GitHub API token for private repos or rate limiting
 
 set -u
@@ -15,6 +16,7 @@ set -u
 GITHUB_REPO="haiyamicode/chi"
 INSTALL_DIR="${CHI_INSTALL_DIR:-}"
 VERSION=""
+LIBC="${CHI_LIBC:-}"
 TMPDIR_CLEANUP=""
 
 # --- Output helpers ---
@@ -94,6 +96,46 @@ detect_platform() {
     esac
 
     PLATFORM="${os}-${arch}"
+    if [ "$os" = "linux" ]; then
+        detect_libc
+        PLATFORM="${PLATFORM}-${LIBC}"
+    fi
+}
+
+# Detect glibc vs musl. Rustup-style ldd probe: glibc's `ldd --version` prints
+# "ldd (GNU libc) ..."; musl's prints "musl libc ..." on stderr with exit 1.
+# `2>&1` captures both, grep matches "musl" case-insensitively.
+detect_libc() {
+    if [ -n "$LIBC" ]; then
+        case "$LIBC" in
+            gnu|musl) ;;
+            *)
+                err "invalid CHI_LIBC value: '$LIBC' (must be 'gnu' or 'musl')"
+                exit 1
+                ;;
+        esac
+        return
+    fi
+
+    if check_cmd ldd; then
+        if ldd --version 2>&1 | grep -qi musl; then
+            LIBC="musl"
+            return
+        fi
+        LIBC="gnu"
+        return
+    fi
+
+    # Fallback: check for musl's dynamic linker. If neither ldd nor a musl
+    # linker is present, default to gnu (the common case) with a warning.
+    if [ -f /lib/ld-musl-x86_64.so.1 ] || [ -f /lib/ld-musl-aarch64.so.1 ]; then
+        LIBC="musl"
+        return
+    fi
+
+    warn "could not detect libc (ldd missing); defaulting to 'gnu'"
+    warn "override with CHI_LIBC=musl if this is a musl system"
+    LIBC="gnu"
 }
 
 # --- Version detection ---
@@ -233,6 +275,17 @@ main() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --version|-v) VERSION="$2"; shift 2 ;;
+            --libc)
+                LIBC="$2"
+                case "$LIBC" in
+                    gnu|musl) ;;
+                    *)
+                        err "invalid --libc value: '$LIBC' (must be 'gnu' or 'musl')"
+                        exit 1
+                        ;;
+                esac
+                shift 2
+                ;;
             --help|-h)
                 info "Chi Programming Language Installer"
                 info ""
@@ -241,11 +294,13 @@ main() {
                 info ""
                 info "Options:"
                 info "  --version, -v <version>   Install a specific version (e.g., v0.9.0)"
+                info "  --libc <gnu|musl>         Linux libc variant (auto-detected)"
                 info "  --help, -h                Show this help"
                 info ""
                 info "Environment variables:"
                 info "  CHI_INSTALL_DIR    Override install location (default: ~/.chi)"
                 info "  CHI_DOWNLOAD_URL   Override base download URL"
+                info "  CHI_LIBC           Override Linux libc detection (gnu or musl)"
                 info "  GITHUB_TOKEN       GitHub API token for private repos"
                 exit 0
                 ;;
@@ -289,6 +344,9 @@ main() {
     info "  ${BOLD}Chi ${VERSION}${RESET}"
     info "  Platform:  ${PLATFORM}"
     info "  Location:  ${INSTALL_DIR}"
+    if [ -n "${LIBC:-}" ] && [ -n "${CHI_LIBC:-}" ]; then
+        info "  Libc:      ${LIBC} (override)"
+    fi
     info ""
 
     # Construct download URL
