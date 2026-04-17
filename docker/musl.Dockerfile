@@ -1,7 +1,8 @@
-# Builds the distributable chi compiler + musl runtime.
+# Builds the distributable chi compiler + musl runtime + chi wrapper.
 #
 # Output artifacts:
 #   /src/build/bin/chic       - fully static chic (works on any Linux host)
+#   /src/build/bin/chi        - musl-linked chi wrapper (for musl targets)
 #   /src/build/libchrt.a      - musl-linked runtime for Alpine/musl targets
 #   /src/build/libchrt_debug.a
 #
@@ -34,3 +35,6 @@ RUN cd build && cmake -G "Unix Makefiles" \
     -DENABLE_STATIC_LINK=ON \
     -DCMAKE_EXE_LINKER_FLAGS="-static" \
     .. && make -j$(nproc) chic chrt_bundling_target chrt_debug_bundling_target
+
+# Build the chi wrapper against the just-built musl libchrt.a.
+RUN cd build && ./bin/chic -c /src/src/chi/main.xs -o bin/chi -r -w /tmp/chi-wrapper-build

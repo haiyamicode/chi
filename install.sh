@@ -145,8 +145,6 @@ detect_version() {
         return
     fi
 
-    info "Finding latest chi release..."
-
     local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
     local auth_header=""
     if [ -n "${GITHUB_TOKEN:-}" ]; then
