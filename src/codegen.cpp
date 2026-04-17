@@ -12827,11 +12827,17 @@ void Compiler::dump_generics_comparison() {
 }
 
 void Compiler::emit_output() {
+#ifdef __APPLE__
     llvm::InitializeAllTargetInfos();
     llvm::InitializeAllTargets();
     llvm::InitializeAllTargetMCs();
     llvm::InitializeAllAsmParsers();
     llvm::InitializeAllAsmPrinters();
+#else
+    llvm::InitializeNativeTarget();
+    llvm::InitializeNativeTargetAsmParser();
+    llvm::InitializeNativeTargetAsmPrinter();
+#endif
 
     string error;
     auto target_triple = llvm::sys::getDefaultTargetTriple();

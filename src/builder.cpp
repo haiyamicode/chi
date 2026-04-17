@@ -172,23 +172,7 @@ void Builder::build_single_file(const string &file_name) {
     compiler.dump_generics_comparison();
     compiler.emit_output();
 
-    // produce executable
-    string sanitizer_flags = sanitize_address ? "-fsanitize=address " : "";
-    string linker = sanitize_address ? LLVM_TOOLS_BINARY_DIR "/clang++" : "c++";
-    auto cmd = fmt::format("{} {} {}{} -o {} {}-l{}", linker, settings->output_obj_to_file,
-                           sanitizer_flags, linker_mode_flags(profile), output_file_name,
-                           runtime_library_search_flags(m_ctx, runtime_library_name),
-                           runtime_library_name);
-
-    if (debug_mode) {
-        print("running: {}\n", cmd);
-    }
-    auto result = system(cmd.c_str());
-    if (result != 0) {
-        print("error: failed to run command: {}\n", cmd);
-    }
-
-    run_post_link_tools(*this, output_file_name);
+    link_executable(settings->output_obj_to_file, "", "", false);
 }
 
 void Builder::build_program(const string &entry_file_name) {
@@ -438,12 +422,17 @@ void Builder::build_package(const string &package_dir) {
         library_flags += fmt::format("-l{} ", lib);
     }
 
+    link_executable(obj_files, library_path_flags, library_flags, true);
+}
+
+void Builder::link_executable(const string &obj_files, const string &extra_library_paths,
+                              const string &extra_library_flags, bool exit_on_failure) {
     string sanitizer_flags = sanitize_address ? "-fsanitize=address " : "";
-    string pkg_linker = sanitize_address ? LLVM_TOOLS_BINARY_DIR "/clang++" : "c++";
-    auto cmd = fmt::format("{} {} {}{} -o {} {}{}-l{} {}", pkg_linker, obj_files, sanitizer_flags,
+    string linker = cxx_compiler.empty() ? "c++" : cxx_compiler;
+    auto cmd = fmt::format("{} {} {}{} -o {} {}{}-l{} {}", linker, obj_files, sanitizer_flags,
                            linker_mode_flags(profile), output_file_name,
                            runtime_library_search_flags(m_ctx, runtime_library_name),
-                           library_path_flags, runtime_library_name, library_flags);
+                           extra_library_paths, runtime_library_name, extra_library_flags);
 
     if (debug_mode) {
         print("running: {}\n", cmd);
@@ -451,7 +440,10 @@ void Builder::build_package(const string &package_dir) {
     auto result = system(cmd.c_str());
     if (result != 0) {
         print("error: failed to link executable: {}\n", cmd);
-        exit(1);
+        if (exit_on_failure) {
+            exit(1);
+        }
+        return;
     }
 
     run_post_link_tools(*this, output_file_name);

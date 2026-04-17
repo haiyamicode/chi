@@ -4,6 +4,7 @@
 #include <clang-c/Index.h>
 #endif
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <set>

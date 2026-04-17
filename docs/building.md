@@ -81,7 +81,8 @@ src/
   builder.cpp      Build orchestration
   analyzer.cpp     IDE/LSP analysis mode
   runtime/         C runtime support
-  stdlib/          Standard library (.xs)
+  stdlib/          Standard library (written in Chi)
+  chi/             Compiler wrapper cli (written in Chi)
 tests/             Test suite
 tests/analyzer/    Analyzer / error-recovery tests
 tests/stress/      Stress and allocator tests

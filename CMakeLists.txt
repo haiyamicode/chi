@@ -41,10 +41,10 @@ function(bundle_static_library tgt_name bundled_tgt_name)
       OUTPUT ${CMAKE_BINARY_DIR}/${bundled_tgt_name}.ar
       INPUT ${CMAKE_BINARY_DIR}/${bundled_tgt_name}.ar.in)
 
-    set(ar_tool "llvm-ar")
-
     if(CMAKE_INTERPROCEDURAL_OPTIMIZATION)
       set(ar_tool ${CMAKE_CXX_COMPILER_AR})
+    else()
+      find_program(ar_tool NAMES llvm-ar ar)
     endif()
 
     add_custom_command(

@@ -30,6 +30,7 @@ class Builder {
     bool strip_symbols = false;
     bool sanitize_address = false;
     string emit_ir_path;
+    string cxx_compiler;
     string runtime_library_name = "chrt";
     BuildMode build_mode = BuildMode::Run;
     codegen::CompilationProfile profile = codegen::CompilationProfile::Debug;
@@ -55,6 +56,8 @@ class Builder {
   private:
     string get_tmp_file_path(const string &filename);
     uint32_t get_extra_lang_flags() const;
+    void link_executable(const string &obj_files, const string &extra_library_paths,
+                         const string &extra_library_flags, bool exit_on_failure);
 };
 
 } // namespace cx

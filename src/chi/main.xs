@@ -152,6 +152,17 @@ struct CliApp {
         this.fail("could not find Chi compiler binary (chic)");
     }
 
+    func require_cxx_compiler() {
+        if let path_value = this.path_env {
+            for name in ["c++", "g++", "clang++"] {
+                if this.find_in_path(path_value, name) != null {
+                    return;
+                }
+            }
+        }
+        this.fail("could not find a C++ compiler (c++, g++, or clang++) in PATH; please install one");
+    }
+
     func find_package_root(start: string) ?string {
         var current = start;
         while true {
@@ -380,6 +391,7 @@ struct CliApp {
         default_release: bool = false
     ) int32 {
         let chic = this.require_chi_compiler();
+        this.require_cxx_compiler();
         let working_dir = this.resolve_working_dir(match, package_root);
 
         this.log_verbose(match, "compiler " + chic);

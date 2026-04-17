@@ -16,7 +16,7 @@ using namespace cx;
 MAKE_ENUM(FlagType, String, Bool);
 MAKE_ENUM(FlagId, CompileEntry, CompilePackage, Debug, Release, Strip, Output, Ast, Format,
           FormatterNoSemantic, WorkingDir, Analyzer, Safe, VerboseLifetimes, VerboseGenerics,
-          DebugAllocatorRuntime, EmitIR, SanitizeAddress, Help);
+          DebugAllocatorRuntime, EmitIR, SanitizeAddress, CxxCompiler, Help);
 MAKE_ENUM(InputMode, File, Package)
 MAKE_ENUM(ProcessingMode, Build, Analyzer, Format)
 
@@ -50,6 +50,7 @@ void init_flags() {
     flags.add({FlagId::DebugAllocatorRuntime, "", "debug-allocator-runtime", FlagType::Bool});
     flags.add({FlagId::EmitIR, "", "emit-ir", FlagType::String});
     flags.add({FlagId::SanitizeAddress, "", "sanitize", FlagType::Bool});
+    flags.add({FlagId::CxxCompiler, "", "cxx", FlagType::String});
     flags.add({FlagId::Help, "h", "help", FlagType::Bool});
 
     for (auto &f : flags) {
@@ -95,6 +96,7 @@ int main(int argc, char *argv[]) {
         print("  --debug-allocator-runtime: link against the debug allocator runtime\n");
         print("  --emit-ir <path>: write LLVM IR to the specified file\n");
         print("  --sanitize: enable AddressSanitizer (detects memory errors)\n");
+        print("  --cxx <path>: C++ compiler to invoke for linking (default: c++)\n");
         print("  -h --help: help\n");
     };
 
@@ -154,6 +156,9 @@ int main(int argc, char *argv[]) {
             break;
         case FlagId::SanitizeAddress:
             bld.sanitize_address = true;
+            break;
+        case FlagId::CxxCompiler:
+            bld.cxx_compiler = flag->value;
             break;
         case FlagId::Help:
             print_help();
