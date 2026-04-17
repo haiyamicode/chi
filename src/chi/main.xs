@@ -81,7 +81,7 @@ struct CliApp {
         }
     }
 
-    func run_command(match: &args.Matches, cmd: &[string]) int32 {
+    func exec_command(match: &args.Matches, cmd: &[string]) int32 {
         if match.flag("verbose") {
             println(this.format_command(cmd));
         }
@@ -213,6 +213,10 @@ struct CliApp {
 
     func install_command() args.Command {
         return this.package_command("install", "Build and install the current package", false);
+    }
+
+    func run_command() args.Command {
+        return this.package_command("run", "Build and run the current package", false);
     }
 
     func require_package_root(match: &args.Matches) string {
@@ -417,7 +421,7 @@ struct CliApp {
         if match.flag("verbose-generics") {
             cmd.push("--verbose-generics");
         }
-        return this.run_command(match, cmd.span());
+        return this.exec_command(match, cmd.span());
     }
 
     func require_install_dir() string {
@@ -428,21 +432,30 @@ struct CliApp {
         return filepath.join(chi_root_dir, "bin");
     }
 
-    func run_build_inner(match: &args.Matches) int32 {
+    func execute_build(match: &args.Matches) int32 {
         let package_root = this.canonical_package_root(this.require_package_root(match));
         let output = match.option("output") ??
                      filepath.join(package_root, this.package_output_name(package_root));
         return this.run_chi_compiler(match, package_root, output);
     }
 
-    func run_build(match: &args.Matches) int32 {
-        return try this.run_build_inner(match) catch CliError as err {
-            println(err.message());
-            1
-        };
+    func execute_run(match: &args.Matches) int32 {
+        let package_root = this.canonical_package_root(this.require_package_root(match));
+        let output = filepath.join(
+            this.resolve_working_dir(match, package_root),
+            this.package_output_name(package_root)
+        );
+        let status = this.run_chi_compiler(match, package_root, output);
+        if status != 0 {
+            return status;
+        }
+        var cmd = [output];
+        let result = os.command(cmd.span());
+        this.print_command_output(&result);
+        return result.exit_code;
     }
 
-    func run_install_inner(match: &args.Matches) int32 {
+    func execute_install(match: &args.Matches) int32 {
         let package_root = this.canonical_package_root(this.require_package_root(match));
         let bin_dir = this.require_install_dir();
         this.log_verbose(match, "install dir " + bin_dir);
@@ -459,19 +472,13 @@ struct CliApp {
         return 0;
     }
 
-    func run_install(match: &args.Matches) int32 {
-        return try this.run_install_inner(match) catch CliError as err {
-            println(err.message());
-            1
-        };
-    }
-
     func root_command() args.Command {
         var root = args.Command{
             name: "chi",
             summary: "Chi toolchain"
         };
         root.command(this.build_command());
+        root.command(this.run_command());
         root.command(this.install_command());
         return root;
     }
@@ -484,12 +491,11 @@ struct CliApp {
                 let sub = match.subcommand();
                 if sub != null {
                     let command = sub!;
-                    if command.command_name() == "build" {
-                        os.exit(this.run_build(command));
-                    }
-                    if command.command_name() == "install" {
-                        os.exit(this.run_install(command));
-                    }
+                    let status = try this.dispatch(command) catch CliError as err {
+                        println(err.message());
+                        1
+                    };
+                    os.exit(status);
                 }
                 println(cli.help());
                 return;
@@ -503,6 +509,19 @@ struct CliApp {
                 os.exit(1);
             }
         }
+    }
+
+    func dispatch(command: &args.Matches) int32 {
+        if command.command_name() == "build" {
+            return this.execute_build(command);
+        }
+        if command.command_name() == "run" {
+            return this.execute_run(command);
+        }
+        if command.command_name() == "install" {
+            return this.execute_install(command);
+        }
+        return 1;
     }
 }
 
