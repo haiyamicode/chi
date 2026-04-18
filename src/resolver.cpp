@@ -7742,6 +7742,11 @@ bool Resolver::type_needs_destruction(ChiType *type) {
         return type_needs_destruction(type->data.fixed_array.elem);
     }
 
+    // Array owns a heap buffer — always needs destruction regardless of elem type
+    if (type->kind == TypeKind::Array) {
+        return true;
+    }
+
     // Tuple needs destruction if any element type needs destruction
     if (type->kind == TypeKind::Tuple) {
         for (auto elem : type->data.tuple.elements) {

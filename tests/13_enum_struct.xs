@@ -151,6 +151,12 @@ enum TracedResult<T, E> {
     Err(E)
 }
 
+enum TracedBag {
+    Items {
+        values: Array<Traced>;
+    }
+}
+
 func make_empty_container<T>(label: string) Container<T> {
     return Empty{:label};
 }
@@ -387,6 +393,22 @@ func test_switch_nested_destructure() {
         else => "empty"
     };
     println(desc);
+}
+
+func test_switch_nested_destructure_traced() {
+    println("=== Test: Switch nested destructure (traced) ===");
+
+    var bag = TracedBag.Items{values: [Traced{1}, Traced{2}, Traced{3}]};
+    var first_id = switch bag {
+        Items{values: [first, ...rest]} => {
+            printf("first.id={}, rest[0].id={}, rest[1].id={}\n",
+                   first.id, rest[0].id, rest[1].id);
+            first.id
+        },
+        else => -1
+    };
+    printf("first_id={}\n", first_id);
+    println("--- scope exit ---");
 }
 
 func test_switch_narrowing() {
@@ -638,6 +660,7 @@ func main() {
     test_switch_destructure();
     test_switch_by_ref_destructure();
     test_switch_nested_destructure();
+    test_switch_nested_destructure_traced();
     test_enum_base_struct_lifecycle();
     test_generic_enum_lifecycle();
     test_enum_display_override();
