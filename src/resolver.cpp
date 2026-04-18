@@ -7742,6 +7742,15 @@ bool Resolver::type_needs_destruction(ChiType *type) {
         return type_needs_destruction(type->data.fixed_array.elem);
     }
 
+    // Tuple needs destruction if any element type needs destruction
+    if (type->kind == TypeKind::Tuple) {
+        for (auto elem : type->data.tuple.elements) {
+            if (type_needs_destruction(elem))
+                return true;
+        }
+        return false;
+    }
+
 
 
     // &move T owns the pointee — RAII auto-destroy + free at scope exit
@@ -10121,6 +10130,7 @@ ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, Reso
         case NodeType::SwitchExpr:
         case NodeType::Block:
         case NodeType::ParenExpr:
+        case NodeType::TupleExpr:
             break;
         case NodeType::BinOpExpr:
             // Operator method dispatch is a function call producing a fresh

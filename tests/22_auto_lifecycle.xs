@@ -441,6 +441,33 @@ func test_paren_temp_cleanup() {
     println("after consume((if...))");
 }
 
+func consume_tuple(t: Tuple<int, TrackedVar>) {}
+
+func make_tuple_traced(name: string) Tuple<int, TrackedVar> {
+    return (1, make_tracked(name));
+}
+
+func test_tuple_temp_cleanup() {
+    println("=== Test 10c: TupleExpr temp cleanup ===");
+
+    println("--- orphaned tuple with destructible element ---");
+    (1, make_tracked("tuple-orphan"));
+    println("after orphaned tuple");
+
+    println("--- tuple as arg ---");
+    consume_tuple((2, make_tracked("tuple-arg")));
+    println("after consume(tuple)");
+
+    println("--- nested orphan tuple ---");
+    (1, (2, make_tracked("tuple-nested")));
+    println("after nested orphan");
+
+    println("--- returned tuple bound to var ---");
+    let t = make_tuple_traced("tuple-return");
+    printf("  t.1.name='{}'\n", t.1.name);
+    println("after return binding");
+}
+
 func test_expr_contexts() {
     println("=== Test 11: Temps in expression-position contexts ===");
 
@@ -892,6 +919,7 @@ func main() {
     test_multiple_vars();
     test_temp_cleanup();
     test_paren_temp_cleanup();
+    test_tuple_temp_cleanup();
     test_expr_contexts();
     test_fn_arg_copy_semantics();
     test_method_param_cleanup();

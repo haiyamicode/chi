@@ -7186,6 +7186,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             auto elem = compile_expr(fn, data.items[i]);
             tuple = m_ctx->llvm_builder->CreateInsertValue(tuple, elem, {(unsigned)i});
         }
+        if (expr->resolved_outlet) {
+            auto outlet_addr = compile_expr_ref(fn, expr->resolved_outlet).address;
+            m_ctx->llvm_builder->CreateStore(tuple, outlet_addr);
+        }
         return tuple;
     }
     case ast::NodeType::IfExpr: {
@@ -10777,23 +10781,7 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
-    // Handle FixedArray via generated destructor
-    if (type->kind == TypeKind::FixedArray) {
-        auto dtor = generate_destructor(type, nullptr);
-        if (dtor) {
-            builder.CreateCall(dtor->llvm_fn, {address});
-        }
-        return;
-    }
-
-    // Handle optionals, structs, enums, and enum values via generated __delete
-    if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct &&
-        type->kind != TypeKind::Enum && type->kind != TypeKind::EnumValue) {
-        return;
-    }
-
-    auto dtor = generate_destructor(original_type, nullptr);
-    if (dtor) {
+    if (auto dtor = generate_destructor(original_type, nullptr)) {
         builder.CreateCall(dtor->llvm_fn, {address});
     }
 }
@@ -11016,9 +11004,6 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         return *existing;
     }
 
-    auto &builder = *m_ctx->llvm_builder;
-    auto &llvm_ctx = *m_ctx->llvm_ctx;
-
     // Resolve subtype if needed
     auto resolved_type = type;
     while (resolved_type && resolved_type->kind == TypeKind::Subtype) {
@@ -11034,111 +11019,168 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         return nullptr;
     }
 
-    // Handle Optional types
-    if (resolved_type->kind == TypeKind::Optional) {
-        return generate_destructor_optional(type, resolved_type);
-    }
-
-    // Handle enum value layouts — switch on discriminator to destroy variant fields
+    // Enums reduce to their base EnumValue layout
     if (resolved_type->kind == TypeKind::Enum) {
         resolved_type = resolved_type->data.enum_.base_value_type;
     }
-    if (resolved_type->kind == TypeKind::EnumValue) {
+
+    switch (resolved_type->kind) {
+    case TypeKind::Optional:
+        return generate_destructor_optional(type, resolved_type);
+    case TypeKind::EnumValue:
         return generate_destructor_enum(type, resolved_type);
+    case TypeKind::FixedArray:
+        return generate_destructor_fixed_array(type, resolved_type);
+    case TypeKind::Tuple:
+        return generate_destructor_tuple(type, resolved_type);
+    case TypeKind::Struct:
+        return generate_destructor_struct(type, resolved_type);
+    default:
+        return nullptr;
     }
+}
 
-    // Handle FixedArray types — reverse loop destroying each element
-    if (resolved_type->kind == TypeKind::FixedArray) {
-        auto elem = resolved_type->data.fixed_array.elem;
-        if (!get_resolver()->type_needs_destruction(elem)) {
-            return nullptr;
-        }
-        auto ptr_type = get_llvm_ptr_type();
-        auto fn_type_l =
-            llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
-        auto type_name = get_resolver()->format_type_display(type);
-        auto fn_name = fmt::format("{}.__delete", type_name);
-        auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
-                                              m_ctx->llvm_module.get());
-        auto fn = new Function(m_ctx, llvm_fn, nullptr);
-        fn->qualified_name = fn_name;
-        m_ctx->functions.emplace(fn);
-        m_ctx->destructor_table[type] = fn;
+Function *Compiler::generate_destructor_fixed_array(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
 
-        auto saved_block = builder.GetInsertBlock();
-        auto saved_point = builder.GetInsertPoint();
-
-        auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
-        auto fa_size = resolved_type->data.fixed_array.size;
-        auto arr_type_l = compile_type(resolved_type);
-
-        auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
-        auto loop_bb = llvm::BasicBlock::Create(llvm_ctx, "loop", llvm_fn);
-        auto body_bb = llvm::BasicBlock::Create(llvm_ctx, "body", llvm_fn);
-        auto end_bb = llvm::BasicBlock::Create(llvm_ctx, "end", llvm_fn);
-
-        builder.SetInsertPoint(entry_bb);
-        auto this_ptr = llvm_fn->getArg(0);
-        auto counter = builder.CreateAlloca(i32_ty, nullptr, "i");
-        builder.CreateStore(llvm::ConstantInt::get(i32_ty, fa_size), counter);
-        builder.CreateBr(loop_bb);
-
-        builder.SetInsertPoint(loop_bb);
-        auto cur = builder.CreateLoad(i32_ty, counter);
-        auto cond = builder.CreateICmpUGT(cur, llvm::ConstantInt::get(i32_ty, 0));
-        builder.CreateCondBr(cond, body_bb, end_bb);
-
-        builder.SetInsertPoint(body_bb);
-        auto idx = builder.CreateSub(cur, llvm::ConstantInt::get(i32_ty, 1));
-        builder.CreateStore(idx, counter);
-        auto zero = llvm::ConstantInt::get(i32_ty, 0);
-        auto elem_ptr = builder.CreateGEP(arr_type_l, this_ptr, {zero, idx});
-        compile_destruction_for_type(fn, elem_ptr, elem);
-        builder.CreateBr(loop_bb);
-
-        builder.SetInsertPoint(end_bb);
-        builder.CreateRetVoid();
-
-        if (saved_block) {
-            builder.SetInsertPoint(saved_block, saved_point);
-        }
-        return fn;
+    auto elem = resolved_type->data.fixed_array.elem;
+    if (!get_resolver()->type_needs_destruction(elem)) {
+        return nullptr;
     }
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__delete", type_name);
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->destructor_table[type] = fn;
 
-    if (resolved_type->kind != TypeKind::Struct) {
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
+    auto fa_size = resolved_type->data.fixed_array.size;
+    auto arr_type_l = compile_type(resolved_type);
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    auto loop_bb = llvm::BasicBlock::Create(llvm_ctx, "loop", llvm_fn);
+    auto body_bb = llvm::BasicBlock::Create(llvm_ctx, "body", llvm_fn);
+    auto end_bb = llvm::BasicBlock::Create(llvm_ctx, "end", llvm_fn);
+
+    builder.SetInsertPoint(entry_bb);
+    auto this_ptr = llvm_fn->getArg(0);
+    auto counter = builder.CreateAlloca(i32_ty, nullptr, "i");
+    builder.CreateStore(llvm::ConstantInt::get(i32_ty, fa_size), counter);
+    builder.CreateBr(loop_bb);
+
+    builder.SetInsertPoint(loop_bb);
+    auto cur = builder.CreateLoad(i32_ty, counter);
+    auto cond = builder.CreateICmpUGT(cur, llvm::ConstantInt::get(i32_ty, 0));
+    builder.CreateCondBr(cond, body_bb, end_bb);
+
+    builder.SetInsertPoint(body_bb);
+    auto idx = builder.CreateSub(cur, llvm::ConstantInt::get(i32_ty, 1));
+    builder.CreateStore(idx, counter);
+    auto zero = llvm::ConstantInt::get(i32_ty, 0);
+    auto elem_ptr = builder.CreateGEP(arr_type_l, this_ptr, {zero, idx});
+    compile_destruction_for_type(fn, elem_ptr, elem);
+    builder.CreateBr(loop_bb);
+
+    builder.SetInsertPoint(end_bb);
+    builder.CreateRetVoid();
+
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    return fn;
+}
+
+Function *Compiler::generate_destructor_tuple(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    auto &elements = resolved_type->data.tuple.elements;
+    bool any_destructible = false;
+    for (auto elem : elements) {
+        if (get_resolver()->type_needs_destruction(elem)) {
+            any_destructible = true;
+            break;
+        }
+    }
+    if (!any_destructible) {
         return nullptr;
     }
 
-    // Create function type: void __delete(T*)
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__delete", type_name);
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->destructor_table[type] = fn;
+
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+    auto this_ptr = llvm_fn->getArg(0);
+    auto tuple_type_l = compile_type(resolved_type);
+
+    for (int i = (int)elements.size() - 1; i >= 0; i--) {
+        auto elem_type = elements[i];
+        if (!get_resolver()->type_needs_destruction(elem_type)) {
+            continue;
+        }
+        auto elem_ptr = builder.CreateStructGEP(tuple_type_l, this_ptr, (unsigned)i);
+        compile_destruction_for_type(fn, elem_ptr, elem_type);
+    }
+    builder.CreateRetVoid();
+
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    return fn;
+}
+
+Function *Compiler::generate_destructor_struct(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
     auto struct_ptr_type = get_llvm_ptr_type();
     auto fn_type_l =
         llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
-    // Generate unique name for the destructor
     auto type_name = get_resolver()->format_type_display(type);
     auto fn_name = fmt::format("{}.__delete", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
                                           m_ctx->llvm_module.get());
 
-    // Create Function object
     auto fn = new Function(m_ctx, llvm_fn, nullptr);
     fn->qualified_name = fn_name;
     m_ctx->functions.emplace(fn);
     m_ctx->destructor_table[type] = fn;
 
-    // Save current insert point
     auto saved_block = builder.GetInsertBlock();
     auto saved_point = builder.GetInsertPoint();
 
-    // Create entry block
     auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
     builder.SetInsertPoint(entry_bb);
 
     auto this_ptr = llvm_fn->getArg(0);
     auto llvm_struct_type = compile_type(resolved_type);
 
-    // 1. Call user's delete() if it exists
+    // Call user's delete() if defined
     auto user_destructor = ChiTypeStruct::get_destructor(resolved_type);
     if (user_destructor) {
         auto destructor_type = get_chitype(user_destructor->node);
@@ -11146,14 +11188,11 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         auto destructor_fn_ptr = m_ctx->function_table.get(destructor_id);
         Function *destructor_fn = nullptr;
         if (!destructor_fn_ptr) {
-            // Compile on demand
             auto proto = user_destructor->node->data.fn_def.fn_proto;
             destructor_fn = compile_fn_proto(proto, user_destructor->node);
-            // Set container subtype so generic type parameters can be resolved
             if (type->kind == TypeKind::Subtype) {
                 destructor_fn->container_subtype = &type->data.subtype;
                 destructor_fn->container_type = type;
-                // Look up TypeEnv from GenericResolver
                 if (auto entry = get_resolver()->get_generics()->struct_envs.get(type->global_id)) {
                     destructor_fn->type_env = &entry->subs;
                 }
@@ -11173,16 +11212,13 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         builder.CreateCall(leave_fn->llvm_fn, {});
     }
 
-    // 2. Destroy fields that need destruction (in reverse order)
+    // Destroy fields in reverse declaration order
     auto fields = resolved_type->data.struct_.own_fields();
-
-    // Iterate in reverse order
     for (int i = fields.size() - 1; i >= 0; i--) {
         auto field = fields[i];
         auto field_type = field->resolved_type;
         auto resolved_field_type = field_type;
 
-        // Resolve Subtype for checking
         while (resolved_field_type && resolved_field_type->kind == TypeKind::Subtype) {
             auto final_type = resolved_field_type->data.subtype.final_type;
             if (final_type) {
@@ -11195,7 +11231,6 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         if (!resolved_field_type)
             continue;
 
-        // Check if field needs destruction using resolver's utility
         if (!get_resolver()->type_needs_destruction(resolved_field_type)) {
             continue;
         }
@@ -11207,7 +11242,6 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
 
     builder.CreateRetVoid();
 
-    // Restore insert point
     if (saved_block) {
         builder.SetInsertPoint(saved_block, saved_point);
     }

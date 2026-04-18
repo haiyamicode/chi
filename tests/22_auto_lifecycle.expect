@@ -113,6 +113,24 @@ after consume(((make())))
   TrackedVar.delete('paren-if-t')
 after consume((if...))
   TrackedVar.delete('paren-orphan')
+=== Test 10c: TupleExpr temp cleanup ===
+--- orphaned tuple with destructible element ---
+  TrackedVar.new('tuple-orphan')
+after orphaned tuple
+--- tuple as arg ---
+  TrackedVar.new('tuple-arg')
+  TrackedVar.delete('tuple-arg')
+after consume(tuple)
+--- nested orphan tuple ---
+  TrackedVar.new('tuple-nested')
+after nested orphan
+--- returned tuple bound to var ---
+  TrackedVar.new('tuple-return')
+  t.1.name='tuple-return'
+after return binding
+  TrackedVar.delete('tuple-return')
+  TrackedVar.delete('tuple-nested')
+  TrackedVar.delete('tuple-orphan')
 === Test 11: Temps in expression-position contexts ===
 --- if condition: DotExpr base on temp ---
   TrackedVar.new('if-cond')
@@ -331,6 +349,8 @@ after unary
   TrackedVal.delete(12)
   TrackedVal.delete(13)
   TrackedVal.delete(12)
+  TrackedVal.delete(10)
+  TrackedVal.delete(11)
   TrackedVal.delete(10)
   TrackedVal.delete(8)
   TrackedVal.delete(9)
