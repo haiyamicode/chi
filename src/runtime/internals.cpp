@@ -1532,12 +1532,24 @@ void cx_runtime_stop() {
 
 extern "C" {
 extern _Unwind_Reason_Code __gxx_personality_v0(...);
+extern void *__cxa_begin_catch(void *) noexcept;
+extern void __cxa_end_catch();
 }
 
 _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t exceptionClass,
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context) {
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
+}
+
+// Releases the C++ exception object allocated by __cxa_allocate_exception in
+// cx_throw. Chi captures all error state into TLS before throwing, so once the
+// landing pad has branched on the thrown pointer we can immediately hand the
+// exception back to the runtime. Must only be called on paths that don't
+// resume unwinding — a resumed exception still needs its object alive.
+void cx_dispose_exception(void *thrown_ptr) {
+    __cxa_begin_catch(thrown_ptr);
+    __cxa_end_catch();
 }
 
 void cx_thread_spawn(void *callback_ptr) {

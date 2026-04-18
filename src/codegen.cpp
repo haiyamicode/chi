@@ -6645,6 +6645,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto get_error_vtable_fn = get_system_fn("cx_get_error_vtable");
         auto get_error_type_id_fn = get_system_fn("cx_get_error_type_id");
         auto clear_loc_fn = get_system_fn("cx_clear_panic_location");
+        auto dispose_exception_fn = get_system_fn("cx_dispose_exception");
 
         auto error_data = builder.CreateCall(get_error_data_fn->llvm_fn, {}, "error_data");
         auto error_vtable = builder.CreateCall(get_error_vtable_fn->llvm_fn, {}, "error_vtable");
@@ -6697,6 +6698,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // Take ownership of the error data pointer
             builder.CreateStore(error_data, error_data_var);
             builder.CreateCall(clear_loc_fn->llvm_fn, {});
+            // Release the C++ exception object now that TLS holds everything
+            // we need. Safe here because this path never resumes unwinding.
+            builder.CreateCall(dispose_exception_fn->llvm_fn, {thrown_ptr});
 
             // Set up error binding variable
             if (data.catch_err_var) {
@@ -6781,6 +6785,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         builder.CreateStore(shared_error, payload_ptr);
                     });
                     builder.CreateCall(clear_loc_fn->llvm_fn, {});
+                    builder.CreateCall(dispose_exception_fn->llvm_fn, {thrown_ptr});
                     builder.CreateBr(continue_b);
                 } else {
                     builder.CreateResume(landing);
@@ -6801,6 +6806,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 });
                 builder.CreateCall(clear_loc_fn->llvm_fn, {});
             }
+            builder.CreateCall(dispose_exception_fn->llvm_fn, {thrown_ptr});
             builder.CreateBr(continue_b);
         }
 
