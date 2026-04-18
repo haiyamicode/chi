@@ -168,7 +168,7 @@ if(NOT RUNTIME_ONLY)
     # Compiler executable
     add_executable(chic chic.cpp ${SOURCE_FILES} ${PACKAGE_SCHEMA_OUTPUT})
     set_target_properties(chic PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-    install(TARGETS chic)
+    install(TARGETS chic RUNTIME DESTINATION bin)
     target_include_directories(chic PUBLIC "${CMAKE_CURRENT_LIST_DIR}/include" ${LLVM_INCLUDE_DIRS} ${PROJECT_BINARY_DIR})
 
     if(ENABLE_STATIC_LINK AND NOT APPLE)
@@ -201,6 +201,7 @@ if(NOT RUNTIME_ONLY)
 
     add_custom_target(chi ALL DEPENDS ${CHI_BOOTSTRAP_OUTPUT})
     install(PROGRAMS ${CHI_BOOTSTRAP_OUTPUT} DESTINATION bin)
+    install(DIRECTORY ${CMAKE_SOURCE_DIR}/src/stdlib DESTINATION src)
 
     add_subdirectory(support)
 endif()

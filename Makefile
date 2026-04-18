@@ -22,14 +22,8 @@ rebuild:
 
 CHI_HOME ?= $(HOME)/.chi
 
-install:
-	cd $(BUILD_DIR) && $(MAKE) install
-	@mkdir -p $(CHI_HOME)/lib
-	@mkdir -p $(CHI_HOME)/src
-	@cp $(BUILD_DIR)/libchrt.a $(CHI_HOME)/lib/
-	@cp $(BUILD_DIR)/libchrt_debug.a $(CHI_HOME)/lib/
-	@rsync -a --delete src/stdlib $(CHI_HOME)/src/
-	@echo "Installed stdlib and runtime libraries to $(CHI_HOME)"
+install: build
+	cd $(BUILD_DIR) && cmake --install . --prefix $(CHI_HOME)
 
 compile_example_debug: build install
 	$(CHIC) -d -c $(INPUT_FILE) -o local/test -w local/build
