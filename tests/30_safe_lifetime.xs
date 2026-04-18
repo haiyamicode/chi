@@ -403,11 +403,10 @@ func test_explicit_move_borrow_cast() {
 func test_unsafe_owner_borrow() {
     printf("=== unsafe owner borrow ===\n");
     var a = new Resource{"gamma_ref"};
-    var r: &Resource;
     unsafe {
-        r = a;
+        var r: &Resource = a;
+        printf("r.name = {}\n", r.name);
     }
-    printf("r.name = {}\n", r.name);
     unsafe {
         delete a;
     }

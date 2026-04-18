@@ -19,7 +19,8 @@ struct Holder {
 }
 
 func main() {
-    var r: &int;
+    var outer = 0;
+    var r: &int = &outer;
     {
         var val = 42;
         var h = Holder{&val};

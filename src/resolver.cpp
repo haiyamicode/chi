@@ -1648,6 +1648,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         if (var_type->kind == TypeKind::Void) {
             error(node, errors::INVALID_VARIABLE_TYPE, format_type_display(var_type));
         }
+        // All local variables must be initialized at declaration. Struct fields,
+        // embeds, and compiler-synthesized decls (e.g. catch err, narrowing temps)
+        // are exempt — they have their own initialization paths.
+        if (!data.expr && !data.is_field && !data.is_embed && !data.is_generated &&
+            scope.parent_fn_node) {
+            error(node, errors::UNINITIALIZED_VARIABLE, node->name);
+        }
         // Compile-time constants must be evaluable at compile time
         if (data.kind == ast::VarKind::Constant) {
             data.resolved_value = resolve_constant_value(data.expr);

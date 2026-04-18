@@ -15,7 +15,8 @@ func get_ref(h: &RefHolder) &int {
 }
 
 func main() {
-    var r: &int;
+    var outer = 0;
+    var r: &int = &outer;
     {
         var x = 99;
         var h = RefHolder{&x};

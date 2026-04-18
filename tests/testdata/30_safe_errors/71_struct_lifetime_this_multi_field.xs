@@ -9,7 +9,7 @@ struct TwoRefs<'a, 'b> {
 
 func main() {
     var a = 1;
-    var t: TwoRefs;
+    var t: TwoRefs = {first: &a, second: &a};
     var b = 2;
     t = {first: &a, second: &b};
     printf("{} {}\n", *t.first, *t.second);

@@ -7,7 +7,8 @@ struct Holder<'a> {
 }
 
 func main() {
-    var h: Holder;
+    var seed = 0;
+    var h: Holder = {ref: &seed};
     {
         var x = 42;
         h = {ref: &x};
