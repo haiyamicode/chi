@@ -475,7 +475,7 @@ struct CliApp {
     func root_command() args.Command {
         var root = args.Command{
             name: "chi",
-            summary: "Chi toolchain"
+            summary: "Chi compiler toolchain"
         };
         root.command(this.build_command());
         root.command(this.run_command());

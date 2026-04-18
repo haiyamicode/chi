@@ -1,6 +1,6 @@
-# Chi
+# Chi Programming Language
 
-Chi is a statically typed, compiled systems programming language with a dual memory model. Write low-level systems code in **System Chi** (`.xs`) with manual memory control, or application code in **Application Chi** (`.x`) with automatic memory management via escape analysis and garbage collection — in the same language, with the same syntax.
+Chi is a statically typed, compiled systems programming language with a dual memory model. Write low-level systems code in **System Chi** (`.xs`) with manual memory control, or high level code in **Application Chi** (`.x`) with automatic memory management — in the same language, with the same syntax.
 
 Chi compiles to native executables via LLVM.
 
@@ -9,7 +9,7 @@ Chi compiles to native executables via LLVM.
 ## Features
 
 - ⚡ **System mode** (`.xs`) — manual memory, zero-cost abstractions, and direct hardware control; **C++ like performance.**
-- 🪄 **Application mode** (`.x`) — no need to worry about memory; **Go-like ergonomics.**
+- 🪄 **Application mode** (`.x`) — garbage collected, no need to worry about memory; **Go-like ergonomics.**
 - ⏳ **First-class async/await** — write concurrent code the right way; **Typescript-like async-await.**
 - 🛡️ **Memory safety** — compiler-enforced borrow checking for low-level code; **Rust-like safety.**
 - **Enum structs** — variants carry data fields and share a common method body
