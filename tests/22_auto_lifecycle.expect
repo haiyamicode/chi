@@ -96,6 +96,23 @@ after early(true)
 after early(false)
   TrackedVar.delete('orphan-construct')
   TrackedVar.delete('orphan-fn')
+=== Test 10b: ParenExpr temp cleanup ===
+--- orphaned (fn call) ---
+  TrackedVar.new('paren-orphan')
+after orphaned (make())
+--- (fn call) as arg ---
+  TrackedVar.new('paren-arg')
+  TrackedVar.delete('paren-arg')
+after consume((make()))
+--- nested ((fn call)) ---
+  TrackedVar.new('paren-nested')
+  TrackedVar.delete('paren-nested')
+after consume(((make())))
+--- (if expr) as arg ---
+  TrackedVar.new('paren-if-t')
+  TrackedVar.delete('paren-if-t')
+after consume((if...))
+  TrackedVar.delete('paren-orphan')
 === Test 11: Temps in expression-position contexts ===
 --- if condition: DotExpr base on temp ---
   TrackedVar.new('if-cond')
@@ -237,6 +254,7 @@ after unary
   TrackedVal.delete(49)
   TrackedVal.delete(40)
   TrackedVal.delete(6)
+  TrackedVal.delete(3)
   TrackedVal.delete(3)
   TrackedVal.delete(2)
   TrackedVal.delete(1)

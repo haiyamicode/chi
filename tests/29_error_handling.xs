@@ -32,6 +32,32 @@ struct DetailedError {
     }
 }
 
+// Traced destructor: proves the caught error (wrapped in Shared<Error>) is
+// released when a discarded `try f();` statement's Result goes out of scope.
+struct TracedError {
+    name: string = "";
+
+    mut func delete() {
+        printf("TracedError.delete({})\n", this.name);
+    }
+
+    impl ops.Copy {
+        mut func copy(source: &This) {
+            this.name = source.name;
+        }
+    }
+
+    impl Error {
+        func message() string {
+            return this.name;
+        }
+    }
+}
+
+func throw_traced(name: string) {
+    throw new TracedError{:name};
+}
+
 // --- Struct with destructor for testing cleanup during unwinding ---
 
 struct Resource {
@@ -257,6 +283,21 @@ func test_result_mode() {
         Err(err) => printf("got error: {}\n", err.message()),
         Ok => println("should not reach")
     }
+}
+
+// Regression: a discarded `try f();` statement (Result mode) used to leak
+// the Shared<Error> it produced, because the Result<T, Shared<Error>> value
+// was never registered for destruction. The trace below proves the inner
+// error now runs its destructor at block exit.
+func test_discarded_try_result() {
+    println("=== discarded try result ===");
+    try throw_traced("once");
+    println("after one discarded try");
+
+    // Multiple discarded tries in the same block: each gets its own temp.
+    try throw_traced("a");
+    try throw_traced("b");
+    println("after two discarded tries");
 }
 
 // --- Typed catch without block → Result<T, Shared<Error>> with type filtering ---
@@ -491,6 +532,15 @@ func branching_catch(rethrow: bool) int {
     return x;
 }
 
+// Regression: throwing a new error from inside a catch block must still
+// destroy the originally caught error.
+func catch_then_throw() {
+    try throw_traced("first") catch TracedError as err {
+        printf("caught: {}\n", err.name);
+        throw new OtherError{code: 7};
+    };
+}
+
 // Return from catch block exits the enclosing function
 func test_catch_return() int {
     try fail_with("bail") catch {
@@ -548,6 +598,7 @@ func main() {
     test_no_throw();
     test_panic_tryable();
     test_result_mode();
+    test_discarded_try_result();
     test_typed_result();
     test_catch_block();
     test_try_block_catch_all();
@@ -562,6 +613,14 @@ func main() {
     var rethrow_result = try test_rethrow() catch OtherError;
     switch rethrow_result {
         Err(err) => printf("re-caught: {}\n", err.message()),
+        Ok => {}
+    }
+
+    // Rethrow lifecycle: caught TracedError must be destroyed before the new throw unwinds
+    println("=== rethrow lifecycle ===");
+    var lifecycle_result = try catch_then_throw() catch OtherError;
+    switch lifecycle_result {
+        Err(err) => printf("rewrapped: {}\n", err.message()),
         Ok => {}
     }
 

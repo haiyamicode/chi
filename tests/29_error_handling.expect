@@ -38,6 +38,12 @@ assert caught: assertion failed: bad assert
 === result mode ===
 value = 42
 got error: oops
+=== discarded try result ===
+after one discarded try
+after two discarded tries
+TracedError.delete(b)
+TracedError.delete(a)
+TracedError.delete(once)
 === typed result ===
 caught: typed result
 value = 42
@@ -74,6 +80,10 @@ all done
 === rethrow ===
 caught: original
 re-caught: error code 42
+=== rethrow lifecycle ===
+caught: first
+TracedError.delete(first)
+rewrapped: error code 7
 branch fallback = -1
 branch rethrow: error code 123
 early return = -1

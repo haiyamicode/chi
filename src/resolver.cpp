@@ -10108,13 +10108,36 @@ ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
 ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, ResolveScope &scope,
                                        bool force_addressable) {
     if (!force_addressable) {
-        // Whitelist: only node types that can produce a non-addressable temporary value
+        // Whitelist: only these node kinds have compile paths that write their
+        // result into resolved_outlet. Non-expression nodes (statements, decls)
+        // fall through to the default and are rejected. Value-producing
+        // expressions whose codegen ignores the outlet (assignment BinOpExpr,
+        // CastExpr, UnwrapExpr, etc.) are also rejected so we don't allocate
+        // an uninitialized temp and crash on block-exit destruction.
         switch (expr->type) {
         case NodeType::FnCallExpr:
         case NodeType::ConstructExpr:
         case NodeType::IfExpr:
         case NodeType::SwitchExpr:
         case NodeType::Block:
+        case NodeType::ParenExpr:
+            break;
+        case NodeType::BinOpExpr:
+            // Operator method dispatch is a function call producing a fresh
+            // temp. Plain and compound assignments write to the LHS.
+            if (!expr->data.bin_op_expr.resolved_call ||
+                is_assignment_op(expr->data.bin_op_expr.op_type))
+                return nullptr;
+            break;
+        case NodeType::UnaryOpExpr:
+            if (!expr->data.unary_op_expr.resolved_call)
+                return nullptr;
+            break;
+        case NodeType::TryExpr:
+            // Catch-block mode may leave the temp uninitialized when the catch
+            // body has no trailing value expression.
+            if (expr->data.try_expr.catch_block)
+                return nullptr;
             break;
         default:
             return nullptr;

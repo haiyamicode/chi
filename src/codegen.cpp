@@ -6002,7 +6002,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::ADD:
         case TokenType::SUB: {
             if (data.resolved_call) {
-                return compile_fn_call(fn, data.resolved_call);
+                data.resolved_call->resolved_outlet = expr->resolved_outlet;
+                return compile_expr(fn, data.resolved_call);
             }
             auto value = compile_expr(fn, data.op1);
             auto type = get_chitype(data.op1);
@@ -6016,7 +6017,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::NOT: {
             if (data.resolved_call) {
-                return compile_fn_call(fn, data.resolved_call);
+                data.resolved_call->resolved_outlet = expr->resolved_outlet;
+                return compile_expr(fn, data.resolved_call);
             }
             auto value = compile_expr(fn, data.op1);
             return builder.CreateNot(value);
@@ -6308,7 +6310,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             if (data.resolved_call) {
                 auto struct_type = get_resolver()->eval_struct_type(target_type);
                 if (struct_type) {
-                    return compile_fn_call(fn, data.resolved_call);
+                    data.resolved_call->resolved_outlet = expr->resolved_outlet;
+                    return compile_expr(fn, data.resolved_call);
                 }
             }
 
@@ -6544,9 +6547,20 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         llvm::Type *result_type_l = nullptr;
         llvm::Value *result_var = nullptr;
 
+        // Discarded `try f();` statement: resolver registers a cleanup temp so
+        // the Result (and its Shared<Error>) is destroyed at block exit. Drop
+        // flag guards resume/panic branches that exit without populating it.
+        bool use_outlet = expr->resolved_outlet != nullptr;
         if (!is_void) {
             result_type_l = compile_type(result_type);
-            result_var = fn->entry_alloca(result_type_l, "try_result");
+            if (use_outlet) {
+                result_var = compile_expr_ref(fn, expr->resolved_outlet).address;
+                if (!m_ctx->drop_flags.has_key(expr->resolved_outlet)) {
+                    alloc_drop_flag(fn, expr->resolved_outlet, false);
+                }
+            } else {
+                result_var = fn->entry_alloca(result_type_l, "try_result");
+            }
         }
 
         ChiType *result_enum = nullptr;
@@ -6724,6 +6738,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 data.catch_block->data.block.implicit_vars.clear();
             }
 
+            // Register error_data_var for function-level cleanup BEFORE compiling the
+            // catch block, so a `throw` or `return` inside the body runs through
+            // emit_cleanup_owners and frees the caught error.
+            fn->cleanup_owner_vars.push_back({error_data_var, catch_type, nullptr, true});
+
             // Compile catch block with a cleanup label instead of continue_b
             auto catch_cleanup_b = fn->new_label("_catch_cleanup");
             compile_block(fn, expr, data.catch_block, catch_cleanup_b, result_var);
@@ -6755,10 +6774,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 fn->use_label(skip_free_b);
             }
             builder.CreateBr(continue_b);
-
-            // Register error_data_var for function-level cleanup (diverge path)
-            // This handles cases where the catch block returns/breaks
-            fn->cleanup_owner_vars.push_back({error_data_var, catch_type, nullptr, true});
         } else {
             // === RESULT MODE: try f() → Result<T, Shared<Error>> ===
 
@@ -6843,6 +6858,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         fn->use_label(continue_b);
         if (is_void) {
             return nullptr;
+        }
+        if (use_outlet) {
+            set_drop_flag_alive(expr->resolved_outlet, true);
         }
         return builder.CreateLoad(result_type_l, result_var, "try_result");
     }
@@ -7152,7 +7170,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return result;
     }
     case ast::NodeType::ParenExpr: {
-        return compile_expr(fn, expr->data.child_expr);
+        auto child = expr->data.child_expr;
+        if (expr->resolved_outlet && !child->resolved_outlet)
+            child->resolved_outlet = expr->resolved_outlet;
+        return compile_expr(fn, child);
     }
     case ast::NodeType::UnitExpr: {
         return llvm::Constant::getNullValue(compile_type(get_system_types()->unit));

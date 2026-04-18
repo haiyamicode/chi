@@ -421,6 +421,26 @@ func early_return_before_temp(fast: bool) {
     consume_tracked(make_tracked("late-temp"));
 }
 
+func test_paren_temp_cleanup() {
+    println("=== Test 10b: ParenExpr temp cleanup ===");
+
+    println("--- orphaned (fn call) ---");
+    (make_tracked("paren-orphan"));
+    println("after orphaned (make())");
+
+    println("--- (fn call) as arg ---");
+    consume_tracked((make_tracked("paren-arg")));
+    println("after consume((make()))");
+
+    println("--- nested ((fn call)) ---");
+    consume_tracked((((make_tracked("paren-nested")))));
+    println("after consume(((make())))");
+
+    println("--- (if expr) as arg ---");
+    consume_tracked((true ? make_tracked("paren-if-t") : make_tracked("paren-if-f")));
+    println("after consume((if...))");
+}
+
 func test_expr_contexts() {
     println("=== Test 11: Temps in expression-position contexts ===");
 
@@ -871,6 +891,7 @@ func main() {
     test_both_lifecycles();
     test_multiple_vars();
     test_temp_cleanup();
+    test_paren_temp_cleanup();
     test_expr_contexts();
     test_fn_arg_copy_semantics();
     test_method_param_cleanup();
