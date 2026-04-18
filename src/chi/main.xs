@@ -216,7 +216,28 @@ struct CliApp {
     }
 
     func run_command() args.Command {
-        return this.package_command("run", "Build and run the current package", false);
+        var command = args.Command{
+            name: "run",
+            summary: "Build and run a Chi source file (or package)"
+        };
+        command.option({
+            name: "cwd",
+            short: "w",
+            value_name: "DIR",
+            help: "Working directory for intermediates"
+        });
+        command.flag({name: "debug", short: "d", help: "Enable debug compiler output"});
+        command.flag({name: "release", short: "r", help: "Build with release optimizations"});
+        command.flag({name: "strip", help: "Strip debug info from the final binary"});
+        command.flag({name: "verbose", short: "v", help: "Print resolved compiler and output paths"});
+        command.flag({name: "verbose-lifetimes", help: "Enable verbose lifetime analysis output"});
+        command.flag({name: "verbose-generics", help: "Enable verbose generics output"});
+        command.positional({
+            name: "file_or_package",
+            help: "Source file (.xs or .x) or package directory (defaults to current directory)",
+            required: false
+        });
+        return command;
     }
 
     func require_package_root(match: &args.Matches) string {
@@ -388,22 +409,32 @@ struct CliApp {
         this.install_package_source(package_root, working_dir, package_name, install_config.include);
     }
 
+    func file_stem(name: string) string {
+        let ext = filepath.ext(name);
+        if ext.is_empty() {
+            return name;
+        }
+        return name.byte_slice(0, name.byte_length() - ext.byte_length());
+    }
+
     func run_chi_compiler(
         match: &args.Matches,
-        package_root: string,
+        target: string,
+        working_dir: string,
         output: string,
+        is_file_mode: bool,
         default_release: bool = false
     ) int32 {
         let chic = this.require_chi_compiler();
         this.require_cxx_compiler();
-        let working_dir = this.resolve_working_dir(match, package_root);
 
         this.log_verbose(match, "compiler " + chic);
-        this.log_verbose(match, "package root " + package_root);
+        this.log_verbose(match, is_file_mode ? "source file " + target : "package root " + target);
         this.log_verbose(match, "working dir " + working_dir);
         this.log_verbose(match, "output " + output);
 
-        var cmd = [chic, "-p", package_root, "-o", output, "-w", working_dir];
+        let target_flag = is_file_mode ? "-c" : "-p";
+        var cmd = [chic, target_flag, target, "-o", output, "-w", working_dir];
         let debug = match.flag("debug");
         let release = match.flag("release");
         if debug {
@@ -434,18 +465,45 @@ struct CliApp {
 
     func execute_build(match: &args.Matches) int32 {
         let package_root = this.canonical_package_root(this.require_package_root(match));
+        let working_dir = this.resolve_working_dir(match, package_root);
         let output = match.option("output") ??
                      filepath.join(package_root, this.package_output_name(package_root));
-        return this.run_chi_compiler(match, package_root, output);
+        return this.run_chi_compiler(match, package_root, working_dir, output, false);
     }
 
     func execute_run(match: &args.Matches) int32 {
+        let arg = match.positional_at(0) ?? ".";
+        let resolved = this.resolve_search_path(arg);
+        if !fs.exists(resolved) {
+            this.fail("path not found: " + resolved);
+        }
+        if fs.is_dir(resolved) {
+            return this.run_package(match);
+        }
+        return this.run_file(match, resolved);
+    }
+
+    func run_package(match: &args.Matches) int32 {
         let package_root = this.canonical_package_root(this.require_package_root(match));
-        let output = filepath.join(
-            this.resolve_working_dir(match, package_root),
-            this.package_output_name(package_root)
-        );
-        let status = this.run_chi_compiler(match, package_root, output);
+        let working_dir = this.resolve_working_dir(match, package_root);
+        let output = filepath.join(working_dir, this.package_output_name(package_root));
+        return this.compile_and_run(match, package_root, working_dir, output, false);
+    }
+
+    func run_file(match: &args.Matches, file: string) int32 {
+        let working_dir = match.option("cwd") ?? filepath.join(filepath.dir(file), "build");
+        let output = filepath.join(working_dir, this.file_stem(filepath.base(file)));
+        return this.compile_and_run(match, file, working_dir, output, true);
+    }
+
+    func compile_and_run(
+        match: &args.Matches,
+        target: string,
+        working_dir: string,
+        output: string,
+        is_file_mode: bool
+    ) int32 {
+        let status = this.run_chi_compiler(match, target, working_dir, output, is_file_mode);
         if status != 0 {
             return status;
         }
@@ -463,8 +521,9 @@ struct CliApp {
             this.fail(err.message());
         };
 
+        let working_dir = this.resolve_working_dir(match, package_root);
         let output = filepath.join(bin_dir, this.package_output_name(package_root));
-        let status = this.run_chi_compiler(match, package_root, output, true);
+        let status = this.run_chi_compiler(match, package_root, working_dir, output, false, true);
         if status != 0 {
             return status;
         }
