@@ -65,7 +65,8 @@ TESTS_LIST = 00_fib.test \
 		59_contextual_variant_shorthand.test \
 		60_conditional_compilation.test \
 		61_package_import.test \
-		62_map_init.test
+		62_map_init.test \
+		63_chi_wrapper.test
 TESTS ?= $(TESTS_LIST)
 CHIC = $(abspath $(BUILD_DIR)/bin/chic)
 CHI = $(abspath $(BUILD_DIR)/bin/chi)
@@ -347,21 +348,30 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		diff -u 15_package.expect 15_package.output; \
 		exit 1; \
 	fi; \
-	rm -f 15_package.output testdata/15_package/15_package; \
-	export PATH="$(dir $(CHI)):$$PATH"; \
-	T=/tmp/chitest_pkg; \
+	rm -f 15_package.output testdata/15_package/15_package
+
+# Exercises the `chi` command wrapper (build / run / install) across all
+# supported invocation forms. Reuses 15_package.expect (package scenarios) and
+# 01_fib_struct.expect (single-file scenarios) as the expected outputs.
+63_chi_wrapper.test: 15_package.expect 01_fib_struct.expect
+	echo Test: 63_chi_wrapper...
+	@export PATH="$(dir $(CHI)):$$PATH"; \
+	T=/tmp/chitest_chi_wrapper; \
+	PKG_EXPECT=$(abspath 15_package.expect); \
+	FILE_EXPECT=$(abspath 01_fib_struct.expect); \
+	FILE_SRC=$(abspath 01_fib_struct.xs); \
 	chi_build_check() { \
 		local label="$$1" dir="$$2" bin="$$3"; shift 3; \
-		(cd "$$dir" && "$$@") > $$T.out 2>&1 || { echo "error in test 15_package ($$label)"; cat $$T.out; exit 1; }; \
+		(cd "$$dir" && "$$@") > $$T.out 2>&1 || { echo "error in test 63_chi_wrapper ($$label)"; cat $$T.out; exit 1; }; \
 		"$$bin" > $$T.output 2>&1; \
-		diff -qbu 15_package.expect $$T.output >/dev/null || { echo "error in test 15_package ($$label output mismatch)"; diff -u 15_package.expect $$T.output; exit 1; }; \
-		[ ! -e testdata/15_package/15_package ] || { echo "error in test 15_package ($$label spilled output)"; rm -f testdata/15_package/15_package; exit 1; }; \
+		diff -qbu "$$PKG_EXPECT" $$T.output >/dev/null || { echo "error in test 63_chi_wrapper ($$label output mismatch)"; diff -u "$$PKG_EXPECT" $$T.output; exit 1; }; \
+		[ ! -e testdata/15_package/15_package ] || { echo "error in test 63_chi_wrapper ($$label spilled output)"; rm -f testdata/15_package/15_package; exit 1; }; \
 		rm -f $$T.out $$T.output; \
 	}; \
 	chi_run_check() { \
-		local label="$$1" dir="$$2"; shift 2; \
-		(cd "$$dir" && "$$@") > $$T.out 2>&1 || { echo "error in test 15_package ($$label)"; cat $$T.out; exit 1; }; \
-		diff -qbu 15_package.expect $$T.out >/dev/null || { echo "error in test 15_package ($$label output mismatch)"; diff -u 15_package.expect $$T.out; exit 1; }; \
+		local label="$$1" dir="$$2" expect="$$3"; shift 3; \
+		(cd "$$dir" && "$$@") > $$T.out 2>&1 || { echo "error in test 63_chi_wrapper ($$label)"; cat $$T.out; exit 1; }; \
+		diff -qbu "$$expect" $$T.out >/dev/null || { echo "error in test 63_chi_wrapper ($$label output mismatch)"; diff -u "$$expect" $$T.out; exit 1; }; \
 		rm -f $$T.out; \
 	}; \
 	chi_build_check "chi build" testdata/15_package $$T.bin \
@@ -372,21 +382,26 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 		$(CHI) build --release --strip --output $$T.rel_bin --cwd $$T.rel_build; \
 	chi_build_check "chi build from src" testdata/15_package/src $$T.src_bin \
 		$(CHI) build --output $$T.src_bin --cwd $$T.src_build; \
-	chi_run_check "chi run" . \
+	chi_run_check "chi run package (explicit path)" . "$$PKG_EXPECT" \
 		$(CHI) run testdata/15_package --cwd $$T.run_build; \
-	chi_run_check "chi run from pkg dir" testdata/15_package \
+	chi_run_check "chi run package (cwd)" testdata/15_package "$$PKG_EXPECT" \
 		$(CHI) run --cwd $$T.run_cwd_build; \
+	chi_run_check "chi run file (relative path)" . "$$FILE_EXPECT" \
+		$(CHI) run 01_fib_struct.xs --cwd $$T.run_file_build; \
+	chi_run_check "chi run file (absolute path)" /tmp "$$FILE_EXPECT" \
+		$(CHI) run "$$FILE_SRC" --cwd $$T.run_file_abs_build; \
 	chi_build_check "chi install" testdata/15_package $$T.install_bin/15_package \
 		env CHI_PATH=$$T.install_bin CHI_SRC=$$T.install_src $(CHI) install --cwd $$T.install_build; \
 	if [ ! -e $$T.install_src/package.jsonc ] || [ ! -e $$T.install_src/main.xs ]; then \
-		echo "error in test 15_package (chi install source missing files)"; exit 1; \
+		echo "error in test 63_chi_wrapper (chi install source missing files)"; exit 1; \
 	fi; \
 	if [ ! -e $$T.install_src/assets/extra.txt ] || [ ! -e $$T.install_src/assets/nested/deep.txt ] || [ -e $$T.install_src/notes.txt ] || [ -e $$T.install_src/.gitignore ] || [ -e $$T.install_src/build/main.o ]; then \
-		echo "error in test 15_package (chi install source filtering mismatch)"; exit 1; \
+		echo "error in test 63_chi_wrapper (chi install source filtering mismatch)"; exit 1; \
 	fi; \
 	rm -f $$T.bin $$T.path_bin $$T.rel_bin $$T.src_bin testdata/15_package/15_package; \
 	rm -rf $$T.build $$T.build.dSYM $$T.path_build $$T.path_build.dSYM $$T.rel_build $$T.rel_build.dSYM $$T.src_build $$T.src_build.dSYM \
 		$$T.run_build $$T.run_build.dSYM $$T.run_cwd_build $$T.run_cwd_build.dSYM \
+		$$T.run_file_build $$T.run_file_build.dSYM $$T.run_file_abs_build $$T.run_file_abs_build.dSYM \
 		$$T.install_build $$T.install_build.dSYM $$T.install_bin $$T.install_src
 
 # Package import test: uses temp CHI_HOME to test package registry auto-discovery
