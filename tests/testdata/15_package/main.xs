@@ -68,5 +68,6 @@ func main() {
 
         var copied = string.from_raw(buf, 5);
         printf("strcpy result: {}\n", copied);
+        mem.free(buf as *void);
     }
 }
