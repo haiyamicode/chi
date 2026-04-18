@@ -40,10 +40,10 @@ ast: build
 test: test_compiler
 
 test_compiler: build
-	(cd tests; make test)
+	$(MAKE) -C tests test
 
 stress: build install
-	(cd tests; make stress)
+	$(MAKE) -C tests stress
 
 compile_stress: build install
 	$(CHIC) --debug-allocator-runtime -o /tmp/collection_memory_leak_stress -c tests/stress/collection_memory_leak_stress.xs

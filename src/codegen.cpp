@@ -1355,9 +1355,10 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (is_entry) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
-    }
-    if (is_entry || return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
-        fn->use_sret()) {
+        builder.CreateRet(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), 0));
+    } else if (return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
+               fn->use_sret()) {
         builder.CreateRetVoid();
     } else {
         auto value = builder.CreateLoad(return_type_l, fn->return_value);
@@ -12275,7 +12276,10 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     llvm::FunctionType *ftype_l = nullptr;
     if (declspec.has_flag(ast::DECL_IS_ENTRY)) {
-        ftype_l = llvm::FunctionType::get(llvm::Type::getVoidTy(*m_ctx->llvm_ctx),
+        // C `main` signature: `int main(int, char**)`. Must return int so libc's
+        // `__libc_start_main` gets a defined exit code (otherwise %eax is whatever
+        // the last call left behind — 0 by luck normally, 1 under valgrind).
+        ftype_l = llvm::FunctionType::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx),
                                           {llvm::Type::getInt32Ty(*m_ctx->llvm_ctx),
                                            llvm::PointerType::get(*m_ctx->llvm_ctx, 0)},
                                           false);

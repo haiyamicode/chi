@@ -73,16 +73,33 @@ CHI = $(abspath $(BUILD_DIR)/bin/chi)
 TMP = /tmp/chitests
 OUTPUT_DIR = $(BUILD_DIR)/tests
 
+# Set VALGRIND=1 to run every chi-compiled test binary under valgrind with
+# leak checking. Definite leaks or memory errors fail the test (exit 99).
+# Garbage-collected (tgc) leaks at program exit are ignored: we only report
+# --errors-for-leak-kinds=definite so the noise stays low. Valgrind's own
+# messages go to stderr (which the existing `2>&1 >X.output` redirect sends to
+# the terminal), keeping stdout-based .expect comparisons intact.
+VALGRIND ?= 0
+ifeq ($(VALGRIND),1)
+    RUN = valgrind --error-exitcode=99 --leak-check=full \
+		--errors-for-leak-kinds=definite --show-leak-kinds=definite \
+		--track-origins=yes
+else
+    RUN =
+endif
+export RUN
+
+# Wraps a compiled test binary with stderr capture, clear error reporting, and
+# valgrind-output forwarding. Defined once here and reused by every test rule.
+RUN_BIN = $(abspath run_test_bin.sh)
+
 %.test: %.expect
 	echo Test: $*...
-	@if [ -f $*.xs ]; then \
-		$(CHIC) -o $(TMP).$* -c $*.xs && $(TMP).$* 2>&1 >$*.output; \
-	elif [ -f $*.x ]; then \
-		$(CHIC) -o $(TMP).$* -c $*.x && $(TMP).$* 2>&1 >$*.output; \
-	else \
-		echo "No source file found for test $*"; \
-		exit 1; \
-	fi
+	@if [ -f $*.xs ]; then src=$*.xs; \
+	elif [ -f $*.x ]; then src=$*.x; \
+	else echo "No source file found for test $*"; exit 1; fi; \
+	$(CHIC) -o $(TMP).$* -c $$src || exit $$?; \
+	$(RUN_BIN) $* $*.output $(TMP).$*
 	@if [ "x`diff -qbu $*.expect $*.output`" != "x" ]; \
 	then \
         	echo "error in test $*"; \
@@ -94,7 +111,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for enum struct test — also tests rejection cases
 13_enum_struct.test: 13_enum_struct.expect
 	echo Test: 13_enum_struct...
-	@$(CHIC) -o $(TMP).13_enum_struct -c 13_enum_struct.xs && $(TMP).13_enum_struct 2>&1 >13_enum_struct.output
+	@$(CHIC) -o $(TMP).13_enum_struct -c 13_enum_struct.xs && $(RUN_BIN) 13_enum_struct 13_enum_struct.output $(TMP).13_enum_struct
 	@if [ "x`diff -qbu 13_enum_struct.expect 13_enum_struct.output`" != "x" ]; \
 	then \
 		echo "error in test 13_enum_struct (output mismatch)"; \
@@ -124,7 +141,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for construct expr test — also tests rejection cases
 42_construct_expr.test: 42_construct_expr.expect
 	echo Test: 42_construct_expr...
-	@$(CHIC) -o $(TMP).42_construct_expr -c 42_construct_expr.xs && $(TMP).42_construct_expr 2>&1 >42_construct_expr.output
+	@$(CHIC) -o $(TMP).42_construct_expr -c 42_construct_expr.xs && $(RUN_BIN) 42_construct_expr 42_construct_expr.output $(TMP).42_construct_expr
 	@if [ "x`diff -qbu 42_construct_expr.expect 42_construct_expr.output`" != "x" ]; \
 	then \
 		echo "error in test 42_construct_expr (output mismatch)"; \
@@ -154,7 +171,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for trait bounds test — also tests rejection cases
 21_trait_bounds.test: 21_trait_bounds.expect
 	echo Test: 21_trait_bounds...
-	@$(CHIC) -o $(TMP).21_trait_bounds -c 21_trait_bounds.xs && $(TMP).21_trait_bounds 2>&1 >21_trait_bounds.output
+	@$(CHIC) -o $(TMP).21_trait_bounds -c 21_trait_bounds.xs && $(RUN_BIN) 21_trait_bounds 21_trait_bounds.output $(TMP).21_trait_bounds
 	@if [ "x`diff -qbu 21_trait_bounds.expect 21_trait_bounds.output`" != "x" ]; \
 	then \
 		echo "error in test 21_trait_bounds (output mismatch)"; \
@@ -185,7 +202,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Also tests error cases: each file in testdata/30_safe_errors/ must fail to compile.
 30_safe_lifetime.test: 30_safe_lifetime.expect
 	echo Test: 30_safe_lifetime...
-	@$(CHIC) -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xs && $(TMP).30_safe_lifetime 2>&1 >30_safe_lifetime.output
+	@$(CHIC) -o $(TMP).30_safe_lifetime -c 30_safe_lifetime.xs && $(RUN_BIN) 30_safe_lifetime 30_safe_lifetime.output $(TMP).30_safe_lifetime
 	@if [ "x`diff -qbu 30_safe_lifetime.expect 30_safe_lifetime.output`" != "x" ]; \
 	then \
 		echo "error in test 30_safe_lifetime (output mismatch)"; \
@@ -229,7 +246,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 			echo "error: $$name failed to compile"; \
 			failed=1; continue; \
 		fi; \
-		$(TMP).48_stdlib_$$name > $(TMP).48_stdlib_$$name.out 2>&1; \
+		$(RUN) $(TMP).48_stdlib_$$name > $(TMP).48_stdlib_$$name.out 2>&1; \
 		sed "s|$(ROOT_DIR)|<PROJECT_ROOT>|g" $(TMP).48_stdlib_$$name.out | \
 			sed -E 's#(<PROJECT_ROOT>/[^:]+\.xs):[0-9]+#\1:0#g' | \
 			sed -E '/^at /d; /^<PROJECT_ROOT>\/.* in function /d' > $(TMP).48_stdlib_$$name.norm; \
@@ -288,7 +305,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Expr block tests — also verify invalid if-expression forms are rejected.
 43_expr_blocks.test: 43_expr_blocks.expect
 	echo Test: 43_expr_blocks...
-	@$(CHIC) -o $(TMP).43_expr_blocks -c 43_expr_blocks.xs && $(TMP).43_expr_blocks 2>&1 >43_expr_blocks.output
+	@$(CHIC) -o $(TMP).43_expr_blocks -c 43_expr_blocks.xs && $(RUN_BIN) 43_expr_blocks 43_expr_blocks.output $(TMP).43_expr_blocks
 	@if [ "x`diff -qbu 43_expr_blocks.expect 43_expr_blocks.output`" != "x" ]; \
 	then \
 		echo "error in test 43_expr_blocks (output mismatch)"; \
@@ -319,7 +336,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # so sort destruction lines (everything after "Test completed") before comparing.
 18_gc_escape.test: 18_gc_escape.expect
 	echo Test: 18_gc_escape...
-	@$(CHIC) -o $(TMP).18_gc_escape -c 18_gc_escape.x && $(TMP).18_gc_escape 2>&1 >18_gc_escape.output
+	@$(CHIC) -o $(TMP).18_gc_escape -c 18_gc_escape.x && $(RUN_BIN) 18_gc_escape 18_gc_escape.output $(TMP).18_gc_escape
 	@grep -v '^\[gc\]' 18_gc_escape.output > 18_gc_escape.out.tmp
 	@grep -v '^\[gc\]' 18_gc_escape.expect > 18_gc_escape.exp.tmp
 	@grep '^\[gc\]' 18_gc_escape.output | sort > 18_gc_escape.out_gc.tmp
@@ -341,7 +358,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # Special rule for package tests
 15_package.test: 15_package.expect
 	echo Test: 15_package...
-	$(CHIC) -p testdata/15_package -o $(TMP).15_package && $(TMP).15_package 2>&1 >15_package.output;
+	$(CHIC) -p testdata/15_package -o $(TMP).15_package && $(RUN_BIN) 15_package 15_package.output $(TMP).15_package;
 	@if [ "x`diff -qbu 15_package.expect 15_package.output`" != "x" ]; \
 	then \
 		echo "error in test 15_package"; \
@@ -363,7 +380,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	chi_build_check() { \
 		local label="$$1" dir="$$2" bin="$$3"; shift 3; \
 		(cd "$$dir" && "$$@") > $$T.out 2>&1 || { echo "error in test 63_chi_wrapper ($$label)"; cat $$T.out; exit 1; }; \
-		"$$bin" > $$T.output 2>&1; \
+		$(RUN_BIN) "63_chi_wrapper/$$label" $$T.output "$$bin" || exit $$?; \
 		diff -qbu "$$PKG_EXPECT" $$T.output >/dev/null || { echo "error in test 63_chi_wrapper ($$label output mismatch)"; diff -u "$$PKG_EXPECT" $$T.output; exit 1; }; \
 		[ ! -e testdata/15_package/15_package ] || { echo "error in test 63_chi_wrapper ($$label spilled output)"; rm -f testdata/15_package/15_package; exit 1; }; \
 		rm -f $$T.out $$T.output; \
@@ -414,7 +431,7 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 	mkdir -p $$PKG_HOME/src/test_registry/mylib; \
 	cp -r testdata/61_package_import/test_registry/mylib/* $$PKG_HOME/src/test_registry/mylib/; \
 	CHI_ROOT=$$PKG_HOME $(CHIC) -o $(TMP).61_package_import -c 61_package_import.xs && \
-	$(TMP).61_package_import 2>&1 >61_package_import.output; \
+	$(RUN_BIN) 61_package_import 61_package_import.output $(TMP).61_package_import; \
 	if [ "x`diff -qbu 61_package_import.expect 61_package_import.output`" != "x" ]; then \
 		echo "error in test 61_package_import"; \
 		diff -u 61_package_import.expect 61_package_import.output; \
@@ -483,7 +500,7 @@ define STRESS_TEST
 	bin="$${tmp_base}.bin"; \
 	out="$${tmp_base}.out"; \
 	$(CHIC) --debug-allocator-runtime -o "$$bin" -c stress/$(1).xs || exit $$?; \
-	"$$bin" > "$$out" 2>&1; \
+	$(RUN_BIN) stress/$(1) "$$out" "$$bin"; \
 	status=$$?; \
 	if [ $$status -ne 0 ]; then \
 		echo "error in test stress/$(1) (compile/run)"; \
