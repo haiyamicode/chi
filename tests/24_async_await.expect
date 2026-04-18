@@ -170,14 +170,17 @@ path 0001=5007
 path 0000=5042
 trace caught: trace 30
 trace lifecycle=1
+TraceAsyncError.delete(30)
 TraceAsyncValue.copy(1)
 TraceAsyncValue.copy(1)
+TraceAsyncValue.delete(1)
 TraceAsyncValue.copy(1)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.got(1)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.copy(2)
 TraceAsyncValue.copy(2)
+TraceAsyncValue.delete(2)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.copy(2)
 TraceAsyncValue.delete(2)

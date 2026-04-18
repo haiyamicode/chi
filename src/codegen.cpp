@@ -1591,6 +1591,30 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
         return builder.CreateLoad(compile_type(param_type), temp_ptr);
     }
 
+    // Moved arg whose source lives at an addressable location (e.g. an async
+    // frame slot via m_async_await_refs). Load bits directly and, if the
+    // source address belongs to an async frame slot, clear its alive flag so
+    // the frame destructor doesn't double-destroy the value.
+    if (expr->analysis.moved && param_type && !param_type->is_reference()) {
+        auto src_ref = compile_expr_ref(fn, expr);
+        if (src_ref.address) {
+            auto arg_value = src_ref.value;
+            if (!arg_value) {
+                arg_value = builder.CreateLoad(compile_type(src_type), src_ref.address);
+            }
+            emit_dbg_location(expr);
+            arg_value = compile_conversion(fn, arg_value, src_type, param_type);
+            if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, src_ref.address)) {
+                builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
+            }
+            return arg_value;
+        }
+        if (src_ref.value) {
+            emit_dbg_location(expr);
+            return compile_conversion(fn, src_ref.value, src_type, param_type);
+        }
+    }
+
     return compile_assignment_to_type(fn, expr, param_type);
 }
 
@@ -3331,8 +3355,8 @@ AsyncLambdaValue Compiler::build_async_resume_forwarder_lambda(Function *fn,
     auto value_arg = fwd_llvm_fn->getArg(1);
     auto previous_frame_ptr = machine.frame_ptr;
     machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
-    write_async_frame_await_value(fwd_fn, machine, await_expr, RefValue::from_value(value_arg),
-                                  value_type, await_expr);
+    write_async_frame_await_value(fwd_fn, machine, await_expr,
+                                  RefValue::from_owned_value(value_arg), value_type, await_expr);
 
     auto state_ptr = get_async_frame_state_ptr(fwd_fn, machine);
     builder.CreateStore(llvm::ConstantInt::get(builder.getInt32Ty(), state_id), state_ptr);
@@ -3400,7 +3424,7 @@ AsyncLambdaValue Compiler::build_async_try_await_forwarder_lambda(Function *fn,
     if (payload_fields.size() > 0) {
         auto payload_ptr = compile_dot_access(fwd_fn, settled_var, variant_member->resolved_type,
                                               payload_fields[0]);
-        compile_copy_with_ref(fwd_fn, RefValue::from_value(value_arg), payload_ptr,
+        compile_copy_with_ref(fwd_fn, RefValue::from_owned_value(value_arg), payload_ptr,
                               payload_fields[0]->resolved_type, await_expr, true);
     }
 
@@ -3408,6 +3432,9 @@ AsyncLambdaValue Compiler::build_async_try_await_forwarder_lambda(Function *fn,
     machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
     write_async_frame_await_value(fwd_fn, machine, await_expr, RefValue::from_address(settled_var),
                                   settled_type, await_expr);
+    if (get_resolver()->type_needs_destruction(settled_type)) {
+        compile_destruction_for_type(fwd_fn, settled_var, settled_type);
+    }
     auto state_ptr = get_async_frame_state_ptr(fwd_fn, machine);
     builder.CreateStore(llvm::ConstantInt::get(builder.getInt32Ty(), state_id), state_ptr);
     emit_dbg_location(fn->node);
