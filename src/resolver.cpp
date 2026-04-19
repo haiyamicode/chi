@@ -438,6 +438,42 @@ static bool is_safe_int_conversion(ChiType *from, ChiType *to) {
     return false;
 }
 
+// Ref-kind compatibility for pointer-like → pointer-like assignments where the
+// element types are already known to match (same type, or a widening like
+// &Concrete → &Interface). Covers Pointer/Reference/MutRef/MoveRef.
+//
+// Pointer ↔ ref crossings stay permissive: raw pointers are the unsafe-interop
+// boundary, and the stdlib (Shared, atomic, mem) relies on implicit same-rep
+// conversions in both directions.
+//
+// The one tightening over that baseline: &move T → &T / &mut T requires an
+// explicit cast. An owning reference can't be silently downgraded to a borrow;
+// the cast makes the borrow creation visible at the use site.
+static bool is_ref_kind_assignable(TypeKind from_kind, ChiType *to_type,
+                                   bool is_explicit) {
+    auto to_kind = to_type->kind;
+    if (from_kind == TypeKind::Pointer || to_kind == TypeKind::Pointer) {
+        return true;
+    }
+    if (from_kind == TypeKind::MoveRef) {
+        return to_kind == TypeKind::MoveRef ||
+               (is_explicit && to_type->is_borrow_reference());
+    }
+    // Borrow → owner is never ok (can't invent ownership).
+    if (to_kind == TypeKind::MoveRef) {
+        return false;
+    }
+    // &mut → & is a downgrade; & → &mut invents mutability and is rejected.
+    if (from_kind == TypeKind::MutRef && to_kind == TypeKind::Reference) {
+        return true;
+    }
+    if (from_kind == TypeKind::Reference && to_kind == TypeKind::MutRef) {
+        return false;
+    }
+    // Remaining: same ref kind.
+    return from_kind == to_kind;
+}
+
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit) {
     if (!from_type || !to_type) {
         return false;
@@ -501,37 +537,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                 bool elem_same = is_same_type(from_elem, to_elem);
 
                 if (elem_same) {
-                    // Pointer <-> Reference-like conversions are allowed
-                    if (from_type->kind == TypeKind::Pointer ||
-                        to_type->kind == TypeKind::Pointer) {
-                        return true;
-                    }
-                    // MoveRef only assigns implicitly to MoveRef. Borrowing from an owner
-                    // requires either a managed/unsafe assignment context or an explicit cast.
-                    if (from_type->kind == TypeKind::MoveRef) {
-                        return to_type->kind == TypeKind::MoveRef ||
-                               (is_explicit && to_type->is_borrow_reference());
-                    }
-                    // MutRef -> Ref is allowed.
-                    if (from_type->kind == TypeKind::MutRef &&
-                        to_type->kind == TypeKind::Reference) {
-                        return true;
-                    }
-                    // Ref -> MutRef is NOT allowed.
-                    if (from_type->kind == TypeKind::Reference &&
-                        to_type->kind == TypeKind::MutRef) {
-                        return false;
-                    }
-                    // Ref/MutRef -> MoveRef is NOT allowed.
-                    if (to_type->kind == TypeKind::MoveRef &&
-                        (from_type->kind == TypeKind::Reference ||
-                         from_type->kind == TypeKind::MutRef)) {
-                        return false;
-                    }
-                    // Same kind is allowed
-                    if (from_type->kind == to_type->kind) {
-                        return true;
-                    }
+                    return is_ref_kind_assignable(from_type->kind, to_type, is_explicit);
                 }
                 // Allow void* conversions
                 else if (to_type->kind == TypeKind::Pointer && to_elem->kind == TypeKind::Void) {
@@ -561,7 +567,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                     from_elem = resolve_subtype(from_elem);
                 if (from_elem && from_elem->kind == TypeKind::Struct &&
                     from_elem->data.struct_.kind == ContainerKind::Struct) {
-                    if (struct_satisfies_interface(from_elem, to_elem)) return true;
+                    if (struct_satisfies_interface(from_elem, to_elem)) {
+                        return is_ref_kind_assignable(from_type->kind, to_type, is_explicit);
+                    }
                 }
             }
         }

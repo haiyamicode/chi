@@ -1339,15 +1339,16 @@ struct AsyncRect {
     impl AsyncShape {}
 }
 
-async func async_make_shape(flag: bool) Promise<&AsyncShape> {
+async func async_make_shape(flag: bool) Promise<Shared<AsyncShape>> {
     if flag {
-        return new AsyncCircle{radius: 7};
+        return Shared<AsyncShape>{new AsyncCircle{radius: 7}};
     }
-    return new AsyncRect{w: 3, h: 4};
+    return Shared<AsyncShape>{new AsyncRect{w: 3, h: 4}};
 }
 
 async func type_switch_stmt_await(flag: bool) Promise<int> {
-    var s = await async_make_shape(flag);
+    var shape = await async_make_shape(flag);
+    var s = shape.ref();
     switch s.(type) {
         &AsyncCircle => {
             return await double_it(s.radius + 1);
@@ -1362,7 +1363,8 @@ async func type_switch_stmt_await(flag: bool) Promise<int> {
 }
 
 async func type_switch_expr_await(flag: bool) Promise<int> {
-    var s = await async_make_shape(flag);
+    var shape = await async_make_shape(flag);
+    var s = shape.ref();
     return switch s.(type) {
         &AsyncCircle => await double_it(s.radius + 1),
         &AsyncRect => await double_it(s.w + s.h + 2),
@@ -1371,7 +1373,8 @@ async func type_switch_expr_await(flag: bool) Promise<int> {
 }
 
 async func type_switch_try_await(flag: bool) Promise<int> {
-    var s = await async_make_shape(flag);
+    var shape = await async_make_shape(flag);
+    var s = shape.ref();
     switch s.(type) {
         &AsyncCircle => {
             return s.radius + try await settle_resolves_after_delay() catch {
