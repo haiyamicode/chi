@@ -79,15 +79,23 @@ OUTPUT_DIR = $(BUILD_DIR)/tests
 # --errors-for-leak-kinds=definite so the noise stays low. Valgrind's own
 # messages go to stderr (which the existing `2>&1 >X.output` redirect sends to
 # the terminal), keeping stdout-based .expect comparisons intact.
+#
+# Managed (.x) tests link tgc, which conservatively scans the stack for GC
+# roots and therefore legitimately reads uninitialised bytes (padding, unused
+# alloca regions). We disable uninit-value tracking only for those via
+# RUN_MANAGED; .xs tests keep the strict check.
 VALGRIND ?= 0
 ifeq ($(VALGRIND),1)
-    RUN = valgrind --error-exitcode=99 --leak-check=full \
-		--errors-for-leak-kinds=definite --show-leak-kinds=definite \
-		--track-origins=yes
+    VALGRIND_BASE = valgrind --error-exitcode=99 --leak-check=full \
+		--errors-for-leak-kinds=definite --show-leak-kinds=definite
+    RUN = $(VALGRIND_BASE) --track-origins=yes
+    RUN_MANAGED = $(VALGRIND_BASE) --undef-value-errors=no
 else
     RUN =
+    RUN_MANAGED =
 endif
 export RUN
+export RUN_MANAGED
 
 # Wraps a compiled test binary with stderr capture, clear error reporting, and
 # valgrind-output forwarding. Defined once here and reused by every test rule.
@@ -95,11 +103,11 @@ RUN_BIN = $(abspath run_test_bin.sh)
 
 %.test: %.expect
 	echo Test: $*...
-	@if [ -f $*.xs ]; then src=$*.xs; \
-	elif [ -f $*.x ]; then src=$*.x; \
+	@if [ -f $*.xs ]; then src=$*.xs; run=$$RUN; \
+	elif [ -f $*.x ]; then src=$*.x; run=$$RUN_MANAGED; \
 	else echo "No source file found for test $*"; exit 1; fi; \
 	$(CHIC) -o $(TMP).$* -c $$src || exit $$?; \
-	$(RUN_BIN) $* $*.output $(TMP).$*
+	RUN=$$run $(RUN_BIN) $* $*.output $(TMP).$*
 	@if [ "x`diff -qbu $*.expect $*.output`" != "x" ]; \
 	then \
         	echo "error in test $*"; \
@@ -336,7 +344,7 @@ RUN_BIN = $(abspath run_test_bin.sh)
 # so sort destruction lines (everything after "Test completed") before comparing.
 18_gc_escape.test: 18_gc_escape.expect
 	echo Test: 18_gc_escape...
-	@$(CHIC) -o $(TMP).18_gc_escape -c 18_gc_escape.x && $(RUN_BIN) 18_gc_escape 18_gc_escape.output $(TMP).18_gc_escape
+	@$(CHIC) -o $(TMP).18_gc_escape -c 18_gc_escape.x && RUN="$$RUN_MANAGED" $(RUN_BIN) 18_gc_escape 18_gc_escape.output $(TMP).18_gc_escape
 	@grep -v '^\[gc\]' 18_gc_escape.output > 18_gc_escape.out.tmp
 	@grep -v '^\[gc\]' 18_gc_escape.expect > 18_gc_escape.exp.tmp
 	@grep '^\[gc\]' 18_gc_escape.output | sort > 18_gc_escape.out_gc.tmp
