@@ -6458,7 +6458,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             auto reject_async_error = [&]() {
                 emit_async_promise_reject_shared(fn, shared_error_value);
-                compile_destruction_for_type(fn, settled_var, settled_type);
                 builder.CreateRetVoid();
             };
 
@@ -6482,9 +6481,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             if (!data.catch_block) {
                 init_result_variant("Err", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
-                    compile_store_or_copy(fn, shared_error_value, payload_ptr, payload_type, expr);
+                    builder.CreateStore(shared_error_value, payload_ptr);
                 });
-                compile_destruction_for_type(fn, settled_var, settled_type);
                 builder.CreateBr(continue_b);
             } else {
                 llvm::Value *shared_owner_var = nullptr;
@@ -6492,7 +6490,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 if (data.catch_err_var) {
                     auto shared_type_l = compile_type(shared_error_type);
                     shared_owner_var = fn->entry_alloca(shared_type_l, "try_await_err_owner");
-                    compile_copy(fn, shared_error_value, shared_owner_var, shared_error_type, expr);
+                    builder.CreateStore(shared_error_value, shared_owner_var);
                     shared_owner_active =
                         fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), "try_await_err_owner.active");
                     {
@@ -6503,9 +6501,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), shared_owner_active);
                     fn->cleanup_owner_vars.push_back(
                         {shared_owner_var, shared_error_type, shared_owner_active, false});
+                } else {
+                    compile_destruction_for_type(fn, shared_error_ptr, shared_error_type);
                 }
-
-                compile_destruction_for_type(fn, settled_var, settled_type);
 
                 if (data.catch_err_var) {
                     auto err_var = compile_alloc(fn, data.catch_err_var);
@@ -6569,7 +6567,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     compile_store_or_copy(fn, ok_value, result_var, result_type, effective_expr);
                 }
             }
-            compile_destruction_for_type(fn, settled_var, settled_type);
+            if (ok_fields.size() > 0 && !site.await_expr->analysis.moved) {
+                auto payload_ptr = compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
+                compile_destruction_for_type(fn, payload_ptr, ok_fields[0]->resolved_type);
+            }
             builder.CreateBr(continue_b);
 
             fn->use_label(continue_b);
@@ -7467,7 +7468,9 @@ void Compiler::compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Val
                     moved_value = builder.CreateLoad(compile_type(type), it->second.address);
                 }
                 builder.CreateStore(moved_value, dest);
-                builder.CreateStore(llvm::Constant::getNullValue(compile_type(type)), it->second.address);
+                if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, it->second.address)) {
+                    builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
+                }
                 return;
             }
         }

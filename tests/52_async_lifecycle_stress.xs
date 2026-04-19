@@ -23,11 +23,31 @@ struct TraceStressValue {
 struct TraceStressError {
     code: int;
 
-    func message() string {
-        return stringf("stress {}", this.code);
+    impl Error {
+        func message() string {
+            return stringf("stress {}", this.code);
+        }
+    }
+}
+
+struct TraceCaughtError {
+    tag: int = 0;
+
+    mut func delete() {
+        printf("TraceCaughtError.delete({})\n", this.tag);
     }
 
-    impl Error {}
+    impl ops.Copy {
+        mut func copy(source: &This) {
+            this.tag = source.tag;
+        }
+    }
+
+    impl Error {
+        func message() string {
+            return stringf("caught {}", this.tag);
+        }
+    }
 }
 
 async func delayed_number(value: int) Promise<int> {
@@ -54,6 +74,15 @@ async func trace_throw_after_delay() Promise<int> {
     var y = await time.sleep(1);
     throw new TraceStressError{code: 30};
     return 0;
+}
+
+async func throw_caught(tag: int) Promise<int> {
+    throw new TraceCaughtError{tag: tag};
+    return 0;
+}
+
+async func try_await_wrap_err(tag: int) Promise<Result<int, Shared<Error>>> {
+    return try await throw_caught(tag) catch TraceCaughtError;
 }
 
 async func complex_stress() Promise<int> {
@@ -100,5 +129,8 @@ async func complex_stress() Promise<int> {
 func main() {
     complex_stress().then(func (value: int) {
         printf("stress result={}\n", value);
+        try_await_wrap_err(51).then(func (r: Result<int, Shared<Error>>) {
+            printf("wrap err msg={}\n", r.error()!.message());
+        });
     });
 }

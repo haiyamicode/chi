@@ -23,5 +23,7 @@ TraceStress.value(12)
 TraceStressValue.delete(12)
 TraceStress.caught(30)
 stress result=195
+wrap err msg=caught 51
+TraceCaughtError.delete(51)
 TraceStressValue.delete(12)
 TraceStressValue.delete(10)
