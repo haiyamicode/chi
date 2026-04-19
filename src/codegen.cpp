@@ -1603,7 +1603,7 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
                 arg_value = builder.CreateLoad(compile_type(src_type), src_ref.address);
             }
             emit_dbg_location(expr);
-            arg_value = compile_conversion(fn, arg_value, src_type, param_type);
+            arg_value = compile_conversion(fn, arg_value, src_type, param_type, true);
             if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, src_ref.address)) {
                 builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
             }
@@ -1611,7 +1611,7 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
         }
         if (src_ref.value) {
             emit_dbg_location(expr);
-            return compile_conversion(fn, src_ref.value, src_type, param_type);
+            return compile_conversion(fn, src_ref.value, src_type, param_type, src_ref.owns_value);
         }
     }
 
@@ -1670,7 +1670,7 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
                 arg_value = builder.CreateLoad(compile_type(src_type), src_ref.address);
             }
             emit_dbg_location(expr);
-            arg_value = compile_conversion(fn, arg_value, src_type, param_type);
+            arg_value = compile_conversion(fn, arg_value, src_type, param_type, true);
             if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, src_ref.address)) {
                 builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
             }
@@ -1679,7 +1679,7 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
         if (src_ref.value) {
             // Rvalue move: expression already compiled, use value directly.
             emit_dbg_location(expr);
-            return compile_conversion(fn, src_ref.value, src_type, param_type);
+            return compile_conversion(fn, src_ref.value, src_type, param_type, src_ref.owns_value);
         }
     }
 
@@ -1754,7 +1754,7 @@ void Compiler::compile_ref_value_to_ptr(Function *fn, RefValue src, ChiType *src
     if (!value) {
         value = builder.CreateLoad(compile_type(src_type), src.address);
     }
-    auto *converted = compile_conversion(fn, value, src_type, dest_type);
+    auto *converted = compile_conversion(fn, value, src_type, dest_type, src.owns_value);
     builder.CreateStore(converted, dest);
 }
 
@@ -5504,7 +5504,7 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
 }
 
 llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
-                                          ChiType *to_type) {
+                                          ChiType *to_type, bool owns_value) {
     // never is the bottom type — unreachable code, return undef
     if (from_type->kind == TypeKind::Never) {
         return llvm::UndefValue::get(compile_type(to_type));
@@ -5612,7 +5612,8 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             auto to_fn = to_type->data.fn_lambda.fn;
             if (from_fn->data.fn.return_type->kind == TypeKind::Void &&
                 to_fn->data.fn.return_type->kind == TypeKind::Unit) {
-                return compile_void_to_unit_lambda_wrapper(fn, value, from_type, to_type);
+                return compile_void_to_unit_lambda_wrapper(fn, value, from_type, to_type,
+                                                           owns_value);
             }
         }
         return value;
@@ -7499,8 +7500,12 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     };
 
     auto destroy_copy_source_temp = [&]() {
-        if (owned_copy_src && src.owns_value && get_resolver()->type_needs_destruction(type)) {
-            compile_destruction_for_type(fn, owned_copy_src, type);
+        if (!src.owns_value || !get_resolver()->type_needs_destruction(type)) {
+            return;
+        }
+        auto *addr = owned_copy_src ? owned_copy_src : src.address;
+        if (addr) {
+            compile_destruction_for_type(fn, addr, type);
         }
     };
 
@@ -7596,9 +7601,13 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             typeinfo_val = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
         }
 
-        // Retain type-erased captures (null-safe).
-        auto retain_fn = get_system_fn("cx_capture_retain");
-        builder.CreateCall(retain_fn->llvm_fn, {captures_ptr});
+        // Retain type-erased captures (null-safe). Skip the retain when we
+        // own the source value — ownership transfers into dest with the
+        // existing refcount.
+        if (!src.owns_value) {
+            auto retain_fn = get_system_fn("cx_capture_retain");
+            builder.CreateCall(retain_fn->llvm_fn, {captures_ptr});
+        }
 
         // Build the destination lambda struct
         llvm::Value *dest_val = llvm::UndefValue::get(llvm_type);
@@ -8461,11 +8470,8 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     }
     switch (expr->type) {
     case ast::NodeType::FnDef: {
-        auto &builder = *m_ctx->llvm_builder.get();
         auto lambda_val = compile_expr(fn, expr);
-        auto lambda_ptr = fn->entry_alloca(lambda_val->getType(), "lambda_literal");
-        builder.CreateStore(lambda_val, lambda_ptr);
-        return RefValue::from_address(lambda_ptr);
+        return RefValue::from_owned_value(lambda_val);
     }
     case ast::NodeType::VarDecl: {
         auto &var_data = expr->data.var_decl;
@@ -8678,14 +8684,16 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::FnCallExpr: {
         llvm::Value *dest = nullptr;
+        bool owns_temp = false;
         if (expr->resolved_outlet) {
             dest = get_var(expr->resolved_outlet);
         } else {
             dest = compile_alloc(fn, expr);
+            owns_temp = true;
         }
         compile_fn_call(fn, expr, nullptr, dest);
         emit_dbg_location(expr);
-        return RefValue::from_address(dest);
+        return RefValue{dest, nullptr, owns_temp};
     }
     // Rvalue expressions - return value only (no meaningful address)
     case ast::NodeType::ParenExpr:
@@ -9754,7 +9762,8 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
 }
 
 llvm::Value *Compiler::compile_void_to_unit_lambda_wrapper(Function *fn, llvm::Value *lambda_value,
-                                                           ChiType *from_type, ChiType *to_type) {
+                                                           ChiType *from_type, ChiType *to_type,
+                                                           bool owns_value) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
@@ -9806,23 +9815,27 @@ llvm::Value *Compiler::compile_void_to_unit_lambda_wrapper(Function *fn, llvm::V
     auto null_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
     auto [cap_ptr, payload_ptr] = compile_cxcapture_create(lambda_size, null_ptr, dtor_ptr);
 
-    // Copy original lambda into payload and retain its inner captures
+    // Store the original lambda into the payload. If we own the source value
+    // ownership transfers into the payload; otherwise retain the inner
+    // captures so the payload holds its own reference.
     auto typed_payload = builder.CreateBitCast(payload_ptr, lambda_type_l->getPointerTo());
     builder.CreateStore(lambda_value, typed_payload);
-    auto inner_cap_ptr = builder.CreateLoad(ptr_type, builder.CreateStructGEP(lambda_type_l, typed_payload, 2));
 
-    // Retain inner captures if non-null
-    auto has_captures = builder.CreateICmpNE(inner_cap_ptr, llvm::ConstantPointerNull::get(
-        llvm::PointerType::get(llvm_ctx, 0)));
-    auto retain_bb = llvm::BasicBlock::Create(llvm_ctx, "retain", fn->llvm_fn);
-    auto cont_bb = llvm::BasicBlock::Create(llvm_ctx, "cont", fn->llvm_fn);
-    builder.CreateCondBr(has_captures, retain_bb, cont_bb);
+    if (!owns_value) {
+        auto inner_cap_ptr = builder.CreateLoad(
+            ptr_type, builder.CreateStructGEP(lambda_type_l, typed_payload, 2));
+        auto has_captures = builder.CreateICmpNE(
+            inner_cap_ptr, llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0)));
+        auto retain_bb = llvm::BasicBlock::Create(llvm_ctx, "retain", fn->llvm_fn);
+        auto cont_bb = llvm::BasicBlock::Create(llvm_ctx, "cont", fn->llvm_fn);
+        builder.CreateCondBr(has_captures, retain_bb, cont_bb);
 
-    builder.SetInsertPoint(retain_bb);
-    builder.CreateCall(get_system_fn("cx_capture_retain")->llvm_fn, {inner_cap_ptr});
-    builder.CreateBr(cont_bb);
+        builder.SetInsertPoint(retain_bb);
+        builder.CreateCall(get_system_fn("cx_capture_retain")->llvm_fn, {inner_cap_ptr});
+        builder.CreateBr(cont_bb);
 
-    builder.SetInsertPoint(cont_bb);
+        builder.SetInsertPoint(cont_bb);
+    }
     compile_cxlambda_set_captures(new_lambda, cap_ptr);
 
     return builder.CreateLoad(new_lambda_type, new_lambda);

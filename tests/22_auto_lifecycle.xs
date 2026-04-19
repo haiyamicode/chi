@@ -907,6 +907,24 @@ func test_maybe_moved_for_bind() {
     println("--- scope exit ---");
 }
 
+struct ValueBox<T> {
+    value: T;
+
+    func transform<U>(f: func (value: T) U) ValueBox<U> {
+        return {value: f(this.value)};
+    }
+}
+
+func test_lambda_call_in_struct_literal() {
+    println("=== Test 22: lambda call result in struct literal does not leak ===");
+    var box = ValueBox<int>{value: 7};
+    var result = box.transform(func (v: int) TrackedVal {
+        return {900 + v};
+    });
+    printf("  result.value.id={}\n", result.value.id);
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -931,5 +949,6 @@ func main() {
     test_construct_field_initializer_without_default();
     test_maybe_moved_param();
     test_maybe_moved_for_bind();
+    test_lambda_call_in_struct_literal();
     println("All tests completed!");
 }

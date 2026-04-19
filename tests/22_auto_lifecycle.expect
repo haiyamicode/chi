@@ -504,4 +504,11 @@ after unary
   TrackedVal.delete(603)
   TrackedVal.delete(602)
   TrackedVal.delete(601)
+=== Test 22: lambda call result in struct literal does not leak ===
+  TrackedVal.new(907)
+  TrackedVal.copy(907)
+  TrackedVal.delete(907)
+  result.value.id=907
+--- scope exit ---
+  TrackedVal.delete(907)
 All tests completed!

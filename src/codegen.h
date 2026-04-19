@@ -668,7 +668,7 @@ class Compiler {
                                            ChiType *to_type);
 
     llvm::Value *compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
-                                    ChiType *to_type);
+                                    ChiType *to_type, bool owns_value = false);
 
     llvm::Value *compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type,
                                         llvm::Type *llvm_type = nullptr);
@@ -711,7 +711,8 @@ class Compiler {
     llvm::Value *generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
                                                 ChiType *lambda_type, NodeList *captures);
     llvm::Value *compile_void_to_unit_lambda_wrapper(Function *fn, llvm::Value *lambda_value,
-                                                     ChiType *from_type, ChiType *to_type);
+                                                     ChiType *from_type, ChiType *to_type,
+                                                     bool owns_value = false);
 
     // Variant lookup helpers
     std::optional<TypeId> resolve_variant_type_id(Function *fn, ChiType *type);
