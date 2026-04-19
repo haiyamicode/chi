@@ -542,6 +542,11 @@ class Compiler {
     // Set the drop flag for a node (no-op if no flag registered).
     void set_drop_flag_alive(ast::Node *node, bool alive);
 
+    // Mark a resolved_outlet slot as alive after its init completes.
+    // Handles both scope-local drop flags and async frame alive flags so
+    // cleanup (block cleanup or frame destructor) will destroy the value.
+    void mark_outlet_alive(Function *fn, ast::Node *outlet);
+
     llvm::Value *compile_comparator(Function *fn, ast::Node *expr, ChiType *type = nullptr);
 
     llvm::Value *compile_expr(Function *fn, ast::Node *expr);

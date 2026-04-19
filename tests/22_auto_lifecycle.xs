@@ -952,6 +952,77 @@ func test_inline_array_in_async_awaited() {
     println("--- scope exit ---");
 }
 
+// --- Outlet-producing expression regressions in async (each must avoid both
+// leaks and double-frees; the async frame destructor's alive-flag protocol is
+// how mark_outlet_alive / async_frame_alive_ptr_for_addr keep the lifetimes
+// correct). ---
+
+func consume_tv(v: TrackedVal) Promise<int> {
+    var rp = Promise<int>{};
+    rp.resolve(v.id);
+    return rp;
+}
+
+func consume_tv_pair(t: Tuple<TrackedVal, TrackedVal>) Promise<int> {
+    var rp = Promise<int>{};
+    rp.resolve(t.0.id + t.1.id);
+    return rp;
+}
+
+async func async_construct_expr_await() Promise {
+    let _ = await consume_tv(TrackedVal{851});
+}
+
+async func async_if_expr_await(flag: bool) Promise {
+    let _ = await consume_tv(flag ? TrackedVal{861} : TrackedVal{862});
+}
+
+async func async_switch_expr_await(k: int) Promise {
+    let _ = await consume_tv(switch k {
+        1 => TrackedVal{871},
+        2 => TrackedVal{872},
+        else => TrackedVal{873}
+    });
+}
+
+async func async_binop_add_await() Promise {
+    var a = TrackedVal{880};
+    var b = TrackedVal{881};
+    let _ = await consume_tv(a + b);
+}
+
+async func async_coalesce_await() Promise {
+    var empty: ?TrackedVal = null;
+    let _ = await consume_tv(empty ?? TrackedVal{890});
+}
+
+async func async_tuple_expr_await() Promise {
+    let _ = await consume_tv_pair((TrackedVal{893}, TrackedVal{894}));
+}
+
+async func async_paren_expr_await() Promise {
+    let _ = await consume_tv((TrackedVal{897}));
+}
+
+func test_outlet_exprs_in_async_awaited() {
+    println("=== Test 25: outlet-producing exprs in async awaited args ===");
+    println("--- construct ---");
+    async_construct_expr_await();
+    println("--- if ---");
+    async_if_expr_await(true);
+    println("--- switch ---");
+    async_switch_expr_await(1);
+    println("--- binop add ---");
+    async_binop_add_await();
+    println("--- coalesce ---");
+    async_coalesce_await();
+    println("--- tuple ---");
+    async_tuple_expr_await();
+    println("--- paren ---");
+    async_paren_expr_await();
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -979,5 +1050,6 @@ func main() {
     test_lambda_call_in_struct_literal();
     test_then_lambda_capture_destroyed();
     test_inline_array_in_async_awaited();
+    test_outlet_exprs_in_async_awaited();
     println("All tests completed!");
 }

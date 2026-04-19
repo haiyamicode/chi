@@ -5843,6 +5843,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             } else {
                 compile_fn_call(fn, expr, nullptr, dest);
             }
+            mark_outlet_alive(fn, expr->resolved_outlet);
             return builder.CreateLoad(type_l, dest);
         }
         auto &call_data = expr->data.fn_call_expr;
@@ -6156,7 +6157,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 } else {
                     var = compile_alloc(fn, expr, false);
                 }
-                return compile_optional_branch(
+                auto result = compile_optional_branch(
                     fn, data.op1, result_type_l, "coalesce",
                     [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
                         if (rewrap) {
@@ -6176,6 +6177,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         return nullptr;
                     },
                     var);
+                if (expr->resolved_outlet) {
+                    mark_outlet_alive(fn, expr->resolved_outlet);
+                }
+                return result;
             }
             if (rewrap) {
                 auto elem_type = result_type->get_elem();
@@ -6897,6 +6902,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         if (use_outlet) {
             set_drop_flag_alive(expr->resolved_outlet, true);
+            mark_outlet_alive(fn, expr->resolved_outlet);
         }
         return builder.CreateLoad(result_type_l, result_var, "try_result");
     }
@@ -6993,7 +6999,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 } else {
                     var = compile_alloc(fn, expr, false);
                 }
-                return compile_optional_branch(
+                auto result = compile_optional_branch(
                     fn, dot_data.expr, result_type_l, "optchain",
                     [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
                         auto unwrapped_type = opt_type->get_elem();
@@ -7018,6 +7024,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         return llvm::ConstantAggregateZero::get(result_type_l);
                     },
                     var);
+                if (expr->resolved_outlet) {
+                    mark_outlet_alive(fn, expr->resolved_outlet);
+                }
+                return result;
             }
             return compile_optional_branch(
                 fn, dot_data.expr, result_type_l, "optchain",
@@ -7083,6 +7093,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto ptr = expr->resolved_outlet ? compile_expr_ref(fn, expr->resolved_outlet).address
                                          : compile_alloc(fn, expr, data.is_new, type);
         compile_construction(fn, ptr, type, expr);
+        if (expr->resolved_outlet && !data.is_new) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
         return data.is_new ? ptr : builder.CreateLoad(compile_type(type), ptr);
     }
     case ast::NodeType::PrefixExpr: {
@@ -7225,6 +7238,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         if (expr->resolved_outlet) {
             auto outlet_addr = compile_expr_ref(fn, expr->resolved_outlet).address;
             m_ctx->llvm_builder->CreateStore(tuple, outlet_addr);
+            mark_outlet_alive(fn, expr->resolved_outlet);
         }
         return tuple;
     }
@@ -7299,6 +7313,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         if (!var)
             return nullptr;
+        if (expr->resolved_outlet) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
         return builder.CreateLoad(compile_type(ret_type), var);
     }
     case ast::NodeType::SwitchExpr: {
@@ -7364,6 +7381,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             fn->use_label(done_label);
             if (!var)
                 return nullptr;
+            if (expr->resolved_outlet) {
+                mark_outlet_alive(fn, expr->resolved_outlet);
+            }
             return builder.CreateLoad(compile_type(ret_type), var);
         }
 
@@ -7409,6 +7429,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         fn->use_label(done_label);
         if (!var)
             return nullptr;
+        if (expr->resolved_outlet) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
         return builder.CreateLoad(compile_type(ret_type), var);
     }
     default:
@@ -8418,7 +8441,6 @@ llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     if (ref.address)
         return ref.address;
 
-    // Temporary value — create alloca so methods get a ptr
     auto &builder = *m_ctx->llvm_builder;
     auto tmp = fn->entry_alloca(ref.value->getType(), "dot_tmp");
     builder.CreateStore(ref.value, tmp);
@@ -8703,6 +8725,9 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         }
         compile_fn_call(fn, expr, nullptr, dest);
         emit_dbg_location(expr);
+        if (expr->resolved_outlet) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
         return RefValue{dest, nullptr, owns_temp};
     }
     // Rvalue expressions - return value only (no meaningful address)
@@ -8722,7 +8747,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         if (it != m_async_await_refs.end()) {
             return it->second;
         }
-        return RefValue::from_owned_value(compile_expr(fn, expr));
+        auto value = compile_expr(fn, expr);
+        if (expr->resolved_outlet &&
+            m_ctx->var_table.has_key(expr->resolved_outlet)) {
+            return RefValue{get_var(expr->resolved_outlet), value, false};
+        }
+        return RefValue::from_owned_value(value);
     }
     case ast::NodeType::CastExpr: {
         auto &data = expr->data.cast_expr;
@@ -8733,7 +8763,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         if (it != m_async_await_refs.end()) {
             return it->second;
         }
-        return RefValue::from_owned_value(compile_expr(fn, expr));
+        auto value = compile_expr(fn, expr);
+        if (expr->resolved_outlet &&
+            m_ctx->var_table.has_key(expr->resolved_outlet)) {
+            return RefValue{get_var(expr->resolved_outlet), value, false};
+        }
+        return RefValue::from_owned_value(value);
     }
     default:
         panic("compile_expr_ref not implemented: {}", PRINT_ENUM(expr->type));
@@ -10673,6 +10708,19 @@ void Compiler::set_drop_flag_alive(ast::Node *node, bool alive) {
         auto val = alive ? llvm::ConstantInt::getTrue(llvm_ctx)
                          : llvm::ConstantInt::getFalse(llvm_ctx);
         m_ctx->llvm_builder->CreateStore(val, *flag);
+    }
+}
+
+void Compiler::mark_outlet_alive(Function *fn, ast::Node *outlet) {
+    if (!outlet) {
+        return;
+    }
+    if (fn && fn->async_machine) {
+        if (auto alive_ptr =
+                get_async_frame_var_alive_ptr(fn, *fn->async_machine, outlet)) {
+            m_ctx->llvm_builder->CreateStore(
+                llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+        }
     }
 }
 

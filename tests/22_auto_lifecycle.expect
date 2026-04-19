@@ -525,4 +525,38 @@ after unary
   TrackedVal.delete(850)
   TrackedVal.delete(850)
 --- scope exit ---
+=== Test 25: outlet-producing exprs in async awaited args ===
+--- construct ---
+  TrackedVal.new(851)
+  TrackedVal.delete(851)
+--- if ---
+  TrackedVal.new(861)
+  TrackedVal.delete(861)
+--- switch ---
+  TrackedVal.new(871)
+  TrackedVal.delete(871)
+--- binop add ---
+  TrackedVal.new(880)
+  TrackedVal.copy(880)
+  TrackedVal.delete(880)
+  TrackedVal.new(881)
+  TrackedVal.copy(881)
+  TrackedVal.delete(881)
+  TrackedVal.add(880, 881)
+  TrackedVal.new(1761)
+  TrackedVal.delete(1761)
+  TrackedVal.delete(881)
+  TrackedVal.delete(880)
+--- coalesce ---
+  TrackedVal.new(890)
+  TrackedVal.delete(890)
+--- tuple ---
+  TrackedVal.new(893)
+  TrackedVal.new(894)
+  TrackedVal.delete(894)
+  TrackedVal.delete(893)
+--- paren ---
+  TrackedVal.new(897)
+  TrackedVal.delete(897)
+--- scope exit ---
 All tests completed!
