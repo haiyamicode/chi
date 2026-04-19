@@ -925,6 +925,16 @@ func test_lambda_call_in_struct_literal() {
     println("--- scope exit ---");
 }
 
+func test_then_lambda_capture_destroyed() {
+    println("=== Test 23: Promise.then lambda captures are destroyed ===");
+    var p = Promise<int>{};
+    p.then(func (val: int) TrackedVal {
+        return {900};
+    });
+    p.resolve(42);
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -950,5 +960,6 @@ func main() {
     test_maybe_moved_param();
     test_maybe_moved_for_bind();
     test_lambda_call_in_struct_literal();
+    test_then_lambda_capture_destroyed();
     println("All tests completed!");
 }

@@ -511,4 +511,8 @@ after unary
   result.value.id=907
 --- scope exit ---
   TrackedVal.delete(907)
+=== Test 23: Promise.then lambda captures are destroyed ===
+  TrackedVal.new(900)
+--- scope exit ---
+  TrackedVal.delete(900)
 All tests completed!

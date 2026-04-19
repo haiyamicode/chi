@@ -2752,10 +2752,11 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
             builder.CreateStore(src_move_flag, capture_flag_gep);
         }
 
-        // Generate destructor for CxCapture cleanup
+        // Monomorphize bstruct before generating dtor — it may still hold generic placeholders.
+        auto eval_bstruct = eval_type(bstruct);
         llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
-        if (get_resolver()->type_needs_destruction(bstruct)) {
-            if (auto dtor = generate_destructor(bstruct, nullptr)) {
+        if (get_resolver()->type_needs_destruction(eval_bstruct)) {
+            if (auto dtor = generate_destructor(eval_bstruct, nullptr)) {
                 dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, builder.getInt8PtrTy());
             }
         }
@@ -3785,7 +3786,11 @@ void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int 
     auto promise_ptr = fn->entry_alloca(promise_type_l, "awaited");
     if (promise_ref.address) {
         compile_copy_with_ref(fn, promise_ref, promise_ptr, promise_type, promise_expr);
-        if (promise_expr->type == ast::NodeType::FnCallExpr) {
+        // compile_copy_with_ref destroys the source when owns_value is true. When
+        // the source is a resolver-allocated outlet (owns_value false), block
+        // cleanup would normally destroy it — but emit_async_function_return
+        // branches to return_label bypassing cleanup, so destroy it inline.
+        if (!promise_ref.owns_value && promise_expr->type == ast::NodeType::FnCallExpr) {
             compile_destruction_for_type(fn, promise_ref.address, promise_type);
         }
     } else {
@@ -5073,10 +5078,6 @@ void Compiler::compile_async_fn_body(Function *fn) {
         auto new_method_node = get_variant_member_node(new_member, variant_type_id);
         auto new_method = get_fn(new_method_node);
         builder.CreateCall(new_method->llvm_fn, {result_promise_ptr});
-
-        // Store as return value so the function returns this promise
-        compile_copy_with_ref(fn, RefValue::from_address(result_promise_ptr), fn->return_value,
-                              return_type, fn->node);
 
         fn->async_reject_promise_ptr = result_promise_ptr;
         fn->async_promise_type = return_type;
@@ -10059,20 +10060,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto return_type = fn->fn_type->data.fn.return_type;
 
                 if (is_async && get_resolver()->is_promise_type(return_type)) {
-                // For async functions, wrap the return value in a resolved Promise
+                    assert(fn->async_reject_promise_ptr &&
+                           "async fast path must pre-initialize result promise");
                     auto promise_struct = get_resolver()->resolve_struct_type(return_type);
 
                     std::optional<TypeId> variant_type_id = std::nullopt;
                     if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
                         variant_type_id = return_type->id;
                     }
-
-                    // Call Promise.new() to initialize promise at return_value
-                    auto new_member = promise_struct->find_member("new");
-                    assert(new_member && "Promise.new() method not found");
-                    auto new_method_node = get_variant_member_node(new_member, variant_type_id);
-                    auto new_method = get_fn(new_method_node);
-                    llvm_builder.CreateCall(new_method->llvm_fn, {fn->return_value});
 
                     // Compile return value, or synthesize Unit{} for bare `return;`
                     auto inner_type = get_resolver()->get_promise_value_type(return_type);
@@ -10083,12 +10078,17 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                         ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
                     }
 
-                    // Call Promise.resolve(value)
+                    // Resolve the pre-initialized result promise, then bitwise-move it to sret.
                     auto resolve_member = promise_struct->find_member("resolve");
                     assert(resolve_member && "Promise.resolve() method not found");
                     auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
                     auto resolve_method = get_fn(resolve_method_node);
-                    llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
+                    llvm_builder.CreateCall(resolve_method->llvm_fn,
+                                            {fn->async_reject_promise_ptr, ret_value});
+                    auto promise_type_l = compile_type(return_type);
+                    auto resolved_promise =
+                        llvm_builder.CreateLoad(promise_type_l, fn->async_reject_promise_ptr);
+                    llvm_builder.CreateStore(resolved_promise, fn->return_value);
                 } else if (data.expr) {
                     auto ret_type = get_chitype(stmt);
                     compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
