@@ -3724,6 +3724,7 @@ void Compiler::emit_async_function_return(Function *fn, AsyncStateMachine &machi
                               machine.promise_type, fn->node);
         builder.CreateBr(fn->return_label);
     } else {
+        emit_cleanup_owners(fn);
         builder.CreateRetVoid();
     }
 }
@@ -3750,6 +3751,7 @@ void Compiler::emit_async_state_transition(Function *fn, AsyncStateMachine &mach
         builder.CreateBitCast(machine.frame_ptr, llvm::PointerType::get(*m_ctx->llvm_ctx, 0));
     emit_dbg_location(fn->node);
     builder.CreateCall(machine.dispatcher_fn, {frame_data_ptr});
+    emit_cleanup_owners(fn);
     builder.CreateRetVoid();
 }
 
@@ -4996,6 +4998,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
         if (fn->return_label) {
             emit_async_function_return(fn, machine, result_promise_ptr);
         } else {
+            emit_cleanup_owners(fn);
             llvm_builder.CreateRetVoid();
         }
         return;
@@ -5025,6 +5028,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             if (fn->return_label) {
                 emit_async_function_return(fn, machine, result_promise_ptr);
             } else {
+                emit_cleanup_owners(fn);
                 builder.CreateRetVoid();
             }
             fn->pop_active_block();
@@ -5148,6 +5152,7 @@ void Compiler::emit_async_cleanup_landing_pad(Function *fn, llvm::Function *work
     auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
     landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
     emit_async_reject_landing_pad(fn, landing);
+    emit_cleanup_owners(fn);
     builder.CreateRetVoid();
 }
 
@@ -5237,6 +5242,7 @@ void Compiler::end_async_worker_state(AsyncStateMachine &machine, AsyncWorkerCon
     auto &builder = *m_ctx->llvm_builder;
 
     if (!builder.GetInsertBlock()->getTerminator()) {
+        emit_cleanup_owners(ctx.state_fn);
         builder.CreateRetVoid();
     }
 

@@ -935,6 +935,23 @@ func test_then_lambda_capture_destroyed() {
     println("--- scope exit ---");
 }
 
+func count_trackedvals(items: Array<TrackedVal>) Promise<int> {
+    var rp = Promise<int>{};
+    rp.resolve(items.length);
+    return rp;
+}
+
+async func async_inline_trackedval_array() Promise {
+    var t = TrackedVal{850};
+    let _ = await count_trackedvals([t]);
+}
+
+func test_inline_array_in_async_awaited() {
+    println("=== Test 24: inline array in async fn with await destroys elements ===");
+    async_inline_trackedval_array();
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -961,5 +978,6 @@ func main() {
     test_maybe_moved_for_bind();
     test_lambda_call_in_struct_literal();
     test_then_lambda_capture_destroyed();
+    test_inline_array_in_async_awaited();
     println("All tests completed!");
 }

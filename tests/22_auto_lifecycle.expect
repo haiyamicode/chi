@@ -515,4 +515,14 @@ after unary
   TrackedVal.new(900)
 --- scope exit ---
   TrackedVal.delete(900)
+=== Test 24: inline array in async fn with await destroys elements ===
+  TrackedVal.new(850)
+  TrackedVal.copy(850)
+  TrackedVal.delete(850)
+  TrackedVal.copy(850)
+  TrackedVal.copy(850)
+  TrackedVal.delete(850)
+  TrackedVal.delete(850)
+  TrackedVal.delete(850)
+--- scope exit ---
 All tests completed!
