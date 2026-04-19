@@ -442,35 +442,37 @@ static bool is_safe_int_conversion(ChiType *from, ChiType *to) {
 // element types are already known to match (same type, or a widening like
 // &Concrete → &Interface). Covers Pointer/Reference/MutRef/MoveRef.
 //
-// Pointer ↔ ref crossings stay permissive: raw pointers are the unsafe-interop
-// boundary, and the stdlib (Shared, atomic, mem) relies on implicit same-rep
-// conversions in both directions.
-//
-// The one tightening over that baseline: &move T → &T / &mut T requires an
-// explicit cast. An owning reference can't be silently downgraded to a borrow;
-// the cast makes the borrow creation visible at the use site.
+// Rules:
+// - ref → *T is always ok: it's a widening cast that discards borrow/ownership
+//   metadata into a raw pointer, no new capability created.
+// - *T → ref requires an explicit cast; the `as` cast then goes through the
+//   CastExpr resolver, which enforces the surrounding `unsafe` block.
+// - &move T → &T / &mut T requires an explicit cast: an owning reference can't
+//   silently become a borrow; the cast makes the borrow creation visible.
+// - & → &mut and (&/&mut) → &move are always rejected (can't invent mutability
+//   or ownership).
 static bool is_ref_kind_assignable(TypeKind from_kind, ChiType *to_type,
                                    bool is_explicit) {
     auto to_kind = to_type->kind;
-    if (from_kind == TypeKind::Pointer || to_kind == TypeKind::Pointer) {
+    if (to_kind == TypeKind::Pointer) {
         return true;
+    }
+    if (from_kind == TypeKind::Pointer) {
+        return is_explicit;
     }
     if (from_kind == TypeKind::MoveRef) {
         return to_kind == TypeKind::MoveRef ||
                (is_explicit && to_type->is_borrow_reference());
     }
-    // Borrow → owner is never ok (can't invent ownership).
     if (to_kind == TypeKind::MoveRef) {
         return false;
     }
-    // &mut → & is a downgrade; & → &mut invents mutability and is rejected.
     if (from_kind == TypeKind::MutRef && to_kind == TypeKind::Reference) {
         return true;
     }
     if (from_kind == TypeKind::Reference && to_kind == TypeKind::MutRef) {
         return false;
     }
-    // Remaining: same ref kind.
     return from_kind == to_kind;
 }
 
