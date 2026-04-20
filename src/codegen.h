@@ -834,6 +834,8 @@ class Compiler {
     llvm::Value *extract_interface_data_ptr(llvm::Value *fat_ptr);
     llvm::Value *extract_interface_vtable_ptr(llvm::Value *fat_ptr);
     void emit_cleanup_owners(Function *fn);
+    llvm::Value *register_cleanup_owner(Function *fn, llvm::Value *owned_ptr,
+                                        ChiType *concrete_type, const std::string &active_name);
     llvm::Value *compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
                                              llvm::Value *dest = nullptr);
 

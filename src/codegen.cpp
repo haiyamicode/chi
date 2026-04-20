@@ -1830,15 +1830,7 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         blob_data = builder.CreateGEP(arr_type_l, fixed_array_ptr, {zero, zero});
         length_value = length_const;
         if (resolver->type_needs_destruction(elem_type)) {
-            auto *active_var = fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx),
-                                                "_vararg_fixed.active");
-            {
-                llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
-                tmp.SetInsertPoint(active_var->getNextNode());
-                tmp.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), active_var);
-            }
-            builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
-            fn->cleanup_owner_vars.push_back({fixed_array_ptr, fixed_array_type, active_var, false});
+            register_cleanup_owner(fn, fixed_array_ptr, fixed_array_type, "_vararg_fixed.active");
         }
     } else {
         emit_dbg_location(dbg_node);
@@ -1905,15 +1897,7 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         blob_data = builder.CreateLoad(compile_type(array_data_field->resolved_type), data_ptr);
         length_value = builder.CreateLoad(i32_ty, length_ptr);
 
-        auto *active_var =
-            fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), "_vararg_array.active");
-        {
-            llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
-            tmp.SetInsertPoint(active_var->getNextNode());
-            tmp.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), active_var);
-        }
-        builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
-        fn->cleanup_owner_vars.push_back({array_ptr, array_type, active_var, false});
+        register_cleanup_owner(fn, array_ptr, array_type, "_vararg_array.active");
     }
 
     return build_span_value(span_type, blob_data, length_value);
@@ -4675,6 +4659,12 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
             auto shared_error_ptr = state_fn->entry_alloca(shared_error_type_l, "_shared_error_slot");
             builder.CreateStore(shared_error, shared_error_ptr);
 
+            // Track ownership of the shared_error so it is released on catch-state
+            // exit paths that do not transfer the refcount to an err binding or
+            // forward it to promise.reject_shared (typed-mismatch re-throw).
+            auto *shared_error_active = register_cleanup_owner(
+                state_fn, shared_error_ptr, shared_error_type, "_shared_error_slot.active");
+
             // Type check for typed catch
             if (data.catch_expr) {
                 auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
@@ -4686,8 +4676,11 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
                 auto nomatch_b = state_fn->new_label("_catch_type_nomatch");
                 builder.CreateCondBr(type_matches, match_b, nomatch_b);
 
-                // Type doesn't match: reject promise (re-throw)
+                // Type doesn't match: reject promise (re-throw). reject_shared
+                // takes the Shared<Error> by value bitwise, so clear the active
+                // flag before the call to avoid a double release.
                 state_fn->use_label(nomatch_b);
+                builder.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_error_active);
                 emit_async_promise_reject_shared(state_fn, shared_error);
                 builder.CreateRetVoid();
 
@@ -4699,13 +4692,18 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
                 auto err_var = compile_alloc(state_fn, data.catch_err_var);
                 add_var(data.catch_err_var, err_var);
                 if (data.catch_expr) {
-                    // Typed catch: extract data ptr from Shared<Error>
+                    // Typed catch: extract data ptr from Shared<Error>. The
+                    // wrapper's refcount still needs to be released on exit —
+                    // leave shared_error_active set so cleanup_owner_vars fires.
                     auto ref = compile_shared_ref(state_fn, shared_error_ptr, shared_error_type);
                     auto raw_data = extract_interface_data_ptr(ref);
                     builder.CreateStore(raw_data, err_var);
                 } else {
-                    // Untyped catch: store Shared<Error> directly
+                    // Untyped catch: transfer the Shared<Error> into err_var
+                    // bitwise. err_var's scope exit releases it, so clear
+                    // shared_error_active to avoid a double release.
                     builder.CreateStore(shared_error, err_var);
+                    builder.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_error_active);
                 }
                 data.catch_block->data.block.implicit_vars.clear();
             }
@@ -4732,6 +4730,7 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
             machine.active_try_stmt = saved_try_stmt;
 
             if (!builder.GetInsertBlock()->getTerminator()) {
+                emit_cleanup_owners(state_fn);
                 builder.CreateRetVoid();
             }
         });
@@ -5118,7 +5117,10 @@ void Compiler::compile_async_fn_body(Function *fn) {
 }
 
 // Emits the common landing pad logic: extract thrown_ptr, check is_typed,
-// panic path (resume), and leaves insert point at the typed-error block.
+// panic path (resume), and leaves insert point at the typed-error block. The
+// typed-error path releases the C++ exception object via cx_dispose_exception
+// since all typed async consumers (reject promise, catch state transition)
+// consume the error from TLS and never resume unwinding.
 void Compiler::emit_async_landing_pad(Function *fn, llvm::Value *landing) {
     auto &builder = *m_ctx->llvm_builder;
 
@@ -5134,8 +5136,8 @@ void Compiler::emit_async_landing_pad(Function *fn, llvm::Value *landing) {
     fn->use_label(panic_b);
     builder.CreateResume((llvm::LandingPadInst *)landing);
 
-    // Insert point is now at the typed-error block
     fn->use_label(typed_error_b);
+    builder.CreateCall(get_system_fn("cx_dispose_exception")->llvm_fn, {thrown_ptr});
 }
 
 void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing) {
@@ -5365,6 +5367,27 @@ llvm::Value *Compiler::compile_interface_type_match(Function *fn, llvm::Value *f
     assert(vtable_global);
     auto case_ti = builder.CreateLoad(ptr_type, vtable_global, "case_ti");
     return builder.CreateICmpEQ(runtime_ti, case_ti, "type_matches");
+}
+
+// Allocates a stack drop flag for `owned_ptr`, initialized false at function
+// entry and set true at the current insert point, then registers the pair in
+// `fn->cleanup_owner_vars` so `emit_cleanup_owners` destroys the value on any
+// state-worker exit. Caller stores `false` into the returned flag when the
+// refcount/ownership is transferred elsewhere (avoiding double destruction).
+llvm::Value *Compiler::register_cleanup_owner(Function *fn, llvm::Value *owned_ptr,
+                                              ChiType *concrete_type,
+                                              const std::string &active_name) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto *active_var = fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), active_name);
+    {
+        llvm::IRBuilder<> tmp(llvm_ctx);
+        tmp.SetInsertPoint(llvm::cast<llvm::Instruction>(active_var)->getNextNode());
+        tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), active_var);
+    }
+    builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), active_var);
+    fn->cleanup_owner_vars.push_back({owned_ptr, concrete_type, active_var, false});
+    return active_var;
 }
 
 void Compiler::emit_cleanup_owners(Function *fn) {
@@ -6496,16 +6519,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     auto shared_type_l = compile_type(shared_error_type);
                     shared_owner_var = fn->entry_alloca(shared_type_l, "try_await_err_owner");
                     builder.CreateStore(shared_error_value, shared_owner_var);
-                    shared_owner_active =
-                        fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), "try_await_err_owner.active");
-                    {
-                        llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
-                        tmp.SetInsertPoint(llvm::cast<llvm::Instruction>(shared_owner_active)->getNextNode());
-                        tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_owner_active);
-                    }
-                    builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), shared_owner_active);
-                    fn->cleanup_owner_vars.push_back(
-                        {shared_owner_var, shared_error_type, shared_owner_active, false});
+                    shared_owner_active = register_cleanup_owner(
+                        fn, shared_owner_var, shared_error_type, "try_await_err_owner.active");
                 } else {
                     compile_destruction_for_type(fn, shared_error_ptr, shared_error_type);
                 }

@@ -1163,6 +1163,40 @@ async func try_block_await_typed_mismatch() Promise<int> {
     return -2;
 }
 
+async func try_block_trace_catch_all() Promise<int> {
+    var result = 0;
+    try {
+        var v = await trace_async_throw_after_delay();
+        result = v;
+    } catch {
+        result = -301;
+    };
+    return result;
+}
+
+async func try_block_trace_catch_typed() Promise<int> {
+    var result = 0;
+    try {
+        var v = await trace_async_throw_after_delay();
+        result = v;
+    } catch TraceAsyncError {
+        result = -302;
+    };
+    return result;
+}
+
+async func try_block_trace_catch_typed_bind() Promise<int> {
+    var result = 0;
+    try {
+        var v = await trace_async_throw_after_delay();
+        result = v;
+    } catch TraceAsyncError as err {
+        printf("try block trace typed bind saw: {}\n", err.message());
+        result = -303;
+    };
+    return result;
+}
+
 async func try_block_await_if_throw() Promise<int> {
     var result = 0;
     try {
@@ -2020,6 +2054,9 @@ async func run_async_tail() Promise {
             return -1;
         }
     );
+    printf("try block trace catch all={}\n", await try_block_trace_catch_all());
+    printf("try block trace catch typed={}\n", await try_block_trace_catch_typed());
+    printf("try block trace catch typed bind={}\n", await try_block_trace_catch_typed_bind());
     printf("try block if throw={}\n", await try_block_await_if_throw());
     printf("try block if ok={}\n", await try_block_await_if_ok());
     printf("try block while={}\n", await try_block_await_while());
