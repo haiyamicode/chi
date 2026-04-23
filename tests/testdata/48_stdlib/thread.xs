@@ -22,7 +22,7 @@ func main() {
             assert(text == "hello");
             let worker_is_main = cx_is_main_thread();
             assert(!worker_is_main);
-            let delay = ((10 - i) * 20) as uint64;
+            let delay = ((10 - i) * 500) as uint64;
             time.timeout(
                 delay,
                 func [i, text, worker_is_main] () {
@@ -43,7 +43,7 @@ func main() {
     }
 
     time.timeout(
-        250,
+        15000,
         func () {
             printf("cleanup = {}\n", cx_is_main_thread());
             if fs.exists(TEST_PATH) {

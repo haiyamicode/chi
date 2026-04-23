@@ -1355,6 +1355,10 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (is_entry) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
+        if (fn_def.is_async() && fn->return_value &&
+            get_resolver()->type_needs_destruction(return_type)) {
+            compile_destruction_for_type(fn, fn->return_value, return_type);
+        }
         builder.CreateRet(
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), 0));
     } else if (return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
@@ -1822,6 +1826,12 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         emit_dbg_location(dbg_node);
         auto *arr_type_l = compile_type(fixed_array_type);
         auto *zero = llvm::ConstantInt::get(i32_ty, 0);
+        bool elem_needs_destruct = resolver->type_needs_destruction(elem_type);
+        llvm::Value *active_var = nullptr;
+        if (elem_needs_destruct) {
+            active_var = register_reusable_cleanup_slot(
+                fn, fixed_array_ptr, fixed_array_type, "_vararg_fixed.active");
+        }
         for (uint32_t i = 0; i < count; i++) {
             auto *idx = llvm::ConstantInt::get(i32_ty, i);
             auto *elem_ptr = builder.CreateGEP(arr_type_l, fixed_array_ptr, {zero, idx});
@@ -1829,8 +1839,8 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         }
         blob_data = builder.CreateGEP(arr_type_l, fixed_array_ptr, {zero, zero});
         length_value = length_const;
-        if (resolver->type_needs_destruction(elem_type)) {
-            register_cleanup_owner(fn, fixed_array_ptr, fixed_array_type, "_vararg_fixed.active");
+        if (elem_needs_destruct) {
+            builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
         }
     } else {
         emit_dbg_location(dbg_node);
@@ -2047,6 +2057,17 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
     effective_expr->resolved_outlet = nullptr;
 
     auto src_type = get_chitype(effective_expr);
+    // Zeroinit: bypass field-wise copy (which would cx_string_copy a zeroed
+    // string and leak a malloc(0)). Emit a direct bitwise zero-store instead.
+    if (src_type && src_type->kind == TypeKind::ZeroInit && dest_type) {
+        if (destruct_old) {
+            compile_destruction_for_type(fn, dest, dest_type);
+        }
+        m_ctx->llvm_builder->CreateStore(
+            llvm::Constant::getNullValue(compile_type(dest_type)), dest);
+        effective_expr->resolved_outlet = saved_outlet;
+        return;
+    }
     if (allow_saved_owning_conversion &&
         compile_implicit_owning_conversion_to_ptr(fn, effective_expr, dest, dest_type,
                                                   destruct_old)) {
@@ -5390,6 +5411,36 @@ llvm::Value *Compiler::register_cleanup_owner(Function *fn, llvm::Value *owned_p
     return active_var;
 }
 
+// For a stack slot that may be dynamically re-entered (e.g., a vararg blob
+// inside a loop), this allocates a flag init-false at entry, emits a
+// conditional destroy-and-clear at the current insert point, then registers
+// the slot for exit cleanup. Caller must store `true` into the returned flag
+// after populating the slot.
+llvm::Value *Compiler::register_reusable_cleanup_slot(Function *fn, llvm::Value *slot_ptr,
+                                                     ChiType *concrete_type,
+                                                     const std::string &active_name) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto *i1_ty = llvm::Type::getInt1Ty(llvm_ctx);
+    auto *active_var = fn->entry_alloca(i1_ty, active_name);
+    {
+        llvm::IRBuilder<> tmp(llvm_ctx);
+        tmp.SetInsertPoint(llvm::cast<llvm::Instruction>(active_var)->getNextNode());
+        tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), active_var);
+    }
+    auto *alive = builder.CreateLoad(i1_ty, active_var);
+    auto *do_destroy = fn->new_label("_slot_reuse_destroy");
+    auto *after_destroy = fn->new_label("_slot_reuse_done");
+    builder.CreateCondBr(alive, do_destroy, after_destroy);
+    fn->use_label(do_destroy);
+    compile_destruction_for_type(fn, slot_ptr, concrete_type);
+    builder.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), active_var);
+    builder.CreateBr(after_destroy);
+    fn->use_label(after_destroy);
+    fn->cleanup_owner_vars.push_back({slot_ptr, concrete_type, active_var, false});
+    return active_var;
+}
+
 void Compiler::emit_cleanup_owners(Function *fn) {
     auto &builder = *m_ctx->llvm_builder;
     for (auto &owner : fn->cleanup_owner_vars) {
@@ -5424,6 +5475,48 @@ void Compiler::emit_cleanup_owners(Function *fn) {
     }
 }
 
+llvm::BasicBlock *Compiler::emit_invoke_unwind_landing(Function *fn) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto saved_bb = builder.GetInsertBlock();
+
+    if (!fn->llvm_fn->hasPersonalityFn()) {
+        fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+    }
+
+    auto landing_b = fn->new_label("_inv_landing");
+    fn->use_label(landing_b);
+
+    if (fn->async_reject_promise_ptr) {
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+        landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
+        emit_async_reject_landing_pad(fn, landing);
+        emit_cleanup_owners(fn);
+        builder.CreateRetVoid();
+    } else {
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 0);
+        landing->setCleanup(true);
+        builder.CreateExtractValue(landing, {0});
+        builder.CreateExtractValue(landing, {1});
+        if (!fn->active_blocks.empty()) {
+            auto &unwind_flow = fn->active_blocks.back()->exit_flow;
+            for (int i = (int)fn->active_blocks.size() - 1; i >= 0; i--) {
+                compile_block_cleanup(fn, fn->active_blocks[i], nullptr, unwind_flow);
+            }
+        } else if (fn->get_def() && fn->get_def()->body) {
+            auto &body_block = fn->get_def()->body->data.block;
+            compile_block_cleanup(fn, &body_block, nullptr, body_block.exit_flow);
+        }
+        emit_cleanup_owners(fn);
+        fn->insn_noop();
+        builder.CreateResume(landing);
+    }
+
+    if (saved_bb) {
+        builder.SetInsertPoint(saved_bb);
+    }
+    return landing_b;
+}
+
 llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
                                                    llvm::Value *dest) {
     auto &builder = *m_ctx->llvm_builder.get();
@@ -5434,10 +5527,7 @@ llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call
         // the function before the catch block runs).
         invoke.landing = fn->try_block_landing;
     } else {
-        if (!fn->cleanup_landing_label) {
-            fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
-        }
-        invoke.landing = fn->cleanup_landing_label;
+        invoke.landing = emit_invoke_unwind_landing(fn);
     }
     // Don't create normal label eagerly — the invoke sites create it on-demand.
     // This avoids orphaned blocks when compile_fn_call bypasses invoke
@@ -10046,6 +10136,13 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             // an unwind during init doesn't destroy the uninitialized slot (e.g.
             // sret destination of a throwing callee).
             alloc_drop_flag(fn, stmt, false);
+        } else if (data.is_generated && !data.expr && fn->get_def() &&
+                   fn->get_def()->has_cleanup &&
+                   get_resolver()->type_needs_destruction(var_type)) {
+            // Outlet temp (stmt_temp_var) filled later at its consuming call site.
+            // Same unwind hazard as above — guard with a drop flag set alive only
+            // after the populating call completes (see mark_outlet_alive).
+            alloc_drop_flag(fn, stmt, false);
         }
 
         if (data.expr) {
@@ -10735,6 +10832,16 @@ void Compiler::mark_outlet_alive(Function *fn, ast::Node *outlet) {
                 get_async_frame_var_alive_ptr(fn, *fn->async_machine, outlet)) {
             m_ctx->llvm_builder->CreateStore(
                 llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+        }
+    }
+    // Only mark the drop flag alive when it belongs to the current function —
+    // async state machines share outlet AST nodes across resume-point lambdas,
+    // so a flag allocated in one lambda must not be touched from another.
+    if (auto *flag = m_ctx->drop_flags.get(outlet)) {
+        if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(*flag)) {
+            if (fn && alloca->getFunction() == fn->llvm_fn) {
+                set_drop_flag_alive(outlet, true);
+            }
         }
     }
 }

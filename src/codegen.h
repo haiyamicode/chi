@@ -836,6 +836,10 @@ class Compiler {
     void emit_cleanup_owners(Function *fn);
     llvm::Value *register_cleanup_owner(Function *fn, llvm::Value *owned_ptr,
                                         ChiType *concrete_type, const std::string &active_name);
+    llvm::Value *register_reusable_cleanup_slot(Function *fn, llvm::Value *slot_ptr,
+                                                ChiType *concrete_type,
+                                                const std::string &active_name);
+    llvm::BasicBlock *emit_invoke_unwind_landing(Function *fn);
     llvm::Value *compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
                                              llvm::Value *dest = nullptr);
 

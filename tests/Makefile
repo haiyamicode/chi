@@ -255,7 +255,16 @@ RUN_BIN = $(abspath run_test_bin.sh)
 			failed=1; continue; \
 		fi; \
 		$(RUN) $(TMP).48_stdlib_$$name > $(TMP).48_stdlib_$$name.out 2>&1; \
-		sed "s|$(ROOT_DIR)|<PROJECT_ROOT>|g" $(TMP).48_stdlib_$$name.out | \
+		rc=$$?; \
+		if [ "$$rc" -eq 99 ]; then \
+			echo "error: $$name valgrind detected memory errors (exit 99)"; \
+			grep -E '^==[0-9]+==' $(TMP).48_stdlib_$$name.out | sed 's/^/    /'; \
+			failed=1; \
+			rm -f $(TMP).48_stdlib_$$name.out; \
+			continue; \
+		fi; \
+		sed -E '/^==[0-9]+==/d' $(TMP).48_stdlib_$$name.out | \
+			sed "s|$(ROOT_DIR)|<PROJECT_ROOT>|g" | \
 			sed -E 's#(<PROJECT_ROOT>/[^:]+\.xs):[0-9]+#\1:0#g' | \
 			sed -E '/^at /d; /^<PROJECT_ROOT>\/.* in function /d' > $(TMP).48_stdlib_$$name.norm; \
 		if ! diff -qbu $$expect $(TMP).48_stdlib_$$name.norm > /dev/null; then \
