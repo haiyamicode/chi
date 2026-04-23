@@ -193,6 +193,7 @@ if(NOT RUNTIME_ONLY)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bin
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CHI_BOOTSTRAP_WORKDIR}
         COMMAND ${CMAKE_COMMAND} -E env LIBRARY_PATH=${CMAKE_BINARY_DIR}
+                CHI_ROOT=${CMAKE_SOURCE_DIR}
                 ASAN_OPTIONS=detect_leaks=0
                 $<TARGET_FILE:chic> -o ${CHI_BOOTSTRAP_OUTPUT} -c ${CMAKE_CURRENT_SOURCE_DIR}/chi/main.xs -w ${CHI_BOOTSTRAP_WORKDIR}
         DEPENDS chic ${CMAKE_CURRENT_SOURCE_DIR}/chi/main.xs

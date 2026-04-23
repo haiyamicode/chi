@@ -1954,6 +1954,46 @@ char *__cx_getcwd(void) {
     return (char *)"";
 }
 
+void __cx_exe_path(CxString *result) {
+    constexpr size_t kMaxPath = 1u << 20;
+#ifdef _WIN32
+    std::vector<char> buf(MAX_PATH);
+    while (buf.size() <= kMaxPath) {
+        DWORD n = GetModuleFileNameA(NULL, buf.data(), (DWORD)buf.size());
+        if (n == 0) break;
+        if (n < buf.size()) {
+            cx_string_from_chars(buf.data(), (uint32_t)n, result);
+            return;
+        }
+        buf.resize(buf.size() * 2);
+    }
+#elif defined(__APPLE__)
+    uint32_t size = 4096;
+    std::vector<char> buf(size);
+    if (_NSGetExecutablePath(buf.data(), &size) != 0) {
+        buf.resize(size);
+        if (_NSGetExecutablePath(buf.data(), &size) != 0) {
+            cx_string_from_chars("", 0, result);
+            return;
+        }
+    }
+    cx_string_from_chars(buf.data(), (uint32_t)strlen(buf.data()), result);
+    return;
+#else
+    std::vector<char> buf(4096);
+    while (buf.size() <= kMaxPath) {
+        ssize_t n = readlink("/proc/self/exe", buf.data(), buf.size());
+        if (n < 0) break;
+        if ((size_t)n < buf.size()) {
+            cx_string_from_chars(buf.data(), (uint32_t)n, result);
+            return;
+        }
+        buf.resize(buf.size() * 2);
+    }
+#endif
+    cx_string_from_chars("", 0, result);
+}
+
 void __cx_system(const char *command, CxCommandResult *result) {
     run_child_command(
         [command]() {

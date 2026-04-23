@@ -229,6 +229,7 @@ CHI_RT_EXPORT const char *__cx_default_chi_home(void);
 CHI_RT_EXPORT const char *__cx_getenv(const char *key);
 CHI_RT_EXPORT void __cx_setenv(const char *key, const char *value);
 CHI_RT_EXPORT char *__cx_getcwd(void);
+CHI_RT_EXPORT void __cx_exe_path(CxString *result);
 CHI_RT_EXPORT void __cx_system(const char *command, CxCommandResult *result);
 CHI_RT_EXPORT void __cx_command(void *args, CxCommandResult *result);
 CHI_RT_EXPORT int32_t __cx_argc(void);
