@@ -28,6 +28,7 @@ extern "C" {
     unsafe func cx_set_panic_location(file: *string, line: uint32, col: uint32);
     unsafe func cx_clear_panic_location();
     unsafe func cx_throw(type_info: *void, data_ptr: *void, vtable_ptr: *void, type_id: uint32);
+    unsafe func cx_dispose_exception(thrown_ptr: *void);
     unsafe func cx_destructor_enter();
     unsafe func cx_destructor_leave();
     func cx_get_error_trace(result: *string);
@@ -119,13 +120,13 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
 
     func ref() &T {
         unsafe {
-            return this.ptr;
+            return this.ptr as &T;
         }
     }
 
     mut func mut() &mut T {
         unsafe {
-            return this.ptr;
+            return this.ptr as &mut T;
         }
     }
 
@@ -151,7 +152,7 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
     impl ops.Deref<T> {
         func deref() &T {
             unsafe {
-                return this.ptr;
+                return this.ptr as &T;
             }
         }
     }
@@ -159,7 +160,7 @@ export struct Shared<T: ops.Unsized + ops.NoCopy> {
     impl ops.DerefMut<T> {
         mut func deref_mut() &mut T {
             unsafe {
-                return this.ptr;
+                return this.ptr as &mut T;
             }
         }
     }
@@ -196,13 +197,13 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
 
     func ref() &T {
         unsafe {
-            return this.ptr;
+            return this.ptr as &T;
         }
     }
 
     mut func mut() &mut T {
         unsafe {
-            return this.ptr;
+            return this.ptr as &mut T;
         }
     }
 
@@ -223,7 +224,7 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
     impl ops.Deref<T> {
         func deref() &T {
             unsafe {
-                return this.ptr;
+                return this.ptr as &T;
             }
         }
     }
@@ -231,7 +232,7 @@ export struct Box<T: ops.Unsized + ops.NoCopy> {
     impl ops.DerefMut<T> {
         mut func deref_mut() &mut T {
             unsafe {
-                return this.ptr;
+                return this.ptr as &mut T;
             }
         }
     }
@@ -464,8 +465,8 @@ export struct Array<T> {
         }
     }
 
-    func raw_data() &T {
-        return this.data;
+    unsafe func raw_data() &T {
+        return this.data as &T;
     }
 
     func filter(predicate: func (value: T) bool) Array<T> {

@@ -137,6 +137,12 @@ struct CliApp {
             }
         }
 
+        if let exe = os.exe_path() {
+            if let candidate = this.find_in_dir(filepath.dir(exe), "chic") {
+                return candidate;
+            }
+        }
+
         if let chi_root_dir = this.chi_root_dir {
             if let candidate = this.find_in_dir(filepath.join(chi_root_dir, "bin"), "chic") {
                 return candidate;

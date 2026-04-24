@@ -347,7 +347,7 @@ func test_multiple_bare() {
 
 func test_timeout() {
     println("=== timeout ===");
-    time.timeout(10, func () {
+    time.timeout(1000, func () {
         println("timeout fired");
     });
     println("scheduled");
@@ -355,7 +355,7 @@ func test_timeout() {
 
 func test_sleep() {
     println("=== sleep ===");
-    time.sleep(10).then(func (u) {
+    time.sleep(1000).then(func (u) {
         println("sleep resolved");
     });
     println("scheduled");
@@ -364,7 +364,7 @@ func test_sleep() {
 func test_sleep_capture() {
     println("=== sleep capture ===");
     var counter = 42;
-    time.sleep(10).then(func [counter] (u) {
+    time.sleep(1000).then(func [counter] (u) {
         printf("captured: {}\n", counter);
     });
     counter = 999;

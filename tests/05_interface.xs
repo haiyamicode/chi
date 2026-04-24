@@ -137,16 +137,16 @@ func test_heap_and_delete() {
     println("=== heap + delete ===");
     var c = new Circle{radius: 5};
     var r = new Rect{w: 3, h: 4};
-    var s: &Shape = c;
+    var s: &Shape = c as &Shape;
     printf("{}: area={}\n", s.name(), s.area());
-    s = r;
+    s = r as &Shape;
     printf("{}: area={}\n", s.name(), s.area());
     unsafe {
         delete c;
         delete r;
     }
     var d = new Circle{radius: 9};
-    var si: &Shape = d;
+    var si: &Shape = d as &Shape;
     printf("{}: area={}\n", si.name(), si.area());
     unsafe {
         delete d;

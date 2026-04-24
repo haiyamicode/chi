@@ -15,6 +15,7 @@ extern "C" {
     unsafe func __cx_setenv(key: *byte, value: *byte);
     unsafe func __cx_exit(code: int);
     unsafe func __cx_getcwd() *byte;
+    unsafe func __cx_exe_path(result: *string);
     unsafe func __cx_system(command: *byte, result: *CommandResult);
     unsafe func __cx_command(args: *void, result: *CommandResult);
     unsafe func __cx_platform_tags(result: *void);
@@ -51,6 +52,14 @@ export func cwd() string {
         var result = __cx_getcwd();
         return string.from_raw(result, __cx_strlen(result));
     }
+}
+
+export func exe_path() ?string {
+    var result: string = "";
+    unsafe {
+        __cx_exe_path(&result);
+    }
+    return result.is_empty() ? null : result;
 }
 
 export func system(command: string) CommandResult {

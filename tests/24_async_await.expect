@@ -170,14 +170,17 @@ path 0001=5007
 path 0000=5042
 trace caught: trace 30
 trace lifecycle=1
+TraceAsyncError.delete(30)
 TraceAsyncValue.copy(1)
 TraceAsyncValue.copy(1)
+TraceAsyncValue.delete(1)
 TraceAsyncValue.copy(1)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.got(1)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.copy(2)
 TraceAsyncValue.copy(2)
+TraceAsyncValue.delete(2)
 TraceAsyncValue.delete(1)
 TraceAsyncValue.copy(2)
 TraceAsyncValue.delete(2)
@@ -191,6 +194,13 @@ try block err=-7
 try block typed saw: error 67
 try block typed=-17
 try block mismatch: other 77
+try block trace catch all=-301
+TraceAsyncError.delete(30)
+try block trace catch typed=-302
+TraceAsyncError.delete(30)
+try block trace typed bind saw: trace 30
+try block trace catch typed bind=-303
+TraceAsyncError.delete(30)
 try block if throw=-88
 try block if ok=155
 try block while=1055

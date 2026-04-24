@@ -142,6 +142,7 @@ CHI_RT_EXPORT void cx_set_panic_location(CxString *file, uint32_t line, uint32_t
 CHI_RT_EXPORT void cx_clear_panic_location();
 
 CHI_RT_EXPORT void cx_throw(void *type_info, void *data_ptr, void *vtable_ptr, uint32_t type_id);
+CHI_RT_EXPORT void cx_dispose_exception(void *thrown_ptr);
 CHI_RT_EXPORT void cx_destructor_enter();
 CHI_RT_EXPORT void cx_destructor_leave();
 CHI_RT_EXPORT void cx_get_error_trace(CxString *result);
@@ -228,6 +229,7 @@ CHI_RT_EXPORT const char *__cx_default_chi_home(void);
 CHI_RT_EXPORT const char *__cx_getenv(const char *key);
 CHI_RT_EXPORT void __cx_setenv(const char *key, const char *value);
 CHI_RT_EXPORT char *__cx_getcwd(void);
+CHI_RT_EXPORT void __cx_exe_path(CxString *result);
 CHI_RT_EXPORT void __cx_system(const char *command, CxCommandResult *result);
 CHI_RT_EXPORT void __cx_command(void *args, CxCommandResult *result);
 CHI_RT_EXPORT int32_t __cx_argc(void);

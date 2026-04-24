@@ -438,6 +438,44 @@ static bool is_safe_int_conversion(ChiType *from, ChiType *to) {
     return false;
 }
 
+// Ref-kind compatibility for pointer-like → pointer-like assignments where the
+// element types are already known to match (same type, or a widening like
+// &Concrete → &Interface). Covers Pointer/Reference/MutRef/MoveRef.
+//
+// Rules:
+// - ref → *T is always ok: it's a widening cast that discards borrow/ownership
+//   metadata into a raw pointer, no new capability created.
+// - *T → ref requires an explicit cast; the `as` cast then goes through the
+//   CastExpr resolver, which enforces the surrounding `unsafe` block.
+// - &move T → &T / &mut T requires an explicit cast: an owning reference can't
+//   silently become a borrow; the cast makes the borrow creation visible.
+// - & → &mut and (&/&mut) → &move are always rejected (can't invent mutability
+//   or ownership).
+static bool is_ref_kind_assignable(TypeKind from_kind, ChiType *to_type,
+                                   bool is_explicit) {
+    auto to_kind = to_type->kind;
+    if (to_kind == TypeKind::Pointer) {
+        return true;
+    }
+    if (from_kind == TypeKind::Pointer) {
+        return is_explicit;
+    }
+    if (from_kind == TypeKind::MoveRef) {
+        return to_kind == TypeKind::MoveRef ||
+               (is_explicit && to_type->is_borrow_reference());
+    }
+    if (to_kind == TypeKind::MoveRef) {
+        return false;
+    }
+    if (from_kind == TypeKind::MutRef && to_kind == TypeKind::Reference) {
+        return true;
+    }
+    if (from_kind == TypeKind::Reference && to_kind == TypeKind::MutRef) {
+        return false;
+    }
+    return from_kind == to_kind;
+}
+
 bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit) {
     if (!from_type || !to_type) {
         return false;
@@ -501,37 +539,7 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                 bool elem_same = is_same_type(from_elem, to_elem);
 
                 if (elem_same) {
-                    // Pointer <-> Reference-like conversions are allowed
-                    if (from_type->kind == TypeKind::Pointer ||
-                        to_type->kind == TypeKind::Pointer) {
-                        return true;
-                    }
-                    // MoveRef only assigns implicitly to MoveRef. Borrowing from an owner
-                    // requires either a managed/unsafe assignment context or an explicit cast.
-                    if (from_type->kind == TypeKind::MoveRef) {
-                        return to_type->kind == TypeKind::MoveRef ||
-                               (is_explicit && to_type->is_borrow_reference());
-                    }
-                    // MutRef -> Ref is allowed.
-                    if (from_type->kind == TypeKind::MutRef &&
-                        to_type->kind == TypeKind::Reference) {
-                        return true;
-                    }
-                    // Ref -> MutRef is NOT allowed.
-                    if (from_type->kind == TypeKind::Reference &&
-                        to_type->kind == TypeKind::MutRef) {
-                        return false;
-                    }
-                    // Ref/MutRef -> MoveRef is NOT allowed.
-                    if (to_type->kind == TypeKind::MoveRef &&
-                        (from_type->kind == TypeKind::Reference ||
-                         from_type->kind == TypeKind::MutRef)) {
-                        return false;
-                    }
-                    // Same kind is allowed
-                    if (from_type->kind == to_type->kind) {
-                        return true;
-                    }
+                    return is_ref_kind_assignable(from_type->kind, to_type, is_explicit);
                 }
                 // Allow void* conversions
                 else if (to_type->kind == TypeKind::Pointer && to_elem->kind == TypeKind::Void) {
@@ -561,7 +569,9 @@ bool Resolver::can_assign(ChiType *from_type, ChiType *to_type, bool is_explicit
                     from_elem = resolve_subtype(from_elem);
                 if (from_elem && from_elem->kind == TypeKind::Struct &&
                     from_elem->data.struct_.kind == ContainerKind::Struct) {
-                    if (struct_satisfies_interface(from_elem, to_elem)) return true;
+                    if (struct_satisfies_interface(from_elem, to_elem)) {
+                        return is_ref_kind_assignable(from_type->kind, to_type, is_explicit);
+                    }
                 }
             }
         }
@@ -7742,6 +7752,20 @@ bool Resolver::type_needs_destruction(ChiType *type) {
         return type_needs_destruction(type->data.fixed_array.elem);
     }
 
+    // Array owns a heap buffer — always needs destruction regardless of elem type
+    if (type->kind == TypeKind::Array) {
+        return true;
+    }
+
+    // Tuple needs destruction if any element type needs destruction
+    if (type->kind == TypeKind::Tuple) {
+        for (auto elem : type->data.tuple.elements) {
+            if (type_needs_destruction(elem))
+                return true;
+        }
+        return false;
+    }
+
 
 
     // &move T owns the pointee — RAII auto-destroy + free at scope exit
@@ -10108,13 +10132,37 @@ ast::Node *Resolver::get_dummy_var(const string &name, ast::Node *expr) {
 ast::Node *Resolver::ensure_temp_owner(ast::Node *expr, ChiType *expr_type, ResolveScope &scope,
                                        bool force_addressable) {
     if (!force_addressable) {
-        // Whitelist: only node types that can produce a non-addressable temporary value
+        // Whitelist: only these node kinds have compile paths that write their
+        // result into resolved_outlet. Non-expression nodes (statements, decls)
+        // fall through to the default and are rejected. Value-producing
+        // expressions whose codegen ignores the outlet (assignment BinOpExpr,
+        // CastExpr, UnwrapExpr, etc.) are also rejected so we don't allocate
+        // an uninitialized temp and crash on block-exit destruction.
         switch (expr->type) {
         case NodeType::FnCallExpr:
         case NodeType::ConstructExpr:
         case NodeType::IfExpr:
         case NodeType::SwitchExpr:
         case NodeType::Block:
+        case NodeType::ParenExpr:
+        case NodeType::TupleExpr:
+            break;
+        case NodeType::BinOpExpr:
+            // Operator method dispatch is a function call producing a fresh
+            // temp. Plain and compound assignments write to the LHS.
+            if (!expr->data.bin_op_expr.resolved_call ||
+                is_assignment_op(expr->data.bin_op_expr.op_type))
+                return nullptr;
+            break;
+        case NodeType::UnaryOpExpr:
+            if (!expr->data.unary_op_expr.resolved_call)
+                return nullptr;
+            break;
+        case NodeType::TryExpr:
+            // Catch-block mode may leave the temp uninitialized when the catch
+            // body has no trailing value expression.
+            if (expr->data.try_expr.catch_block)
+                return nullptr;
             break;
         default:
             return nullptr;

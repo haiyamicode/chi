@@ -1163,6 +1163,40 @@ async func try_block_await_typed_mismatch() Promise<int> {
     return -2;
 }
 
+async func try_block_trace_catch_all() Promise<int> {
+    var result = 0;
+    try {
+        var v = await trace_async_throw_after_delay();
+        result = v;
+    } catch {
+        result = -301;
+    };
+    return result;
+}
+
+async func try_block_trace_catch_typed() Promise<int> {
+    var result = 0;
+    try {
+        var v = await trace_async_throw_after_delay();
+        result = v;
+    } catch TraceAsyncError {
+        result = -302;
+    };
+    return result;
+}
+
+async func try_block_trace_catch_typed_bind() Promise<int> {
+    var result = 0;
+    try {
+        var v = await trace_async_throw_after_delay();
+        result = v;
+    } catch TraceAsyncError as err {
+        printf("try block trace typed bind saw: {}\n", err.message());
+        result = -303;
+    };
+    return result;
+}
+
 async func try_block_await_if_throw() Promise<int> {
     var result = 0;
     try {
@@ -1339,15 +1373,16 @@ struct AsyncRect {
     impl AsyncShape {}
 }
 
-async func async_make_shape(flag: bool) Promise<&AsyncShape> {
+async func async_make_shape(flag: bool) Promise<Shared<AsyncShape>> {
     if flag {
-        return new AsyncCircle{radius: 7};
+        return Shared<AsyncShape>{new AsyncCircle{radius: 7}};
     }
-    return new AsyncRect{w: 3, h: 4};
+    return Shared<AsyncShape>{new AsyncRect{w: 3, h: 4}};
 }
 
 async func type_switch_stmt_await(flag: bool) Promise<int> {
-    var s = await async_make_shape(flag);
+    var shape = await async_make_shape(flag);
+    var s = shape.ref();
     switch s.(type) {
         &AsyncCircle => {
             return await double_it(s.radius + 1);
@@ -1362,7 +1397,8 @@ async func type_switch_stmt_await(flag: bool) Promise<int> {
 }
 
 async func type_switch_expr_await(flag: bool) Promise<int> {
-    var s = await async_make_shape(flag);
+    var shape = await async_make_shape(flag);
+    var s = shape.ref();
     return switch s.(type) {
         &AsyncCircle => await double_it(s.radius + 1),
         &AsyncRect => await double_it(s.w + s.h + 2),
@@ -1371,7 +1407,8 @@ async func type_switch_expr_await(flag: bool) Promise<int> {
 }
 
 async func type_switch_try_await(flag: bool) Promise<int> {
-    var s = await async_make_shape(flag);
+    var shape = await async_make_shape(flag);
+    var s = shape.ref();
     switch s.(type) {
         &AsyncCircle => {
             return s.radius + try await settle_resolves_after_delay() catch {
@@ -2017,6 +2054,9 @@ async func run_async_tail() Promise {
             return -1;
         }
     );
+    printf("try block trace catch all={}\n", await try_block_trace_catch_all());
+    printf("try block trace catch typed={}\n", await try_block_trace_catch_typed());
+    printf("try block trace catch typed bind={}\n", await try_block_trace_catch_typed_bind());
     printf("try block if throw={}\n", await try_block_await_if_throw());
     printf("try block if ok={}\n", await try_block_await_if_ok());
     printf("try block while={}\n", await try_block_await_while());

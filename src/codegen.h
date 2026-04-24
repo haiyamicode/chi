@@ -493,6 +493,9 @@ class Compiler {
     Function *generate_any_copier(ChiType *type);
     Function *generate_destructor_optional(ChiType *type, ChiType *resolved_type);
     Function *generate_destructor_enum(ChiType *type, ChiType *resolved_type);
+    Function *generate_destructor_fixed_array(ChiType *type, ChiType *resolved_type);
+    Function *generate_destructor_tuple(ChiType *type, ChiType *resolved_type);
+    Function *generate_destructor_struct(ChiType *type, ChiType *resolved_type);
     Function *generate_copier_enum(ChiType *type);
     Function *generate_copier_fixed_array(ChiType *type);
     Function *generate_destructor_continuation(llvm::StructType *capture_struct_type,
@@ -538,6 +541,11 @@ class Compiler {
 
     // Set the drop flag for a node (no-op if no flag registered).
     void set_drop_flag_alive(ast::Node *node, bool alive);
+
+    // Mark a resolved_outlet slot as alive after its init completes.
+    // Handles both scope-local drop flags and async frame alive flags so
+    // cleanup (block cleanup or frame destructor) will destroy the value.
+    void mark_outlet_alive(Function *fn, ast::Node *outlet);
 
     llvm::Value *compile_comparator(Function *fn, ast::Node *expr, ChiType *type = nullptr);
 
@@ -665,7 +673,7 @@ class Compiler {
                                            ChiType *to_type);
 
     llvm::Value *compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
-                                    ChiType *to_type);
+                                    ChiType *to_type, bool owns_value = false);
 
     llvm::Value *compile_constant_value(Function *fn, const ConstantValue &value, ChiType *type,
                                         llvm::Type *llvm_type = nullptr);
@@ -708,7 +716,8 @@ class Compiler {
     llvm::Value *generate_lambda_proxy_function(Function *fn, llvm::Value *original_fn_ptr,
                                                 ChiType *lambda_type, NodeList *captures);
     llvm::Value *compile_void_to_unit_lambda_wrapper(Function *fn, llvm::Value *lambda_value,
-                                                     ChiType *from_type, ChiType *to_type);
+                                                     ChiType *from_type, ChiType *to_type,
+                                                     bool owns_value = false);
 
     // Variant lookup helpers
     std::optional<TypeId> resolve_variant_type_id(Function *fn, ChiType *type);
@@ -825,6 +834,12 @@ class Compiler {
     llvm::Value *extract_interface_data_ptr(llvm::Value *fat_ptr);
     llvm::Value *extract_interface_vtable_ptr(llvm::Value *fat_ptr);
     void emit_cleanup_owners(Function *fn);
+    llvm::Value *register_cleanup_owner(Function *fn, llvm::Value *owned_ptr,
+                                        ChiType *concrete_type, const std::string &active_name);
+    llvm::Value *register_reusable_cleanup_slot(Function *fn, llvm::Value *slot_ptr,
+                                                ChiType *concrete_type,
+                                                const std::string &active_name);
+    llvm::BasicBlock *emit_invoke_unwind_landing(Function *fn);
     llvm::Value *compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
                                              llvm::Value *dest = nullptr);
 

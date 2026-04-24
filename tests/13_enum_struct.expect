@@ -89,6 +89,40 @@ bool
 bool
 === Test: Switch nested destructure ===
 join:txt:lhs:rhs:tail
+=== Test: Switch nested destructure (traced) ===
+Traced(1) created
+Traced(2) created
+Traced(3) created
+Traced(1) copied
+Traced(2) copied
+Traced(3) copied
+Traced(1) copied
+Traced(1) copied
+Traced(1) destroyed
+Traced(2) copied
+Traced(2) copied
+Traced(2) destroyed
+Traced(3) copied
+Traced(3) copied
+Traced(3) destroyed
+Traced(1) copied
+Traced(2) copied
+Traced(3) copied
+first.id=1, rest[0].id=2, rest[1].id=3
+Traced(1) destroyed
+Traced(2) destroyed
+Traced(3) destroyed
+Traced(2) destroyed
+Traced(3) destroyed
+Traced(1) destroyed
+first_id=1
+--- scope exit ---
+Traced(1) destroyed
+Traced(2) destroyed
+Traced(3) destroyed
+Traced(3) destroyed
+Traced(2) destroyed
+Traced(1) destroyed
 === Test: Enum base struct lifecycle ===
 -- create --
 Traced(1) created

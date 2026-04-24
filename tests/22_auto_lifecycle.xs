@@ -421,6 +421,53 @@ func early_return_before_temp(fast: bool) {
     consume_tracked(make_tracked("late-temp"));
 }
 
+func test_paren_temp_cleanup() {
+    println("=== Test 10b: ParenExpr temp cleanup ===");
+
+    println("--- orphaned (fn call) ---");
+    (make_tracked("paren-orphan"));
+    println("after orphaned (make())");
+
+    println("--- (fn call) as arg ---");
+    consume_tracked((make_tracked("paren-arg")));
+    println("after consume((make()))");
+
+    println("--- nested ((fn call)) ---");
+    consume_tracked((((make_tracked("paren-nested")))));
+    println("after consume(((make())))");
+
+    println("--- (if expr) as arg ---");
+    consume_tracked((true ? make_tracked("paren-if-t") : make_tracked("paren-if-f")));
+    println("after consume((if...))");
+}
+
+func consume_tuple(t: Tuple<int, TrackedVar>) {}
+
+func make_tuple_traced(name: string) Tuple<int, TrackedVar> {
+    return (1, make_tracked(name));
+}
+
+func test_tuple_temp_cleanup() {
+    println("=== Test 10c: TupleExpr temp cleanup ===");
+
+    println("--- orphaned tuple with destructible element ---");
+    (1, make_tracked("tuple-orphan"));
+    println("after orphaned tuple");
+
+    println("--- tuple as arg ---");
+    consume_tuple((2, make_tracked("tuple-arg")));
+    println("after consume(tuple)");
+
+    println("--- nested orphan tuple ---");
+    (1, (2, make_tracked("tuple-nested")));
+    println("after nested orphan");
+
+    println("--- returned tuple bound to var ---");
+    let t = make_tuple_traced("tuple-return");
+    printf("  t.1.name='{}'\n", t.1.name);
+    println("after return binding");
+}
+
 func test_expr_contexts() {
     println("=== Test 11: Temps in expression-position contexts ===");
 
@@ -860,6 +907,122 @@ func test_maybe_moved_for_bind() {
     println("--- scope exit ---");
 }
 
+struct ValueBox<T> {
+    value: T;
+
+    func transform<U>(f: func (value: T) U) ValueBox<U> {
+        return {value: f(this.value)};
+    }
+}
+
+func test_lambda_call_in_struct_literal() {
+    println("=== Test 22: lambda call result in struct literal does not leak ===");
+    var box = ValueBox<int>{value: 7};
+    var result = box.transform(func (v: int) TrackedVal {
+        return {900 + v};
+    });
+    printf("  result.value.id={}\n", result.value.id);
+    println("--- scope exit ---");
+}
+
+func test_then_lambda_capture_destroyed() {
+    println("=== Test 23: Promise.then lambda captures are destroyed ===");
+    var p = Promise<int>{};
+    p.then(func (val: int) TrackedVal {
+        return {900};
+    });
+    p.resolve(42);
+    println("--- scope exit ---");
+}
+
+func count_trackedvals(items: Array<TrackedVal>) Promise<int> {
+    var rp = Promise<int>{};
+    rp.resolve(items.length);
+    return rp;
+}
+
+async func async_inline_trackedval_array() Promise {
+    var t = TrackedVal{850};
+    let _ = await count_trackedvals([t]);
+}
+
+func test_inline_array_in_async_awaited() {
+    println("=== Test 24: inline array in async fn with await destroys elements ===");
+    async_inline_trackedval_array();
+    println("--- scope exit ---");
+}
+
+// --- Outlet-producing expression regressions in async (each must avoid both
+// leaks and double-frees; the async frame destructor's alive-flag protocol is
+// how mark_outlet_alive / async_frame_alive_ptr_for_addr keep the lifetimes
+// correct). ---
+
+func consume_tv(v: TrackedVal) Promise<int> {
+    var rp = Promise<int>{};
+    rp.resolve(v.id);
+    return rp;
+}
+
+func consume_tv_pair(t: Tuple<TrackedVal, TrackedVal>) Promise<int> {
+    var rp = Promise<int>{};
+    rp.resolve(t.0.id + t.1.id);
+    return rp;
+}
+
+async func async_construct_expr_await() Promise {
+    let _ = await consume_tv(TrackedVal{851});
+}
+
+async func async_if_expr_await(flag: bool) Promise {
+    let _ = await consume_tv(flag ? TrackedVal{861} : TrackedVal{862});
+}
+
+async func async_switch_expr_await(k: int) Promise {
+    let _ = await consume_tv(switch k {
+        1 => TrackedVal{871},
+        2 => TrackedVal{872},
+        else => TrackedVal{873}
+    });
+}
+
+async func async_binop_add_await() Promise {
+    var a = TrackedVal{880};
+    var b = TrackedVal{881};
+    let _ = await consume_tv(a + b);
+}
+
+async func async_coalesce_await() Promise {
+    var empty: ?TrackedVal = null;
+    let _ = await consume_tv(empty ?? TrackedVal{890});
+}
+
+async func async_tuple_expr_await() Promise {
+    let _ = await consume_tv_pair((TrackedVal{893}, TrackedVal{894}));
+}
+
+async func async_paren_expr_await() Promise {
+    let _ = await consume_tv((TrackedVal{897}));
+}
+
+func test_outlet_exprs_in_async_awaited() {
+    println("=== Test 25: outlet-producing exprs in async awaited args ===");
+    println("--- construct ---");
+    async_construct_expr_await();
+    println("--- if ---");
+    async_if_expr_await(true);
+    println("--- switch ---");
+    async_switch_expr_await(1);
+    println("--- binop add ---");
+    async_binop_add_await();
+    println("--- coalesce ---");
+    async_coalesce_await();
+    println("--- tuple ---");
+    async_tuple_expr_await();
+    println("--- paren ---");
+    async_paren_expr_await();
+    println("--- scope exit ---");
+}
+
 func main() {
     test_auto_destroy_no_custom_delete();
     test_new_initializes_defaults();
@@ -871,6 +1034,8 @@ func main() {
     test_both_lifecycles();
     test_multiple_vars();
     test_temp_cleanup();
+    test_paren_temp_cleanup();
+    test_tuple_temp_cleanup();
     test_expr_contexts();
     test_fn_arg_copy_semantics();
     test_method_param_cleanup();
@@ -882,5 +1047,9 @@ func main() {
     test_construct_field_initializer_without_default();
     test_maybe_moved_param();
     test_maybe_moved_for_bind();
+    test_lambda_call_in_struct_literal();
+    test_then_lambda_capture_destroyed();
+    test_inline_array_in_async_awaited();
+    test_outlet_exprs_in_async_awaited();
     println("All tests completed!");
 }

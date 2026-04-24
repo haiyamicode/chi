@@ -1532,12 +1532,24 @@ void cx_runtime_stop() {
 
 extern "C" {
 extern _Unwind_Reason_Code __gxx_personality_v0(...);
+extern void *__cxa_begin_catch(void *) noexcept;
+extern void __cxa_end_catch();
 }
 
 _Unwind_Reason_Code cx_personality(int version, _Unwind_Action actions, uint64_t exceptionClass,
                                    struct _Unwind_Exception *exceptionObject,
                                    struct _Unwind_Context *context) {
     return __gxx_personality_v0(version, actions, exceptionClass, exceptionObject, context);
+}
+
+// Releases the C++ exception object allocated by __cxa_allocate_exception in
+// cx_throw. Chi captures all error state into TLS before throwing, so once the
+// landing pad has branched on the thrown pointer we can immediately hand the
+// exception back to the runtime. Must only be called on paths that don't
+// resume unwinding — a resumed exception still needs its object alive.
+void cx_dispose_exception(void *thrown_ptr) {
+    __cxa_begin_catch(thrown_ptr);
+    __cxa_end_catch();
 }
 
 void cx_thread_spawn(void *callback_ptr) {
@@ -1940,6 +1952,46 @@ char *__cx_getcwd(void) {
     static char buf[4096];
     if (getcwd(buf, sizeof(buf))) return buf;
     return (char *)"";
+}
+
+void __cx_exe_path(CxString *result) {
+    constexpr size_t kMaxPath = 1u << 20;
+#ifdef _WIN32
+    std::vector<char> buf(MAX_PATH);
+    while (buf.size() <= kMaxPath) {
+        DWORD n = GetModuleFileNameA(NULL, buf.data(), (DWORD)buf.size());
+        if (n == 0) break;
+        if (n < buf.size()) {
+            cx_string_from_chars(buf.data(), (uint32_t)n, result);
+            return;
+        }
+        buf.resize(buf.size() * 2);
+    }
+#elif defined(__APPLE__)
+    uint32_t size = 4096;
+    std::vector<char> buf(size);
+    if (_NSGetExecutablePath(buf.data(), &size) != 0) {
+        buf.resize(size);
+        if (_NSGetExecutablePath(buf.data(), &size) != 0) {
+            cx_string_from_chars("", 0, result);
+            return;
+        }
+    }
+    cx_string_from_chars(buf.data(), (uint32_t)strlen(buf.data()), result);
+    return;
+#else
+    std::vector<char> buf(4096);
+    while (buf.size() <= kMaxPath) {
+        ssize_t n = readlink("/proc/self/exe", buf.data(), buf.size());
+        if (n < 0) break;
+        if ((size_t)n < buf.size()) {
+            cx_string_from_chars(buf.data(), (uint32_t)n, result);
+            return;
+        }
+        buf.resize(buf.size() * 2);
+    }
+#endif
+    cx_string_from_chars("", 0, result);
 }
 
 void __cx_system(const char *command, CxCommandResult *result) {

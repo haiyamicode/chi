@@ -7,6 +7,16 @@ project(chi LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 14)
 
+# Default install prefix to $CHI_HOME, or $HOME/.chi if unset. Override with
+# -DCMAKE_INSTALL_PREFIX=... at configure time.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    if(DEFINED ENV{CHI_HOME})
+        set(CMAKE_INSTALL_PREFIX "$ENV{CHI_HOME}" CACHE PATH "Install prefix" FORCE)
+    else()
+        set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.chi" CACHE PATH "Install prefix" FORCE)
+    endif()
+endif()
+
 # Bundling libraries
 function(bundle_static_library tgt_name bundled_tgt_name)
   list(APPEND static_libs ${tgt_name})
@@ -74,7 +84,7 @@ function(bundle_static_library tgt_name bundled_tgt_name)
   set(bundle_target_name ${bundled_tgt_name}_bundling_target)
   add_custom_target(${bundle_target_name} ALL DEPENDS ${bundled_tgt_full_name})
   add_dependencies(${bundle_target_name} ${tgt_name})
-  install(FILES ${bundled_tgt_full_name} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
+  install(FILES ${bundled_tgt_full_name} DESTINATION lib)
 
   add_library(${bundled_tgt_name} STATIC IMPORTED)
 

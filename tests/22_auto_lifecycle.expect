@@ -96,6 +96,41 @@ after early(true)
 after early(false)
   TrackedVar.delete('orphan-construct')
   TrackedVar.delete('orphan-fn')
+=== Test 10b: ParenExpr temp cleanup ===
+--- orphaned (fn call) ---
+  TrackedVar.new('paren-orphan')
+after orphaned (make())
+--- (fn call) as arg ---
+  TrackedVar.new('paren-arg')
+  TrackedVar.delete('paren-arg')
+after consume((make()))
+--- nested ((fn call)) ---
+  TrackedVar.new('paren-nested')
+  TrackedVar.delete('paren-nested')
+after consume(((make())))
+--- (if expr) as arg ---
+  TrackedVar.new('paren-if-t')
+  TrackedVar.delete('paren-if-t')
+after consume((if...))
+  TrackedVar.delete('paren-orphan')
+=== Test 10c: TupleExpr temp cleanup ===
+--- orphaned tuple with destructible element ---
+  TrackedVar.new('tuple-orphan')
+after orphaned tuple
+--- tuple as arg ---
+  TrackedVar.new('tuple-arg')
+  TrackedVar.delete('tuple-arg')
+after consume(tuple)
+--- nested orphan tuple ---
+  TrackedVar.new('tuple-nested')
+after nested orphan
+--- returned tuple bound to var ---
+  TrackedVar.new('tuple-return')
+  t.1.name='tuple-return'
+after return binding
+  TrackedVar.delete('tuple-return')
+  TrackedVar.delete('tuple-nested')
+  TrackedVar.delete('tuple-orphan')
 === Test 11: Temps in expression-position contexts ===
 --- if condition: DotExpr base on temp ---
   TrackedVar.new('if-cond')
@@ -238,6 +273,7 @@ after unary
   TrackedVal.delete(40)
   TrackedVal.delete(6)
   TrackedVal.delete(3)
+  TrackedVal.delete(3)
   TrackedVal.delete(2)
   TrackedVal.delete(1)
   TrackedVal.delete(50)
@@ -313,6 +349,8 @@ after unary
   TrackedVal.delete(12)
   TrackedVal.delete(13)
   TrackedVal.delete(12)
+  TrackedVal.delete(10)
+  TrackedVal.delete(11)
   TrackedVal.delete(10)
   TrackedVal.delete(8)
   TrackedVal.delete(9)
@@ -466,4 +504,59 @@ after unary
   TrackedVal.delete(603)
   TrackedVal.delete(602)
   TrackedVal.delete(601)
+=== Test 22: lambda call result in struct literal does not leak ===
+  TrackedVal.new(907)
+  TrackedVal.copy(907)
+  TrackedVal.delete(907)
+  result.value.id=907
+--- scope exit ---
+  TrackedVal.delete(907)
+=== Test 23: Promise.then lambda captures are destroyed ===
+  TrackedVal.new(900)
+--- scope exit ---
+  TrackedVal.delete(900)
+=== Test 24: inline array in async fn with await destroys elements ===
+  TrackedVal.new(850)
+  TrackedVal.copy(850)
+  TrackedVal.delete(850)
+  TrackedVal.copy(850)
+  TrackedVal.copy(850)
+  TrackedVal.delete(850)
+  TrackedVal.delete(850)
+  TrackedVal.delete(850)
+--- scope exit ---
+=== Test 25: outlet-producing exprs in async awaited args ===
+--- construct ---
+  TrackedVal.new(851)
+  TrackedVal.delete(851)
+--- if ---
+  TrackedVal.new(861)
+  TrackedVal.delete(861)
+--- switch ---
+  TrackedVal.new(871)
+  TrackedVal.delete(871)
+--- binop add ---
+  TrackedVal.new(880)
+  TrackedVal.copy(880)
+  TrackedVal.delete(880)
+  TrackedVal.new(881)
+  TrackedVal.copy(881)
+  TrackedVal.delete(881)
+  TrackedVal.add(880, 881)
+  TrackedVal.new(1761)
+  TrackedVal.delete(1761)
+  TrackedVal.delete(881)
+  TrackedVal.delete(880)
+--- coalesce ---
+  TrackedVal.new(890)
+  TrackedVal.delete(890)
+--- tuple ---
+  TrackedVal.new(893)
+  TrackedVal.new(894)
+  TrackedVal.delete(894)
+  TrackedVal.delete(893)
+--- paren ---
+  TrackedVal.new(897)
+  TrackedVal.delete(897)
+--- scope exit ---
 All tests completed!

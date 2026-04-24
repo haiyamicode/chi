@@ -342,8 +342,12 @@ main() {
     info "  ${BOLD}Chi ${VERSION}${RESET}"
     info "  Platform:  ${PLATFORM}"
     info "  Location:  ${INSTALL_DIR}"
-    if [ -n "${LIBC:-}" ] && [ -n "${CHI_LIBC:-}" ]; then
-        info "  Libc:      ${LIBC} (override)"
+    if [ -n "${LIBC:-}" ]; then
+        if [ -n "${CHI_LIBC:-}" ]; then
+            info "  Libc:      ${LIBC} (override via CHI_LIBC)"
+        else
+            info "  Libc:      ${LIBC} (detected)"
+        fi
     fi
     info ""
 

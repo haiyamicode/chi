@@ -1355,9 +1355,14 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
     if (is_entry) {
         auto runtime_stop = get_system_fn("cx_runtime_stop");
         builder.CreateCall(runtime_stop->llvm_fn, {});
-    }
-    if (is_entry || return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
-        fn->use_sret()) {
+        if (fn_def.is_async() && fn->return_value &&
+            get_resolver()->type_needs_destruction(return_type)) {
+            compile_destruction_for_type(fn, fn->return_value, return_type);
+        }
+        builder.CreateRet(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx), 0));
+    } else if (return_type->kind == TypeKind::Void || return_type->kind == TypeKind::Never ||
+               fn->use_sret()) {
         builder.CreateRetVoid();
     } else {
         auto value = builder.CreateLoad(return_type_l, fn->return_value);
@@ -1590,6 +1595,30 @@ llvm::Value *Compiler::compile_arg_for_call(Function *fn, ast::Node *expr, ChiTy
         return builder.CreateLoad(compile_type(param_type), temp_ptr);
     }
 
+    // Moved arg whose source lives at an addressable location (e.g. an async
+    // frame slot via m_async_await_refs). Load bits directly and, if the
+    // source address belongs to an async frame slot, clear its alive flag so
+    // the frame destructor doesn't double-destroy the value.
+    if (expr->analysis.moved && param_type && !param_type->is_reference()) {
+        auto src_ref = compile_expr_ref(fn, expr);
+        if (src_ref.address) {
+            auto arg_value = src_ref.value;
+            if (!arg_value) {
+                arg_value = builder.CreateLoad(compile_type(src_type), src_ref.address);
+            }
+            emit_dbg_location(expr);
+            arg_value = compile_conversion(fn, arg_value, src_type, param_type, true);
+            if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, src_ref.address)) {
+                builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
+            }
+            return arg_value;
+        }
+        if (src_ref.value) {
+            emit_dbg_location(expr);
+            return compile_conversion(fn, src_ref.value, src_type, param_type, src_ref.owns_value);
+        }
+    }
+
     return compile_assignment_to_type(fn, expr, param_type);
 }
 
@@ -1645,7 +1674,7 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
                 arg_value = builder.CreateLoad(compile_type(src_type), src_ref.address);
             }
             emit_dbg_location(expr);
-            arg_value = compile_conversion(fn, arg_value, src_type, param_type);
+            arg_value = compile_conversion(fn, arg_value, src_type, param_type, true);
             if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, src_ref.address)) {
                 builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
             }
@@ -1654,7 +1683,7 @@ llvm::Value *Compiler::compile_direct_call_arg(Function *fn, ast::Node *expr, Ch
         if (src_ref.value) {
             // Rvalue move: expression already compiled, use value directly.
             emit_dbg_location(expr);
-            return compile_conversion(fn, src_ref.value, src_type, param_type);
+            return compile_conversion(fn, src_ref.value, src_type, param_type, src_ref.owns_value);
         }
     }
 
@@ -1729,7 +1758,7 @@ void Compiler::compile_ref_value_to_ptr(Function *fn, RefValue src, ChiType *src
     if (!value) {
         value = builder.CreateLoad(compile_type(src_type), src.address);
     }
-    auto *converted = compile_conversion(fn, value, src_type, dest_type);
+    auto *converted = compile_conversion(fn, value, src_type, dest_type, src.owns_value);
     builder.CreateStore(converted, dest);
 }
 
@@ -1797,6 +1826,12 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         emit_dbg_location(dbg_node);
         auto *arr_type_l = compile_type(fixed_array_type);
         auto *zero = llvm::ConstantInt::get(i32_ty, 0);
+        bool elem_needs_destruct = resolver->type_needs_destruction(elem_type);
+        llvm::Value *active_var = nullptr;
+        if (elem_needs_destruct) {
+            active_var = register_reusable_cleanup_slot(
+                fn, fixed_array_ptr, fixed_array_type, "_vararg_fixed.active");
+        }
         for (uint32_t i = 0; i < count; i++) {
             auto *idx = llvm::ConstantInt::get(i32_ty, i);
             auto *elem_ptr = builder.CreateGEP(arr_type_l, fixed_array_ptr, {zero, idx});
@@ -1804,16 +1839,8 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         }
         blob_data = builder.CreateGEP(arr_type_l, fixed_array_ptr, {zero, zero});
         length_value = length_const;
-        if (resolver->type_needs_destruction(elem_type)) {
-            auto *active_var = fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx),
-                                                "_vararg_fixed.active");
-            {
-                llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
-                tmp.SetInsertPoint(active_var->getNextNode());
-                tmp.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), active_var);
-            }
+        if (elem_needs_destruct) {
             builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
-            fn->cleanup_owner_vars.push_back({fixed_array_ptr, fixed_array_type, active_var, false});
         }
     } else {
         emit_dbg_location(dbg_node);
@@ -1880,15 +1907,7 @@ llvm::Value *Compiler::compile_variadic_span_arg(Function *fn, array<ast::Node *
         blob_data = builder.CreateLoad(compile_type(array_data_field->resolved_type), data_ptr);
         length_value = builder.CreateLoad(i32_ty, length_ptr);
 
-        auto *active_var =
-            fn->entry_alloca(llvm::Type::getInt1Ty(*m_ctx->llvm_ctx), "_vararg_array.active");
-        {
-            llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
-            tmp.SetInsertPoint(active_var->getNextNode());
-            tmp.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), active_var);
-        }
-        builder.CreateStore(llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), active_var);
-        fn->cleanup_owner_vars.push_back({array_ptr, array_type, active_var, false});
+        register_cleanup_owner(fn, array_ptr, array_type, "_vararg_array.active");
     }
 
     return build_span_value(span_type, blob_data, length_value);
@@ -2038,6 +2057,17 @@ void Compiler::compile_assignment_to_ptr(Function *fn, ast::Node *expr, llvm::Va
     effective_expr->resolved_outlet = nullptr;
 
     auto src_type = get_chitype(effective_expr);
+    // Zeroinit: bypass field-wise copy (which would cx_string_copy a zeroed
+    // string and leak a malloc(0)). Emit a direct bitwise zero-store instead.
+    if (src_type && src_type->kind == TypeKind::ZeroInit && dest_type) {
+        if (destruct_old) {
+            compile_destruction_for_type(fn, dest, dest_type);
+        }
+        m_ctx->llvm_builder->CreateStore(
+            llvm::Constant::getNullValue(compile_type(dest_type)), dest);
+        effective_expr->resolved_outlet = saved_outlet;
+        return;
+    }
     if (allow_saved_owning_conversion &&
         compile_implicit_owning_conversion_to_ptr(fn, effective_expr, dest, dest_type,
                                                   destruct_old)) {
@@ -2727,10 +2757,11 @@ llvm::Value *Compiler::compile_lambda_alloc(Function *fn, ChiType *lambda_type, 
             builder.CreateStore(src_move_flag, capture_flag_gep);
         }
 
-        // Generate destructor for CxCapture cleanup
+        // Monomorphize bstruct before generating dtor — it may still hold generic placeholders.
+        auto eval_bstruct = eval_type(bstruct);
         llvm::Value *dtor_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
-        if (get_resolver()->type_needs_destruction(bstruct)) {
-            if (auto dtor = generate_destructor(bstruct, nullptr)) {
+        if (get_resolver()->type_needs_destruction(eval_bstruct)) {
+            if (auto dtor = generate_destructor(eval_bstruct, nullptr)) {
                 dtor_ptr = builder.CreateBitCast(dtor->llvm_fn, builder.getInt8PtrTy());
             }
         }
@@ -3330,8 +3361,8 @@ AsyncLambdaValue Compiler::build_async_resume_forwarder_lambda(Function *fn,
     auto value_arg = fwd_llvm_fn->getArg(1);
     auto previous_frame_ptr = machine.frame_ptr;
     machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
-    write_async_frame_await_value(fwd_fn, machine, await_expr, RefValue::from_value(value_arg),
-                                  value_type, await_expr);
+    write_async_frame_await_value(fwd_fn, machine, await_expr,
+                                  RefValue::from_owned_value(value_arg), value_type, await_expr);
 
     auto state_ptr = get_async_frame_state_ptr(fwd_fn, machine);
     builder.CreateStore(llvm::ConstantInt::get(builder.getInt32Ty(), state_id), state_ptr);
@@ -3399,7 +3430,7 @@ AsyncLambdaValue Compiler::build_async_try_await_forwarder_lambda(Function *fn,
     if (payload_fields.size() > 0) {
         auto payload_ptr = compile_dot_access(fwd_fn, settled_var, variant_member->resolved_type,
                                               payload_fields[0]);
-        compile_copy_with_ref(fwd_fn, RefValue::from_value(value_arg), payload_ptr,
+        compile_copy_with_ref(fwd_fn, RefValue::from_owned_value(value_arg), payload_ptr,
                               payload_fields[0]->resolved_type, await_expr, true);
     }
 
@@ -3407,6 +3438,9 @@ AsyncLambdaValue Compiler::build_async_try_await_forwarder_lambda(Function *fn,
     machine.frame_ptr = builder.CreateBitCast(data_arg, machine.frame_struct_type->getPointerTo());
     write_async_frame_await_value(fwd_fn, machine, await_expr, RefValue::from_address(settled_var),
                                   settled_type, await_expr);
+    if (get_resolver()->type_needs_destruction(settled_type)) {
+        compile_destruction_for_type(fwd_fn, settled_var, settled_type);
+    }
     auto state_ptr = get_async_frame_state_ptr(fwd_fn, machine);
     builder.CreateStore(llvm::ConstantInt::get(builder.getInt32Ty(), state_id), state_ptr);
     emit_dbg_location(fn->node);
@@ -3695,6 +3729,7 @@ void Compiler::emit_async_function_return(Function *fn, AsyncStateMachine &machi
                               machine.promise_type, fn->node);
         builder.CreateBr(fn->return_label);
     } else {
+        emit_cleanup_owners(fn);
         builder.CreateRetVoid();
     }
 }
@@ -3721,6 +3756,7 @@ void Compiler::emit_async_state_transition(Function *fn, AsyncStateMachine &mach
         builder.CreateBitCast(machine.frame_ptr, llvm::PointerType::get(*m_ctx->llvm_ctx, 0));
     emit_dbg_location(fn->node);
     builder.CreateCall(machine.dispatcher_fn, {frame_data_ptr});
+    emit_cleanup_owners(fn);
     builder.CreateRetVoid();
 }
 
@@ -3757,7 +3793,11 @@ void Compiler::emit_async_suspend(Function *fn, AsyncStateMachine &machine, int 
     auto promise_ptr = fn->entry_alloca(promise_type_l, "awaited");
     if (promise_ref.address) {
         compile_copy_with_ref(fn, promise_ref, promise_ptr, promise_type, promise_expr);
-        if (promise_expr->type == ast::NodeType::FnCallExpr) {
+        // compile_copy_with_ref destroys the source when owns_value is true. When
+        // the source is a resolver-allocated outlet (owns_value false), block
+        // cleanup would normally destroy it — but emit_async_function_return
+        // branches to return_label bypassing cleanup, so destroy it inline.
+        if (!promise_ref.owns_value && promise_expr->type == ast::NodeType::FnCallExpr) {
             compile_destruction_for_type(fn, promise_ref.address, promise_type);
         }
     } else {
@@ -4640,6 +4680,12 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
             auto shared_error_ptr = state_fn->entry_alloca(shared_error_type_l, "_shared_error_slot");
             builder.CreateStore(shared_error, shared_error_ptr);
 
+            // Track ownership of the shared_error so it is released on catch-state
+            // exit paths that do not transfer the refcount to an err binding or
+            // forward it to promise.reject_shared (typed-mismatch re-throw).
+            auto *shared_error_active = register_cleanup_owner(
+                state_fn, shared_error_ptr, shared_error_type, "_shared_error_slot.active");
+
             // Type check for typed catch
             if (data.catch_expr) {
                 auto catch_type = get_resolver()->to_value_type(get_chitype(data.catch_expr));
@@ -4651,8 +4697,11 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
                 auto nomatch_b = state_fn->new_label("_catch_type_nomatch");
                 builder.CreateCondBr(type_matches, match_b, nomatch_b);
 
-                // Type doesn't match: reject promise (re-throw)
+                // Type doesn't match: reject promise (re-throw). reject_shared
+                // takes the Shared<Error> by value bitwise, so clear the active
+                // flag before the call to avoid a double release.
                 state_fn->use_label(nomatch_b);
+                builder.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_error_active);
                 emit_async_promise_reject_shared(state_fn, shared_error);
                 builder.CreateRetVoid();
 
@@ -4664,13 +4713,18 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
                 auto err_var = compile_alloc(state_fn, data.catch_err_var);
                 add_var(data.catch_err_var, err_var);
                 if (data.catch_expr) {
-                    // Typed catch: extract data ptr from Shared<Error>
+                    // Typed catch: extract data ptr from Shared<Error>. The
+                    // wrapper's refcount still needs to be released on exit —
+                    // leave shared_error_active set so cleanup_owner_vars fires.
                     auto ref = compile_shared_ref(state_fn, shared_error_ptr, shared_error_type);
                     auto raw_data = extract_interface_data_ptr(ref);
                     builder.CreateStore(raw_data, err_var);
                 } else {
-                    // Untyped catch: store Shared<Error> directly
+                    // Untyped catch: transfer the Shared<Error> into err_var
+                    // bitwise. err_var's scope exit releases it, so clear
+                    // shared_error_active to avoid a double release.
                     builder.CreateStore(shared_error, err_var);
+                    builder.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_error_active);
                 }
                 data.catch_block->data.block.implicit_vars.clear();
             }
@@ -4697,6 +4751,7 @@ void Compiler::compile_async_try_recursive(const AsyncBlockContext &ctx,
             machine.active_try_stmt = saved_try_stmt;
 
             if (!builder.GetInsertBlock()->getTerminator()) {
+                emit_cleanup_owners(state_fn);
                 builder.CreateRetVoid();
             }
         });
@@ -4963,6 +5018,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
         if (fn->return_label) {
             emit_async_function_return(fn, machine, result_promise_ptr);
         } else {
+            emit_cleanup_owners(fn);
             llvm_builder.CreateRetVoid();
         }
         return;
@@ -4992,6 +5048,7 @@ void Compiler::compile_async_block_recursive(const AsyncBlockContext &ctx, ast::
             if (fn->return_label) {
                 emit_async_function_return(fn, machine, result_promise_ptr);
             } else {
+                emit_cleanup_owners(fn);
                 builder.CreateRetVoid();
             }
             fn->pop_active_block();
@@ -5046,10 +5103,6 @@ void Compiler::compile_async_fn_body(Function *fn) {
         auto new_method = get_fn(new_method_node);
         builder.CreateCall(new_method->llvm_fn, {result_promise_ptr});
 
-        // Store as return value so the function returns this promise
-        compile_copy_with_ref(fn, RefValue::from_address(result_promise_ptr), fn->return_value,
-                              return_type, fn->node);
-
         fn->async_reject_promise_ptr = result_promise_ptr;
         fn->async_promise_type = return_type;
         compile_block(fn, fn->node, body, fn->return_label);
@@ -5085,7 +5138,10 @@ void Compiler::compile_async_fn_body(Function *fn) {
 }
 
 // Emits the common landing pad logic: extract thrown_ptr, check is_typed,
-// panic path (resume), and leaves insert point at the typed-error block.
+// panic path (resume), and leaves insert point at the typed-error block. The
+// typed-error path releases the C++ exception object via cx_dispose_exception
+// since all typed async consumers (reject promise, catch state transition)
+// consume the error from TLS and never resume unwinding.
 void Compiler::emit_async_landing_pad(Function *fn, llvm::Value *landing) {
     auto &builder = *m_ctx->llvm_builder;
 
@@ -5101,8 +5157,8 @@ void Compiler::emit_async_landing_pad(Function *fn, llvm::Value *landing) {
     fn->use_label(panic_b);
     builder.CreateResume((llvm::LandingPadInst *)landing);
 
-    // Insert point is now at the typed-error block
     fn->use_label(typed_error_b);
+    builder.CreateCall(get_system_fn("cx_dispose_exception")->llvm_fn, {thrown_ptr});
 }
 
 void Compiler::emit_async_reject_landing_pad(Function *fn, llvm::Value *landing) {
@@ -5119,6 +5175,7 @@ void Compiler::emit_async_cleanup_landing_pad(Function *fn, llvm::Function *work
     auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
     landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
     emit_async_reject_landing_pad(fn, landing);
+    emit_cleanup_owners(fn);
     builder.CreateRetVoid();
 }
 
@@ -5208,6 +5265,7 @@ void Compiler::end_async_worker_state(AsyncStateMachine &machine, AsyncWorkerCon
     auto &builder = *m_ctx->llvm_builder;
 
     if (!builder.GetInsertBlock()->getTerminator()) {
+        emit_cleanup_owners(ctx.state_fn);
         builder.CreateRetVoid();
     }
 
@@ -5332,6 +5390,57 @@ llvm::Value *Compiler::compile_interface_type_match(Function *fn, llvm::Value *f
     return builder.CreateICmpEQ(runtime_ti, case_ti, "type_matches");
 }
 
+// Allocates a stack drop flag for `owned_ptr`, initialized false at function
+// entry and set true at the current insert point, then registers the pair in
+// `fn->cleanup_owner_vars` so `emit_cleanup_owners` destroys the value on any
+// state-worker exit. Caller stores `false` into the returned flag when the
+// refcount/ownership is transferred elsewhere (avoiding double destruction).
+llvm::Value *Compiler::register_cleanup_owner(Function *fn, llvm::Value *owned_ptr,
+                                              ChiType *concrete_type,
+                                              const std::string &active_name) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto *active_var = fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), active_name);
+    {
+        llvm::IRBuilder<> tmp(llvm_ctx);
+        tmp.SetInsertPoint(llvm::cast<llvm::Instruction>(active_var)->getNextNode());
+        tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), active_var);
+    }
+    builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), active_var);
+    fn->cleanup_owner_vars.push_back({owned_ptr, concrete_type, active_var, false});
+    return active_var;
+}
+
+// For a stack slot that may be dynamically re-entered (e.g., a vararg blob
+// inside a loop), this allocates a flag init-false at entry, emits a
+// conditional destroy-and-clear at the current insert point, then registers
+// the slot for exit cleanup. Caller must store `true` into the returned flag
+// after populating the slot.
+llvm::Value *Compiler::register_reusable_cleanup_slot(Function *fn, llvm::Value *slot_ptr,
+                                                     ChiType *concrete_type,
+                                                     const std::string &active_name) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+    auto *i1_ty = llvm::Type::getInt1Ty(llvm_ctx);
+    auto *active_var = fn->entry_alloca(i1_ty, active_name);
+    {
+        llvm::IRBuilder<> tmp(llvm_ctx);
+        tmp.SetInsertPoint(llvm::cast<llvm::Instruction>(active_var)->getNextNode());
+        tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), active_var);
+    }
+    auto *alive = builder.CreateLoad(i1_ty, active_var);
+    auto *do_destroy = fn->new_label("_slot_reuse_destroy");
+    auto *after_destroy = fn->new_label("_slot_reuse_done");
+    builder.CreateCondBr(alive, do_destroy, after_destroy);
+    fn->use_label(do_destroy);
+    compile_destruction_for_type(fn, slot_ptr, concrete_type);
+    builder.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), active_var);
+    builder.CreateBr(after_destroy);
+    fn->use_label(after_destroy);
+    fn->cleanup_owner_vars.push_back({slot_ptr, concrete_type, active_var, false});
+    return active_var;
+}
+
 void Compiler::emit_cleanup_owners(Function *fn) {
     auto &builder = *m_ctx->llvm_builder;
     for (auto &owner : fn->cleanup_owner_vars) {
@@ -5366,6 +5475,48 @@ void Compiler::emit_cleanup_owners(Function *fn) {
     }
 }
 
+llvm::BasicBlock *Compiler::emit_invoke_unwind_landing(Function *fn) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto saved_bb = builder.GetInsertBlock();
+
+    if (!fn->llvm_fn->hasPersonalityFn()) {
+        fn->llvm_fn->setPersonalityFn(get_system_fn("cx_personality")->llvm_fn);
+    }
+
+    auto landing_b = fn->new_label("_inv_landing");
+    fn->use_label(landing_b);
+
+    if (fn->async_reject_promise_ptr) {
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 1);
+        landing->addClause(llvm::ConstantPointerNull::get(builder.getPtrTy()));
+        emit_async_reject_landing_pad(fn, landing);
+        emit_cleanup_owners(fn);
+        builder.CreateRetVoid();
+    } else {
+        auto landing = builder.CreateLandingPad(m_ctx->get_caught_result_type(), 0);
+        landing->setCleanup(true);
+        builder.CreateExtractValue(landing, {0});
+        builder.CreateExtractValue(landing, {1});
+        if (!fn->active_blocks.empty()) {
+            auto &unwind_flow = fn->active_blocks.back()->exit_flow;
+            for (int i = (int)fn->active_blocks.size() - 1; i >= 0; i--) {
+                compile_block_cleanup(fn, fn->active_blocks[i], nullptr, unwind_flow);
+            }
+        } else if (fn->get_def() && fn->get_def()->body) {
+            auto &body_block = fn->get_def()->body->data.block;
+            compile_block_cleanup(fn, &body_block, nullptr, body_block.exit_flow);
+        }
+        emit_cleanup_owners(fn);
+        fn->insn_noop();
+        builder.CreateResume(landing);
+    }
+
+    if (saved_bb) {
+        builder.SetInsertPoint(saved_bb);
+    }
+    return landing_b;
+}
+
 llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call_expr,
                                                    llvm::Value *dest) {
     auto &builder = *m_ctx->llvm_builder.get();
@@ -5376,10 +5527,7 @@ llvm::Value *Compiler::compile_fn_call_with_invoke(Function *fn, ast::Node *call
         // the function before the catch block runs).
         invoke.landing = fn->try_block_landing;
     } else {
-        if (!fn->cleanup_landing_label) {
-            fn->cleanup_landing_label = fn->new_label("_cleanup_landing");
-        }
-        invoke.landing = fn->cleanup_landing_label;
+        invoke.landing = emit_invoke_unwind_landing(fn);
     }
     // Don't create normal label eagerly — the invoke sites create it on-demand.
     // This avoids orphaned blocks when compile_fn_call bypasses invoke
@@ -5476,7 +5624,7 @@ llvm::Value *Compiler::compile_number_conversion(Function *fn, llvm::Value *valu
 }
 
 llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiType *from_type,
-                                          ChiType *to_type) {
+                                          ChiType *to_type, bool owns_value) {
     // never is the bottom type — unreachable code, return undef
     if (from_type->kind == TypeKind::Never) {
         return llvm::UndefValue::get(compile_type(to_type));
@@ -5584,7 +5732,8 @@ llvm::Value *Compiler::compile_conversion(Function *fn, llvm::Value *value, ChiT
             auto to_fn = to_type->data.fn_lambda.fn;
             if (from_fn->data.fn.return_type->kind == TypeKind::Void &&
                 to_fn->data.fn.return_type->kind == TypeKind::Unit) {
-                return compile_void_to_unit_lambda_wrapper(fn, value, from_type, to_type);
+                return compile_void_to_unit_lambda_wrapper(fn, value, from_type, to_type,
+                                                           owns_value);
             }
         }
         return value;
@@ -5807,6 +5956,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             } else {
                 compile_fn_call(fn, expr, nullptr, dest);
             }
+            mark_outlet_alive(fn, expr->resolved_outlet);
             return builder.CreateLoad(type_l, dest);
         }
         auto &call_data = expr->data.fn_call_expr;
@@ -6001,7 +6151,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         case TokenType::ADD:
         case TokenType::SUB: {
             if (data.resolved_call) {
-                return compile_fn_call(fn, data.resolved_call);
+                data.resolved_call->resolved_outlet = expr->resolved_outlet;
+                return compile_expr(fn, data.resolved_call);
             }
             auto value = compile_expr(fn, data.op1);
             auto type = get_chitype(data.op1);
@@ -6015,7 +6166,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         }
         case TokenType::NOT: {
             if (data.resolved_call) {
-                return compile_fn_call(fn, data.resolved_call);
+                data.resolved_call->resolved_outlet = expr->resolved_outlet;
+                return compile_expr(fn, data.resolved_call);
             }
             auto value = compile_expr(fn, data.op1);
             return builder.CreateNot(value);
@@ -6118,7 +6270,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 } else {
                     var = compile_alloc(fn, expr, false);
                 }
-                return compile_optional_branch(
+                auto result = compile_optional_branch(
                     fn, data.op1, result_type_l, "coalesce",
                     [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
                         if (rewrap) {
@@ -6138,6 +6290,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         return nullptr;
                     },
                     var);
+                if (expr->resolved_outlet) {
+                    mark_outlet_alive(fn, expr->resolved_outlet);
+                }
+                return result;
             }
             if (rewrap) {
                 auto elem_type = result_type->get_elem();
@@ -6307,7 +6463,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             if (data.resolved_call) {
                 auto struct_type = get_resolver()->eval_struct_type(target_type);
                 if (struct_type) {
-                    return compile_fn_call(fn, data.resolved_call);
+                    data.resolved_call->resolved_outlet = expr->resolved_outlet;
+                    return compile_expr(fn, data.resolved_call);
                 }
             }
 
@@ -6419,7 +6576,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             auto reject_async_error = [&]() {
                 emit_async_promise_reject_shared(fn, shared_error_value);
-                compile_destruction_for_type(fn, settled_var, settled_type);
                 builder.CreateRetVoid();
             };
 
@@ -6443,9 +6599,8 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
             if (!data.catch_block) {
                 init_result_variant("Err", [&](ChiType *payload_type, llvm::Value *payload_ptr) {
-                    compile_store_or_copy(fn, shared_error_value, payload_ptr, payload_type, expr);
+                    builder.CreateStore(shared_error_value, payload_ptr);
                 });
-                compile_destruction_for_type(fn, settled_var, settled_type);
                 builder.CreateBr(continue_b);
             } else {
                 llvm::Value *shared_owner_var = nullptr;
@@ -6453,20 +6608,12 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 if (data.catch_err_var) {
                     auto shared_type_l = compile_type(shared_error_type);
                     shared_owner_var = fn->entry_alloca(shared_type_l, "try_await_err_owner");
-                    compile_copy(fn, shared_error_value, shared_owner_var, shared_error_type, expr);
-                    shared_owner_active =
-                        fn->entry_alloca(llvm::Type::getInt1Ty(llvm_ctx), "try_await_err_owner.active");
-                    {
-                        llvm::IRBuilder<> tmp(*m_ctx->llvm_ctx);
-                        tmp.SetInsertPoint(llvm::cast<llvm::Instruction>(shared_owner_active)->getNextNode());
-                        tmp.CreateStore(llvm::ConstantInt::getFalse(llvm_ctx), shared_owner_active);
-                    }
-                    builder.CreateStore(llvm::ConstantInt::getTrue(llvm_ctx), shared_owner_active);
-                    fn->cleanup_owner_vars.push_back(
-                        {shared_owner_var, shared_error_type, shared_owner_active, false});
+                    builder.CreateStore(shared_error_value, shared_owner_var);
+                    shared_owner_active = register_cleanup_owner(
+                        fn, shared_owner_var, shared_error_type, "try_await_err_owner.active");
+                } else {
+                    compile_destruction_for_type(fn, shared_error_ptr, shared_error_type);
                 }
-
-                compile_destruction_for_type(fn, settled_var, settled_type);
 
                 if (data.catch_err_var) {
                     auto err_var = compile_alloc(fn, data.catch_err_var);
@@ -6530,7 +6677,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                     compile_store_or_copy(fn, ok_value, result_var, result_type, effective_expr);
                 }
             }
-            compile_destruction_for_type(fn, settled_var, settled_type);
+            if (ok_fields.size() > 0 && !site.await_expr->analysis.moved) {
+                auto payload_ptr = compile_dot_access(fn, settled_var, ok_variant_type, ok_fields[0]);
+                compile_destruction_for_type(fn, payload_ptr, ok_fields[0]->resolved_type);
+            }
             builder.CreateBr(continue_b);
 
             fn->use_label(continue_b);
@@ -6543,9 +6693,20 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         llvm::Type *result_type_l = nullptr;
         llvm::Value *result_var = nullptr;
 
+        // Discarded `try f();` statement: resolver registers a cleanup temp so
+        // the Result (and its Shared<Error>) is destroyed at block exit. Drop
+        // flag guards resume/panic branches that exit without populating it.
+        bool use_outlet = expr->resolved_outlet != nullptr;
         if (!is_void) {
             result_type_l = compile_type(result_type);
-            result_var = fn->entry_alloca(result_type_l, "try_result");
+            if (use_outlet) {
+                result_var = compile_expr_ref(fn, expr->resolved_outlet).address;
+                if (!m_ctx->drop_flags.has_key(expr->resolved_outlet)) {
+                    alloc_drop_flag(fn, expr->resolved_outlet, false);
+                }
+            } else {
+                result_var = fn->entry_alloca(result_type_l, "try_result");
+            }
         }
 
         ChiType *result_enum = nullptr;
@@ -6644,6 +6805,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto get_error_vtable_fn = get_system_fn("cx_get_error_vtable");
         auto get_error_type_id_fn = get_system_fn("cx_get_error_type_id");
         auto clear_loc_fn = get_system_fn("cx_clear_panic_location");
+        auto dispose_exception_fn = get_system_fn("cx_dispose_exception");
 
         auto error_data = builder.CreateCall(get_error_data_fn->llvm_fn, {}, "error_data");
         auto error_vtable = builder.CreateCall(get_error_vtable_fn->llvm_fn, {}, "error_vtable");
@@ -6696,6 +6858,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // Take ownership of the error data pointer
             builder.CreateStore(error_data, error_data_var);
             builder.CreateCall(clear_loc_fn->llvm_fn, {});
+            // Release the C++ exception object now that TLS holds everything
+            // we need. Safe here because this path never resumes unwinding.
+            builder.CreateCall(dispose_exception_fn->llvm_fn, {thrown_ptr});
 
             // Set up error binding variable
             if (data.catch_err_var) {
@@ -6718,6 +6883,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 // Clear implicit_vars so compile_block doesn't re-alloca the err var
                 data.catch_block->data.block.implicit_vars.clear();
             }
+
+            // Register error_data_var for function-level cleanup BEFORE compiling the
+            // catch block, so a `throw` or `return` inside the body runs through
+            // emit_cleanup_owners and frees the caught error.
+            fn->cleanup_owner_vars.push_back({error_data_var, catch_type, nullptr, true});
 
             // Compile catch block with a cleanup label instead of continue_b
             auto catch_cleanup_b = fn->new_label("_catch_cleanup");
@@ -6750,10 +6920,6 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 fn->use_label(skip_free_b);
             }
             builder.CreateBr(continue_b);
-
-            // Register error_data_var for function-level cleanup (diverge path)
-            // This handles cases where the catch block returns/breaks
-            fn->cleanup_owner_vars.push_back({error_data_var, catch_type, nullptr, true});
         } else {
             // === RESULT MODE: try f() → Result<T, Shared<Error>> ===
 
@@ -6780,6 +6946,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         builder.CreateStore(shared_error, payload_ptr);
                     });
                     builder.CreateCall(clear_loc_fn->llvm_fn, {});
+                    builder.CreateCall(dispose_exception_fn->llvm_fn, {thrown_ptr});
                     builder.CreateBr(continue_b);
                 } else {
                     builder.CreateResume(landing);
@@ -6800,6 +6967,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 });
                 builder.CreateCall(clear_loc_fn->llvm_fn, {});
             }
+            builder.CreateCall(dispose_exception_fn->llvm_fn, {thrown_ptr});
             builder.CreateBr(continue_b);
         }
 
@@ -6836,6 +7004,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         fn->use_label(continue_b);
         if (is_void) {
             return nullptr;
+        }
+        if (use_outlet) {
+            set_drop_flag_alive(expr->resolved_outlet, true);
+            mark_outlet_alive(fn, expr->resolved_outlet);
         }
         return builder.CreateLoad(result_type_l, result_var, "try_result");
     }
@@ -6932,7 +7104,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 } else {
                     var = compile_alloc(fn, expr, false);
                 }
-                return compile_optional_branch(
+                auto result = compile_optional_branch(
                     fn, dot_data.expr, result_type_l, "optchain",
                     [&](llvm::Value *unwrapped_ptr) -> llvm::Value * {
                         auto unwrapped_type = opt_type->get_elem();
@@ -6957,6 +7129,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                         return llvm::ConstantAggregateZero::get(result_type_l);
                     },
                     var);
+                if (expr->resolved_outlet) {
+                    mark_outlet_alive(fn, expr->resolved_outlet);
+                }
+                return result;
             }
             return compile_optional_branch(
                 fn, dot_data.expr, result_type_l, "optchain",
@@ -7022,6 +7198,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         auto ptr = expr->resolved_outlet ? compile_expr_ref(fn, expr->resolved_outlet).address
                                          : compile_alloc(fn, expr, data.is_new, type);
         compile_construction(fn, ptr, type, expr);
+        if (expr->resolved_outlet && !data.is_new) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
         return data.is_new ? ptr : builder.CreateLoad(compile_type(type), ptr);
     }
     case ast::NodeType::PrefixExpr: {
@@ -7145,7 +7324,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         return result;
     }
     case ast::NodeType::ParenExpr: {
-        return compile_expr(fn, expr->data.child_expr);
+        auto child = expr->data.child_expr;
+        if (expr->resolved_outlet && !child->resolved_outlet)
+            child->resolved_outlet = expr->resolved_outlet;
+        return compile_expr(fn, child);
     }
     case ast::NodeType::UnitExpr: {
         return llvm::Constant::getNullValue(compile_type(get_system_types()->unit));
@@ -7157,6 +7339,11 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         for (int i = 0; i < data.items.size(); i++) {
             auto elem = compile_expr(fn, data.items[i]);
             tuple = m_ctx->llvm_builder->CreateInsertValue(tuple, elem, {(unsigned)i});
+        }
+        if (expr->resolved_outlet) {
+            auto outlet_addr = compile_expr_ref(fn, expr->resolved_outlet).address;
+            m_ctx->llvm_builder->CreateStore(tuple, outlet_addr);
+            mark_outlet_alive(fn, expr->resolved_outlet);
         }
         return tuple;
     }
@@ -7231,6 +7418,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
 
         if (!var)
             return nullptr;
+        if (expr->resolved_outlet) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
         return builder.CreateLoad(compile_type(ret_type), var);
     }
     case ast::NodeType::SwitchExpr: {
@@ -7296,6 +7486,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             fn->use_label(done_label);
             if (!var)
                 return nullptr;
+            if (expr->resolved_outlet) {
+                mark_outlet_alive(fn, expr->resolved_outlet);
+            }
             return builder.CreateLoad(compile_type(ret_type), var);
         }
 
@@ -7341,6 +7534,9 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
         fn->use_label(done_label);
         if (!var)
             return nullptr;
+        if (expr->resolved_outlet) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
         return builder.CreateLoad(compile_type(ret_type), var);
     }
     default:
@@ -7400,7 +7596,9 @@ void Compiler::compile_store_or_copy(Function *fn, llvm::Value *value, llvm::Val
                     moved_value = builder.CreateLoad(compile_type(type), it->second.address);
                 }
                 builder.CreateStore(moved_value, dest);
-                builder.CreateStore(llvm::Constant::getNullValue(compile_type(type)), it->second.address);
+                if (auto alive_ptr = async_frame_alive_ptr_for_addr(fn, it->second.address)) {
+                    builder.CreateStore(llvm::ConstantInt::getFalse(*m_ctx->llvm_ctx), alive_ptr);
+                }
                 return;
             }
         }
@@ -7440,8 +7638,12 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
     };
 
     auto destroy_copy_source_temp = [&]() {
-        if (owned_copy_src && src.owns_value && get_resolver()->type_needs_destruction(type)) {
-            compile_destruction_for_type(fn, owned_copy_src, type);
+        if (!src.owns_value || !get_resolver()->type_needs_destruction(type)) {
+            return;
+        }
+        auto *addr = owned_copy_src ? owned_copy_src : src.address;
+        if (addr) {
+            compile_destruction_for_type(fn, addr, type);
         }
     };
 
@@ -7537,9 +7739,13 @@ void Compiler::compile_copy_with_ref(Function *fn, RefValue src, llvm::Value *de
             typeinfo_val = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
         }
 
-        // Retain type-erased captures (null-safe).
-        auto retain_fn = get_system_fn("cx_capture_retain");
-        builder.CreateCall(retain_fn->llvm_fn, {captures_ptr});
+        // Retain type-erased captures (null-safe). Skip the retain when we
+        // own the source value — ownership transfers into dest with the
+        // existing refcount.
+        if (!src.owns_value) {
+            auto retain_fn = get_system_fn("cx_capture_retain");
+            builder.CreateCall(retain_fn->llvm_fn, {captures_ptr});
+        }
 
         // Build the destination lambda struct
         llvm::Value *dest_val = llvm::UndefValue::get(llvm_type);
@@ -8340,7 +8546,6 @@ llvm::Value *Compiler::compile_dot_ptr(Function *fn, ast::Node *expr) {
     if (ref.address)
         return ref.address;
 
-    // Temporary value — create alloca so methods get a ptr
     auto &builder = *m_ctx->llvm_builder;
     auto tmp = fn->entry_alloca(ref.value->getType(), "dot_tmp");
     builder.CreateStore(ref.value, tmp);
@@ -8402,11 +8607,8 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     }
     switch (expr->type) {
     case ast::NodeType::FnDef: {
-        auto &builder = *m_ctx->llvm_builder.get();
         auto lambda_val = compile_expr(fn, expr);
-        auto lambda_ptr = fn->entry_alloca(lambda_val->getType(), "lambda_literal");
-        builder.CreateStore(lambda_val, lambda_ptr);
-        return RefValue::from_address(lambda_ptr);
+        return RefValue::from_owned_value(lambda_val);
     }
     case ast::NodeType::VarDecl: {
         auto &var_data = expr->data.var_decl;
@@ -8619,14 +8821,19 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
     }
     case ast::NodeType::FnCallExpr: {
         llvm::Value *dest = nullptr;
+        bool owns_temp = false;
         if (expr->resolved_outlet) {
             dest = get_var(expr->resolved_outlet);
         } else {
             dest = compile_alloc(fn, expr);
+            owns_temp = true;
         }
         compile_fn_call(fn, expr, nullptr, dest);
         emit_dbg_location(expr);
-        return RefValue::from_address(dest);
+        if (expr->resolved_outlet) {
+            mark_outlet_alive(fn, expr->resolved_outlet);
+        }
+        return RefValue{dest, nullptr, owns_temp};
     }
     // Rvalue expressions - return value only (no meaningful address)
     case ast::NodeType::ParenExpr:
@@ -8645,7 +8852,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         if (it != m_async_await_refs.end()) {
             return it->second;
         }
-        return RefValue::from_owned_value(compile_expr(fn, expr));
+        auto value = compile_expr(fn, expr);
+        if (expr->resolved_outlet &&
+            m_ctx->var_table.has_key(expr->resolved_outlet)) {
+            return RefValue{get_var(expr->resolved_outlet), value, false};
+        }
+        return RefValue::from_owned_value(value);
     }
     case ast::NodeType::CastExpr: {
         auto &data = expr->data.cast_expr;
@@ -8656,7 +8868,12 @@ RefValue Compiler::compile_expr_ref(Function *fn, ast::Node *expr) {
         if (it != m_async_await_refs.end()) {
             return it->second;
         }
-        return RefValue::from_owned_value(compile_expr(fn, expr));
+        auto value = compile_expr(fn, expr);
+        if (expr->resolved_outlet &&
+            m_ctx->var_table.has_key(expr->resolved_outlet)) {
+            return RefValue{get_var(expr->resolved_outlet), value, false};
+        }
+        return RefValue::from_owned_value(value);
     }
     default:
         panic("compile_expr_ref not implemented: {}", PRINT_ENUM(expr->type));
@@ -9695,7 +9912,8 @@ llvm::Value *Compiler::generate_lambda_proxy_function(Function *fn, llvm::Value 
 }
 
 llvm::Value *Compiler::compile_void_to_unit_lambda_wrapper(Function *fn, llvm::Value *lambda_value,
-                                                           ChiType *from_type, ChiType *to_type) {
+                                                           ChiType *from_type, ChiType *to_type,
+                                                           bool owns_value) {
     auto &builder = *m_ctx->llvm_builder;
     auto &llvm_ctx = *m_ctx->llvm_ctx;
     auto ptr_type = llvm::PointerType::get(llvm_ctx, 0);
@@ -9747,23 +9965,27 @@ llvm::Value *Compiler::compile_void_to_unit_lambda_wrapper(Function *fn, llvm::V
     auto null_ptr = llvm::ConstantPointerNull::get(builder.getInt8PtrTy());
     auto [cap_ptr, payload_ptr] = compile_cxcapture_create(lambda_size, null_ptr, dtor_ptr);
 
-    // Copy original lambda into payload and retain its inner captures
+    // Store the original lambda into the payload. If we own the source value
+    // ownership transfers into the payload; otherwise retain the inner
+    // captures so the payload holds its own reference.
     auto typed_payload = builder.CreateBitCast(payload_ptr, lambda_type_l->getPointerTo());
     builder.CreateStore(lambda_value, typed_payload);
-    auto inner_cap_ptr = builder.CreateLoad(ptr_type, builder.CreateStructGEP(lambda_type_l, typed_payload, 2));
 
-    // Retain inner captures if non-null
-    auto has_captures = builder.CreateICmpNE(inner_cap_ptr, llvm::ConstantPointerNull::get(
-        llvm::PointerType::get(llvm_ctx, 0)));
-    auto retain_bb = llvm::BasicBlock::Create(llvm_ctx, "retain", fn->llvm_fn);
-    auto cont_bb = llvm::BasicBlock::Create(llvm_ctx, "cont", fn->llvm_fn);
-    builder.CreateCondBr(has_captures, retain_bb, cont_bb);
+    if (!owns_value) {
+        auto inner_cap_ptr = builder.CreateLoad(
+            ptr_type, builder.CreateStructGEP(lambda_type_l, typed_payload, 2));
+        auto has_captures = builder.CreateICmpNE(
+            inner_cap_ptr, llvm::ConstantPointerNull::get(llvm::PointerType::get(llvm_ctx, 0)));
+        auto retain_bb = llvm::BasicBlock::Create(llvm_ctx, "retain", fn->llvm_fn);
+        auto cont_bb = llvm::BasicBlock::Create(llvm_ctx, "cont", fn->llvm_fn);
+        builder.CreateCondBr(has_captures, retain_bb, cont_bb);
 
-    builder.SetInsertPoint(retain_bb);
-    builder.CreateCall(get_system_fn("cx_capture_retain")->llvm_fn, {inner_cap_ptr});
-    builder.CreateBr(cont_bb);
+        builder.SetInsertPoint(retain_bb);
+        builder.CreateCall(get_system_fn("cx_capture_retain")->llvm_fn, {inner_cap_ptr});
+        builder.CreateBr(cont_bb);
 
-    builder.SetInsertPoint(cont_bb);
+        builder.SetInsertPoint(cont_bb);
+    }
     compile_cxlambda_set_captures(new_lambda, cap_ptr);
 
     return builder.CreateLoad(new_lambda_type, new_lambda);
@@ -9914,6 +10136,13 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
             // an unwind during init doesn't destroy the uninitialized slot (e.g.
             // sret destination of a throwing callee).
             alloc_drop_flag(fn, stmt, false);
+        } else if (data.is_generated && !data.expr && fn->get_def() &&
+                   fn->get_def()->has_cleanup &&
+                   get_resolver()->type_needs_destruction(var_type)) {
+            // Outlet temp (stmt_temp_var) filled later at its consuming call site.
+            // Same unwind hazard as above — guard with a drop flag set alive only
+            // after the populating call completes (see mark_outlet_alive).
+            alloc_drop_flag(fn, stmt, false);
         }
 
         if (data.expr) {
@@ -9987,20 +10216,14 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                 auto return_type = fn->fn_type->data.fn.return_type;
 
                 if (is_async && get_resolver()->is_promise_type(return_type)) {
-                // For async functions, wrap the return value in a resolved Promise
+                    assert(fn->async_reject_promise_ptr &&
+                           "async fast path must pre-initialize result promise");
                     auto promise_struct = get_resolver()->resolve_struct_type(return_type);
 
                     std::optional<TypeId> variant_type_id = std::nullopt;
                     if (return_type->kind == TypeKind::Subtype && !return_type->is_placeholder) {
                         variant_type_id = return_type->id;
                     }
-
-                    // Call Promise.new() to initialize promise at return_value
-                    auto new_member = promise_struct->find_member("new");
-                    assert(new_member && "Promise.new() method not found");
-                    auto new_method_node = get_variant_member_node(new_member, variant_type_id);
-                    auto new_method = get_fn(new_method_node);
-                    llvm_builder.CreateCall(new_method->llvm_fn, {fn->return_value});
 
                     // Compile return value, or synthesize Unit{} for bare `return;`
                     auto inner_type = get_resolver()->get_promise_value_type(return_type);
@@ -10011,12 +10234,17 @@ void Compiler::compile_stmt(Function *fn, ast::Node *stmt) {
                         ret_value = llvm::Constant::getNullValue(compile_type(inner_type));
                     }
 
-                    // Call Promise.resolve(value)
+                    // Resolve the pre-initialized result promise, then bitwise-move it to sret.
                     auto resolve_member = promise_struct->find_member("resolve");
                     assert(resolve_member && "Promise.resolve() method not found");
                     auto resolve_method_node = get_variant_member_node(resolve_member, variant_type_id);
                     auto resolve_method = get_fn(resolve_method_node);
-                    llvm_builder.CreateCall(resolve_method->llvm_fn, {fn->return_value, ret_value});
+                    llvm_builder.CreateCall(resolve_method->llvm_fn,
+                                            {fn->async_reject_promise_ptr, ret_value});
+                    auto promise_type_l = compile_type(return_type);
+                    auto resolved_promise =
+                        llvm_builder.CreateLoad(promise_type_l, fn->async_reject_promise_ptr);
+                    llvm_builder.CreateStore(resolved_promise, fn->return_value);
                 } else if (data.expr) {
                     auto ret_type = get_chitype(stmt);
                     compile_assignment_to_ptr(fn, data.expr, fn->return_value, ret_type);
@@ -10595,6 +10823,29 @@ void Compiler::set_drop_flag_alive(ast::Node *node, bool alive) {
     }
 }
 
+void Compiler::mark_outlet_alive(Function *fn, ast::Node *outlet) {
+    if (!outlet) {
+        return;
+    }
+    if (fn && fn->async_machine) {
+        if (auto alive_ptr =
+                get_async_frame_var_alive_ptr(fn, *fn->async_machine, outlet)) {
+            m_ctx->llvm_builder->CreateStore(
+                llvm::ConstantInt::getTrue(*m_ctx->llvm_ctx), alive_ptr);
+        }
+    }
+    // Only mark the drop flag alive when it belongs to the current function —
+    // async state machines share outlet AST nodes across resume-point lambdas,
+    // so a flag allocated in one lambda must not be touched from another.
+    if (auto *flag = m_ctx->drop_flags.get(outlet)) {
+        if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(*flag)) {
+            if (fn && alloca->getFunction() == fn->llvm_fn) {
+                set_drop_flag_alive(outlet, true);
+            }
+        }
+    }
+}
+
 void Compiler::compile_destruction(Function *fn, llvm::Value *address, ast::Node *node) {
     // In managed memory mode, don't destroy heap-allocated objects locally - GC handles them
     if (is_fn_managed(fn) && node->is_heap_allocated()) {
@@ -10749,23 +11000,7 @@ void Compiler::compile_destruction_for_type(Function *fn, llvm::Value *address, 
         return;
     }
 
-    // Handle FixedArray via generated destructor
-    if (type->kind == TypeKind::FixedArray) {
-        auto dtor = generate_destructor(type, nullptr);
-        if (dtor) {
-            builder.CreateCall(dtor->llvm_fn, {address});
-        }
-        return;
-    }
-
-    // Handle optionals, structs, enums, and enum values via generated __delete
-    if (type->kind != TypeKind::Optional && type->kind != TypeKind::Struct &&
-        type->kind != TypeKind::Enum && type->kind != TypeKind::EnumValue) {
-        return;
-    }
-
-    auto dtor = generate_destructor(original_type, nullptr);
-    if (dtor) {
+    if (auto dtor = generate_destructor(original_type, nullptr)) {
         builder.CreateCall(dtor->llvm_fn, {address});
     }
 }
@@ -10988,9 +11223,6 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         return *existing;
     }
 
-    auto &builder = *m_ctx->llvm_builder;
-    auto &llvm_ctx = *m_ctx->llvm_ctx;
-
     // Resolve subtype if needed
     auto resolved_type = type;
     while (resolved_type && resolved_type->kind == TypeKind::Subtype) {
@@ -11006,111 +11238,168 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         return nullptr;
     }
 
-    // Handle Optional types
-    if (resolved_type->kind == TypeKind::Optional) {
-        return generate_destructor_optional(type, resolved_type);
-    }
-
-    // Handle enum value layouts — switch on discriminator to destroy variant fields
+    // Enums reduce to their base EnumValue layout
     if (resolved_type->kind == TypeKind::Enum) {
         resolved_type = resolved_type->data.enum_.base_value_type;
     }
-    if (resolved_type->kind == TypeKind::EnumValue) {
+
+    switch (resolved_type->kind) {
+    case TypeKind::Optional:
+        return generate_destructor_optional(type, resolved_type);
+    case TypeKind::EnumValue:
         return generate_destructor_enum(type, resolved_type);
+    case TypeKind::FixedArray:
+        return generate_destructor_fixed_array(type, resolved_type);
+    case TypeKind::Tuple:
+        return generate_destructor_tuple(type, resolved_type);
+    case TypeKind::Struct:
+        return generate_destructor_struct(type, resolved_type);
+    default:
+        return nullptr;
     }
+}
 
-    // Handle FixedArray types — reverse loop destroying each element
-    if (resolved_type->kind == TypeKind::FixedArray) {
-        auto elem = resolved_type->data.fixed_array.elem;
-        if (!get_resolver()->type_needs_destruction(elem)) {
-            return nullptr;
-        }
-        auto ptr_type = get_llvm_ptr_type();
-        auto fn_type_l =
-            llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
-        auto type_name = get_resolver()->format_type_display(type);
-        auto fn_name = fmt::format("{}.__delete", type_name);
-        auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
-                                              m_ctx->llvm_module.get());
-        auto fn = new Function(m_ctx, llvm_fn, nullptr);
-        fn->qualified_name = fn_name;
-        m_ctx->functions.emplace(fn);
-        m_ctx->destructor_table[type] = fn;
+Function *Compiler::generate_destructor_fixed_array(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
 
-        auto saved_block = builder.GetInsertBlock();
-        auto saved_point = builder.GetInsertPoint();
-
-        auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
-        auto fa_size = resolved_type->data.fixed_array.size;
-        auto arr_type_l = compile_type(resolved_type);
-
-        auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
-        auto loop_bb = llvm::BasicBlock::Create(llvm_ctx, "loop", llvm_fn);
-        auto body_bb = llvm::BasicBlock::Create(llvm_ctx, "body", llvm_fn);
-        auto end_bb = llvm::BasicBlock::Create(llvm_ctx, "end", llvm_fn);
-
-        builder.SetInsertPoint(entry_bb);
-        auto this_ptr = llvm_fn->getArg(0);
-        auto counter = builder.CreateAlloca(i32_ty, nullptr, "i");
-        builder.CreateStore(llvm::ConstantInt::get(i32_ty, fa_size), counter);
-        builder.CreateBr(loop_bb);
-
-        builder.SetInsertPoint(loop_bb);
-        auto cur = builder.CreateLoad(i32_ty, counter);
-        auto cond = builder.CreateICmpUGT(cur, llvm::ConstantInt::get(i32_ty, 0));
-        builder.CreateCondBr(cond, body_bb, end_bb);
-
-        builder.SetInsertPoint(body_bb);
-        auto idx = builder.CreateSub(cur, llvm::ConstantInt::get(i32_ty, 1));
-        builder.CreateStore(idx, counter);
-        auto zero = llvm::ConstantInt::get(i32_ty, 0);
-        auto elem_ptr = builder.CreateGEP(arr_type_l, this_ptr, {zero, idx});
-        compile_destruction_for_type(fn, elem_ptr, elem);
-        builder.CreateBr(loop_bb);
-
-        builder.SetInsertPoint(end_bb);
-        builder.CreateRetVoid();
-
-        if (saved_block) {
-            builder.SetInsertPoint(saved_block, saved_point);
-        }
-        return fn;
+    auto elem = resolved_type->data.fixed_array.elem;
+    if (!get_resolver()->type_needs_destruction(elem)) {
+        return nullptr;
     }
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__delete", type_name);
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->destructor_table[type] = fn;
 
-    if (resolved_type->kind != TypeKind::Struct) {
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    auto i32_ty = llvm::Type::getInt32Ty(llvm_ctx);
+    auto fa_size = resolved_type->data.fixed_array.size;
+    auto arr_type_l = compile_type(resolved_type);
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    auto loop_bb = llvm::BasicBlock::Create(llvm_ctx, "loop", llvm_fn);
+    auto body_bb = llvm::BasicBlock::Create(llvm_ctx, "body", llvm_fn);
+    auto end_bb = llvm::BasicBlock::Create(llvm_ctx, "end", llvm_fn);
+
+    builder.SetInsertPoint(entry_bb);
+    auto this_ptr = llvm_fn->getArg(0);
+    auto counter = builder.CreateAlloca(i32_ty, nullptr, "i");
+    builder.CreateStore(llvm::ConstantInt::get(i32_ty, fa_size), counter);
+    builder.CreateBr(loop_bb);
+
+    builder.SetInsertPoint(loop_bb);
+    auto cur = builder.CreateLoad(i32_ty, counter);
+    auto cond = builder.CreateICmpUGT(cur, llvm::ConstantInt::get(i32_ty, 0));
+    builder.CreateCondBr(cond, body_bb, end_bb);
+
+    builder.SetInsertPoint(body_bb);
+    auto idx = builder.CreateSub(cur, llvm::ConstantInt::get(i32_ty, 1));
+    builder.CreateStore(idx, counter);
+    auto zero = llvm::ConstantInt::get(i32_ty, 0);
+    auto elem_ptr = builder.CreateGEP(arr_type_l, this_ptr, {zero, idx});
+    compile_destruction_for_type(fn, elem_ptr, elem);
+    builder.CreateBr(loop_bb);
+
+    builder.SetInsertPoint(end_bb);
+    builder.CreateRetVoid();
+
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    return fn;
+}
+
+Function *Compiler::generate_destructor_tuple(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
+    auto &elements = resolved_type->data.tuple.elements;
+    bool any_destructible = false;
+    for (auto elem : elements) {
+        if (get_resolver()->type_needs_destruction(elem)) {
+            any_destructible = true;
+            break;
+        }
+    }
+    if (!any_destructible) {
         return nullptr;
     }
 
-    // Create function type: void __delete(T*)
+    auto ptr_type = get_llvm_ptr_type();
+    auto fn_type_l =
+        llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {ptr_type}, false);
+    auto type_name = get_resolver()->format_type_display(type);
+    auto fn_name = fmt::format("{}.__delete", type_name);
+    auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
+                                          m_ctx->llvm_module.get());
+    auto fn = new Function(m_ctx, llvm_fn, nullptr);
+    fn->qualified_name = fn_name;
+    m_ctx->functions.emplace(fn);
+    m_ctx->destructor_table[type] = fn;
+
+    auto saved_block = builder.GetInsertBlock();
+    auto saved_point = builder.GetInsertPoint();
+
+    auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
+    builder.SetInsertPoint(entry_bb);
+    auto this_ptr = llvm_fn->getArg(0);
+    auto tuple_type_l = compile_type(resolved_type);
+
+    for (int i = (int)elements.size() - 1; i >= 0; i--) {
+        auto elem_type = elements[i];
+        if (!get_resolver()->type_needs_destruction(elem_type)) {
+            continue;
+        }
+        auto elem_ptr = builder.CreateStructGEP(tuple_type_l, this_ptr, (unsigned)i);
+        compile_destruction_for_type(fn, elem_ptr, elem_type);
+    }
+    builder.CreateRetVoid();
+
+    if (saved_block) {
+        builder.SetInsertPoint(saved_block, saved_point);
+    }
+    return fn;
+}
+
+Function *Compiler::generate_destructor_struct(ChiType *type, ChiType *resolved_type) {
+    auto &builder = *m_ctx->llvm_builder;
+    auto &llvm_ctx = *m_ctx->llvm_ctx;
+
     auto struct_ptr_type = get_llvm_ptr_type();
     auto fn_type_l =
         llvm::FunctionType::get(llvm::Type::getVoidTy(llvm_ctx), {struct_ptr_type}, false);
 
-    // Generate unique name for the destructor
     auto type_name = get_resolver()->format_type_display(type);
     auto fn_name = fmt::format("{}.__delete", type_name);
 
     auto llvm_fn = llvm::Function::Create(fn_type_l, llvm::Function::InternalLinkage, fn_name,
                                           m_ctx->llvm_module.get());
 
-    // Create Function object
     auto fn = new Function(m_ctx, llvm_fn, nullptr);
     fn->qualified_name = fn_name;
     m_ctx->functions.emplace(fn);
     m_ctx->destructor_table[type] = fn;
 
-    // Save current insert point
     auto saved_block = builder.GetInsertBlock();
     auto saved_point = builder.GetInsertPoint();
 
-    // Create entry block
     auto entry_bb = llvm::BasicBlock::Create(llvm_ctx, "entry", llvm_fn);
     builder.SetInsertPoint(entry_bb);
 
     auto this_ptr = llvm_fn->getArg(0);
     auto llvm_struct_type = compile_type(resolved_type);
 
-    // 1. Call user's delete() if it exists
+    // Call user's delete() if defined
     auto user_destructor = ChiTypeStruct::get_destructor(resolved_type);
     if (user_destructor) {
         auto destructor_type = get_chitype(user_destructor->node);
@@ -11118,14 +11407,11 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         auto destructor_fn_ptr = m_ctx->function_table.get(destructor_id);
         Function *destructor_fn = nullptr;
         if (!destructor_fn_ptr) {
-            // Compile on demand
             auto proto = user_destructor->node->data.fn_def.fn_proto;
             destructor_fn = compile_fn_proto(proto, user_destructor->node);
-            // Set container subtype so generic type parameters can be resolved
             if (type->kind == TypeKind::Subtype) {
                 destructor_fn->container_subtype = &type->data.subtype;
                 destructor_fn->container_type = type;
-                // Look up TypeEnv from GenericResolver
                 if (auto entry = get_resolver()->get_generics()->struct_envs.get(type->global_id)) {
                     destructor_fn->type_env = &entry->subs;
                 }
@@ -11145,16 +11431,13 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         builder.CreateCall(leave_fn->llvm_fn, {});
     }
 
-    // 2. Destroy fields that need destruction (in reverse order)
+    // Destroy fields in reverse declaration order
     auto fields = resolved_type->data.struct_.own_fields();
-
-    // Iterate in reverse order
     for (int i = fields.size() - 1; i >= 0; i--) {
         auto field = fields[i];
         auto field_type = field->resolved_type;
         auto resolved_field_type = field_type;
 
-        // Resolve Subtype for checking
         while (resolved_field_type && resolved_field_type->kind == TypeKind::Subtype) {
             auto final_type = resolved_field_type->data.subtype.final_type;
             if (final_type) {
@@ -11167,7 +11450,6 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
         if (!resolved_field_type)
             continue;
 
-        // Check if field needs destruction using resolver's utility
         if (!get_resolver()->type_needs_destruction(resolved_field_type)) {
             continue;
         }
@@ -11179,7 +11461,6 @@ Function *Compiler::generate_destructor(ChiType *type, ChiType *container_type) 
 
     builder.CreateRetVoid();
 
-    // Restore insert point
     if (saved_block) {
         builder.SetInsertPoint(saved_block, saved_point);
     }
@@ -12275,7 +12556,10 @@ Function *Compiler::compile_fn_proto(ast::Node *proto_node, ast::Node *fn, strin
 
     llvm::FunctionType *ftype_l = nullptr;
     if (declspec.has_flag(ast::DECL_IS_ENTRY)) {
-        ftype_l = llvm::FunctionType::get(llvm::Type::getVoidTy(*m_ctx->llvm_ctx),
+        // C `main` signature: `int main(int, char**)`. Must return int so libc's
+        // `__libc_start_main` gets a defined exit code (otherwise %eax is whatever
+        // the last call left behind — 0 by luck normally, 1 under valgrind).
+        ftype_l = llvm::FunctionType::get(llvm::Type::getInt32Ty(*m_ctx->llvm_ctx),
                                           {llvm::Type::getInt32Ty(*m_ctx->llvm_ctx),
                                            llvm::PointerType::get(*m_ctx->llvm_ctx, 0)},
                                           false);
