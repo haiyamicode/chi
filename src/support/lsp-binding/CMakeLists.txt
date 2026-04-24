@@ -9,6 +9,7 @@ include_directories(
   "${CMAKE_CURRENT_LIST_DIR}/include",
   "${PROJECT_SOURCE_DIR}/src",
   "${PROJECT_SOURCE_DIR}/src/include",
+  "${NODE_API_INCLUDE_DIR}/node",
   ${LLVM_INCLUDE_DIRS}
 )
 target_link_libraries(binding PUBLIC fmt)
