@@ -216,7 +216,13 @@ int main(int argc, char *argv[]) {
         Analyzer analyzer;
         analyzer.build_runtime();
         auto pkg = analyzer.add_package(".");
-        auto module = analyzer.process_file(pkg, input_file);
+        Module *module;
+        try {
+            module = analyzer.process_file(pkg, input_file);
+        } catch (const std::runtime_error &e) {
+            fmt::print(stderr, "error: {}\n", e.what());
+            return 2;
+        }
 
         // Print collected errors for analyzer testing
         if (module && module->errors.size() > 0) {
@@ -234,7 +240,13 @@ int main(int argc, char *argv[]) {
         Analyzer analyzer;
         analyzer.build_runtime();
         auto pkg = analyzer.add_package(".");
-        auto module = analyzer.format_file(pkg, input_file);
+        Module *module;
+        try {
+            module = analyzer.format_file(pkg, input_file);
+        } catch (const std::runtime_error &e) {
+            fmt::print(stderr, "error: {}\n", e.what());
+            return 2;
+        }
 
         if (module && module->errors.size() > 0) {
             for (auto &error : module->errors) {
@@ -268,15 +280,20 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    switch (input_mode) {
-    case InputMode::File:
-        bld.build_program(input_file);
-        break;
-    case InputMode::Package:
-        bld.build_package(input_file);
-        break;
-    default:
-        assert(false);
+    try {
+        switch (input_mode) {
+        case InputMode::File:
+            bld.build_program(input_file);
+            break;
+        case InputMode::Package:
+            bld.build_package(input_file);
+            break;
+        default:
+            assert(false);
+        }
+    } catch (const std::runtime_error &e) {
+        fmt::print(stderr, "error: {}\n", e.what());
+        return 2;
     }
 
     return 0;

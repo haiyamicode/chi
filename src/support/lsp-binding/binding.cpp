@@ -21,115 +21,53 @@ namespace fs = std::filesystem;
 // UTF-8 / UTF-16 offset conversion
 // ============================================================================
 
+// Decode one UTF-8 sequence starting at source[pos]. On a bad lead byte we
+// advance 1 and report codepoint 0 — callers treat that as one UTF-16 unit.
+struct Utf8Unit { int seq_len; uint32_t codepoint; };
+static Utf8Unit decode_utf8(const std::string &source, long pos) {
+    auto c = (unsigned char)source[pos];
+    int seq_len;
+    uint32_t codepoint;
+    if (c < 0x80) {
+        seq_len = 1; codepoint = c;
+    } else if ((c & 0xE0) == 0xC0) {
+        seq_len = 2; codepoint = c & 0x1F;
+    } else if ((c & 0xF0) == 0xE0) {
+        seq_len = 3; codepoint = c & 0x0F;
+    } else if ((c & 0xF8) == 0xF0) {
+        seq_len = 4; codepoint = c & 0x07;
+    } else {
+        return {1, 0};
+    }
+    for (int i = 1; i < seq_len && pos + i < (long)source.size(); i++) {
+        codepoint = (codepoint << 6) | ((unsigned char)source[pos + i] & 0x3F);
+    }
+    return {seq_len, codepoint};
+}
+
+// A codepoint occupies 2 UTF-16 code units iff it's outside the BMP.
+static int utf16_units(uint32_t cp) { return cp >= 0x10000 ? 2 : 1; }
+
 // Convert a UTF-16 code unit offset (as used by JS/LSP) to a UTF-8 byte offset.
 static long utf16_to_byte_offset(const std::string &source, long utf16_offset) {
-    long utf16_pos = 0;
-    long byte_pos = 0;
+    long utf16_pos = 0, byte_pos = 0;
     while (byte_pos < (long)source.size() && utf16_pos < utf16_offset) {
-        auto c = (unsigned char)source[byte_pos];
-        int seq_len;
-        uint32_t codepoint;
-        if (c < 0x80) {
-            seq_len = 1;
-            codepoint = c;
-        } else if ((c & 0xE0) == 0xC0) {
-            seq_len = 2;
-            codepoint = c & 0x1F;
-        } else if ((c & 0xF0) == 0xE0) {
-            seq_len = 3;
-            codepoint = c & 0x0F;
-        } else if ((c & 0xF8) == 0xF0) {
-            seq_len = 4;
-            codepoint = c & 0x07;
-        } else {
-            byte_pos++;
-            utf16_pos++;
-            continue;
-        }
-        for (int i = 1; i < seq_len && byte_pos + i < (long)source.size(); i++) {
-            codepoint = (codepoint << 6) | ((unsigned char)source[byte_pos + i] & 0x3F);
-        }
-        byte_pos += seq_len;
-        utf16_pos += (codepoint >= 0x10000) ? 2 : 1;
+        auto u = decode_utf8(source, byte_pos);
+        byte_pos += u.seq_len;
+        utf16_pos += utf16_units(u.codepoint);
     }
     return byte_pos;
 }
 
 // Convert a UTF-8 byte offset to a UTF-16 code unit offset.
 static long byte_to_utf16_offset(const std::string &source, long byte_offset) {
-    long utf16_pos = 0;
-    long byte_pos = 0;
+    long utf16_pos = 0, byte_pos = 0;
     while (byte_pos < byte_offset && byte_pos < (long)source.size()) {
-        auto c = (unsigned char)source[byte_pos];
-        int seq_len;
-        uint32_t codepoint;
-        if (c < 0x80) {
-            seq_len = 1;
-            codepoint = c;
-        } else if ((c & 0xE0) == 0xC0) {
-            seq_len = 2;
-            codepoint = c & 0x1F;
-        } else if ((c & 0xF0) == 0xE0) {
-            seq_len = 3;
-            codepoint = c & 0x0F;
-        } else if ((c & 0xF8) == 0xF0) {
-            seq_len = 4;
-            codepoint = c & 0x07;
-        } else {
-            byte_pos++;
-            utf16_pos++;
-            continue;
-        }
-        for (int i = 1; i < seq_len && byte_pos + i < (long)source.size(); i++) {
-            codepoint = (codepoint << 6) | ((unsigned char)source[byte_pos + i] & 0x3F);
-        }
-        byte_pos += seq_len;
-        utf16_pos += (codepoint >= 0x10000) ? 2 : 1;
+        auto u = decode_utf8(source, byte_pos);
+        byte_pos += u.seq_len;
+        utf16_pos += utf16_units(u.codepoint);
     }
     return utf16_pos;
-}
-
-// Convert a codepoint-based column to a UTF-16 column, given the source line.
-static long col_to_utf16(const std::string &source, long line, long col) {
-    // Find the start of the given line
-    long line_start = 0;
-    for (long l = 0; l < line && line_start < (long)source.size(); line_start++) {
-        if (source[line_start] == '\n') l++;
-    }
-    // Walk codepoints and count UTF-16 code units
-    long utf16_col = 0;
-    long cp_count = 0;
-    long pos = line_start;
-    while (pos < (long)source.size() && cp_count < col) {
-        auto c = (unsigned char)source[pos];
-        int seq_len;
-        uint32_t codepoint;
-        if (c < 0x80) {
-            seq_len = 1;
-            codepoint = c;
-        } else if ((c & 0xE0) == 0xC0) {
-            seq_len = 2;
-            codepoint = c & 0x1F;
-        } else if ((c & 0xF0) == 0xE0) {
-            seq_len = 3;
-            codepoint = c & 0x0F;
-        } else if ((c & 0xF8) == 0xF0) {
-            seq_len = 4;
-            codepoint = c & 0x07;
-        } else {
-            pos++;
-            utf16_col++;
-            cp_count++;
-            continue;
-        }
-        for (int i = 1; i < seq_len && pos + i < (long)source.size(); i++) {
-            codepoint = (codepoint << 6) | ((unsigned char)source[pos + i] & 0x3F);
-        }
-        pos += seq_len;
-        utf16_col += (codepoint >= 0x10000) ? 2 : 1;
-        cp_count++;
-    }
-    return utf16_col;
 }
 
 // ============================================================================
@@ -214,11 +152,27 @@ static napi_value napi_json_result(napi_env env, const boost::json::value &json)
     return result;
 }
 
-// Set up analyzer from common JSON fields (chiRoot, file)
+// Build a single-error diagnostic payload. Offset/range 0 so nothing is
+// underlined — used when the compiler pipeline failed before we could map
+// the error to a real source position.
+static boost::json::object make_error_json(const std::string &msg) {
+    boost::json::array errors;
+    errors.push_back(boost::json::object{
+        {"message", msg}, {"offset", 0}, {"range", 0}});
+    return boost::json::object{{"errors", std::move(errors)}};
+}
+
+// chiRoot wins over chiHome (mirrors $CHI_ROOT / $CHI_HOME precedence in
+// context.cpp). If both are empty, CompilationContext falls back to its
+// own default search.
+static std::string g_chi_home;
+static std::string g_chi_root;
+
 static void init_analyzer(cx::Analyzer &analyzer, const boost::json::object &input,
                           std::string &input_file) {
-    if (input.contains("chiRoot")) {
-        analyzer.get_context()->root_path = input.at("chiRoot").as_string().c_str();
+    const std::string &override_root = !g_chi_root.empty() ? g_chi_root : g_chi_home;
+    if (!override_root.empty()) {
+        analyzer.get_context()->root_path = override_root;
     }
     input_file = input.at("file").as_string().c_str();
 }
@@ -226,8 +180,6 @@ static void init_analyzer(cx::Analyzer &analyzer, const boost::json::object &inp
 // Process source through the full compiler pipeline (runtime + resolve + sema)
 static cx::ast::Module* process_source(cx::Analyzer &analyzer, const std::string &input_file,
                                        cx::io::Buffer *src) {
-    if (analyzer.get_context()->root_path.empty())
-        return nullptr;
     auto rt_path = analyzer.get_context()->get_stdlib_path("runtime.xs");
     bool is_runtime = false;
     std::error_code ec;
@@ -480,7 +432,6 @@ static boost::json::object build_construct_signature_help(cx::ScanResult &result
     auto *proto = ctor_node->data.fn_def.fn_proto;
     auto &proto_params = proto->data.fn_proto.params;
 
-    // Build signature label
     std::string type_name = resolver.format_type_display(resolved);
     std::string label = type_name + "{";
     boost::json::array params_json;
@@ -590,7 +541,6 @@ static boost::json::array complete_construct(cx::ScanResult &result, cx::Resolve
 
     auto &data = node->data.construct_expr;
 
-    // Resolve the struct type from the construct expression
     auto *resolved = node->resolved_type;
     if (!resolved)
         return completions;
@@ -598,19 +548,16 @@ static boost::json::array complete_construct(cx::ScanResult &result, cx::Resolve
     if (!struct_)
         return completions;
 
-    // Collect already-provided field names
     std::set<std::string> provided;
     for (auto fi : data.field_inits) {
         provided.insert(fi->data.field_init_expr.field->str);
     }
 
-    // Check if cursor is right after ':' for shorthand
     bool is_colon = false;
     if (result.pos.offset > 0 && result.pos.offset <= source.size()) {
         is_colon = source[result.pos.offset - 1] == ':';
     }
 
-    // For shorthand ':' completions, collect local symbols in scope
     std::set<std::string> local_symbols;
     if (is_colon && result.scope) {
         for (auto symbol : scope_resolver.get_all_symbols(result.scope)) {
@@ -626,7 +573,6 @@ static boost::json::array complete_construct(cx::ScanResult &result, cx::Resolve
             continue;
 
         if (is_colon) {
-            // Only suggest shorthand if a matching local symbol exists
             if (!local_symbols.count(name))
                 continue;
             boost::json::object completion;
@@ -694,11 +640,11 @@ static boost::json::array generate_semantic_tokens(cx::ast::Module *module) {
     for (auto tok : module->tokens) {
         if (tok->pos.line < 0) continue;
 
-        // Emit keyword tokens directly
         if (tok->type >= cx::TokenType::KW_BREAK && tok->type < cx::TokenType::BOOL) {
             auto len = tok->str.size();
             if (len == 0) continue;
-            // Storage modifiers get a distinct token type (blue in Dark+)
+            // Storage modifiers get their own type so VSCode themes can color them
+            // distinctly from control-flow keywords (e.g. Dark+ paints them blue).
             auto st = ST_Keyword;
             if (tok->type == cx::TokenType::KW_MUT ||
                 tok->type == cx::TokenType::KW_STATIC ||
@@ -901,7 +847,6 @@ static void collect_auto_import_completions(
     if (!fs::exists(stdlib_dir) || !fs::is_directory(stdlib_dir))
         return;
 
-    // Collect already-imported module paths
     std::set<std::string> imported_paths;
     for (auto *imp : module->imports) {
         imported_paths.insert(imp->full_path());
@@ -988,7 +933,7 @@ static boost::json::array complete_auto_import_dot(
 // ============================================================================
 
 // analyze: process source, return diagnostics
-// Input:  {"file": "...", "source": "...", "chiRoot": "..."}
+// Input:  {"file": "...", "source": "..."}
 // Output: {"errors": [...]}
 static napi_value AnalyzeMethod(napi_env env, napi_callback_info info) {
     std::string input_buf;
@@ -1001,7 +946,12 @@ static napi_value AnalyzeMethod(napi_env env, napi_callback_info info) {
     auto source_str = std::string(input["source"].as_string().c_str());
     auto src = cx::io::Buffer::from_string(source_str.c_str());
 
-    auto module = process_source(analyzer, input_file, &src);
+    cx::ast::Module *module;
+    try {
+        module = process_source(analyzer, input_file, &src);
+    } catch (const std::runtime_error &e) {
+        return napi_json_result(env, make_error_json(e.what()));
+    }
 
     return napi_json_result(env, boost::json::object{{"errors", collect_errors(module, source_str)}});
 }
@@ -1019,7 +969,12 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
     init_analyzer(analyzer, input, input_file);
     auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
 
-    auto module = process_source(analyzer, input_file, &src);
+    cx::ast::Module *module;
+    try {
+        module = process_source(analyzer, input_file, &src);
+    } catch (const std::runtime_error &) {
+        return napi_json_result(env, boost::json::object{});
+    }
 
     auto source_str = std::string(input["source"].as_string().c_str());
     auto utf16_offset = input["offset"].as_int64();
@@ -1091,7 +1046,7 @@ static napi_value ScanMethod(napi_env env, napi_callback_info info) {
 }
 
 // format: lightweight parse + format (no runtime needed)
-// Input:  {"file": "...", "source": "...", "chiRoot": "..."}
+// Input:  {"file": "...", "source": "..."}
 // Output: {"errors": [...], "formatted": "..."}
 static napi_value FormatMethod(napi_env env, napi_callback_info info) {
     std::string input_buf;
@@ -1104,9 +1059,14 @@ static napi_value FormatMethod(napi_env env, napi_callback_info info) {
     auto source_str = std::string(input["source"].as_string().c_str());
     auto src = cx::io::Buffer::from_string(source_str.c_str());
 
-    auto pkg = analyzer.get_context()->add_package(".");
-    load_package_config(analyzer.get_context(), pkg, input_file);
-    auto module = analyzer.format_source(pkg, &src, input_file);
+    cx::ast::Module *module;
+    try {
+        auto pkg = analyzer.get_context()->add_package(".");
+        load_package_config(analyzer.get_context(), pkg, input_file);
+        module = analyzer.format_source(pkg, &src, input_file);
+    } catch (const std::runtime_error &e) {
+        return napi_json_result(env, make_error_json(e.what()));
+    }
 
     boost::json::object output;
     output["errors"] = collect_errors(module, source_str);
@@ -1119,7 +1079,7 @@ static napi_value FormatMethod(napi_env env, napi_callback_info info) {
 }
 
 // semanticTokens: process source, generate semantic token data
-// Input:  {"file": "...", "source": "...", "chiRoot": "..."}
+// Input:  {"file": "...", "source": "..."}
 // Output: [line, col, len, type, mod, ...]
 static napi_value SemanticTokensMethod(napi_env env, napi_callback_info info) {
     std::string input_buf;
@@ -1131,9 +1091,34 @@ static napi_value SemanticTokensMethod(napi_env env, napi_callback_info info) {
     init_analyzer(analyzer, input, input_file);
     auto src = cx::io::Buffer::from_string(input["source"].as_string().c_str());
 
-    auto module = process_source(analyzer, input_file, &src);
+    cx::ast::Module *module;
+    try {
+        module = process_source(analyzer, input_file, &src);
+    } catch (const std::runtime_error &) {
+        // semanticTokens returns number[] — surface nothing; the analyze()
+        // path will have already reported the error as a diagnostic.
+        return napi_json_result(env, boost::json::array{});
+    }
 
     return napi_json_result(env, generate_semantic_tokens(module));
+}
+
+// configure: set chi install paths once; applied to every subsequent call.
+// Input:  {"chiHome": "...", "chiRoot": "..."} (both optional)
+// Output: null
+static napi_value ConfigureMethod(napi_env env, napi_callback_info info) {
+    std::string input_buf;
+    if (!parse_napi_arg(env, info, input_buf)) return nullptr;
+    auto input = boost::json::parse(input_buf).as_object();
+    if (input.contains("chiHome")) {
+        g_chi_home = input.at("chiHome").as_string().c_str();
+    }
+    if (input.contains("chiRoot")) {
+        g_chi_root = input.at("chiRoot").as_string().c_str();
+    }
+    napi_value result;
+    napi_get_null(env, &result);
+    return result;
 }
 
 // ============================================================================
@@ -1145,12 +1130,13 @@ static napi_value SemanticTokensMethod(napi_env env, napi_callback_info info) {
 
 static napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor descs[] = {
+        DECLARE_NAPI_METHOD("configure", ConfigureMethod),
         DECLARE_NAPI_METHOD("analyze", AnalyzeMethod),
         DECLARE_NAPI_METHOD("scan", ScanMethod),
         DECLARE_NAPI_METHOD("format", FormatMethod),
         DECLARE_NAPI_METHOD("semanticTokens", SemanticTokensMethod),
     };
-    napi_status status = napi_define_properties(env, exports, 4, descs);
+    napi_status status = napi_define_properties(env, exports, 5, descs);
     assert(status == napi_ok);
     return exports;
 }

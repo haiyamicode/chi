@@ -342,8 +342,8 @@ class Buffer {
     static Buffer from_file(string file_name) {
         auto stream = new std::ifstream(file_name);
         if (stream->fail()) {
-            print("unable to open file '{}'", file_name);
-            exit(2);
+            delete stream;
+            throw std::runtime_error(fmt::format("unable to open file '{}'", file_name));
         }
         return {stream};
     }
