@@ -1,10 +1,12 @@
 #include <assert.h>
-#include <node/node_api.h>
+#include <node_api.h>
 #include <signal.h>
-#include <execinfo.h>
+#if defined(__GLIBC__)
+#  include <execinfo.h>
+#  define CHI_HAVE_BACKTRACE 1
+#endif
 #include <unistd.h>
 
-#define BOOST_NO_EXCEPTIONS
 #include "../../analyzer.h"
 #include "../../ast_printer.h"
 #include "../../c_importer.h"
@@ -176,9 +178,11 @@ static void load_package_config(cx::CompilationContext* ctx, cx::ast::Package* p
 
 static void crash_handler(int sig) {
     fprintf(stderr, "\n=== CRASH: signal %d ===\n", sig);
+#if defined(CHI_HAVE_BACKTRACE)
     void *bt[64];
     int n = backtrace(bt, 64);
     backtrace_symbols_fd(bt, n, 2);
+#endif
     fprintf(stderr, "=== END CRASH ===\n");
     _exit(1);
 }
