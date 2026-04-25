@@ -516,6 +516,16 @@ func bitwise_and<T: ops.Int>(a: T, b: T) T {
     return a & b;
 }
 
+struct Stats<T: ops.Number + ops.Copy + ops.Construct> {
+    min: T;
+    max: T;
+
+    mut func observe(v: T) {
+        if v < this.min { this.min = v; }
+        if v > this.max { this.max = v; }
+    }
+}
+
 func test_multilevel_embedding() {
     println("=== multi-level embedding ===");
 
@@ -628,6 +638,20 @@ func test_ops_composite() {
 
     // Int bound: includes Number + bitwise ops
     printf("bitwise_and int: {}\n", bitwise_and<int>(255, 15));
+
+    // Generic field comparison: Ord::cmp result must be compared as int,
+    // not lifted to fcmp/icmp using the field's element type.
+    var sf = Stats<float64>{min: 100.0, max: -100.0};
+    sf.observe(3.5);
+    sf.observe(-2.0);
+    sf.observe(7.5);
+    printf("stats float: min={}, max={}\n", sf.min, sf.max);
+
+    var si = Stats<int32>{min: 100, max: -100};
+    si.observe(3);
+    si.observe(-2);
+    si.observe(7);
+    printf("stats int: min={}, max={}\n", si.min, si.max);
 }
 
 func main() {

@@ -90,3 +90,5 @@ adder deep: 104
 sum_three int: 60
 sum_three float: 7
 bitwise_and int: 15
+stats float: min=-2, max=7.5
+stats int: min=-2, max=7

@@ -6197,7 +6197,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 default: {
                     // Ord::cmp returns int; compare to 0
                     auto zero = llvm::ConstantInt::get(result->getType(), 0);
-                    auto cmpop = get_cmpop(data.op_type, get_chitype(data.op1));
+                    auto cmpop = get_cmpop(data.op_type, get_system_types()->int_);
                     return builder.CreateCmp(cmpop, result, zero);
                 }
                 }
