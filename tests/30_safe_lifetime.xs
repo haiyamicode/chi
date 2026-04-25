@@ -1100,6 +1100,62 @@ func test_nested_field_projection_copy() {
     printf("moved.other = {}\n", moved.other);
 }
 
+struct NestedRefReadInner {
+    val: uint32 = 0;
+
+    func read() &uint32 {
+        return &this.val;
+    }
+}
+
+struct NestedRefReadMid {
+    inner: NestedRefReadInner = {};
+}
+
+struct NestedRefReadOuter {
+    mid: NestedRefReadMid = {};
+
+    func observe() {
+        let r = this.mid.inner.read();
+        printf("nested chain ref = {}\n", *r);
+    }
+}
+
+struct NestedRefReadDeeper {
+    outer: NestedRefReadOuter = {};
+
+    func observe() {
+        let r = this.outer.mid.inner.read();
+        printf("nested chain deeper ref = {}\n", *r);
+    }
+}
+
+struct NestedMapInner {
+    m: Map<string, uint32> = {};
+}
+
+struct NestedMapOuter {
+    inner: NestedMapInner = {};
+
+    func observe(key: string) {
+        let prev = this.inner.m.get(key);
+        if let value = prev {
+            printf("nested map ref = {}\n", *value);
+        }
+    }
+}
+
+func test_nested_receiver_chain_ref_return() {
+    printf("=== nested receiver chain ref return ===\n");
+    var o = NestedRefReadOuter{mid: {inner: {val: 11}}};
+    o.observe();
+    var d = NestedRefReadDeeper{outer: {mid: {inner: {val: 22}}}};
+    d.observe();
+    var m = NestedMapOuter{};
+    m.inner.m.set("a", 42);
+    m.observe("a");
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -1170,4 +1226,5 @@ func main() {
     test_try_catch_maybe_move();
     test_try_catch_guard();
     test_nested_field_projection_copy();
+    test_nested_receiver_chain_ref_return();
 }

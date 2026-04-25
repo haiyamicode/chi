@@ -207,4 +207,8 @@ Heavy.delete(1300)
 inner = 77
 value = 77
 moved.other = 1
+=== nested receiver chain ref return ===
+nested chain ref = 11
+nested chain deeper ref = 22
+nested map ref = 42
 Heavy.delete(20)

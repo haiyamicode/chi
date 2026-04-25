@@ -12034,13 +12034,14 @@ void Resolver::add_projection_source_edges(ast::FnDef &fn_def, ast::Node *expr,
             assert(expr_projection && "missing projection node for projected dot expression");
             auto *nested_projection =
                 get_projection_node(expr_projection, tuple_index, field_member, false);
-            assert(nested_projection && "missing nested projection summary");
-            if (is_ref) {
-                fn_def.add_ref_edge(target, nested_projection);
-            } else {
-                fn_def.copy_ref_edges(target, nested_projection, false);
+            if (nested_projection) {
+                if (is_ref) {
+                    fn_def.add_ref_edge(target, nested_projection);
+                } else {
+                    fn_def.copy_ref_edges(target, nested_projection, false);
+                }
+                return;
             }
-            return;
         }
     }
 
