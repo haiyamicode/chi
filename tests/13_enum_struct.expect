@@ -177,3 +177,5 @@ reassign printf: blue
 green stmt
 green
 expr: green
+=== Test: Nested variant inline construct ===
+nested_variant_value: 42

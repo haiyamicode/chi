@@ -631,6 +631,22 @@ func test_switch_statement() {
     printf("expr: {}\n", name);
 }
 
+enum Inner { Some(int), None }
+enum Outer { Wrap(Inner), Empty }
+
+func test_nested_variant_inline_construct() {
+    println("=== Test: Nested variant inline construct ===");
+    var o: Outer = Outer.Wrap{Inner.Some{42}};
+    var n = switch o {
+        Outer.Wrap(i) => switch i {
+            Inner.Some(v) => v,
+            else => -1
+        },
+        else => -2
+    };
+    printf("nested_variant_value: {}\n", n);
+}
+
 func main() {
     var node = Node.FnDef{
         name: "f",
@@ -664,4 +680,5 @@ func main() {
     test_generic_enum_lifecycle();
     test_enum_display_override();
     test_switch_statement();
+    test_nested_variant_inline_construct();
 }

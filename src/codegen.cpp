@@ -8046,11 +8046,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             auto field = payload_fields[i];
             auto item = expr->data.construct_expr.items[i];
             auto gep = compile_dot_access(fn, dest, type, field);
-            if (item->type == ast::NodeType::ConstructExpr) {
-                compile_construction(fn, gep, field->resolved_type, item);
-            } else {
-                compile_assignment_to_ptr(fn, item, gep, field->resolved_type);
-            }
+            compile_assignment_to_ptr(fn, item, gep, field->resolved_type);
             emit_dbg_location(expr);
         }
 
@@ -8060,11 +8056,7 @@ void Compiler::compile_construction(Function *fn, llvm::Value *dest, ChiType *ty
             assert(field);
             auto gep = compile_dot_access(fn, dest, type, field);
             data.compiled_field_address = gep;
-            if (data.value->type == ast::NodeType::ConstructExpr) {
-                compile_construction(fn, gep, field->resolved_type, data.value);
-            } else {
-                compile_assignment_to_ptr(fn, data.value, gep, field->resolved_type);
-            }
+            compile_assignment_to_ptr(fn, data.value, gep, field->resolved_type);
             emit_dbg_location(expr);
         }
         break;
