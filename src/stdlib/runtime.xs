@@ -1135,24 +1135,28 @@ export struct Promise<T = Unit> {
         }
         for i in 0..count {
             var p = promises[i];
-            p.on_resolve(func [state, result, i] (value: T) {
-                state.mut().results[i] = move value;
-                state.mut().remaining -= 1;
-                if state.remaining == 0 && !state.settled {
-                    state.mut().settled = true;
-                    var final_results: Array<T> = {};
-                    for item in state.results {
-                        final_results.push(item!);
+            p.on_resolve(
+                func [state, result, i] (value: T) {
+                    state.mut().results[i] = move value;
+                    state.mut().remaining -= 1;
+                    if state.remaining == 0 && !state.settled {
+                        state.mut().settled = true;
+                        var final_results: Array<T> = [];
+                        for item in state.results {
+                            final_results.push(item!);
+                        }
+                        result.resolve(move final_results);
                     }
-                    result.resolve(move final_results);
                 }
-            });
-            p.on_reject(func [state, result] (err: Shared<Error>) {
-                if !state.settled {
-                    state.mut().settled = true;
-                    result.reject_shared(move err);
+            );
+            p.on_reject(
+                func [state, result] (err: Shared<Error>) {
+                    if !state.settled {
+                        state.mut().settled = true;
+                        result.reject_shared(move err);
+                    }
                 }
-            });
+            );
         }
         return result;
     }

@@ -521,8 +521,12 @@ struct Stats<T: ops.Number + ops.Copy + ops.Construct> {
     max: T;
 
     mut func observe(v: T) {
-        if v < this.min { this.min = v; }
-        if v > this.max { this.max = v; }
+        if v < this.min {
+            this.min = v;
+        }
+        if v > this.max {
+            this.max = v;
+        }
     }
 }
 

@@ -392,6 +392,25 @@ class Resolver {
 
     ChiType *_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags = 0);
 
+    ChiType *resolve_bin_op(ast::Node *node, ResolveScope &scope);
+    ChiType *resolve_assignment(ast::Node *node, ChiType *t1, ResolveScope &scope);
+    ChiType *resolve_binary(ast::Node *node, ChiType *t1, ResolveScope &scope);
+
+    // `opt! = v` retargets the assignment at `opt` so codegen's normal T → ?T wrap
+    // applies. Updates *t1 to the outer optional and returns the inner T as RHS context;
+    // returns nullptr if no retarget applies.
+    ChiType *retarget_optional_unwrap_assignment(ast::BinOpExpr &data, ChiType *&t1);
+
+    void track_assignment_init(ast::Node *node, ast::Node *eff_op1, ast::BinOpExpr &data,
+                               ResolveScope &scope);
+    void track_assignment_flow(ast::Node *node, ast::Node *eff_op1, ChiType *t1,
+                               ChiType *t2, ResolveScope &scope);
+
+    ChiType *resolve_comparison(ast::Node *node, ChiType *t1, ChiType *t2, ResolveScope &scope);
+    ChiType *resolve_nullish_coalesce(ast::Node *node, ChiType *t1, ChiType *t2,
+                                      ResolveScope &scope);
+    ChiType *resolve_arithmetic(ast::Node *node, ChiType *t1, ChiType *t2, ResolveScope &scope);
+
     template <typename... Args>
     void error(ast::Node *node, const char *format, const Args &...args) {
         error_with_notes(node, {}, format, args...);

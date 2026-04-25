@@ -398,11 +398,10 @@ func test_switch_nested_destructure() {
 func test_switch_nested_destructure_traced() {
     println("=== Test: Switch nested destructure (traced) ===");
 
-    var bag = TracedBag.Items{values: [Traced{1}, Traced{2}, Traced{3}]};
+    var bag = TracedBag.Items{values: [{1}, {2}, {3}]};
     var first_id = switch bag {
         Items{values: [first, ...rest]} => {
-            printf("first.id={}, rest[0].id={}, rest[1].id={}\n",
-                   first.id, rest[0].id, rest[1].id);
+            printf("first.id={}, rest[0].id={}, rest[1].id={}\n", first.id, rest[0].id, rest[1].id);
             first.id
         },
         else => -1

@@ -137,4 +137,7 @@ func main() {
             };
         }
     );
+
+    var maybe_point2: ?Point = Point{50, 51};
+    maybe_point2! = Point{52, 53};
 }

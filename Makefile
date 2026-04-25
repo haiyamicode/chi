@@ -1,3 +1,4 @@
+SHELL=/bin/bash
 BUILD_DIR=build
 BASE=$(shell pwd)
 LOCAL_DIR=local
@@ -100,6 +101,7 @@ format_all: build install
 			tests/formatter_collapse.xs|\
 			tests/formatter_semantic_collapse.xs|\
 			tests/42_construct_expr.xs|\
+			tests/analyzer/*|\
 			tests/testdata/*_errors/*) \
 				echo "Skipping $$file (formatter test input)..."; \
 				continue; \

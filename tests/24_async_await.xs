@@ -1375,9 +1375,9 @@ struct AsyncRect {
 
 async func async_make_shape(flag: bool) Promise<Shared<AsyncShape>> {
     if flag {
-        return Shared<AsyncShape>{new AsyncCircle{radius: 7}};
+        return {new AsyncCircle{radius: 7}};
     }
-    return Shared<AsyncShape>{new AsyncRect{w: 3, h: 4}};
+    return {new AsyncRect{w: 3, h: 4}};
 }
 
 async func type_switch_stmt_await(flag: bool) Promise<int> {

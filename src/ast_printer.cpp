@@ -464,7 +464,19 @@ void AstPrinter::print_node(Node *node) {
         bool is_empty_block = data.has_braces && !data.statements.size() && !data.return_expr;
         if (data.has_braces) {
             if (is_empty_block) {
-                emit("{}");
+                bool has_inner_comments =
+                    node->end_token && m_comments && m_comment_idx < m_comments->size() &&
+                    m_comments->at(m_comment_idx).pos < node->end_token->pos;
+                if (!has_inner_comments) {
+                    emit("{}");
+                    break;
+                }
+                m_indent++;
+                emit("{\n");
+                flush_comments_before(node->end_token->pos);
+                m_indent--;
+                print_indent(m_indent);
+                emit("}");
                 break;
             }
             m_indent++;

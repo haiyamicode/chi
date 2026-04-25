@@ -1696,353 +1696,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         }
         return var_type;
     }
-    case NodeType::BinOpExpr: {
-        auto &data = node->data.bin_op_expr;
-        if (data.op_type == TokenType::QUES && scope.move_outlet) {
-            node->resolved_outlet = scope.move_outlet;
-            node->analysis.moved = true;
-        }
-        auto op1_scope = scope;
-        if (is_assignment_op(data.op_type)) {
-            op1_scope = scope.set_is_lhs(true);
-        }
-        auto t1 = resolve(data.op1, op1_scope);
-        if (!t1) {
-            return nullptr;
-        }
-
-        // `opt! = value` → `opt = value`: retarget the assignment at the whole
-        // optional so codegen's normal T → ?T implicit-wrap path handles it,
-        // rather than special-casing optional unwrap in the ASS handler.
-        // We keep the RHS inference context on the inner T (not ?T) so
-        // brace-init shorthand continues to construct the payload type.
-        ChiType *rhs_ctx_override = nullptr;
-        if (data.op_type == TokenType::ASS &&
-            data.op1->type == NodeType::UnaryOpExpr) {
-            auto &u = data.op1->data.unary_op_expr;
-            if (u.is_suffix && u.op_type == TokenType::LNOT && u.op1 &&
-                u.op1->resolved_type &&
-                u.op1->resolved_type->kind == TypeKind::Optional &&
-                t1 == u.op1->resolved_type->get_elem()) {
-                rhs_ctx_override = t1;
-                data.op1 = u.op1;
-                t1 = u.op1->resolved_type;
-            }
-        }
-
-        ChiType *t2;
-        if (is_assignment_op(data.op_type)) {
-            auto var = data.op1->get_decl();
-            if (var && var->type == NodeType::VarDecl) {
-                // Cannot assign to immutable or constant variables
-                if (var->data.var_decl.kind != ast::VarKind::Mutable) {
-                    error(node, errors::ASSIGNMENT_TO_CONST, var->name);
-                }
-            }
-            if (var && var->type == NodeType::VarDecl) {
-                auto &vd = var->data.var_decl;
-                auto init_ctx = vd.is_field ? get_init_context(scope) : InitContext::None;
-                auto *&init_slot = init_ctx == InitContext::Copy
-                    ? vd.initialized_at_copy : vd.initialized_at;
-                bool is_first = !init_slot;
-                // Field with only a default value (parser sets initialized_at = var itself)
-                // being assigned for the first time in an initializer
-                if (!is_first && vd.is_field && init_slot == var &&
-                    init_ctx != InitContext::None) {
-                    is_first = true;
-                    init_slot = nullptr; // reset so mark_field_initialized sees it as unset
-                }
-                if (is_first) {
-                    data.is_initializing = true;
-                    mark_field_initialized(var, node, init_ctx);
-                }
-            }
-            auto var_scope = scope.set_value_type(rhs_ctx_override ? rhs_ctx_override : t1);
-            // For plain assignment, allow construct-into-target optimization.
-            // For compound assignments (+=, -=, etc.), don't set move_outlet because
-            // the old LHS value must be read by the operator method before being overwritten.
-            if (data.op_type == TokenType::ASS) {
-                var_scope = var_scope.set_move_outlet(data.op1);
-            }
-            t2 = resolve(data.op2, var_scope);
-            if (scope.parent_fn_node) {
-                auto lhs_decl = find_root_decl(data.op1);
-                // `new Foo{...}` produces an owning pointer, not a borrow —
-                // skip borrow edges so args inside `new` aren't treated as borrowed by the LHS.
-                bool is_new_expr = data.op2->type == NodeType::ConstructExpr &&
-                                   data.op2->data.construct_expr.is_new;
-                if (lhs_decl && !scope.is_unsafe_block && !is_new_expr) {
-                    auto &fn_def = *scope.parent_fn_def();
-                    fn_def.bump_edge_offset(lhs_decl);
-                    bool is_ref_target =
-                        expr_creates_direct_borrow(this, data.op2, t2, t1, &scope);
-                    add_borrow_source_edges(fn_def, data.op2, lhs_decl, is_ref_target);
-                    copy_projection_summaries(fn_def, data.op2, lhs_decl, t1);
-                    if (fn_def.flow.ref_edges.has_key(lhs_decl)) {
-                        fn_def.add_terminal(lhs_decl);
-                        if (data.op1->type == NodeType::DotExpr) {
-                            auto *field_decl = data.op1->data.dot_expr.resolved_decl;
-                            if (field_decl && field_decl->type == NodeType::VarDecl &&
-                                field_decl->data.var_decl.is_field) {
-                                auto *field_type = field_decl->resolved_type;
-                                if (field_type &&
-                                    type_may_propagate_borrow_deps(this, field_type)) {
-                                    auto *root_type = node_get_type(lhs_decl);
-                                    if (root_type) {
-                                        auto *st = resolve_struct_type(root_type);
-                                        if (st && st->this_lifetime) {
-                                            fn_def.flow.terminal_lifetimes[lhs_decl] =
-                                                st->this_lifetime;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                // Move tracking for assignments
-                if (lhs_decl) {
-                    track_move_sink(scope.parent_fn_node, data.op2, t2, lhs_decl, t1);
-                }
-            }
-        } else {
-            // Propagate type context for literal inference (e.g., `x == 0` where x is uint32)
-            auto ctx_type = t1;
-            // For ??, propagate the unwrapped type so RHS gets T context, not ?T
-            if (data.op_type == TokenType::QUES && t1->kind == TypeKind::Optional) {
-                ctx_type = t1->get_elem();
-            }
-            auto op2_scope = scope.set_value_type(ctx_type);
-            ast::Block rhs_narrow_block = {};
-            if ((data.op_type == TokenType::LAND || data.op_type == TokenType::LOR) && scope.block &&
-                scope.block->scope && scope.parent_fn_node) {
-                array<ast::Node *> rhs_narrowables;
-                collect_narrowables(data.op1, logical_rhs_uses_truthy_narrowing(data.op_type),
-                                    rhs_narrowables);
-                if (rhs_narrowables.size() > 0) {
-                    rhs_narrow_block.scope = m_ctx->allocator->create_scope(scope.block->scope);
-                    for (auto ident : rhs_narrowables) {
-                        auto var = create_narrowed_var(ident, node, scope);
-                        rhs_narrow_block.scope->put(var->name, var);
-                        data.rhs_narrow_vars.add(var);
-                    }
-                    op2_scope = op2_scope.set_block(&rhs_narrow_block);
-                }
-            }
-            t2 = resolve(data.op2, op2_scope);
-        }
-
-        if (!t2) {
-            return nullptr;
-        }
-
-        // For plain assignment
-        if (data.op_type == TokenType::ASS) {
-            check_assignment(data.op2, t2, t1, &scope);
-            // NoCopy: error if assigning from a named value
-            if (is_non_copyable(t1) && is_addressable(data.op2) &&
-                !data.op2->analysis.moved && should_destroy(data.op2, t2)) {
-                error(data.op2, errors::TYPE_NOT_COPYABLE, format_type_display(t1));
-            }
-            // RHS is a non-addressable temp (fn call, construct, etc.):
-            // transfer ownership to the LHS — move, don't copy.
-            mark_temp_moved_if_needed(data.op2, t2);
-            return t1;
-        }
-        // For compound assignment operators, validate the base op
-        if (is_assignment_op(data.op_type)) {
-            // Check if an operator method handles this (e.g. Add for +=)
-            auto base_op = get_assignment_op(data.op_type);
-            auto intrinsic = get_operator_intrinsic_symbol(base_op);
-            if (intrinsic != IntrinsicSymbol::None) {
-                auto method_call = try_resolve_operator_method(
-                    intrinsic, t1, t2, data.op1, data.op2, node, scope);
-                if (method_call.has_value()) {
-                    data.resolved_call = method_call->call_node;
-                    return t1;
-                }
-            }
-            check_binary_op(node, data.op_type, t1);
-            check_assignment(data.op2, t2, t1, &scope);
-            return t1;
-        }
-
-        // Non-assignment: operands are consumed by the operator, ensure any temps are owned
-        ensure_temp_owner(data.op1, t1, scope);
-        ensure_temp_owner(data.op2, t2, scope);
-
-        switch (data.op_type) {
-        case TokenType::EQ:
-        case TokenType::NE:
-        case TokenType::LT:
-        case TokenType::LE:
-        case TokenType::GT:
-        case TokenType::GE: {
-            // Pointer ordering comparisons require unsafe
-            if ((t1->kind == TypeKind::Pointer || t2->kind == TypeKind::Pointer) &&
-                data.op_type != TokenType::EQ && data.op_type != TokenType::NE) {
-                if (!scope.is_unsafe_block) {
-                    error(node, "pointer comparison requires unsafe block");
-                    return nullptr;
-                }
-            }
-            // Handle null in comparisons
-            if (data.op_type == TokenType::EQ || data.op_type == TokenType::NE) {
-                bool lhs_null = t1->kind == TypeKind::Null;
-                bool rhs_null = t2->kind == TypeKind::Null;
-                // Optional null check: ?T == null / null == ?T
-                if ((lhs_null && t2->kind == TypeKind::Optional) ||
-                    (rhs_null && t1->kind == TypeKind::Optional)) {
-                    return get_system_types()->bool_;
-                }
-                if ((lhs_null && t2->is_reference()) || (rhs_null && t1->is_reference())) {
-                    error(node, "references cannot be compared to null");
-                    return nullptr;
-                }
-                // Optional-to-optional: reject (only null checks allowed)
-                else if (t1->kind == TypeKind::Optional && t2->kind == TypeKind::Optional) {
-                    error(node, "cannot compare optional values directly — "
-                          "only null checks are allowed (e.g. x == null)");
-                    return nullptr;
-                }
-                // Pointer null check: coerce null to pointer type
-                else if (lhs_null && !rhs_null && can_assign(t1, t2)) {
-                    data.op1->resolved_type = t2;
-                    t1 = t2;
-                } else if (rhs_null && !lhs_null && can_assign(t2, t1)) {
-                    data.op2->resolved_type = t1;
-                    t2 = t1;
-                }
-            }
-            // Try operator method for struct types (e.g. Eq::eq for strings)
-            IntrinsicSymbol cmp_sym = get_operator_intrinsic_symbol(data.op_type);
-            if (cmp_sym != IntrinsicSymbol::None) {
-                auto method_call = try_resolve_operator_method(cmp_sym, t1, t2, data.op1,
-                                                               data.op2, node, scope);
-                if (method_call.has_value()) {
-                    data.resolved_call = method_call->call_node;
-                }
-            }
-            if (!data.resolved_call && t1->kind != TypeKind::Optional) {
-                check_binary_op(node, data.op_type, t1);
-            }
-            return get_system_types()->bool_;
-        }
-        case TokenType::LAND:
-        case TokenType::LOR:
-            check_assignment(data.op1, t1, get_system_types()->bool_, &scope);
-            check_assignment(data.op2, t2, get_system_types()->bool_, &scope);
-            return get_system_types()->bool_;
-        case TokenType::QUES: {
-            if (t1->kind != TypeKind::Optional) {
-                error(node, "left operand of ?? must be optional, got {}", format_type_display(t1));
-                return nullptr;
-            }
-            auto elem_type = t1->get_elem();
-            bool rhs_optional = t2->kind == TypeKind::Optional &&
-                                is_same_type(t2->get_elem(), elem_type);
-            auto target_type = rhs_optional ? t1 : elem_type;
-            data.op2->analysis.conversion_type = resolve_conversion_type(t2, target_type);
-            mark_temp_moved_if_needed(data.op2, t2);
-            if (data.op2->analysis.moved) {
-                node->analysis.moved = true;
-            }
-            check_assignment(data.op2, t2, target_type, &scope);
-            return target_type;
-        }
-        default: {
-            // Pointer arithmetic (requires unsafe)
-            if (data.op_type == TokenType::ADD || data.op_type == TokenType::SUB) {
-                bool lhs_ptr = t1->kind == TypeKind::Pointer;
-                bool rhs_ptr = t2->kind == TypeKind::Pointer;
-                bool lhs_int = t1->is_int();
-                bool rhs_int = t2->is_int();
-
-                // ptr + int, ptr - int
-                if (lhs_ptr && rhs_int) {
-                    if (!scope.is_unsafe_block) {
-                        error(node, "pointer arithmetic requires unsafe block");
-                        return nullptr;
-                    }
-                    return t1;
-                }
-                // int + ptr
-                if (lhs_int && rhs_ptr && data.op_type == TokenType::ADD) {
-                    if (!scope.is_unsafe_block) {
-                        error(node, "pointer arithmetic requires unsafe block");
-                        return nullptr;
-                    }
-                    return t2;
-                }
-                // ptr - ptr (same element type)
-                if (lhs_ptr && rhs_ptr && data.op_type == TokenType::SUB) {
-                    if (!scope.is_unsafe_block) {
-                        error(node, "pointer arithmetic requires unsafe block");
-                        return nullptr;
-                    }
-                    if (!is_same_type(t1->get_elem(), t2->get_elem())) {
-                        error(node, "pointer subtraction requires same element type, got {} and {}",
-                              format_type_display(t1), format_type_display(t2));
-                        return nullptr;
-                    }
-                    return get_system_types()->int64;
-                }
-            }
-
-            // First, check if left operand has interface method for this operator
-            IntrinsicSymbol intrinsic_symbol = get_operator_intrinsic_symbol(data.op_type);
-
-            ChiType *result_type = t1;
-
-            // If either operand is float, result is float
-            if (t1->kind == TypeKind::Float || t2->kind == TypeKind::Float) {
-                // If both are float, use the larger type
-                if (t1->kind == TypeKind::Float && t2->kind == TypeKind::Float) {
-                    result_type = t1->data.float_.bit_count >= t2->data.float_.bit_count ? t1 : t2;
-                } else {
-                    result_type = t1->kind == TypeKind::Float ? t1 : t2;
-                }
-            }
-            // For integer operations, use the larger type
-            else if (t1->is_int() && t2->is_int()) {
-                // If either operand is rune, result is rune
-                if (t1->kind == TypeKind::Rune || t2->kind == TypeKind::Rune) {
-                    result_type = get_system_types()->rune_;
-                } else {
-                    int t1_size = get_int_type_size(t1);
-                    int t2_size = get_int_type_size(t2);
-
-                    if (t2_size > t1_size) {
-                        result_type = t2;
-                    } else if (t1_size == t2_size && t1->kind == TypeKind::Int &&
-                               t2->kind == TypeKind::Int) {
-                        // If same size, prefer unsigned if either is unsigned
-                        if (t2->data.int_.is_unsigned && !t1->data.int_.is_unsigned) {
-                            result_type = t2;
-                        }
-                    }
-                }
-            }
-
-            // Check for intrinsic operator method (concrete types or trait bounds)
-            if (intrinsic_symbol != IntrinsicSymbol::None) {
-                auto method_call = try_resolve_operator_method(intrinsic_symbol, t1, t2, data.op1,
-                                                               data.op2, node, scope);
-                if (method_call.has_value()) {
-                    data.resolved_call = method_call->call_node;
-                    return method_call->return_type;
-                }
-            }
-
-            // Check that both operands can be converted to the result type
-            check_assignment(data.op1, t1, result_type, &scope);
-            check_assignment(data.op2, t2, result_type, &scope);
-
-            check_binary_op(node, data.op_type, result_type);
-            return result_type;
-        }
-        }
-    }
+    case NodeType::BinOpExpr:
+        return resolve_bin_op(node, scope);
     case NodeType::UnaryOpExpr: {
         auto &data = node->data.unary_op_expr;
         if (data.op_type == TokenType::MUTREF) {
@@ -5475,6 +5130,10 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
         auto module = data.import->data.import_decl.resolved_module;
         std::string symbol_name = data.name->get_name();
 
+        if (!module) {
+            return create_type(TypeKind::Unknown);
+        }
+
         // Check if this is a wildcard pattern (contains *)
         if (symbol_name.find('*') != std::string::npos) {
             // Wildcard import: match pattern against all module exports
@@ -5884,6 +5543,355 @@ ChiType *Resolver::resolve_comparator(ChiType *type, ResolveScope &scope) {
 }
 
 static bool has_conditional_compile_attrs(ast::Node *node);
+
+ChiType *Resolver::resolve_bin_op(ast::Node *node, ResolveScope &scope) {
+    auto &data = node->data.bin_op_expr;
+    if (data.op_type == TokenType::QUES && scope.move_outlet) {
+        node->resolved_outlet = scope.move_outlet;
+        node->analysis.moved = true;
+    }
+    auto op1_scope = scope;
+    if (is_assignment_op(data.op_type)) {
+        op1_scope = scope.set_is_lhs(true);
+    }
+    auto t1 = resolve(data.op1, op1_scope);
+    if (!t1) {
+        return nullptr;
+    }
+    if (is_assignment_op(data.op_type)) {
+        return resolve_assignment(node, t1, scope);
+    }
+    return resolve_binary(node, t1, scope);
+}
+
+ChiType *Resolver::retarget_optional_unwrap_assignment(ast::BinOpExpr &data, ChiType *&t1) {
+    if (data.op_type != TokenType::ASS || data.op1->type != NodeType::UnaryOpExpr) {
+        return nullptr;
+    }
+    auto &u = data.op1->data.unary_op_expr;
+    if (!u.is_suffix || u.op_type != TokenType::LNOT || !u.op1 || !u.op1->resolved_type ||
+        u.op1->resolved_type->kind != TypeKind::Optional ||
+        t1 != u.op1->resolved_type->get_elem()) {
+        return nullptr;
+    }
+    auto *rhs_ctx = t1;
+    data.resolved_op1 = u.op1;
+    t1 = u.op1->resolved_type;
+    return rhs_ctx;
+}
+
+void Resolver::track_assignment_init(ast::Node *node, ast::Node *eff_op1, ast::BinOpExpr &data,
+                                     ResolveScope &scope) {
+    auto var = eff_op1->get_decl();
+    if (!var || var->type != NodeType::VarDecl) {
+        return;
+    }
+    if (var->data.var_decl.kind != ast::VarKind::Mutable) {
+        error(node, errors::ASSIGNMENT_TO_CONST, var->name);
+    }
+    auto &vd = var->data.var_decl;
+    auto init_ctx = vd.is_field ? get_init_context(scope) : InitContext::None;
+    auto *&init_slot =
+        init_ctx == InitContext::Copy ? vd.initialized_at_copy : vd.initialized_at;
+    bool is_first = !init_slot;
+    // Field with only a default value (parser sets initialized_at = var itself)
+    // being assigned for the first time in an initializer
+    if (!is_first && vd.is_field && init_slot == var && init_ctx != InitContext::None) {
+        is_first = true;
+        init_slot = nullptr;
+    }
+    if (is_first) {
+        data.is_initializing = true;
+        mark_field_initialized(var, node, init_ctx);
+    }
+}
+
+void Resolver::track_assignment_flow(ast::Node *node, ast::Node *eff_op1, ChiType *t1,
+                                     ChiType *t2, ResolveScope &scope) {
+    if (!scope.parent_fn_node) {
+        return;
+    }
+    auto &data = node->data.bin_op_expr;
+    auto lhs_decl = find_root_decl(eff_op1);
+    // `new Foo{...}` produces an owning pointer, not a borrow — skip borrow edges
+    // so args inside `new` aren't treated as borrowed by the LHS.
+    bool is_new_expr = data.op2->type == NodeType::ConstructExpr &&
+                       data.op2->data.construct_expr.is_new;
+    if (lhs_decl && !scope.is_unsafe_block && !is_new_expr) {
+        auto &fn_def = *scope.parent_fn_def();
+        fn_def.bump_edge_offset(lhs_decl);
+        bool is_ref_target = expr_creates_direct_borrow(this, data.op2, t2, t1, &scope);
+        add_borrow_source_edges(fn_def, data.op2, lhs_decl, is_ref_target);
+        copy_projection_summaries(fn_def, data.op2, lhs_decl, t1);
+        if (fn_def.flow.ref_edges.has_key(lhs_decl)) {
+            fn_def.add_terminal(lhs_decl);
+            if (eff_op1->type == NodeType::DotExpr) {
+                auto *field_decl = eff_op1->data.dot_expr.resolved_decl;
+                if (field_decl && field_decl->type == NodeType::VarDecl &&
+                    field_decl->data.var_decl.is_field) {
+                    auto *field_type = field_decl->resolved_type;
+                    if (field_type && type_may_propagate_borrow_deps(this, field_type)) {
+                        auto *root_type = node_get_type(lhs_decl);
+                        if (root_type) {
+                            auto *st = resolve_struct_type(root_type);
+                            if (st && st->this_lifetime) {
+                                fn_def.flow.terminal_lifetimes[lhs_decl] = st->this_lifetime;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (lhs_decl) {
+        track_move_sink(scope.parent_fn_node, data.op2, t2, lhs_decl, t1);
+    }
+}
+
+ChiType *Resolver::resolve_assignment(ast::Node *node, ChiType *t1, ResolveScope &scope) {
+    auto &data = node->data.bin_op_expr;
+    auto *rhs_ctx_override = retarget_optional_unwrap_assignment(data, t1);
+    auto *eff_op1 = data.resolved_op1 ? data.resolved_op1 : data.op1;
+
+    track_assignment_init(node, eff_op1, data, scope);
+
+    auto var_scope = scope.set_value_type(rhs_ctx_override ? rhs_ctx_override : t1);
+    // Plain assignment can construct directly into the target. Compound assignments
+    // (+=, -=, etc.) must read the old LHS first, so don't set move_outlet there.
+    if (data.op_type == TokenType::ASS) {
+        var_scope = var_scope.set_move_outlet(eff_op1);
+    }
+    auto t2 = resolve(data.op2, var_scope);
+    if (!t2) {
+        return nullptr;
+    }
+    track_assignment_flow(node, eff_op1, t1, t2, scope);
+
+    if (data.op_type == TokenType::ASS) {
+        check_assignment(data.op2, t2, t1, &scope);
+        // NoCopy: error if assigning from a named value
+        if (is_non_copyable(t1) && is_addressable(data.op2) && !data.op2->analysis.moved &&
+            should_destroy(data.op2, t2)) {
+            error(data.op2, errors::TYPE_NOT_COPYABLE, format_type_display(t1));
+        }
+        // RHS is a non-addressable temp (fn call, construct, etc.):
+        // transfer ownership to the LHS — move, don't copy.
+        mark_temp_moved_if_needed(data.op2, t2);
+        return t1;
+    }
+
+    // Compound assignment: route through the operator method (e.g. Add::add for +=)
+    // when one exists, otherwise validate the base op directly.
+    auto base_op = get_assignment_op(data.op_type);
+    auto intrinsic = get_operator_intrinsic_symbol(base_op);
+    if (intrinsic != IntrinsicSymbol::None) {
+        auto method_call =
+            try_resolve_operator_method(intrinsic, t1, t2, data.op1, data.op2, node, scope);
+        if (method_call.has_value()) {
+            data.resolved_call = method_call->call_node;
+            return t1;
+        }
+    }
+    check_binary_op(node, data.op_type, t1);
+    check_assignment(data.op2, t2, t1, &scope);
+    return t1;
+}
+
+ChiType *Resolver::resolve_binary(ast::Node *node, ChiType *t1, ResolveScope &scope) {
+    auto &data = node->data.bin_op_expr;
+    // For ??, propagate the unwrapped T (not ?T) so RHS literal inference picks the payload type.
+    auto ctx_type = (data.op_type == TokenType::QUES && t1->kind == TypeKind::Optional)
+                        ? t1->get_elem()
+                        : t1;
+    auto op2_scope = scope.set_value_type(ctx_type);
+    ast::Block rhs_narrow_block = {};
+    if ((data.op_type == TokenType::LAND || data.op_type == TokenType::LOR) && scope.block &&
+        scope.block->scope && scope.parent_fn_node) {
+        array<ast::Node *> rhs_narrowables;
+        collect_narrowables(data.op1, logical_rhs_uses_truthy_narrowing(data.op_type),
+                            rhs_narrowables);
+        if (rhs_narrowables.size() > 0) {
+            rhs_narrow_block.scope = m_ctx->allocator->create_scope(scope.block->scope);
+            for (auto ident : rhs_narrowables) {
+                auto var = create_narrowed_var(ident, node, scope);
+                rhs_narrow_block.scope->put(var->name, var);
+                data.rhs_narrow_vars.add(var);
+            }
+            op2_scope = op2_scope.set_block(&rhs_narrow_block);
+        }
+    }
+    auto t2 = resolve(data.op2, op2_scope);
+    if (!t2) {
+        return nullptr;
+    }
+
+    // Operands are consumed by the operator — ensure any temps own their storage.
+    ensure_temp_owner(data.op1, t1, scope);
+    ensure_temp_owner(data.op2, t2, scope);
+
+    switch (data.op_type) {
+    case TokenType::EQ:
+    case TokenType::NE:
+    case TokenType::LT:
+    case TokenType::LE:
+    case TokenType::GT:
+    case TokenType::GE:
+        return resolve_comparison(node, t1, t2, scope);
+    case TokenType::LAND:
+    case TokenType::LOR:
+        check_assignment(data.op1, t1, get_system_types()->bool_, &scope);
+        check_assignment(data.op2, t2, get_system_types()->bool_, &scope);
+        return get_system_types()->bool_;
+    case TokenType::QUES:
+        return resolve_nullish_coalesce(node, t1, t2, scope);
+    default:
+        return resolve_arithmetic(node, t1, t2, scope);
+    }
+}
+
+ChiType *Resolver::resolve_comparison(ast::Node *node, ChiType *t1, ChiType *t2,
+                                      ResolveScope &scope) {
+    auto &data = node->data.bin_op_expr;
+    if ((t1->kind == TypeKind::Pointer || t2->kind == TypeKind::Pointer) &&
+        data.op_type != TokenType::EQ && data.op_type != TokenType::NE) {
+        if (!scope.is_unsafe_block) {
+            error(node, "pointer comparison requires unsafe block");
+            return nullptr;
+        }
+    }
+    if (data.op_type == TokenType::EQ || data.op_type == TokenType::NE) {
+        bool lhs_null = t1->kind == TypeKind::Null;
+        bool rhs_null = t2->kind == TypeKind::Null;
+        if ((lhs_null && t2->kind == TypeKind::Optional) ||
+            (rhs_null && t1->kind == TypeKind::Optional)) {
+            return get_system_types()->bool_;
+        }
+        if ((lhs_null && t2->is_reference()) || (rhs_null && t1->is_reference())) {
+            error(node, "references cannot be compared to null");
+            return nullptr;
+        } else if (t1->kind == TypeKind::Optional && t2->kind == TypeKind::Optional) {
+            error(node, "cannot compare optional values directly — "
+                        "only null checks are allowed (e.g. x == null)");
+            return nullptr;
+        } else if (lhs_null && !rhs_null && can_assign(t1, t2)) {
+            data.op1->resolved_type = t2;
+            t1 = t2;
+        } else if (rhs_null && !lhs_null && can_assign(t2, t1)) {
+            data.op2->resolved_type = t1;
+            t2 = t1;
+        }
+    }
+    IntrinsicSymbol cmp_sym = get_operator_intrinsic_symbol(data.op_type);
+    if (cmp_sym != IntrinsicSymbol::None) {
+        auto method_call =
+            try_resolve_operator_method(cmp_sym, t1, t2, data.op1, data.op2, node, scope);
+        if (method_call.has_value()) {
+            data.resolved_call = method_call->call_node;
+        }
+    }
+    if (!data.resolved_call && t1->kind != TypeKind::Optional) {
+        check_binary_op(node, data.op_type, t1);
+    }
+    return get_system_types()->bool_;
+}
+
+ChiType *Resolver::resolve_nullish_coalesce(ast::Node *node, ChiType *t1, ChiType *t2,
+                                            ResolveScope &scope) {
+    auto &data = node->data.bin_op_expr;
+    if (t1->kind != TypeKind::Optional) {
+        error(node, "left operand of ?? must be optional, got {}", format_type_display(t1));
+        return nullptr;
+    }
+    auto elem_type = t1->get_elem();
+    bool rhs_optional =
+        t2->kind == TypeKind::Optional && is_same_type(t2->get_elem(), elem_type);
+    auto target_type = rhs_optional ? t1 : elem_type;
+    data.op2->analysis.conversion_type = resolve_conversion_type(t2, target_type);
+    mark_temp_moved_if_needed(data.op2, t2);
+    if (data.op2->analysis.moved) {
+        node->analysis.moved = true;
+    }
+    check_assignment(data.op2, t2, target_type, &scope);
+    return target_type;
+}
+
+ChiType *Resolver::resolve_arithmetic(ast::Node *node, ChiType *t1, ChiType *t2,
+                                      ResolveScope &scope) {
+    auto &data = node->data.bin_op_expr;
+    if (data.op_type == TokenType::ADD || data.op_type == TokenType::SUB) {
+        bool lhs_ptr = t1->kind == TypeKind::Pointer;
+        bool rhs_ptr = t2->kind == TypeKind::Pointer;
+        bool lhs_int = t1->is_int();
+        bool rhs_int = t2->is_int();
+
+        if (lhs_ptr && rhs_int) {
+            if (!scope.is_unsafe_block) {
+                error(node, "pointer arithmetic requires unsafe block");
+                return nullptr;
+            }
+            return t1;
+        }
+        if (lhs_int && rhs_ptr && data.op_type == TokenType::ADD) {
+            if (!scope.is_unsafe_block) {
+                error(node, "pointer arithmetic requires unsafe block");
+                return nullptr;
+            }
+            return t2;
+        }
+        if (lhs_ptr && rhs_ptr && data.op_type == TokenType::SUB) {
+            if (!scope.is_unsafe_block) {
+                error(node, "pointer arithmetic requires unsafe block");
+                return nullptr;
+            }
+            if (!is_same_type(t1->get_elem(), t2->get_elem())) {
+                error(node, "pointer subtraction requires same element type, got {} and {}",
+                      format_type_display(t1), format_type_display(t2));
+                return nullptr;
+            }
+            return get_system_types()->int64;
+        }
+    }
+
+    IntrinsicSymbol intrinsic_symbol = get_operator_intrinsic_symbol(data.op_type);
+    ChiType *result_type = t1;
+
+    if (t1->kind == TypeKind::Float || t2->kind == TypeKind::Float) {
+        if (t1->kind == TypeKind::Float && t2->kind == TypeKind::Float) {
+            result_type = t1->data.float_.bit_count >= t2->data.float_.bit_count ? t1 : t2;
+        } else {
+            result_type = t1->kind == TypeKind::Float ? t1 : t2;
+        }
+    } else if (t1->is_int() && t2->is_int()) {
+        if (t1->kind == TypeKind::Rune || t2->kind == TypeKind::Rune) {
+            result_type = get_system_types()->rune_;
+        } else {
+            int t1_size = get_int_type_size(t1);
+            int t2_size = get_int_type_size(t2);
+            if (t2_size > t1_size) {
+                result_type = t2;
+            } else if (t1_size == t2_size && t1->kind == TypeKind::Int &&
+                       t2->kind == TypeKind::Int) {
+                if (t2->data.int_.is_unsigned && !t1->data.int_.is_unsigned) {
+                    result_type = t2;
+                }
+            }
+        }
+    }
+
+    if (intrinsic_symbol != IntrinsicSymbol::None) {
+        auto method_call = try_resolve_operator_method(intrinsic_symbol, t1, t2, data.op1,
+                                                       data.op2, node, scope);
+        if (method_call.has_value()) {
+            data.resolved_call = method_call->call_node;
+            return method_call->return_type;
+        }
+    }
+
+    check_assignment(data.op1, t1, result_type, &scope);
+    check_assignment(data.op2, t2, result_type, &scope);
+    check_binary_op(node, data.op_type, result_type);
+    return result_type;
+}
 
 ChiType *Resolver::resolve(ast::Node *node, ResolveScope &scope, uint32_t flags) {
     if (!node)

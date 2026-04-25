@@ -970,18 +970,18 @@ func consume_tv_pair(t: Tuple<TrackedVal, TrackedVal>) Promise<int> {
 }
 
 async func async_construct_expr_await() Promise {
-    let _ = await consume_tv(TrackedVal{851});
+    let _ = await consume_tv({851});
 }
 
 async func async_if_expr_await(flag: bool) Promise {
-    let _ = await consume_tv(flag ? TrackedVal{861} : TrackedVal{862});
+    let _ = await consume_tv(flag ? {861} : {862});
 }
 
 async func async_switch_expr_await(k: int) Promise {
     let _ = await consume_tv(switch k {
-        1 => TrackedVal{871},
-        2 => TrackedVal{872},
-        else => TrackedVal{873}
+        1 => ({871}),
+        2 => ({872}),
+        else => ({873})
     });
 }
 
@@ -993,7 +993,7 @@ async func async_binop_add_await() Promise {
 
 async func async_coalesce_await() Promise {
     var empty: ?TrackedVal = null;
-    let _ = await consume_tv(empty ?? TrackedVal{890});
+    let _ = await consume_tv(empty ?? {890});
 }
 
 async func async_tuple_expr_await() Promise {
@@ -1001,7 +1001,7 @@ async func async_tuple_expr_await() Promise {
 }
 
 async func async_paren_expr_await() Promise {
-    let _ = await consume_tv((TrackedVal{897}));
+    let _ = await consume_tv(({897}));
 }
 
 func test_outlet_exprs_in_async_awaited() {

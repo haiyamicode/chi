@@ -438,6 +438,11 @@ struct BinOpExpr {
     Node *resolved_call = nullptr;
     bool is_initializing = false; // true when this assignment is the first write to the target
     array<Node *> rhs_narrow_vars = {}; // narrowed vars visible only while resolving/evaluating op2
+    // Resolver-effective LHS. Set when the assignment is retargeted at a
+    // different node than the user wrote (e.g. `x! = v` retargets onto `x`
+    // so the implicit T → ?T wrap path applies). `op1` is left untouched
+    // so the formatter still prints what the user wrote.
+    Node *resolved_op1 = nullptr;
 };
 
 struct UnaryOpExpr {

@@ -6319,9 +6319,10 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
                 [&]() { return compile_assignment_to_type(fn, data.op2, result_type); });
         }
         case TokenType::ASS: {
-            auto ref = compile_expr_ref(fn, data.op1);
+            auto *lhs = data.resolved_op1 ? data.resolved_op1 : data.op1;
+            auto ref = compile_expr_ref(fn, lhs);
             assert(ref.address);
-            auto dest_type = get_chitype(data.op1);
+            auto dest_type = get_chitype(lhs);
             auto dest_ptr = ref.address;
 
             // Route owning assignment through a disjoint temp so RHS and
@@ -6339,7 +6340,7 @@ llvm::Value *Compiler::compile_expr(Function *fn, ast::Node *expr) {
             // Fallback for cloned AST nodes (e.g. subtype variants):
             // check if this is a field being initialized inside a constructor
             if (destruct_old && fn->node) {
-                auto var = data.op1->get_decl();
+                auto var = lhs->get_decl();
                 if (var && var->type == ast::NodeType::VarDecl && var->data.var_decl.is_field &&
                     fn->node->type == ast::NodeType::FnDef &&
                     fn->node->data.fn_def.fn_kind == ast::FnKind::Constructor) {

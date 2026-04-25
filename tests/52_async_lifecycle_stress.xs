@@ -77,7 +77,7 @@ async func trace_throw_after_delay() Promise<int> {
 }
 
 async func throw_caught(tag: int) Promise<int> {
-    throw new TraceCaughtError{tag: tag};
+    throw new TraceCaughtError{:tag};
     return 0;
 }
 
@@ -127,10 +127,14 @@ async func complex_stress() Promise<int> {
 }
 
 func main() {
-    complex_stress().then(func (value: int) {
-        printf("stress result={}\n", value);
-        try_await_wrap_err(51).then(func (r: Result<int, Shared<Error>>) {
-            printf("wrap err msg={}\n", r.error()!.message());
-        });
-    });
+    complex_stress().then(
+        func (value: int) {
+            printf("stress result={}\n", value);
+            try_await_wrap_err(51).then(
+                func (r: Result<int, Shared<Error>>) {
+                    printf("wrap err msg={}\n", r.error()!.message());
+                }
+            );
+        }
+    );
 }

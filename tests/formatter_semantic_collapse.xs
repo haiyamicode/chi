@@ -152,4 +152,7 @@ func main() {
         extremely_long_field_name_beta_component: 14000,
         extremely_long_field_name_gamma_component: 15000
     });
+
+    var maybe_point2: ?Point = Point{50, 51};
+    maybe_point2! = Point{52, 53};
 }
