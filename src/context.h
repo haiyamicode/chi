@@ -120,7 +120,9 @@ struct CompilationContext : public Context {
 
     ChiLifetime *create_lifetime(string name, LifetimeKind kind, ast::Node *owner,
                                  ChiType *origin) {
-        return lifetimes.emplace(new ChiLifetime{std::move(name), kind, owner, origin})->get();
+        auto *lt = lifetimes.emplace(new ChiLifetime{0, std::move(name), kind, owner, origin})->get();
+        lt->id = lifetimes.size();
+        return lt;
     }
 };
 } // namespace cx

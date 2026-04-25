@@ -77,6 +77,20 @@ struct SystemTypes {
 // Forward declaration for GenericResolver
 class Resolver;
 
+struct FormatOptions {
+    bool for_display = false;
+    bool include_lifetimes = false;
+};
+
+struct TypeFormatter {
+    Resolver *resolver = nullptr;
+    FormatOptions opts;
+
+    string format(ChiType *type);
+    string format_list(TypeList *type_list);
+    string format_data(TypeKind kind, ChiType::Data *data);
+};
+
 // Tracks a single generic instantiation and its type environment
 struct TypeEnvEntry {
     string name;                           // e.g., "promise<Unit>", "Array<int>.add"
@@ -480,15 +494,17 @@ class Resolver {
 
     ChiType *node_get_type(ast::Node *node);
 
-    string format_type(ChiType *type, bool for_display = false);
-    string format_type_list(TypeList *types, bool for_display = false);
+    string format_type(ChiType *type, FormatOptions opts = {});
+    string format_type_list(TypeList *types, FormatOptions opts = {});
 
-    // Convenience wrappers: display = human-readable for errors, id = unique internal key
-    string format_type_display(ChiType *type) { return format_type(type, true); }
-    string format_type_id(ChiType *type) { return format_type(type, false); }
+    string format_type_display(ChiType *type) { return format_type(type, {.for_display = true}); }
+    string format_type_id(ChiType *type) { return format_type(type, {}); }
+    string format_type_id_with_lifetimes(ChiType *type) {
+        return format_type(type, {.include_lifetimes = true});
+    }
     string format_type_qualified_name(ChiType *type, const string &module_id = "");
 
-    string format_type_data(TypeKind kind, ChiType::Data *data, bool for_display = false);
+    string format_type_data(TypeKind kind, ChiType::Data *data, FormatOptions opts = {});
 
     string resolve_global_id(ast::Node *node);
 

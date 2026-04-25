@@ -1180,6 +1180,24 @@ func test_inline_optref_unwrap_borrow() {
     printf("inline coalesce fallback = {}\n", *r3);
 }
 
+func optref_producer(v: &int) ?(&int) {
+    return {v};
+}
+
+func optref_consumer(x: ?(&int)) {
+    if x {
+        printf("optref pass = {}\n", *x!);
+    }
+}
+
+func test_optref_passed_between_functions() {
+    printf("=== optref passed between functions ===\n");
+    var n = 21;
+    optref_consumer(optref_producer(&n));
+    let opt = optref_producer(&n);
+    optref_consumer(opt);
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -1252,4 +1270,5 @@ func main() {
     test_nested_field_projection_copy();
     test_nested_receiver_chain_ref_return();
     test_inline_optref_unwrap_borrow();
+    test_optref_passed_between_functions();
 }

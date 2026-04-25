@@ -6174,23 +6174,23 @@ string Resolver::resolve_display_name(ast::Node *node) {
     }
 }
 
-string Resolver::format_type(ChiType *type, bool for_display) {
+string TypeFormatter::format(ChiType *type) {
     if (!type) {
         return "<invalid-type>";
     }
-    if (for_display) {
+    if (opts.for_display) {
         if (type->display_name) {
             return *type->display_name;
         }
         if (type->kind == TypeKind::Struct) {
             auto &sty = type->data.struct_;
             auto base_name = sty.node ? sty.node->name : type->name.value_or(string("<anon>"));
-            return format_container_display_name(this, base_name, &sty.type_params);
+            return format_container_display_name(resolver, base_name, &sty.type_params);
         }
         if (type->kind == TypeKind::Enum) {
             auto &ety = type->data.enum_;
             auto base_name = ety.node ? ety.node->name : type->name.value_or(string("<anon>"));
-            return format_container_display_name(this, base_name, &ety.type_params);
+            return format_container_display_name(resolver, base_name, &ety.type_params);
         }
         if (type->name) {
             return *type->name;
@@ -6199,7 +6199,32 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         if (!type->global_id.empty()) {
             return type->global_id;
         }
-        auto name = format_type_display(type);
+        auto wrapper_id = [&](const char *prefix) {
+            string s = prefix + format(type->get_elem());
+            if (opts.include_lifetimes) {
+                if (auto *lts = type->get_lifetimes()) {
+                    for (auto *lt : *lts) {
+                        if (lt) s += "L" + std::to_string(lt->id);
+                    }
+                }
+            }
+            return s;
+        };
+        switch (type->kind) {
+        case TypeKind::Pointer:
+            return wrapper_id("*");
+        case TypeKind::Reference:
+            return wrapper_id("&");
+        case TypeKind::MutRef:
+            return wrapper_id("&mut ");
+        case TypeKind::MoveRef:
+            return wrapper_id("&move ");
+        case TypeKind::Optional:
+            return wrapper_id("?");
+        default:
+            break;
+        }
+        auto name = resolver->format_type_display(type);
         return fmt::format("Type:{}:{}", type->id, name);
     }
 
@@ -6211,7 +6236,7 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         ss << "Tuple<";
         auto &elems = type->data.tuple.elements;
         for (int i = 0; i < elems.size(); i++) {
-            ss << format_type(elems[i], for_display);
+            ss << format(elems[i]);
             if (i < elems.size() - 1) ss << ", ";
         }
         ss << ">";
@@ -6220,25 +6245,24 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     case TypeKind::Infer: {
         auto inferred = type->data.infer.inferred_type;
         if (inferred) {
-            return format_type(inferred, for_display);
+            return format(inferred);
         }
-        return for_display ? "Infer" : fmt::format("Type:{}:Infer", type->id);
+        return opts.for_display ? "Infer" : fmt::format("Type:{}:Infer", type->id);
     }
     case TypeKind::This:
-        return format_type(type->eval(), for_display);
+        return format(type->eval());
     case TypeKind::Subtype: {
         auto &data = type->data.subtype;
         switch (data.generic->kind) {
         case cx::TypeKind::Fn:
         case cx::TypeKind::FnLambda:
-            return format_type(data.final_type, for_display);
+            return format(data.final_type);
         default: {
             std::stringstream ss;
-            ss << format_type(data.generic, for_display) << "<";
+            ss << format(data.generic) << "<";
             bool first = true;
             for (int i = 0; i < data.args.size(); i++) {
                 auto arg = data.args[i];
-                // Unpack variadic Tuple arg for display
                 bool is_variadic_param = false;
                 if (data.generic->kind == TypeKind::Struct) {
                     auto &dp = data.generic->data.struct_.node->data.struct_decl.type_params;
@@ -6253,12 +6277,12 @@ string Resolver::format_type(ChiType *type, bool for_display) {
                     for (auto elem : arg->data.tuple.elements) {
                         if (!first) ss << ",";
                         first = false;
-                        ss << format_type(elem, for_display);
+                        ss << format(elem);
                     }
                 } else {
                     if (!first) ss << ",";
                     first = false;
-                    ss << format_type(arg, for_display);
+                    ss << format(arg);
                 }
             }
             ss << ">";
@@ -6269,28 +6293,28 @@ string Resolver::format_type(ChiType *type, bool for_display) {
     case TypeKind::String:
         return "string";
     case TypeKind::Pointer:
-        return "*" + format_type(type->get_elem(), for_display);
+        return "*" + format(type->get_elem());
     case TypeKind::Reference:
-        return "&" + format_type(type->get_elem(), for_display);
+        return "&" + format(type->get_elem());
     case TypeKind::MutRef:
-        return "&mut " + format_type(type->get_elem(), for_display);
+        return "&mut " + format(type->get_elem());
     case TypeKind::MoveRef:
-        return "&move " + format_type(type->get_elem(), for_display);
+        return "&move " + format(type->get_elem());
     case TypeKind::Optional:
-        return "?" + format_type(type->get_elem(), for_display);
+        return "?" + format(type->get_elem());
     case TypeKind::Array:
-        return fmt::format("Array<{}>", format_type(type->get_elem(), for_display));
+        return fmt::format("Array<{}>", format(type->get_elem()));
     case TypeKind::Span: {
         string lt_name =
             type->data.span.lifetimes.size() > 0 && type->data.span.lifetimes[0]
                 ? type->data.span.lifetimes[0]->name
                 : "";
         string prefix = format_span_prefix(type->data.span.is_mut, lt_name);
-        return fmt::format("{}[{}]", prefix, format_type(type->data.span.elem, for_display));
+        return fmt::format("{}[{}]", prefix, format(type->data.span.elem));
     }
     case TypeKind::FixedArray:
         return fmt::format("[{}]{}", type->data.fixed_array.size,
-                           format_type(type->data.fixed_array.elem, for_display));
+                           format(type->data.fixed_array.elem));
     case TypeKind::Unknown:
         return "unknown";
     case TypeKind::Undefined:
@@ -6305,13 +6329,13 @@ string Resolver::format_type(ChiType *type, bool for_display) {
         break;
     }
     assert(type->kind < TypeKind::__COUNT);
-    return format_type_data(type->kind, &type->data, for_display);
+    return format_data(type->kind, &type->data);
 }
 
-string Resolver::format_type_list(TypeList *type_list, bool for_display) {
+string TypeFormatter::format_list(TypeList *type_list) {
     std::stringstream ss;
     for (int i = 0; i < type_list->size(); i++) {
-        ss << format_type(type_list->at(i), for_display);
+        ss << format(type_list->at(i));
         if (i < type_list->size() - 1) {
             ss << ",";
         }
@@ -6319,7 +6343,7 @@ string Resolver::format_type_list(TypeList *type_list, bool for_display) {
     return ss.str();
 }
 
-string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_display) {
+string TypeFormatter::format_data(TypeKind kind, ChiType::Data *data) {
     switch (kind) {
     case TypeKind::Struct: {
         auto &struct_ = data->struct_;
@@ -6328,7 +6352,7 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         if (struct_.type_params.size() > 0) {
             ss << "<";
             for (int i = 0; i < struct_.type_params.size(); i++) {
-                ss << format_type(struct_.type_params[i], for_display);
+                ss << format(struct_.type_params[i]);
                 if (i < struct_.type_params.size() - 1) {
                     ss << ",";
                 }
@@ -6338,7 +6362,7 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         ss << "{";
         for (int i = 0; i < struct_.members.size(); i++) {
             auto &member = struct_.members[i];
-            ss << format_type(member->resolved_type, for_display);
+            ss << format(member->resolved_type);
             if (i < struct_.members.size() - 1) {
                 ss << ",";
             }
@@ -6352,9 +6376,9 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         if (fn.is_extern) {
             ss << "extern ";
         }
-        if (fn.container_ref && !for_display) {
+        if (fn.container_ref && !opts.for_display) {
             ss << "(";
-            ss << format_type(fn.container_ref, for_display);
+            ss << format(fn.container_ref);
             ss << ") ";
         }
         ss << "func(";
@@ -6363,29 +6387,29 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
                 ss << "...";
                 auto *param = fn.get_variadic_elem_type();
                 if (param) {
-                    ss << format_type(param, for_display);
+                    ss << format(param);
                 } else {
-                    ss << format_type(fn.params[i], for_display);
+                    ss << format(fn.params[i]);
                 }
                 if (i < fn.params.size() - 1) {
                     ss << ",";
                 }
                 continue;
             }
-            ss << format_type(fn.params[i], for_display);
+            ss << format(fn.params[i]);
             if (i < fn.params.size() - 1) {
                 ss << ",";
             }
         }
         ss << ")";
         if (fn.return_type) {
-            ss << " " << format_type(fn.return_type, for_display);
+            ss << " " << format(fn.return_type);
         }
         return ss.str();
     }
     case TypeKind::FnLambda: {
         auto &fn_lambda = data->fn_lambda;
-        return fmt::format("Lambda<{}>", format_type(fn_lambda.fn, for_display));
+        return fmt::format("Lambda<{}>", format(fn_lambda.fn));
     }
     case TypeKind::Enum: {
         auto &enum_ = data->enum_;
@@ -6396,7 +6420,7 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
             ss << member->name;
             auto &enum_value = member->resolved_type->data.enum_value;
             if (member->resolved_type->data.enum_value.variant_struct) {
-                ss << "{" << format_type(enum_value.variant_struct, for_display) << "}";
+                ss << "{" << format(enum_value.variant_struct) << "}";
             }
             if (i < enum_.variants.size() - 1) {
                 ss << ",";
@@ -6408,6 +6432,18 @@ string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, bool for_d
         break;
     }
     return PRINT_ENUM(kind);
+}
+
+string Resolver::format_type(ChiType *type, FormatOptions opts) {
+    return TypeFormatter{this, opts}.format(type);
+}
+
+string Resolver::format_type_list(TypeList *type_list, FormatOptions opts) {
+    return TypeFormatter{this, opts}.format_list(type_list);
+}
+
+string Resolver::format_type_data(TypeKind kind, ChiType::Data *data, FormatOptions opts) {
+    return TypeFormatter{this, opts}.format_data(kind, data);
 }
 
 static bool allows_move_ref_borrow_coercion(Resolver *resolver, ast::Node *value,
@@ -10715,7 +10751,7 @@ ChiType *Resolver::get_fn_type(ChiType *ret, TypeList *params, bool is_variadic,
         fn.container_ref = get_pointer_type(container, TypeKind::Reference);
     }
 
-    auto key = format_type_data(TypeKind::Fn, (ChiType::Data *)&fn);
+    auto key = format_type_data(TypeKind::Fn, (ChiType::Data *)&fn, {.include_lifetimes = true});
 
     // Don't cache function types with placeholder return types - they may be
     // modified during lambda body resolution for type inference

@@ -215,4 +215,7 @@ nested map ref = 42
 inline unwrap = 7
 inline coalesce = 7
 inline coalesce fallback = 88
+=== optref passed between functions ===
+optref pass = 21
+optref pass = 21
 Heavy.delete(20)

@@ -181,6 +181,7 @@ enum class LifetimeKind {
 };
 
 struct ChiLifetime {
+    int id = 0;                   // unique sequential id, for stable identity in cache keys
     string name;                  // "this", "x", "h", etc.
     LifetimeKind kind;
     ast::Node *owner = nullptr;   // ParamDecl node for Param kind, null for This/Return
