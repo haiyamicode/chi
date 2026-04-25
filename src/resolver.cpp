@@ -12825,6 +12825,33 @@ void Resolver::add_borrow_source_edges(ast::FnDef &fn_def, ast::Node *expr, ast:
     case NodeType::CastExpr:
         add_borrow_source_edges(fn_def, expr->data.cast_expr.expr, target, is_ref, edge_offset);
         break;
+    case NodeType::ParenExpr:
+        add_borrow_source_edges(fn_def, expr->data.child_expr, target, is_ref, edge_offset);
+        break;
+    case NodeType::UnaryOpExpr: {
+        // Optional unwrap (`expr!`) preserves the inner reference's borrow source.
+        // For custom-method unwrap (ops.Unwrap), the resolved call carries the flow.
+        auto &uop = expr->data.unary_op_expr;
+        if (uop.is_suffix && uop.op_type == TokenType::LNOT) {
+            if (uop.resolved_call) {
+                add_borrow_source_edges(fn_def, uop.resolved_call, target, is_ref, edge_offset);
+            } else if (uop.op1) {
+                add_borrow_source_edges(fn_def, uop.op1, target, is_ref, edge_offset);
+            }
+        }
+        break;
+    }
+    case NodeType::BinOpExpr: {
+        // Nullish coalesce (`a ?? b`): result borrows from either branch.
+        auto &bop = expr->data.bin_op_expr;
+        if (bop.op_type == TokenType::QUES) {
+            if (bop.op1)
+                add_borrow_source_edges(fn_def, bop.op1, target, is_ref, edge_offset);
+            if (bop.op2)
+                add_borrow_source_edges(fn_def, bop.op2, target, is_ref, edge_offset);
+        }
+        break;
+    }
     case NodeType::SwitchExpr:
         for (auto scase : expr->data.switch_expr.cases) {
             if (scase) {

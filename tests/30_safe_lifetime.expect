@@ -211,4 +211,8 @@ moved.other = 1
 nested chain ref = 11
 nested chain deeper ref = 22
 nested map ref = 42
+=== inline optref unwrap borrow ===
+inline unwrap = 7
+inline coalesce = 7
+inline coalesce fallback = 88
 Heavy.delete(20)

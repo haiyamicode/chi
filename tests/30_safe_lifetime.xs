@@ -1156,6 +1156,30 @@ func test_nested_receiver_chain_ref_return() {
     m.observe("a");
 }
 
+struct InlineOptRefSource {
+    val: int = 0;
+    fallback: int = -1;
+
+    func find() ?(&int) {
+        if this.val > 0 {
+            return {&this.val};
+        }
+        return null;
+    }
+}
+
+func test_inline_optref_unwrap_borrow() {
+    printf("=== inline optref unwrap borrow ===\n");
+    var s = InlineOptRefSource{val: 7, fallback: 99};
+    let r1: &int = s.find()!;
+    printf("inline unwrap = {}\n", *r1);
+    let r2: &int = s.find() ?? &s.fallback;
+    printf("inline coalesce = {}\n", *r2);
+    var empty = InlineOptRefSource{val: 0, fallback: 88};
+    let r3: &int = empty.find() ?? &empty.fallback;
+    printf("inline coalesce fallback = {}\n", *r3);
+}
+
 func main() {
     test_holder();
     test_multi_ref();
@@ -1227,4 +1251,5 @@ func main() {
     test_try_catch_guard();
     test_nested_field_projection_copy();
     test_nested_receiver_chain_ref_return();
+    test_inline_optref_unwrap_borrow();
 }
