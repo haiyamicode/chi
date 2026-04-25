@@ -171,6 +171,7 @@ struct ResolveScope {
     ChiType *parent_type_symbol = nullptr;
     bool is_fn_call = false; // True when resolving function reference for call
     bool is_unsafe_block = false; // True when inside an unsafe block or unsafe function
+    bool is_sizeof_operand = false; // True when resolving the operand of `sizeof`
     map<string, ChiLifetime *> *fn_lifetime_params = nullptr; // Explicit lifetime params from function declaration
 
     ast::FnDef *parent_fn_def() {
@@ -204,6 +205,8 @@ struct ResolveScope {
     ResolveScope set_is_fn_call(bool is_fn_call) const;
 
     ResolveScope set_is_unsafe_block(bool is_unsafe) const;
+
+    ResolveScope set_is_sizeof_operand(bool is_sizeof_operand) const;
 };
 
 enum ResolveFlag : uint32_t { IS_FN_DECL_PROTO = 1 << 0, IS_FN_LAMBDA = 1 << 1 };

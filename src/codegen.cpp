@@ -9522,7 +9522,6 @@ llvm::Value *Compiler::compile_fn_call(Function *fn, ast::Node *expr, InvokeInfo
         auto ctn_type_l = compile_type(ctn_type);
         auto ptr = compile_dot_ptr(fn, dot_expr.effective_expr());
 
-        // Check if receiver is an interface reference (fat pointer dispatch)
         bool receiver_is_interface = false;
         if (ctn_type->is_pointer_like()) {
             auto elem = ctn_type->get_elem();

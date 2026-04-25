@@ -1773,7 +1773,13 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                           format_type_display(t), format_type_display(t));
                     return nullptr;
                 }
-                return t->get_elem();
+                auto elem = t->get_elem();
+                if (elem && ChiTypeStruct::is_interface(elem) && !scope.is_sizeof_operand) {
+                    error(node, errors::BARE_INTERFACE_TYPE, format_type_display(elem),
+                          format_type_display(elem));
+                    return nullptr;
+                }
+                return elem;
             }
             // Check for ops.Deref / ops.DerefMut
             {
@@ -1789,8 +1795,16 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
                 if (method_call) {
                     data.resolved_call = method_call->call_node;
                     auto ret = method_call->return_type;
-                    if (ret && ret->is_reference())
-                        return ret->get_elem();
+                    if (ret && ret->is_reference()) {
+                        auto elem = ret->get_elem();
+                        if (elem && ChiTypeStruct::is_interface(elem) &&
+                            !scope.is_sizeof_operand) {
+                            error(node, errors::BARE_INTERFACE_TYPE,
+                                  format_type_display(elem), format_type_display(elem));
+                            return nullptr;
+                        }
+                        return elem;
+                    }
                     return ret;
                 }
             }
@@ -4893,7 +4907,8 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             return get_system_types()->void_;
         }
         case TokenType::KW_SIZEOF: {
-            auto type = resolve_value(data.expr, scope);
+            auto sizeof_scope = scope.set_is_sizeof_operand(true);
+            auto type = resolve_value(data.expr, sizeof_scope);
             data.expr->resolved_type = type;
             return get_system_types()->uint32;
         }
@@ -13480,6 +13495,10 @@ ResolveScope ResolveScope::set_is_lhs(bool is_lhs) const { RS_SET_PROP_COPY(is_l
 
 ResolveScope ResolveScope::set_is_fn_call(bool is_fn_call) const {
     RS_SET_PROP_COPY(is_fn_call, is_fn_call);
+}
+
+ResolveScope ResolveScope::set_is_sizeof_operand(bool is_sizeof_operand) const {
+    RS_SET_PROP_COPY(is_sizeof_operand, is_sizeof_operand);
 }
 
 ResolveScope ResolveScope::set_is_unsafe_block(bool is_unsafe) const {
