@@ -66,7 +66,8 @@ TESTS_LIST = 00_fib.test \
 		60_conditional_compilation.test \
 		61_package_import.test \
 		62_map_init.test \
-		63_chi_wrapper.test
+		63_chi_wrapper.test \
+		64_main_frame_gc_roots.test
 TESTS ?= $(TESTS_LIST)
 CHIC = $(abspath $(BUILD_DIR)/bin/chic)
 CHI = $(abspath $(BUILD_DIR)/bin/chi)

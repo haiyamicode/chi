@@ -1308,8 +1308,17 @@ Function *Compiler::compile_fn_def(ast::Node *node, Function *fn) {
         emit_dbg_location(fn_def.body);
         auto runtime_start = get_system_fn("cx_runtime_start");
         auto set_program_args = get_system_fn("cx_set_program_args");
-        auto stack_marker =
-            builder.CreateAlloca(llvm::IntegerType::getInt1Ty(llvm_ctx), nullptr, "_stack_marker");
+        // GC stack-scan base: must be the highest address in main's frame. An alloca
+        // won't do — entry_alloca prepends, so it ends up at the LOWEST address and
+        // the scan misses every local. frameaddress(0) returns RBP; force frame-pointer=all
+        // so it's preserved.
+        fn->llvm_fn->addFnAttr("frame-pointer", "all");
+        auto frameaddr_fn = llvm::Intrinsic::getDeclaration(
+            m_ctx->llvm_module.get(), llvm::Intrinsic::frameaddress,
+            {llvm::PointerType::get(llvm::Type::getInt8Ty(llvm_ctx), 0)});
+        llvm::Value *stack_marker = builder.CreateCall(
+            frameaddr_fn, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(llvm_ctx), 0)},
+            "_stack_marker");
         builder.CreateCall(runtime_start->llvm_fn, {stack_marker});
         if (fn->llvm_fn->arg_size() >= 2) {
             builder.CreateCall(set_program_args->llvm_fn,
