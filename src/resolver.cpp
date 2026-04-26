@@ -44,6 +44,47 @@ static bool is_nonowning_alias_decl(ast::Node *node) {
     return node && node->type == NodeType::VarDecl && node->data.var_decl.narrowed_from;
 }
 
+// Mirrors the projection cases of find_root_decl, but returns the first node
+// whose receiver is a non-owning &T or &mut T (explicit *r or implicit
+// auto-deref via .field / [i]). Owning derefs (&move T) and projections
+// through owned values return nullptr.
+static ast::Node *find_nonowning_deref(ast::Node *expr) {
+    if (!expr) return nullptr;
+    auto is_nonowning_ref = [](ChiType *t) {
+        return t && (t->kind == TypeKind::Reference || t->kind == TypeKind::MutRef);
+    };
+    switch (expr->type) {
+    case NodeType::ParenExpr:
+        return find_nonowning_deref(expr->data.child_expr);
+    case NodeType::DotExpr: {
+        auto *recv = expr->data.dot_expr.effective_expr();
+        if (recv && is_nonowning_ref(recv->resolved_type)) return expr;
+        return find_nonowning_deref(recv);
+    }
+    case NodeType::IndexExpr: {
+        auto &ix = expr->data.index_expr;
+        // User-defined Index/IndexMut: index() returns &V / &mut V, so a[i] always
+        // projects through a non-owning ref regardless of the receiver's ownership.
+        if (ix.resolved_method) return expr;
+        auto *recv = ix.expr;
+        if (recv && is_nonowning_ref(recv->resolved_type)) return expr;
+        return find_nonowning_deref(recv);
+    }
+    case NodeType::UnaryOpExpr: {
+        auto &u = expr->data.unary_op_expr;
+        if (u.op_type == TokenType::MUL) {
+            // User-defined Deref/DerefMut: deref() returns &T / &mut T, so *r
+            // projects through a non-owning ref.
+            if (u.resolved_call) return expr;
+            if (u.op1 && is_nonowning_ref(u.op1->resolved_type)) return expr;
+        }
+        return nullptr;
+    }
+    default:
+        return nullptr;
+    }
+}
+
 // Check if a name matches a pattern (supports * wildcard)
 static bool matches_pattern(const std::string &name, const std::string &pattern) {
     size_t name_idx = 0;
@@ -1881,6 +1922,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
             }
+            if (find_nonowning_deref(data.op1)) {
+                error(node, "cannot move out of a non-owning reference");
+            }
             auto *src_decl = find_root_decl(data.op1);
             if (is_nonowning_alias_decl(src_decl)) {
                 error(node, "cannot move from non-owning alias '{}'", src_decl->name);
@@ -1899,6 +1943,9 @@ ChiType *Resolver::_resolve(ast::Node *node, ResolveScope &scope, uint32_t flags
             // move x — value move optimization: produces T, sinks source
             if (!is_addressable(data.op1)) {
                 error(node, errors::CANNOT_GET_REFERENCE_UNADDRESSABLE);
+            }
+            if (find_nonowning_deref(data.op1)) {
+                error(node, "cannot move out of a non-owning reference");
             }
             auto *src_decl = find_root_decl(data.op1);
             if (is_nonowning_alias_decl(src_decl)) {
