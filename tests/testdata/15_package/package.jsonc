@@ -1,5 +1,7 @@
 {
   "name": "tests/15_package",
+  "version": "0.1.0",
+  "description": "package mode test fixture",
   "include": ["assets/**/*.txt", "missing/**/*.txt"],
   // Entry point for the Chi package
   "entry_file": "main.xs",

@@ -169,6 +169,7 @@ void Builder::build_single_file(const string &file_name) {
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
+    compiler.emit_pkg_info_globals(nullptr, nullptr, nullptr);
     compiler.dump_generics_comparison();
     compiler.emit_output();
 
@@ -342,6 +343,10 @@ void Builder::build_package(const string &package_dir) {
 
     compiler.compile_module(runtime_module);
     compiler.compile_module(module);
+    compiler.emit_pkg_info_globals(
+        config_ptr->name ? &*config_ptr->name : nullptr,
+        config_ptr->version ? &*config_ptr->version : nullptr,
+        config_ptr->description ? &*config_ptr->description : nullptr);
     compiler.dump_generics_comparison();
     compiler.emit_output();
 

@@ -869,6 +869,8 @@ class Compiler {
 
     llvm::DICompileUnit *get_module_cu(ast::Module *module);
     void compile_module(ast::Module *module);
+    void emit_pkg_info_globals(const std::string *name, const std::string *version,
+                               const std::string *description);
 
     llvm::Type *compile_type(ChiType *type);
 

@@ -3,6 +3,7 @@ import "std/filepath" as filepath;
 import "std/fs" as fs;
 import "std/json" as json;
 import "std/os" as os;
+import "std/pkg" as pkg;
 
 extern "C" {
     unsafe func __cx_default_chi_home() *byte;
@@ -542,10 +543,21 @@ struct CliApp {
             name: "chi",
             summary: "Chi compiler toolchain"
         };
+        root.flag({name: "version", short: "V", help: "Print version and exit"});
         root.command(this.build_command());
         root.command(this.run_command());
         root.command(this.install_command());
         return root;
+    }
+
+    func print_version() {
+        let info = pkg.info();
+        let name = info.name ?? "chi";
+        if info.version != null {
+            println(name + " " + info.version!);
+        } else {
+            println(name);
+        }
     }
 
     func run() {
@@ -553,6 +565,10 @@ struct CliApp {
         let parsed = cli.parse();
         switch parsed {
             args.Parse.Ok(match) => {
+                if match.flag("version") {
+                    this.print_version();
+                    return;
+                }
                 let sub = match.subcommand();
                 if sub != null {
                     let command = sub!;

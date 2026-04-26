@@ -13,3 +13,6 @@ strlen('World') = 5
 strcmp('Hello', 'World') < 0 = true
 strcmp('Hello', 'Hello') == 0 = true
 strcpy result: Hello
+pkg.name=tests/15_package
+pkg.version=0.1.0
+pkg.description=package mode test fixture

@@ -22,9 +22,13 @@ rebuild:
 	. $(LOCAL_DIR)/init_env.sh && cd $(BUILD_DIR) && rm -f CMakeCache.txt && cmake -G "Unix Makefiles" -DCMAKE_TOOLCHAIN_FILE=conan_toolchain.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_BUILD_TYPE=${BUILD_MODE} $(CMAKE_ARGS) .. && $(MAKE)
 
 CHI_HOME ?= $(HOME)/.chi
+PREFIX ?= /usr/local
 
 install: build
-	cd $(BUILD_DIR) && cmake --install . --prefix $(CHI_HOME)
+	cd $(BUILD_DIR) && cmake --install . --component home
+
+link:
+	cd $(BUILD_DIR) && sudo cmake --install . --component symlinks --prefix $(PREFIX)
 
 compile_example_debug: build install
 	$(CHIC) -d -c $(INPUT_FILE) -o local/test -w local/build

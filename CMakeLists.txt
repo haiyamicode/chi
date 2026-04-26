@@ -1,21 +1,25 @@
 set(CONAN_DISABLE_CHECK_COMPILER True CACHE BOOL "" FORCE)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "14" CACHE STRING "Minimum OS X deployment version")
 
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.14)
 project(chi LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 14)
 
-# Default install prefix to $CHI_HOME, or $HOME/.chi if unset. Override with
-# -DCMAKE_INSTALL_PREFIX=... at configure time.
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-    if(DEFINED ENV{CHI_HOME})
-        set(CMAKE_INSTALL_PREFIX "$ENV{CHI_HOME}" CACHE PATH "Install prefix" FORCE)
-    else()
-        set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.chi" CACHE PATH "Install prefix" FORCE)
-    endif()
+# CMAKE_INSTALL_PREFIX defaults to the platform default (/usr/local on Unix).
+# This is only used as the symlink target for chi/chic — see the "symlinks"
+# install component below.
+#
+# CHI_INSTALL_HOME is where the real installation lives (binaries, libs, stdlib).
+# Defaults to $CHI_HOME if set, else $HOME/.chi.
+if(DEFINED ENV{CHI_HOME})
+    set(_chi_home_default "$ENV{CHI_HOME}")
+else()
+    set(_chi_home_default "$ENV{HOME}/.chi")
 endif()
+set(CHI_INSTALL_HOME "${_chi_home_default}"
+    CACHE PATH "Chi installation home (binaries, libs, stdlib)")
 
 # Bundling libraries
 function(bundle_static_library tgt_name bundled_tgt_name)
@@ -84,7 +88,7 @@ function(bundle_static_library tgt_name bundled_tgt_name)
   set(bundle_target_name ${bundled_tgt_name}_bundling_target)
   add_custom_target(${bundle_target_name} ALL DEPENDS ${bundled_tgt_full_name})
   add_dependencies(${bundle_target_name} ${tgt_name})
-  install(FILES ${bundled_tgt_full_name} DESTINATION lib)
+  install(FILES ${bundled_tgt_full_name} DESTINATION ${CHI_INSTALL_HOME}/lib COMPONENT home)
 
   add_library(${bundled_tgt_name} STATIC IMPORTED)
 

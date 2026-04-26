@@ -1,6 +1,6 @@
 # Chi Programming Language
 
-[![Docs](https://img.shields.io/badge/Docs-Getting%20Started-4B8BBE?logo=readthedocs&logoColor=white)](https://haiyami.com/chi/guides/getting-started) [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/D8s6Srz9Uy)
+[![Docs](https://img.shields.io/badge/Docs-Getting%20Started-4B8BBE?logo=readthedocs&logoColor=white)](https://chilang.dev/guides/getting-started) [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/D8s6Srz9Uy)
 
 Chi is a statically typed, compiled systems programming language with a dual memory model. Write low-level systems code in **System Chi** (`.xs`) with manual memory control, or high level code in **Application Chi** (`.x`) with automatic memory management — in the same language, with the same syntax.
 

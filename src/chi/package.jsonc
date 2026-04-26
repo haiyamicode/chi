@@ -1,0 +1,6 @@
+{
+  "name": "chi",
+  "version": "0.9.0",
+  "description": "Chi compiler toolchain wrapper",
+  "entry_file": "main.xs"
+}

@@ -1440,6 +1440,32 @@ llvm::Value *Compiler::compile_constant_value(Function *fn, const ConstantValue 
     return nullptr;
 }
 
+void Compiler::emit_pkg_info_globals(const std::string *name, const std::string *version,
+                                     const std::string *description) {
+    auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
+    auto &llvm_module = *(m_ctx->llvm_module.get());
+
+    auto emit = [&](const char *fn_name, const std::string *value) {
+        auto *fn = llvm_module.getFunction(fn_name);
+        if (!fn) return;
+        auto *ret_ty = llvm::cast<llvm::PointerType>(fn->getReturnType());
+        auto bb = llvm::BasicBlock::Create(llvm_ctx, "entry", fn);
+        llvm::IRBuilder<> b(bb);
+        if (!value) {
+            b.CreateRet(llvm::ConstantPointerNull::get(ret_ty));
+            return;
+        }
+        auto *str_const = llvm::cast<llvm::Constant>(compile_string_literal(*value));
+        auto *gv =
+            new llvm::GlobalVariable(llvm_module, str_const->getType(), true,
+                                     llvm::GlobalValue::PrivateLinkage, str_const, "pkg_str");
+        b.CreateRet(gv);
+    };
+    emit("__cx_pkg_name", name);
+    emit("__cx_pkg_version", version);
+    emit("__cx_pkg_description", description);
+}
+
 llvm::Value *Compiler::compile_string_literal(const string &str) {
     auto &llvm_ctx = *(m_ctx->llvm_ctx.get());
     auto &llvm_module = *(m_ctx->llvm_module.get());

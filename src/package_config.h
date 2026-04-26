@@ -50,7 +50,9 @@ CInteropConfig tag_invoke(boost::json::value_to_tag<CInteropConfig>,
                           const boost::json::value &jv);
 
 struct PackageConfig {
-    std::string name;
+    std::optional<std::string> name;
+    std::optional<std::string> version;
+    std::optional<std::string> description;
     std::vector<std::string> include;
     std::string entry_file;
     std::optional<CInteropConfig> c_interop;

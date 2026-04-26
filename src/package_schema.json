@@ -22,6 +22,10 @@
       "type": "string",
       "description": "Package version"
     },
+    "description": {
+      "type": "string",
+      "description": "Short human-readable description of the package"
+    },
     "entry_file": {
       "type": "string",
       "description": "The main entry file for the package",

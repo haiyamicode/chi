@@ -1,5 +1,6 @@
 import "stdio" as stdio;
 import "std/mem" as mem;
+import "std/pkg" as pkg;
 import "math" as math;
 
 // Test module that re-exports C functions
@@ -70,4 +71,9 @@ func main() {
         printf("strcpy result: {}\n", copied);
         mem.free(buf as *void);
     }
+
+    let info = pkg.info();
+    printf("pkg.name={}\n", info.name ?? "<null>");
+    printf("pkg.version={}\n", info.version ?? "<null>");
+    printf("pkg.description={}\n", info.description ?? "<null>");
 }

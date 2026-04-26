@@ -135,8 +135,16 @@ CInteropConfig tag_invoke(boost::json::value_to_tag<CInteropConfig>, const boost
 void tag_invoke(boost::json::value_from_tag, boost::json::value &jv, const PackageConfig &config) {
     jv = {{"entry_file", config.entry_file}};
 
-    if (!config.name.empty()) {
-        jv.as_object()["name"] = config.name;
+    if (config.name) {
+        jv.as_object()["name"] = *config.name;
+    }
+
+    if (config.version) {
+        jv.as_object()["version"] = *config.version;
+    }
+
+    if (config.description) {
+        jv.as_object()["description"] = *config.description;
     }
 
     if (!config.include.empty()) {
@@ -157,9 +165,16 @@ PackageConfig tag_invoke(boost::json::value_to_tag<PackageConfig>, const boost::
 
     const auto &obj = jv.as_object();
 
-    // Parse entry file (required)
     if (obj.if_contains("name")) {
         config.name = boost::json::value_to<std::string>(obj.at("name"));
+    }
+
+    if (obj.if_contains("version")) {
+        config.version = boost::json::value_to<std::string>(obj.at("version"));
+    }
+
+    if (obj.if_contains("description")) {
+        config.description = boost::json::value_to<std::string>(obj.at("description"));
     }
 
     if (obj.if_contains("include")) {
